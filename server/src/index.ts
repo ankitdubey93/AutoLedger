@@ -1,9 +1,11 @@
 import express, {Request, Response} from 'express';
-import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import connectDB from './db/connect';
 import User from './models/User';
+
+
+
 
 dotenv.config();
 
@@ -29,8 +31,14 @@ app.post("/add-user", async (req: Request, res: Response) => {
     }
   });
 
-app.get("/" , (req: Request, res: Response) => {
-    res.status(200).send("Hello");
+app.get("/" ,async (req: Request, res: Response) => {
+    try {
+        const user =await User.find();
+
+        res.status(200).json(user);
+    } catch (error) {
+        res.status(500).json({error: "Failed to fetch users", details: error})
+    }
 })
 
 
