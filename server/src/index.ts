@@ -3,13 +3,10 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import connectDB from './db/connect';
 import User from './models/User';
-
-
-
-
 dotenv.config();
 
 const app = express();
+const PORT = process.env.PORT;
 
 app.use(express.json());
 
@@ -42,6 +39,6 @@ app.get("/" ,async (req: Request, res: Response) => {
 })
 
 
-app.listen(4000, () => {
-    console.log("Server is listening on port 4000....")
+app.listen(PORT, () => {
+    console.log(`Server is listening on port: ${PORT}....`)
 })
