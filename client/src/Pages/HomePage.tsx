@@ -22,7 +22,7 @@ const HomePage: React.FC = () => {
     
 
     return (
-        <div className='min-h-screen flex flex-col items-center justify-center bg-gray-100'>
+        <div className='flex flex-col items-center justify-center bg-gray-100'>
             <div className='mb-2'>
                 <img src={Logo} alt="AutoLedger Logo" className='max-w-xs mx-auto'/>
             </div>
@@ -36,13 +36,13 @@ const HomePage: React.FC = () => {
                         <label className="block text-gray-700 text-sm font-bold mb-2">
                             Email
                         </label>
-                        <input type="text" placeholder="Your Email Here" value={username} onChange={(e) => setUserName(e.target.value)} required />
+                        <input className='shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline' type="text" placeholder="Your Email Here" value={username} onChange={(e) => setUserName(e.target.value)} required />
                     </div>
                     <div>
                         <label className='block text-gray-700 text-sm font-bold mb-2'>
                             Password
                         </label>
-                        <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+                        <input className='shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline' type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
                     </div>
                     {isSignUp && (
                         <div className='mb-4'>
