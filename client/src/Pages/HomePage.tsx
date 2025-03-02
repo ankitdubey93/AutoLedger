@@ -1,5 +1,7 @@
 import Logo from '../../public/Logo-text-big.png';
 import { useState } from 'react';
+import SignInForm from '../components/SignInForm';
+import SignUpForm from '../components/SignUpForm';
 
 
 const HomePage: React.FC = () => {
@@ -31,33 +33,12 @@ const HomePage: React.FC = () => {
                 <h2 className='text-2xl font-semibold mb-4 text-center'>
                    {isSignUp? 'Sign Up': 'Sign In'}
                 </h2>
-                <form className='space-y-4' onSubmit={handleSubmit}>
-                    <div>
-                        <label className="block text-gray-700 text-sm font-bold mb-2">
-                            Email
-                        </label>
-                        <input className='shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline' type="text" placeholder="Your Email Here" value={username} onChange={(e) => setUserName(e.target.value)} required />
-                    </div>
-                    <div>
-                        <label className='block text-gray-700 text-sm font-bold mb-2'>
-                            Password
-                        </label>
-                        <input className='shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline' type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
-                    </div>
-                    {isSignUp && (
-                        <div className='mb-4'>
-                            <label className='block text-gray-700 text-sm font-bold mb-2'>
-                                Confirm Password
-                            </label>
-                            <input className='shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline' type='password' placeholder='Confirm Password' value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}/>
-                        </div>
-                    )}
-                    <div>
-                        <button className='bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline w-full' type='submit'>
-                            {isSignUp ? 'Sign Up': 'Sign In'}
-                        </button>
-                    </div>
-                </form>
+                {isSignUp? (
+                    <SignUpForm/>
+                    
+                ):(
+                    <SignInForm/>
+                )}
                 <p className='text-center mt-4'>
                     {isSignUp ? (
                         <>
