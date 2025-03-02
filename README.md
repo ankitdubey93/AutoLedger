@@ -1,8 +1,6 @@
 # AutoLedger
 
 
-# AutoLedger
-
 **AutoLedger SRS Document**
 
 **1. Introduction**
