@@ -8,20 +8,61 @@ const HomePage: React.FC = () => {
 
 
     const [isSignUp, setIsSignUp] = useState(false);
-    const [username,setUserName] = useState('');
-    const [password,setPassword] = useState('');
-    const [confirmPassword,setConfirmPassword] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
-    const handleSubmit = (e: React.FormEvent) => {
-        e.preventDefault();
-
-        if(isSignUp) {
-            console.log('Signing up:', {username, password, confirmPassword});
-        } else {
-            console.log('Logging in : ', {username,password});
+    const handleSignIn = async (username: string, password:string ) => {
+        setError('');
+        try {
+            const response = await fetch('api/users/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'},
+                body: JSON.stringify({username,password}),
+                }
+            );
+            if (!response.ok) {
+                const errorData = await response.json();
+                setError(errorData.message || 'Login failed.');
+                return;
+            } 
+            const data =await response.json();
+            localStorage.setItem('token', data.token);
+            window.location.href = '/dashboard';
+            
+        } catch (err){
+            console.log('API error:', err);
+            setError('An unexpected error occurred.');
         }
-    }
-    
+    };
+
+    const handleSignUp = async (username: string, password: string, confirmPassword: string) => {
+        setError('');
+        setSuccess('');
+        if(password !== confirmPassword) {
+            setError('Passwords do not match.');
+            return;
+        }
+        try {
+            const response = await fetch('/api/users/signup', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({username,password}),
+            });
+            if(!response.ok) {
+                const errorData = await response.json();
+                setError(errorData.message || 'Signup failed.');
+                return;
+            }
+            setSuccess('Signup Successful, please login.');
+            setIsSignUp(false);
+        } catch (err) {
+            console.error('API error:', err);
+            setError('An unexpected error occurred.')
+        }
+    };
 
     return (
         <div className='flex flex-col items-center justify-center bg-gray-100'>
@@ -31,13 +72,16 @@ const HomePage: React.FC = () => {
             <div>
             <div className='bg-white p-8 rounded-md shadow-md w-96'>
                 <h2 className='text-2xl font-semibold mb-4 text-center'>
+                    {error && <p className='text-red-500 text-sm mb-2'>{error}</p>}
+                    {success && <p className='text-green-500 text-sm mb-2'>{success}</p>}
                    {isSignUp? 'Sign Up': 'Sign In'}
                 </h2>
                 {isSignUp? (
-                    <SignUpForm/>
+                    <SignUpForm onSignUp={handleSignUp} error={error}/>
                     
                 ):(
-                    <SignInForm/>
+                    <SignInForm onSignIn={handleSignIn}
+                    />
                 )}
                 <p className='text-center mt-4'>
                     {isSignUp ? (
