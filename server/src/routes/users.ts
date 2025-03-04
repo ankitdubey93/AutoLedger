@@ -13,7 +13,7 @@ const router = express.Router();
 router.post('/signup', async (req: Request, res: Response): Promise<void> => {
     try {
         const { username, password } = req.body;
-        console.log(req.body);
+        
 
         const existingUser = await User.findOne({ username });
         if (existingUser) {
@@ -36,7 +36,7 @@ router.post('/signup', async (req: Request, res: Response): Promise<void> => {
 router.post('/login', async (req: Request, res: Response): Promise<void> => {
     try {
         const { username, password } = req.body;
-        console.log(username,password);
+        
 
         const user = await User.findOne({ username });
         if (!user) {
