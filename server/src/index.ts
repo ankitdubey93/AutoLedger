@@ -1,8 +1,9 @@
-import express, {Request, Response} from 'express';
+import express, {Request, Response, NextFunction} from 'express';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import connectDB from './db/connect';
 import userRoutes from './routes/users'
+import journalEntryRoutes from './routes/journalEntries';
 dotenv.config();
 
 const app = express();
@@ -15,7 +16,15 @@ app.use(cors());
 
 connectDB();
 
+
 app.use('/api/users', userRoutes);
+app.use('/api/journal-entries', journalEntryRoutes )
+
+// Error-handling middleware
+app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
+    console.error(err.stack); // Log the error stack
+    res.status(500).json({ message: 'Internal Server Error' }); // Send a generic error response
+  });
 
 app.listen(PORT, () => {
     console.log(`Server is listening on port: ${PORT}....`)

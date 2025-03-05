@@ -1,6 +1,6 @@
 import React,{useState,useEffect} from "react";
 import {jwtDecode} from 'jwt-decode';
-import { UNSAFE_getPatchRoutesOnNavigationFunction, useNavigate } from "react-router-dom";
+import {useNavigate } from "react-router-dom";
 
 interface DecodedToken {
     user: {

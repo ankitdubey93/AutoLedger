@@ -38,6 +38,7 @@ const HomePage: React.FC = () => {
             } 
             const data =await response.json();
             localStorage.setItem('token', data.token);
+            console.log(data.token);
             window.location.href = '/dashboard';
             
         } catch (err){
