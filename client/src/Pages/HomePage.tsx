@@ -1,5 +1,7 @@
 import Logo from '../../public/Logo-text-big.png';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import SignInForm from '../components/SignInForm';
 import SignUpForm from '../components/SignUpForm';
 
@@ -10,6 +12,14 @@ const HomePage: React.FC = () => {
     const [isSignUp, setIsSignUp] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
+    const navigate = useNavigate();
+
+    useEffect(() => {
+        const token = localStorage.getItem('token')
+    if(token) {
+        navigate('/dashboard');
+    }
+    }, [navigate]);
 
     const handleSignIn = async (username: string, password:string ) => {
         setError('');
