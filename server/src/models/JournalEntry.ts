@@ -10,7 +10,7 @@ interface IJournalEntry extends Document {
     date: Date;
     description: string;
     lines: IJournalEntryLine[];
-    userId: mongoose.Types.ObjectId;
+    userId: mongoose.Schema.Types.ObjectId;
 }
 
 const JournalEntrySchema: Schema = new Schema({

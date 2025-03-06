@@ -22,11 +22,14 @@ router.get('/', auth, async (req: CustomRequest, res: Response, next: NextFuncti
 router.post('/', auth, async (req: CustomRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
         const {date, description, lines} = req.body;
+        console.log("req.user", req.user);
+        const userId = req.user?.user.id;
+        console.log(userId);
         const newEntry = new JournalEntry({
             date, 
             description, 
             lines,
-            userId: req.user?.id,
+            userId: userId,
         })
         await newEntry.save();
         res.status(201).json({message: 'Journal entry added successfully.'})
