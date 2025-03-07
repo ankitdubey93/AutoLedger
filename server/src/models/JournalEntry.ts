@@ -4,6 +4,7 @@ interface IJournalEntryLine {
     account: string;
     debit: number;
     credit: number;
+    description: string;
 }
 
 interface IJournalEntry extends Document {

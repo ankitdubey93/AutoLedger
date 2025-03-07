@@ -1,6 +1,7 @@
 import React,{useState,useEffect} from "react";
 import {jwtDecode} from 'jwt-decode';
 import {useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 
 interface DecodedToken {
     user: {
@@ -46,6 +47,14 @@ const Dashboard:React.FC = () => {
     <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
         <h1 className="text-2xl font-semibold">AutoLedger Dashboard</h1>
         <button onClick={handleSignout} className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded">SignOut</button>
+        <nav>
+        <ul>
+          <li>
+            <Link to="/journal-entries">Journal Entries</Link>
+          </li>
+          {/* Add other dashboard links here */}
+        </ul>
+      </nav>
     </header>
     <main className="container mx-auto p-4">
         <section className="bg-white p-4 rounded-md shadow-md mb-4">
