@@ -16,6 +16,10 @@ const JournalEntries: React.FC = () => {
     const [newDate, setNewDate] = useState<string>('');
     const [newDescription, setNewDescription] = useState<string>('');
     const [newAmount, setNewAmount] = useState<number>(0);
+    const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
+    const [editDate,setEditDate] = useState<string>('');
+    const [editDescription, setEditDescription] = useState<string>('');
+    const [editAmount, setEditAmount] = useState<number>(0);
 
 
    
@@ -72,7 +76,40 @@ const JournalEntries: React.FC = () => {
             console.error('Error adding journal entry: ', error);        }
     }
 
+    const handleEdit = (entry: JournalEntry) => {
+        setEditingEntry(entry);
+        setEditDate(entry.date.slice(0,10));
+        setEditDescription(entry.description);
+        setEditAmount(entry.amount);
+    };
 
+    const handleUpdateEntry = async () => {
+        try {
+            if (!editingEntry) return;
+
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/api/journal-entries/${editingEntry._id}`,{
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({
+                    date: new Date(editDate).toISOString(),
+                    description: editDescription,
+                    amount: editAmount,
+                }),
+            });
+
+            if(!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            fetchEntries();
+            setEditingEntry(null);
+        } catch (error) {
+            console.error('Error updating journal entry:', error);
+        }
+    };
 
 
 
