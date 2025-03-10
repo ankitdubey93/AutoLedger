@@ -111,29 +111,64 @@ const JournalEntries: React.FC = () => {
         }
     };
 
+    const handleDeleteEntry = async (id: string) => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`/api/journal-entries/${id}`,{
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`
+                },
+            });
+            if(!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            fetchEntries();
+        } catch (error) {
+            console.error('Error deleting journal entry: ', error);
+        }
+    };
+
 
 
     return (
-        <div>
-            <h2>Journal Entries</h2>
-        <div>
-            <input type='date'></input>
-            <input type='text' placeholder='Description'></input>
-            <input type='text' placeholder='Amount'></input>
-            <button onClick={handleAddEntry}>Add Entry</button>
+        <div className="p-4">
+            <h2 className="text-2xl font-bold mb-4">Journal Entries</h2>
+            <div className="mb-4 flex space-x-2">
+                <input type='date' value={newDate} onChange={(e) => setNewDate(e.target.value)} className="border rounded p-2" />
+                <input type='text' placeholder='Description' value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="border rounded p-2" />
+                <input type='number' placeholder='Amount' value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} className="border rounded p-2" />
+                <button onClick={handleAddEntry} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Add Entry</button>
+            </div>
+            <div>
+                <ul className="space-y-2">
+                    {entries.map(entry => (
+                        <li key={entry._id} className="border rounded p-2 flex justify-between items-center">
+                            {editingEntry?._id === entry._id ? (
+                                <div className="flex space-x-2 items-center">
+                                    <input type='date' value={editDate} onChange={(e) => setEditDate(e.target.value)} className="border rounded p-1" />
+                                    <input type='text' value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="border rounded p-1" />
+                                    <input type='number' value={editAmount} onChange={(e) => setEditAmount(Number(e.target.value))} className="border rounded p-1" />
+                                    <button onClick={handleUpdateEntry} className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded">Update</button>
+                                    <button onClick={() => setEditingEntry(null)} className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-1 px-2 rounded">Cancel</button>
+                                </div>
+                            ) : (
+                                <span className="flex-grow">
+                                    {entry.date.slice(0, 10)} - {entry.description} - {entry.amount}
+                                </span>
+                            )}
+                            {editingEntry?._id !== entry._id && (
+                                <div className="space-x-2">
+                                    <button onClick={() => handleEdit(entry)} className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded">Edit</button>
+                                    <button onClick={() => handleDeleteEntry(entry._id)} className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded">Delete</button>
+                                </div>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            </div>
         </div>
-        <div>
-            <ul>
-                {entries.map(entry => (
-                    <li key={entry._id}>
-                        {new Date(entry.date).toLocaleDateString('en-CA')} - {entry.description}- {entry.amount}
-                    </li>
-                ))}
-            </ul>
-        </div>
-      
-        </div>
-    )
+    );
 }
 
 
