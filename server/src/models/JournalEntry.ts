@@ -1,30 +1,19 @@
 import mongoose,{Schema,Document} from 'mongoose';
 
-interface IJournalEntryLine {
-    account: string;
-    debit: number;
-    credit: number;
-    description: string;
-}
 
-interface IJournalEntry extends Document {
+interface JournalEntry extends Document {
     date: Date;
     description: string;
-    lines: IJournalEntryLine[];
+    amount: number;
     userId: mongoose.Schema.Types.ObjectId;
+    
 }
 
 const JournalEntrySchema: Schema = new Schema({
     date: {type: Date, required: true},
     description: {type: String, required: true},
-    lines: [
-        {
-            account: {type: String, required: true},
-            debit: {type: Number, required: true, default: 0},
-            credit: {type: Number, required: true, default:0},
-        },
-    ],
+    amount: {type: Number, required: true},
     userId: {type: Schema.Types.ObjectId, ref: 'User', required: true},
 });
 
-export default mongoose.model<IJournalEntry>('JournalEntry', JournalEntrySchema);
+export default mongoose.model<JournalEntry>('JournalEntry', JournalEntrySchema);

@@ -21,8 +21,8 @@ const auth = (req: CustomRequest,res: Response,next: NextFunction) => {
 
     try {
         const decoded = jwt.verify(idToken,secretKey as string) as JwtPayload;
+        console.log(decoded);
         req.user = decoded;
-        console.log('decided user from token', decoded);
         next();
     } catch(error) {
         res.status(401).json({message: 'Token is not valid.'});

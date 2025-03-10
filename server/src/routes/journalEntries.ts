@@ -10,10 +10,13 @@ interface CustomRequest extends Request {
 const router = express.Router();
 
 
-router.get('/', auth, async (req: CustomRequest, res: Response, next: NextFunction):Promise<void> => {
+router.get('/', auth, async (req: CustomRequest, res: Response, next: NextFunction) => {
     try{
-        const journalEntries = await JournalEntry.find({userId: req.user?.id});
-        res.json(journalEntries);
+        const user = req.user?.user.id;
+        console.log(user);
+        const journalEntries = await JournalEntry.find({userId: user});
+        console.log(journalEntries);
+        res.status(200).json(journalEntries);
     } catch (error) {
         next(error);
     }
@@ -21,14 +24,15 @@ router.get('/', auth, async (req: CustomRequest, res: Response, next: NextFuncti
 
 router.post('/', auth, async (req: CustomRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
-        const {date, description, lines} = req.body;
+        console.log('Receiving body: ', req.body);
+        const {date, description, amount} = req.body;
        
         const userId = req.user?.user.id;
         
         const newEntry = new JournalEntry({
             date, 
             description, 
-            lines,
+           amount,
             userId: userId,
         })
         await newEntry.save();
