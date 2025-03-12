@@ -15,29 +15,85 @@ interface DecodedToken {
 const Dashboard:React.FC = () => {
 
     const [username, setUsername] = useState<string | null>(null);
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
     const navigate = useNavigate();
-    
+
+   
     useEffect(() => {
-        const token = localStorage.getItem('token');
-        if(token) {
-            try {
-                const decoded = jwtDecode(token) as DecodedToken;
-                fetch(`/api/users/${decoded.user.id}`)
-                .then((response)=> response.json())
+
+        const checkAuth = () => {
+            const token = localStorage.getItem('token');
+
+        if(!token) {
+            setIsAuthenticated(false);
+            return;
+        }
+
+        try {
+            const decoded = jwtDecode<DecodedToken>(token);
+            const currentTime = Math.floor(Date.now()/ 1000);
+
+
+            if(decoded.exp < currentTime) {
+                console.warn("Token has expired!");
+                localStorage.removeItem("token");
+                setIsAuthenticated(false);
+                return;
+            }
+
+            fetch(`/api/users/${decoded.user.id}`)
+                .then((response)=> 
+                   { if(response.status === 401) {
+                        localStorage.removeItem("token");
+                        setIsAuthenticated(false);
+                        return null;
+                    }
+                    return response.json()})
                 .then((data) => setUsername(data.username))
                 .catch((error) => console.error('Error fetching username: ', error));  
-            }catch (error) {
-                console.error('Error decoding token: ', error);
+                }
+
+             catch (error) {
+                console.error("Error decoding token", error);
+                localStorage.removeItem("token");
+                setIsAuthenticated(false);
+             }   
+            };
+
+            checkAuth();
+
+            const interval = setInterval(checkAuth, 5000);
+            
+            const handleStorageChange = (e: StorageEvent) => {
+                if(e.key === "token" && !e.newValue) {
+                    setIsAuthenticated(false);
+                }
+            };
+
+            window.addEventListener("storage", handleStorageChange);
+
+            return () => {
+                clearInterval(interval);
+                window.removeEventListener("storage", handleStorageChange);
+            }
+            
+        },[]);
+
+
+        useEffect(() => {
+            if(!isAuthenticated) {
                 navigate('/');
-            } 
-        } else {
-            navigate('/');
-        }
-    }, [navigate]);
+            }
+
+
+
+        }, [isAuthenticated, navigate]);
+
+
 
     const handleSignout = () => {
         localStorage.removeItem('token');
-        navigate('/');
+        setIsAuthenticated(false);
     }
 
 

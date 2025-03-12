@@ -1,4 +1,6 @@
+import { jwtDecode } from 'jwt-decode';
 import React, { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface JournalEntry {
     _id: string;
@@ -8,6 +10,13 @@ interface JournalEntry {
     userId: string;
 }
 
+interface DecodedToken {
+    user: {
+        id: string;
+    };
+
+    exp: number;
+}
 
 
 const JournalEntries: React.FC = () => {
@@ -20,9 +29,55 @@ const JournalEntries: React.FC = () => {
     const [editDate,setEditDate] = useState<string>('');
     const [editDescription, setEditDescription] = useState<string>('');
     const [editAmount, setEditAmount] = useState<number>(0);
+    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+
+    const navigate = useNavigate();
 
 
-   
+    const checkAuth = useCallback(() => {
+        const token = localStorage.getItem("token");
+        if(!token) {
+            setIsAuthenticated(false);
+            return;
+        }
+
+        try {
+            const decoded = jwtDecode<DecodedToken>(token);
+            if(decoded.exp < Math.floor(Date.now()/1000)) {
+            console.warn("Token expired!");
+            localStorage.removeItem("token");
+            setIsAuthenticated(false);
+            }
+        } catch (error) {
+            console.error("Error decoding token: ", error);
+            localStorage.removeItem("token");
+            setIsAuthenticated(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        checkAuth();
+        const interval = setInterval(checkAuth, 5000);
+        const handleStorageChange = (e: StorageEvent) => {
+            if(e.key === "token" && !e.newValue) {
+                setIsAuthenticated(false);
+            }
+        };
+        window.addEventListener("storage", handleStorageChange);
+
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener("storage", handleStorageChange);
+        }
+    }, [checkAuth]);
+
+
+    useEffect(() => {
+        if(!isAuthenticated) {
+            navigate('/');
+        }
+    }, [navigate, isAuthenticated]);
 
 
     const fetchEntries =useCallback( async() => {
