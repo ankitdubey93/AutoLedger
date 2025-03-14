@@ -1,6 +1,7 @@
-import { jwtDecode } from 'jwt-decode';
-import React, { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+
+import React, { useState, useEffect, useCallback, useContext } from 'react';
+
+import { AuthContext } from '../context/AuthContext';
 
 interface JournalEntry {
     _id: string;
@@ -10,17 +11,9 @@ interface JournalEntry {
     userId: string;
 }
 
-interface DecodedToken {
-    user: {
-        id: string;
-    };
-
-    exp: number;
-}
-
 
 const JournalEntries: React.FC = () => {
-    
+    const {isAuthenticated, username} = useContext(AuthContext)!;
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [newDate, setNewDate] = useState<string>('');
     const [newDescription, setNewDescription] = useState<string>('');
@@ -29,60 +22,13 @@ const JournalEntries: React.FC = () => {
     const [editDate,setEditDate] = useState<string>('');
     const [editDescription, setEditDescription] = useState<string>('');
     const [editAmount, setEditAmount] = useState<number>(0);
-    const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
-
-    const navigate = useNavigate();
-
-
-    const checkAuth = useCallback(() => {
-        const token = localStorage.getItem("token");
-        if(!token) {
-            setIsAuthenticated(false);
-            return;
-        }
-
-        try {
-            const decoded = jwtDecode<DecodedToken>(token);
-            if(decoded.exp < Math.floor(Date.now()/1000)) {
-            console.warn("Token expired!");
-            localStorage.removeItem("token");
-            setIsAuthenticated(false);
-            }
-        } catch (error) {
-            console.error("Error decoding token: ", error);
-            localStorage.removeItem("token");
-            setIsAuthenticated(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        checkAuth();
-        const interval = setInterval(checkAuth, 5000);
-        const handleStorageChange = (e: StorageEvent) => {
-            if(e.key === "token" && !e.newValue) {
-                setIsAuthenticated(false);
-            }
-        };
-        window.addEventListener("storage", handleStorageChange);
-
-
-        return () => {
-            clearInterval(interval);
-            window.removeEventListener("storage", handleStorageChange);
-        }
-    }, [checkAuth]);
-
-
-    useEffect(() => {
-        if(!isAuthenticated) {
-            navigate('/');
-        }
-    }, [navigate, isAuthenticated]);
-
+   
 
     const fetchEntries =useCallback( async() => {
         try {
             const token = localStorage.getItem('token');
+            if(!token) return;
+
             const response = await fetch('/api/journal-entries', {
                 headers: {
                     Authorization: `Bearer ${token}`
@@ -92,7 +38,7 @@ const JournalEntries: React.FC = () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            console.log(data);
+            
             setEntries(data);
         } catch (error) {
             console.error('Error fetching journal entries: ', error);
@@ -100,14 +46,19 @@ const JournalEntries: React.FC = () => {
     }, [setEntries]);
 
     useEffect(() => {
-        fetchEntries();
-    },[fetchEntries]);
+        if(isAuthenticated) {
+            fetchEntries();
+        }
+    },[fetchEntries, isAuthenticated]);
 
 
     const handleAddEntry = async () => {
         try {
             console.log('button clicked')
             const token = localStorage.getItem('token');
+
+            if(!token) return;
+
             const response = await fetch('/api/journal-entries', {
                 method: 'POST',
                 headers: {
@@ -143,6 +94,9 @@ const JournalEntries: React.FC = () => {
             if (!editingEntry) return;
 
             const token = localStorage.getItem('token');
+
+            if(!token) return;
+
             const response = await fetch(`/api/journal-entries/${editingEntry._id}`,{
                 method: 'PUT',
                 headers: {
@@ -169,6 +123,8 @@ const JournalEntries: React.FC = () => {
     const handleDeleteEntry = async (id: string) => {
         try {
             const token = localStorage.getItem('token');
+            if(!token) return;
+            
             const response = await fetch(`/api/journal-entries/${id}`,{
                 method: 'DELETE',
                 headers: {
@@ -189,6 +145,7 @@ const JournalEntries: React.FC = () => {
     return (
         <div className="p-4">
             <h2 className="text-2xl font-bold mb-4">Journal Entries</h2>
+            {username && <p className='text-gray-600 mb-4'>Logged in as {username}</p>}
             <div className="mb-4 flex space-x-2">
                 <input type='date' value={newDate} onChange={(e) => setNewDate(e.target.value)} className="border rounded p-2" />
                 <input type='text' placeholder='Description' value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="border rounded p-2" />
