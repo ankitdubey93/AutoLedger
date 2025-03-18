@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 
 import { AuthContext } from '../context/AuthContext';
@@ -11,34 +10,32 @@ interface JournalEntry {
     userId: string;
 }
 
-
 const JournalEntries: React.FC = () => {
-    const {isAuthenticated, username} = useContext(AuthContext)!;
+    const { isAuthenticated, username } = useContext(AuthContext)!;
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [newDate, setNewDate] = useState<string>('');
     const [newDescription, setNewDescription] = useState<string>('');
     const [newAmount, setNewAmount] = useState<number>(0);
     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
-    const [editDate,setEditDate] = useState<string>('');
+    const [editDate, setEditDate] = useState<string>('');
     const [editDescription, setEditDescription] = useState<string>('');
     const [editAmount, setEditAmount] = useState<number>(0);
-   
 
-    const fetchEntries =useCallback( async() => {
+    const fetchEntries = useCallback(async () => {
         try {
             const token = localStorage.getItem('token');
-            if(!token) return;
+            if (!token) return;
 
             const response = await fetch('/api/journal-entries', {
                 headers: {
-                    Authorization: `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
             });
-            if(!response.ok) {
+            if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-            
+
             setEntries(data);
         } catch (error) {
             console.error('Error fetching journal entries: ', error);
@@ -46,18 +43,17 @@ const JournalEntries: React.FC = () => {
     }, [setEntries]);
 
     useEffect(() => {
-        if(isAuthenticated) {
+        if (isAuthenticated) {
             fetchEntries();
         }
-    },[fetchEntries, isAuthenticated]);
-
+    }, [fetchEntries, isAuthenticated]);
 
     const handleAddEntry = async () => {
         try {
-            console.log('button clicked')
+            console.log('button clicked');
             const token = localStorage.getItem('token');
 
-            if(!token) return;
+            if (!token) return;
 
             const response = await fetch('/api/journal-entries', {
                 method: 'POST',
@@ -71,7 +67,7 @@ const JournalEntries: React.FC = () => {
                     amount: newAmount,
                 }),
             });
-            if(!response.ok) {
+            if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             fetchEntries();
@@ -79,12 +75,13 @@ const JournalEntries: React.FC = () => {
             setNewDescription('');
             setNewAmount(0);
         } catch (error) {
-            console.error('Error adding journal entry: ', error);        }
-    }
+            console.error('Error adding journal entry: ', error);
+        }
+    };
 
     const handleEdit = (entry: JournalEntry) => {
         setEditingEntry(entry);
-        setEditDate(entry.date.slice(0,10));
+        setEditDate(entry.date.slice(0, 10));
         setEditDescription(entry.description);
         setEditAmount(entry.amount);
     };
@@ -95,22 +92,25 @@ const JournalEntries: React.FC = () => {
 
             const token = localStorage.getItem('token');
 
-            if(!token) return;
+            if (!token) return;
 
-            const response = await fetch(`/api/journal-entries/${editingEntry._id}`,{
-                method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    date: new Date(editDate).toISOString(),
-                    description: editDescription,
-                    amount: editAmount,
-                }),
-            });
+            const response = await fetch(
+                `/api/journal-entries/${editingEntry._id}`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        date: new Date(editDate).toISOString(),
+                        description: editDescription,
+                        amount: editAmount,
+                    }),
+                }
+            );
 
-            if(!response.ok) {
+            if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             fetchEntries();
@@ -123,15 +123,15 @@ const JournalEntries: React.FC = () => {
     const handleDeleteEntry = async (id: string) => {
         try {
             const token = localStorage.getItem('token');
-            if(!token) return;
-            
-            const response = await fetch(`/api/journal-entries/${id}`,{
+            if (!token) return;
+
+            const response = await fetch(`/api/journal-entries/${id}`, {
                 method: 'DELETE',
                 headers: {
-                    Authorization: `Bearer ${token}`
+                    Authorization: `Bearer ${token}`,
                 },
             });
-            if(!response.ok) {
+            if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             fetchEntries();
@@ -140,39 +140,110 @@ const JournalEntries: React.FC = () => {
         }
     };
 
-
-
     return (
         <div className="p-4">
             <h2 className="text-2xl font-bold mb-4">Journal Entries</h2>
-            {username && <p className='text-gray-600 mb-4'>Logged in as {username}</p>}
+            {username && (
+                <p className="text-gray-600 mb-4">Logged in as {username}</p>
+            )}
             <div className="mb-4 flex space-x-2">
-                <input type='date' value={newDate} onChange={(e) => setNewDate(e.target.value)} className="border rounded p-2" />
-                <input type='text' placeholder='Description' value={newDescription} onChange={(e) => setNewDescription(e.target.value)} className="border rounded p-2" />
-                <input type='number' placeholder='Amount' value={newAmount} onChange={(e) => setNewAmount(Number(e.target.value))} className="border rounded p-2" />
-                <button onClick={handleAddEntry} className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded">Add Entry</button>
+                <input
+                    type="date"
+                    value={newDate}
+                    onChange={(e) => setNewDate(e.target.value)}
+                    className="border rounded p-2"
+                />
+                <input
+                    type="text"
+                    placeholder="Description"
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    className="border rounded p-2"
+                />
+                <input
+                    type="number"
+                    placeholder="Amount"
+                    value={newAmount}
+                    onChange={(e) => setNewAmount(Number(e.target.value))}
+                    className="border rounded p-2"
+                />
+                <button
+                    onClick={handleAddEntry}
+                    className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+                >
+                    Add Entry
+                </button>
             </div>
             <div>
                 <ul className="space-y-2">
-                    {entries.map(entry => (
-                        <li key={entry._id} className="border rounded p-2 flex justify-between items-center">
+                    {entries.map((entry) => (
+                        <li
+                            key={entry._id}
+                            className="border rounded p-2 flex justify-between items-center"
+                        >
                             {editingEntry?._id === entry._id ? (
                                 <div className="flex space-x-2 items-center">
-                                    <input type='date' value={editDate} onChange={(e) => setEditDate(e.target.value)} className="border rounded p-1" />
-                                    <input type='text' value={editDescription} onChange={(e) => setEditDescription(e.target.value)} className="border rounded p-1" />
-                                    <input type='number' value={editAmount} onChange={(e) => setEditAmount(Number(e.target.value))} className="border rounded p-1" />
-                                    <button onClick={handleUpdateEntry} className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded">Update</button>
-                                    <button onClick={() => setEditingEntry(null)} className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-1 px-2 rounded">Cancel</button>
+                                    <input
+                                        type="date"
+                                        value={editDate}
+                                        onChange={(e) =>
+                                            setEditDate(e.target.value)
+                                        }
+                                        className="border rounded p-1"
+                                    />
+                                    <input
+                                        type="text"
+                                        value={editDescription}
+                                        onChange={(e) =>
+                                            setEditDescription(e.target.value)
+                                        }
+                                        className="border rounded p-1"
+                                    />
+                                    <input
+                                        type="number"
+                                        value={editAmount}
+                                        onChange={(e) =>
+                                            setEditAmount(
+                                                Number(e.target.value)
+                                            )
+                                        }
+                                        className="border rounded p-1"
+                                    />
+                                    <button
+                                        onClick={handleUpdateEntry}
+                                        className="bg-green-500 hover:bg-green-700 text-white font-bold py-1 px-2 rounded"
+                                    >
+                                        Update
+                                    </button>
+                                    <button
+                                        onClick={() => setEditingEntry(null)}
+                                        className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-1 px-2 rounded"
+                                    >
+                                        Cancel
+                                    </button>
                                 </div>
                             ) : (
                                 <span className="flex-grow">
-                                    {entry.date.slice(0, 10)} - {entry.description} - {entry.amount}
+                                    {entry.date.slice(0, 10)} -{' '}
+                                    {entry.description} - {entry.amount}
                                 </span>
                             )}
                             {editingEntry?._id !== entry._id && (
                                 <div className="space-x-2">
-                                    <button onClick={() => handleEdit(entry)} className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded">Edit</button>
-                                    <button onClick={() => handleDeleteEntry(entry._id)} className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded">Delete</button>
+                                    <button
+                                        onClick={() => handleEdit(entry)}
+                                        className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        onClick={() =>
+                                            handleDeleteEntry(entry._id)
+                                        }
+                                        className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+                                    >
+                                        Delete
+                                    </button>
                                 </div>
                             )}
                         </li>
@@ -181,8 +252,6 @@ const JournalEntries: React.FC = () => {
             </div>
         </div>
     );
-}
-
-
+};
 
 export default JournalEntries;

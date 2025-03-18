@@ -1,19 +1,18 @@
-import {JSX} from 'react';
-import { useContext } from "react";
-import { AuthContext } from "../context/AuthContext";
-import { Navigate } from "react-router-dom";
+import { JSX } from 'react';
+import { useContext } from 'react';
+import { AuthContext } from '../context/AuthContext';
+import { Navigate } from 'react-router-dom';
 
+const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
+    const authContext = useContext(AuthContext);
 
-const ProtectedRoute = ({children}: {children: JSX.Element}) => {
-   const authContext = useContext(AuthContext);
+    if (!authContext) {
+        return <Navigate to="/" />;
+    }
 
-   if(!authContext) {
-    return <Navigate to="/" />;
-   }
+    const { isAuthenticated } = authContext;
 
-    const  {isAuthenticated} = authContext;
-
-    return isAuthenticated ? children : <Navigate to="/" replace/>
+    return isAuthenticated ? children : <Navigate to="/" replace />;
 
     return children;
 };

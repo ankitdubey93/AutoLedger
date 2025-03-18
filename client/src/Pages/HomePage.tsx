@@ -7,7 +7,7 @@ import SignUpForm from '../components/SignUpForm';
 
 const HomePage: React.FC = () => {
     const authContext = useContext(AuthContext);
-    
+
     const isAuthenticated = authContext?.isAuthenticated || false;
     const login = authContext?.login || (() => {});
 
@@ -46,7 +46,11 @@ const HomePage: React.FC = () => {
         }
     };
 
-    const handleSignUp = async (username: string, password: string, confirmPassword: string) => {
+    const handleSignUp = async (
+        username: string,
+        password: string,
+        confirmPassword: string
+    ) => {
         setError('');
         setSuccess('');
         if (password !== confirmPassword) {
@@ -75,14 +79,22 @@ const HomePage: React.FC = () => {
     };
 
     return (
-        <div className='flex flex-col items-center justify-center bg-gray-100 min-h-screen'>
-            <div className='mb-2'>
-                <img src={Logo} alt="AutoLedger Logo" className='max-w-xs mx-auto' />
+        <div className="flex flex-col items-center justify-center bg-gray-100 min-h-screen">
+            <div className="mb-2">
+                <img
+                    src={Logo}
+                    alt="AutoLedger Logo"
+                    className="max-w-xs mx-auto"
+                />
             </div>
-            <div className='bg-white p-8 rounded-md shadow-md w-96'>
-                <h2 className='text-2xl font-semibold mb-4 text-center'>
-                    {error && <p className='text-red-500 text-sm mb-2'>{error}</p>}
-                    {success && <p className='text-green-500 text-sm mb-2'>{success}</p>}
+            <div className="bg-white p-8 rounded-md shadow-md w-96">
+                <h2 className="text-2xl font-semibold mb-4 text-center">
+                    {error && (
+                        <p className="text-red-500 text-sm mb-2">{error}</p>
+                    )}
+                    {success && (
+                        <p className="text-green-500 text-sm mb-2">{success}</p>
+                    )}
                     {isSignUp ? 'Sign Up' : 'Sign In'}
                 </h2>
                 {isSignUp ? (
@@ -90,18 +102,24 @@ const HomePage: React.FC = () => {
                 ) : (
                     <SignInForm onSignIn={handleSignIn} />
                 )}
-                <p className='text-center mt-4'>
+                <p className="text-center mt-4">
                     {isSignUp ? (
                         <>
                             Already have an account?{' '}
-                            <button className='text-blue-500 hover:underline' onClick={() => setIsSignUp(false)}>
+                            <button
+                                className="text-blue-500 hover:underline"
+                                onClick={() => setIsSignUp(false)}
+                            >
                                 Sign In
                             </button>
                         </>
                     ) : (
                         <>
                             Don't have an account?{' '}
-                            <button className='text-blue-500 hover:underline' onClick={() => setIsSignUp(true)}>
+                            <button
+                                className="text-blue-500 hover:underline"
+                                onClick={() => setIsSignUp(true)}
+                            >
                                 Sign Up
                             </button>
                         </>
