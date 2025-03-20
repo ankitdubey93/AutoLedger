@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 
 import { AuthContext } from '../context/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface JournalEntry {
     _id: string;
@@ -11,7 +12,7 @@ interface JournalEntry {
 }
 
 const JournalEntries: React.FC = () => {
-    const { isAuthenticated, username } = useContext(AuthContext)!;
+    const { isAuthenticated, username, logout } = useContext(AuthContext)!;
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [newDate, setNewDate] = useState<string>('');
     const [newDescription, setNewDescription] = useState<string>('');
@@ -20,6 +21,8 @@ const JournalEntries: React.FC = () => {
     const [editDate, setEditDate] = useState<string>('');
     const [editDescription, setEditDescription] = useState<string>('');
     const [editAmount, setEditAmount] = useState<number>(0);
+    const [error, setError] = useState<string | null>(null);
+    const navigate = useNavigate();
 
     const fetchEntries = useCallback(async () => {
         try {
@@ -49,6 +52,10 @@ const JournalEntries: React.FC = () => {
     }, [fetchEntries, isAuthenticated]);
 
     const handleAddEntry = async () => {
+        if (!newDate || !newDescription.trim() || newAmount === 0) {
+            setError('Please fill in all fields before adding an entry.');
+            return;
+        }
         try {
             console.log('button clicked');
             const token = localStorage.getItem('token');
@@ -74,8 +81,10 @@ const JournalEntries: React.FC = () => {
             setNewDate('');
             setNewDescription('');
             setNewAmount(0);
+            setError(null);
         } catch (error) {
             console.error('Error adding journal entry: ', error);
+            setError('Failed to add entry. Please try again.');
         }
     };
 
@@ -141,11 +150,26 @@ const JournalEntries: React.FC = () => {
     };
 
     return (
-        <div className="p-4">
-            <h2 className="text-2xl font-bold mb-4">Journal Entries</h2>
+        <div>
+            <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
+                <h1 className="text-2xl font-semibold">Journal Entries</h1>
+                <button
+                    onClick={() => navigate('/dashboard')}
+                    className=" text-white font-bold py-2 px-4 rounded"
+                >
+                    Dashboard
+                </button>
+                <button
+                    onClick={logout}
+                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+                >
+                    SignOut
+                </button>
+            </header>
             {username && (
                 <p className="text-gray-600 mb-4">Logged in as {username}</p>
             )}
+            {error && <p className="text-red-500 font-semibold">{error}</p>}
             <div className="mb-4 flex space-x-2">
                 <input
                     type="date"
@@ -163,7 +187,7 @@ const JournalEntries: React.FC = () => {
                 <input
                     type="number"
                     placeholder="Amount"
-                    value={newAmount}
+                    value={newAmount === 0 ? '' : newAmount}
                     onChange={(e) => setNewAmount(Number(e.target.value))}
                     className="border rounded p-2"
                 />
