@@ -98,7 +98,7 @@ const JournalEntries: React.FC = () => {
     const handleUpdateEntry = async () => {
         try {
             if (!editingEntry) return;
-
+            console.log('updating entry....');
             const token = localStorage.getItem('token');
 
             if (!token) return;
@@ -122,7 +122,12 @@ const JournalEntries: React.FC = () => {
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
-            fetchEntries();
+
+            console.log(response.json());
+
+            await fetchEntries();
+
+            console.log('Updated entries:', entries);
             setEditingEntry(null);
         } catch (error) {
             console.error('Error updating journal entry:', error);
