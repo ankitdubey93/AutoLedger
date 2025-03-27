@@ -79,15 +79,16 @@ const HomePage: React.FC = () => {
     };
 
     return (
-        <div className="flex flex-col items-center justify-center bg-gray-100 min-h-screen">
-            <div className="mb-2">
+        <div className="flex flex-col items-center justify-start">
+            <div>
                 <img
+                    width={200}
                     src={Logo}
                     alt="AutoLedger Logo"
                     className="max-w-xs mx-auto"
                 />
             </div>
-            <div className="bg-white p-8 rounded-md shadow-md w-96">
+            <div className="bg-white p-8 rounded-md shadow-md w-96 mt-4">
                 <h2 className="text-2xl font-semibold mb-4 text-center">
                     {error && (
                         <p className="text-red-500 text-sm mb-2">{error}</p>
