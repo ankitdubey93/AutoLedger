@@ -179,6 +179,21 @@ const JournalEntries: React.FC = () => {
         }
     };
 
+    const handleDeleteAccount = (
+        index: number,
+        isEditingPhase: boolean = false
+    ) => {
+        if (isEditingPhase) {
+            const updatedAccounts = [...editAccounts];
+            updatedAccounts.splice(index, 1);
+            setEditAccounts(updatedAccounts);
+        } else {
+            const updatedAccounts = [...newAccounts];
+            updatedAccounts.splice(index, 1);
+            setNewAccounts(updatedAccounts);
+        }
+    };
+
     return (
         <div>
             <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
@@ -261,6 +276,12 @@ const JournalEntries: React.FC = () => {
                             }
                             className="border rounded p-2"
                         />
+                        <button
+                            onClick={() => handleDeleteAccount(index)}
+                            className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+                        >
+                            Delete Account
+                        </button>
                     </div>
                 ))}
 
@@ -278,7 +299,61 @@ const JournalEntries: React.FC = () => {
                     Add Entry
                 </button>
             </div>
-
+            <div className="overflow-x-auto">
+                <table className="table-auto w-full mt-4">
+                    <thead>
+                        <tr className="border-b-2">
+                            <th className="px-4 py-2 text-left">Date</th>
+                            <th className="px-4 py-2 text-left">Description</th>
+                            <th className="px-4 py-2 text-left">Accounts</th>
+                            <th className="px-4 py-2 text-left">Debit</th>
+                            <th className="px-4 py-2 text-left">Credit</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {entries.map((entry) => (
+                            <tr key={entry._id} className="border-b">
+                                <td className="px-4 py-2">
+                                    {entry.date.slice(0, 10)}
+                                </td>
+                                <td className="px-4 py-2">
+                                    {entry.description}
+                                </td>
+                                <td className="px-4 py-2">
+                                    {entry.accounts.map((account, index) => (
+                                        <div
+                                            key={index}
+                                            className="flex space-x-4"
+                                        >
+                                            <span>{account.accountName}</span>
+                                        </div>
+                                    ))}
+                                </td>
+                                <td className="px-4 py-2">
+                                    {entry.accounts.map((account, index) => (
+                                        <div
+                                            key={index}
+                                            className="flex space-x-4"
+                                        >
+                                            <span>{account.debit}</span>
+                                        </div>
+                                    ))}
+                                </td>
+                                <td className="px-4 py-2">
+                                    {entry.accounts.map((account, index) => (
+                                        <div
+                                            key={index}
+                                            className="flex space-x-4"
+                                        >
+                                            <span>{account.credit}</span>
+                                        </div>
+                                    ))}
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
             <div>
                 <ul className="space-y-2">
                     {entries.map((entry) => (
@@ -376,6 +451,12 @@ const JournalEntries: React.FC = () => {
                                 }
                                 className="border rounded p-2"
                             />
+                            <button
+                                onClick={() => handleDeleteAccount(index, true)}
+                                className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+                            >
+                                Delete Account
+                            </button>
                         </div>
                     ))}
 
