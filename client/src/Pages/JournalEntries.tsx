@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
-
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 
@@ -25,6 +24,10 @@ const JournalEntries: React.FC = () => {
     const [newAccounts, setNewAccounts] = useState<AccountEntry[]>([
         { accountName: '', debit: 0, credit: 0 },
     ]);
+    const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
+    const [editDate, setEditDate] = useState<string>('');
+    const [editDescription, setEditDescription] = useState<string>('');
+    const [editAccounts, setEditAccounts] = useState<AccountEntry[]>([]);
     const [error, setError] = useState<string | null>(null);
     const navigate = useNavigate();
 
@@ -42,12 +45,11 @@ const JournalEntries: React.FC = () => {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             const data = await response.json();
-
             setEntries(data);
         } catch (error) {
             console.error('Error fetching journal entries: ', error);
         }
-    }, [setEntries]);
+    }, []);
 
     useEffect(() => {
         if (isAuthenticated) {
@@ -61,9 +63,7 @@ const JournalEntries: React.FC = () => {
             return;
         }
         try {
-            console.log('button clicked');
             const token = localStorage.getItem('token');
-
             if (!token) return;
 
             const response = await fetch('/api/journal-entries', {
@@ -109,13 +109,83 @@ const JournalEntries: React.FC = () => {
         ]);
     };
 
+    const handleEdit = (entry: JournalEntry) => {
+        setEditingEntry(entry);
+        setEditDate(entry.date.slice(0, 10));
+        setEditDescription(entry.description);
+        setEditAccounts(entry.accounts);
+    };
+
+    const handleEditAccountChange = (
+        index: number,
+        field: keyof AccountEntry,
+        value: string | number
+    ) => {
+        const updatedAccounts = [...editAccounts];
+        updatedAccounts[index][field] = value as never;
+        setEditAccounts(updatedAccounts);
+    };
+
+    const handleUpdateEntry = async () => {
+        if (!editingEntry) return;
+
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+
+            const response = await fetch(
+                `/api/journal-entries/${editingEntry._id}`,
+                {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                        date: new Date(editDate).toISOString(),
+                        description: editDescription,
+                        accounts: editAccounts,
+                    }),
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            await fetchEntries();
+            setEditingEntry(null);
+        } catch (error) {
+            console.error('Error updating journal entry:', error);
+        }
+    };
+
+    const handleDeleteEntry = async (id: string) => {
+        try {
+            const token = localStorage.getItem('token');
+            if (!token) return;
+
+            const response = await fetch(`/api/journal-entries/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                },
+            });
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            fetchEntries();
+        } catch (error) {
+            console.error('Error deleting journal entry: ', error);
+        }
+    };
+
     return (
         <div>
             <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
                 <h1 className="text-2xl font-semibold">Journal Entries</h1>
                 <button
                     onClick={() => navigate('/dashboard')}
-                    className=" text-white font-bold py-2 px-4 rounded"
+                    className="text-white font-bold py-2 px-4 rounded"
                 >
                     Dashboard
                 </button>
@@ -133,6 +203,7 @@ const JournalEntries: React.FC = () => {
                     </p>
                 )}
                 {error && <p className="text-red-500 font-semibold">{error}</p>}
+
                 <div className="mb-4 flex space-x-2">
                     <input
                         type="date"
@@ -148,6 +219,7 @@ const JournalEntries: React.FC = () => {
                         className="border rounded p-2"
                     />
                 </div>
+
                 {newAccounts.map((account, index) => (
                     <div key={index} className="mb-2 flex space-x-2">
                         <input
@@ -191,12 +263,14 @@ const JournalEntries: React.FC = () => {
                         />
                     </div>
                 ))}
+
                 <button
                     onClick={addAccountField}
                     className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2"
                 >
                     Add Account
                 </button>
+
                 <button
                     onClick={handleAddEntry}
                     className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
@@ -204,6 +278,7 @@ const JournalEntries: React.FC = () => {
                     Add Entry
                 </button>
             </div>
+
             <div>
                 <ul className="space-y-2">
                     {entries.map((entry) => (
@@ -211,6 +286,7 @@ const JournalEntries: React.FC = () => {
                             <div>
                                 {entry.date.slice(0, 10)} - {entry.description}
                             </div>
+
                             <ul>
                                 {entry.accounts.map((account, i) => (
                                     <li key={i} className="ml-4">
@@ -220,10 +296,103 @@ const JournalEntries: React.FC = () => {
                                     </li>
                                 ))}
                             </ul>
+
+                            <div className="space-x-2">
+                                <button
+                                    onClick={() => handleEdit(entry)}
+                                    className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
+                                >
+                                    Edit
+                                </button>
+                                <button
+                                    onClick={() => handleDeleteEntry(entry._id)}
+                                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+                                >
+                                    Delete
+                                </button>
+                            </div>
                         </li>
                     ))}
                 </ul>
             </div>
+
+            {editingEntry && (
+                <div className="mt-4">
+                    <h2>Edit Journal Entry</h2>
+                    <div className="mb-4 flex space-x-2">
+                        <input
+                            type="date"
+                            value={editDate}
+                            onChange={(e) => setEditDate(e.target.value)}
+                            className="border rounded p-2"
+                        />
+                        <input
+                            type="text"
+                            placeholder="Description"
+                            value={editDescription}
+                            onChange={(e) => setEditDescription(e.target.value)}
+                            className="border rounded p-2"
+                        />
+                    </div>
+
+                    {editAccounts.map((account, index) => (
+                        <div key={index} className="mb-2 flex space-x-2">
+                            <input
+                                type="text"
+                                placeholder="Account Name"
+                                value={account.accountName}
+                                onChange={(e) =>
+                                    handleEditAccountChange(
+                                        index,
+                                        'accountName',
+                                        e.target.value
+                                    )
+                                }
+                                className="border rounded p-2"
+                            />
+                            <input
+                                type="number"
+                                placeholder="Debit"
+                                value={account.debit}
+                                onChange={(e) =>
+                                    handleEditAccountChange(
+                                        index,
+                                        'debit',
+                                        Number(e.target.value)
+                                    )
+                                }
+                                className="border rounded p-2"
+                            />
+                            <input
+                                type="number"
+                                placeholder="Credit"
+                                value={account.credit}
+                                onChange={(e) =>
+                                    handleEditAccountChange(
+                                        index,
+                                        'credit',
+                                        Number(e.target.value)
+                                    )
+                                }
+                                className="border rounded p-2"
+                            />
+                        </div>
+                    ))}
+
+                    <button
+                        onClick={handleUpdateEntry}
+                        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Update Entry
+                    </button>
+                    <button
+                        onClick={() => setEditingEntry(null)}
+                        className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+                    >
+                        Cancel
+                    </button>
+                </div>
+            )}
         </div>
     );
 };
