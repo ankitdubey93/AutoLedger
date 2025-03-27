@@ -231,7 +231,7 @@ const JournalEntries: React.FC = () => {
                         placeholder="Description"
                         value={newDescription}
                         onChange={(e) => setNewDescription(e.target.value)}
-                        className="border rounded p-2"
+                        className="border rounded p-2 max-w-xs"
                     />
                 </div>
 
@@ -303,94 +303,72 @@ const JournalEntries: React.FC = () => {
                 <table className="table-auto w-full mt-4">
                     <thead>
                         <tr className="border-b-2">
-                            <th className="px-4 py-2 text-left">Date</th>
-                            <th className="px-4 py-2 text-left">Description</th>
-                            <th className="px-4 py-2 text-left">Accounts</th>
-                            <th className="px-4 py-2 text-left">Debit</th>
-                            <th className="px-4 py-2 text-left">Credit</th>
+                            <th className="px-4 py-2 text-left w-1/12">Date</th>
+                            <th className="px-4 py-2 text-left w-1/4 max-w-xs">
+                                Description
+                            </th>
+                            <th className="px-4 py-2 text-left w-1/8">
+                                Accounts
+                            </th>
+                            <th className="px-4 py-2 text-left w-1/8">Debit</th>
+                            <th className="px-4 py-2 text-left w-1/8">
+                                Credit
+                            </th>
+                            <th className="px-4 py-2 text-left w-1/12">
+                                Actions
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
                         {entries.map((entry) => (
                             <tr key={entry._id} className="border-b">
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 text-left">
                                     {entry.date.slice(0, 10)}
                                 </td>
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 text-left truncate whitespace-normal break-words max-w-xs">
                                     {entry.description}
                                 </td>
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 text-left">
                                     {entry.accounts.map((account, index) => (
                                         <div
                                             key={index}
-                                            className="flex space-x-4"
+                                            className="flex justify-between"
                                         >
                                             <span>{account.accountName}</span>
                                         </div>
                                     ))}
                                 </td>
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 text-left">
                                     {entry.accounts.map((account, index) => (
-                                        <div
-                                            key={index}
-                                            className="flex space-x-4"
-                                        >
-                                            <span>{account.debit}</span>
-                                        </div>
+                                        <div key={index}>{account.debit}</div>
                                     ))}
                                 </td>
-                                <td className="px-4 py-2">
+                                <td className="px-4 py-2 text-left">
                                     {entry.accounts.map((account, index) => (
-                                        <div
-                                            key={index}
-                                            className="flex space-x-4"
-                                        >
-                                            <span>{account.credit}</span>
-                                        </div>
+                                        <div key={index}>{account.credit}</div>
                                     ))}
+                                </td>
+                                <td className="px-4 py-2 text-left">
+                                    <button
+                                        onClick={() => handleEdit(entry)}
+                                        className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
+                                    >
+                                        Edit
+                                    </button>
+                                    <button
+                                        onClick={() =>
+                                            handleDeleteEntry(entry._id)
+                                        }
+                                        className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded ml-2"
+                                    >
+                                        Delete
+                                    </button>
                                 </td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
-            <div>
-                <ul className="space-y-2">
-                    {entries.map((entry) => (
-                        <li key={entry._id} className="border rounded p-2">
-                            <div>
-                                {entry.date.slice(0, 10)} - {entry.description}
-                            </div>
-
-                            <ul>
-                                {entry.accounts.map((account, i) => (
-                                    <li key={i} className="ml-4">
-                                        {account.accountName} - Debit:{' '}
-                                        {account.debit}, Credit:{' '}
-                                        {account.credit}
-                                    </li>
-                                ))}
-                            </ul>
-
-                            <div className="space-x-2">
-                                <button
-                                    onClick={() => handleEdit(entry)}
-                                    className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
-                                >
-                                    Edit
-                                </button>
-                                <button
-                                    onClick={() => handleDeleteEntry(entry._id)}
-                                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
-                                >
-                                    Delete
-                                </button>
-                            </div>
-                        </li>
-                    ))}
-                </ul>
-            </div>
-
             {editingEntry && (
                 <div className="mt-4">
                     <h2>Edit Journal Entry</h2>
