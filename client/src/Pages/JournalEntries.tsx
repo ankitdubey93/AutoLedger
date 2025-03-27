@@ -287,7 +287,7 @@ const JournalEntries: React.FC = () => {
 
                 <button
                     onClick={addAccountField}
-                    className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded mb-2"
+                    className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-2 rounded mb-2 mr-2"
                 >
                     Add Account
                 </button>
