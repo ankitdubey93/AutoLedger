@@ -12,7 +12,11 @@ const router = express.Router();
 router.get(
   "/",
   auth,
-  async (req: CustomRequest, res: Response, next: NextFunction) => {
+  async (
+    req: CustomRequest,
+    res: Response,
+    next: NextFunction
+  ): Promise<void> => {
     try {
       const user = req.user?.user.id;
       console.log(user);
@@ -35,17 +39,26 @@ router.post(
   ): Promise<void> => {
     try {
       console.log("Receiving body: ", req.body);
-      const { date, description, amount } = req.body;
+      const { date, description, accounts } = req.body;
+
+      if (!Array.isArray(accounts) || accounts.length < 2) {
+        res.status(400).json({
+          message: "A journal entry must have at least two accounts.",
+        });
+        return;
+      }
 
       const userId = req.user?.user.id;
 
       const newEntry = new JournalEntry({
         date,
         description,
-        amount,
+        accounts,
         userId: userId,
       });
+
       await newEntry.save();
+
       res.status(201).json({ message: "Journal entry added successfully." });
     } catch (error) {
       next(error);
@@ -62,15 +75,18 @@ router.put(
     next: NextFunction
   ): Promise<void> => {
     try {
-      const { date, description, amount } = req.body;
+      const { date, description, accounts } = req.body;
       console.log("request payload", req.body);
       const journalEntry = await JournalEntry.findById(req.params.id);
+
       if (!journalEntry) {
         res.status(404).json({ message: "Journal entry not found." });
         return;
       }
+
       if (journalEntry.userId.toString() !== req.user?.user.id) {
         res.status(403).json({ message: "Unauthorized" });
+        return;
       }
 
       const updatedEntry = await JournalEntry.findByIdAndUpdate(
@@ -78,7 +94,7 @@ router.put(
         {
           date,
           description,
-          amount,
+          accounts,
         },
         { new: true }
       );
@@ -110,8 +126,9 @@ router.delete(
         res.status(403).json({ message: "Unauthorized" });
         return;
       }
+
       await JournalEntry.findByIdAndDelete(req.params.id);
-      res.status(201).json({ message: "Journal entry deleted successfully." });
+      res.status(200).json({ message: "Journal entry deleted successfully." });
     } catch (error) {
       next(error);
     }
