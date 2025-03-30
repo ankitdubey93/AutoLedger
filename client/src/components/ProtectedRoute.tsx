@@ -13,8 +13,6 @@ const ProtectedRoute = ({ children }: { children: JSX.Element }) => {
     const { isAuthenticated } = authContext;
 
     return isAuthenticated ? children : <Navigate to="/" replace />;
-
-    return children;
 };
 
 export default ProtectedRoute;

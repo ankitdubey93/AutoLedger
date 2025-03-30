@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useContext } from 'react';
 import { AuthContext } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import { authenticatedFetch } from '../utils/fetch';
 
 interface AccountEntry {
     accountName: string;
@@ -17,7 +18,7 @@ interface JournalEntry {
 }
 
 const JournalEntries: React.FC = () => {
-    const { isAuthenticated, username, logout } = useContext(AuthContext)!;
+    const { username, logout } = useContext(AuthContext)!;
     const [entries, setEntries] = useState<JournalEntry[]>([]);
     const [newDate, setNewDate] = useState<string>('');
     const [newDescription, setNewDescription] = useState<string>('');
@@ -33,14 +34,7 @@ const JournalEntries: React.FC = () => {
 
     const fetchEntries = useCallback(async () => {
         try {
-            const token = localStorage.getItem('token');
-            if (!token) return;
-
-            const response = await fetch('/api/journal-entries', {
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
+            const response = await authenticatedFetch('/api/journal-entries');
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -52,10 +46,8 @@ const JournalEntries: React.FC = () => {
     }, []);
 
     useEffect(() => {
-        if (isAuthenticated) {
-            fetchEntries();
-        }
-    }, [fetchEntries, isAuthenticated]);
+        fetchEntries();
+    }, [fetchEntries]);
 
     const handleAddEntry = async () => {
         if (!newDate || !newDescription.trim() || newAccounts.length === 0) {
