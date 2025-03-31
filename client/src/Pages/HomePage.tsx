@@ -1,5 +1,5 @@
 import Logo from '../../public/Logo-text-big.png';
-import { useState, useEffect, useContext } from 'react';
+import { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import SignInForm from '../components/SignInForm';
@@ -8,19 +8,12 @@ import SignUpForm from '../components/SignUpForm';
 const HomePage: React.FC = () => {
     const authContext = useContext(AuthContext);
 
-    const isAuthenticated = authContext?.isAuthenticated || false;
     const login = authContext?.login || (() => {});
 
     const [isSignUp, setIsSignUp] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
     const navigate = useNavigate();
-
-    useEffect(() => {
-        if (isAuthenticated) {
-            navigate('/dashboard');
-        }
-    }, [navigate, isAuthenticated]);
 
     const handleSignIn = async (username: string, password: string) => {
         setError('');
