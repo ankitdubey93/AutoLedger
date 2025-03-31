@@ -11,22 +11,13 @@ const App = () => {
             <AuthProvider>
                 <Routes>
                     <Route path="/" element={<HomePage />} />
-                    <Route
-                        path="/dashboard"
-                        element={
-                            <ProtectedRoute>
-                                <Dashboard />
-                            </ProtectedRoute>
-                        }
-                    />
-                    <Route
-                        path="/journal-entries"
-                        element={
-                            <ProtectedRoute>
-                                <JournalEntries />
-                            </ProtectedRoute>
-                        }
-                    />
+                    <Route element={<ProtectedRoute />}>
+                        <Route path="/dashboard" element={<Dashboard />} />
+                        <Route
+                            path="/journal-entries"
+                            element={<JournalEntries />}
+                        />
+                    </Route>
                 </Routes>
             </AuthProvider>
         </Router>
