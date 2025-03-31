@@ -11,7 +11,9 @@ const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children }) => {
     const authContext = useContext(AuthContext);
 
     if (!authContext) {
-        return <Navigate to="/" />;
+        throw new Error(
+            'AuthContext is missing. Ensure that authProvider wraps the app.'
+        );
     }
 
     const { isAuthenticated } = authContext;
