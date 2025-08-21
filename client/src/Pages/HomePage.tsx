@@ -18,7 +18,7 @@ const HomePage: React.FC = () => {
     const handleSignIn = async (username: string, password: string) => {
         setError('');
         try {
-            const response = await fetch('/api/users/login', {
+            const response = await fetch('/api/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),
@@ -51,7 +51,7 @@ const HomePage: React.FC = () => {
             return;
         }
         try {
-            const response = await fetch('/api/users/signup', {
+            const response = await fetch('/api/auth/signup', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ username, password }),

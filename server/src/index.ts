@@ -2,9 +2,10 @@ import express, { Request, Response, NextFunction } from "express";
 import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./db/connect";
-import userRoutes from "./routes/users";
 import journalEntryRoutes from "./routes/journalEntries";
 import authRoute from "./routes/auth";
+import  errorHandler  from "./middleware/errorHandler";
+import ApiError from "./utils/apiError";
 
 dotenv.config();
 
@@ -18,15 +19,17 @@ app.use(cors());
 
 connectDB();
 
-app.use("/api/users", userRoutes);
+
 app.use("/api/journal-entries", journalEntryRoutes);
 app.use("/api/auth", authRoute);
 
-// Error-handling middleware
-app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
-  console.error(err.stack); // Log the error stack
-  res.status(500).json({ message: "Internal Server Error" }); // Send a generic error response
+// Example 404 route handler
+app.all("*", (req, res, next) => {
+  next(new ApiError(404, `Route ${req.originalUrl} not found`));
 });
+
+// Centralized error handling
+app.use(errorHandler);
 
 app.listen(PORT, () => {
   console.log(`Server is listening on port: ${PORT}....`);
