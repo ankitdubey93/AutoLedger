@@ -1,11 +1,10 @@
-import {Request, Response, NextFunction} from "express";
+import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import User from "../models/User";
 import jwt from "jsonwebtoken";
-
+import ApiError from "../utils/apiError";
 
 const jwtSecret = process.env.JWT_SECRET as string;
-
 
 export const verifyToken = (req: Request, res: Response) => {
   res.status(200).json({ message: "Token is valid", user: (req as any).user });
@@ -15,10 +14,13 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
   try {
     const { username, password } = req.body;
 
+    if (!username || !password) {
+      throw new ApiError(400, "Username and password are required");
+    }
+
     const existingUser = await User.findOne({ username });
     if (existingUser) {
-        res.status(400).json({ message: "User already exists" });
-        return;
+      throw new ApiError(400, "User already exists");
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -28,7 +30,7 @@ export const signup = async (req: Request, res: Response, next: NextFunction) =>
 
     res.status(201).json({ message: "User created successfully." });
   } catch (err) {
-    next(err); // <-- Pass to error middleware
+    next(err);
   }
 };
 
@@ -36,16 +38,18 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
   try {
     const { username, password } = req.body;
 
+    if (!username || !password) {
+      throw new ApiError(400, "Username and password are required");
+    }
+
     const user = await User.findOne({ username });
     if (!user) {
-        res.status(400).json({ message: "Invalid credentials." });
-        return;
+      throw new ApiError(400, "Invalid credentials");
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-        res.status(400).json({ message: "Invalid credentials." });
-        return;
+      throw new ApiError(400, "Invalid credentials");
     }
 
     const payload = { user: { id: user.id } };
@@ -53,7 +57,7 @@ export const login = async (req: Request, res: Response, next: NextFunction) => 
 
     res.json({ token });
   } catch (err) {
-    next(err); // <-- Pass to error middleware
+    next(err);
   }
 };
 
@@ -61,8 +65,7 @@ export const getUserById = async (req: Request, res: Response, next: NextFunctio
   try {
     const user = await User.findById(req.params.id);
     if (!user) {
-        res.status(404).json({ message: "User not found." });
-        return;
+      throw new ApiError(404, "User not found");
     }
     res.status(200).json(user);
   } catch (err) {
