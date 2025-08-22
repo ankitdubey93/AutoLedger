@@ -1,75 +1,83 @@
 import Logo from '../../public/Logo-text-big.png';
-import { useState, useContext } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AuthContext } from '../context/AuthContext';
-import SignInForm from '../components/SignInForm';
-import SignUpForm from '../components/SignUpForm';
+import { useAuth } from '../context/AuthContext';
+import { login, register } from '../services/fetchServices';
 
 const HomePage: React.FC = () => {
-    const authContext = useContext(AuthContext);
 
-    const login = authContext?.login || (() => {});
 
-    const [isSignUp, setIsSignUp] = useState(false);
-    const [error, setError] = useState('');
-    const [success, setSuccess] = useState('');
+    const [isLogin, setIsLogin] = useState<boolean>(true);
+    const [error, setError] = useState("");
+
+    const [formData, setFormData] = useState({
+        name: "",
+        email: "",
+        password: "",
+        confirmPassword: "",
+    });
+
+    const { setIsLoggedIn, setUser, isLoggedIn } = useAuth();
     const navigate = useNavigate();
 
-    const handleSignIn = async (username: string, password: string) => {
-        setError('');
-        try {
-            const response = await fetch('/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
+    
 
-            if (!response.ok) {
-                const errorData = await response.json();
-                setError(errorData.message || 'Login failed.');
-                return;
+    useEffect(() => {
+        if(isLoggedIn) {
+            navigate("/dashboard", {replace: true});
+        }
+    }, [isLoggedIn, navigate]);
+
+      const toggleMode = () => {
+    setIsLogin((prev) => !prev);
+    setFormData({ name: "", email: "", password: "", confirmPassword: "" });
+  };
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if(!isLogin && formData.password !== formData.confirmPassword) {
+        setError("Passwords do not match.");
+        return;
+    }
+
+    try {
+        if(isLogin) {
+            const response = await login(formData.email, formData.password);
+            if(response.ok) {
+                setIsLoggedIn(true);
+                setUser(response.user);
+                navigate("/dashboard");
+
+            } else {
+                setError(response.message || "Login Failed");
             }
 
-            const data = await response.json();
-            login(data.token, username);
-            navigate('/dashboard');
-        } catch (err) {
-            console.log('API error:', err);
-            setError('An unexpected error occurred.');
         }
-    };
-
-    const handleSignUp = async (
-        username: string,
-        password: string,
-        confirmPassword: string
-    ) => {
-        setError('');
-        setSuccess('');
-        if (password !== confirmPassword) {
-            setError('Passwords do not match.');
-            return;
-        }
-        try {
-            const response = await fetch('/api/auth/signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
-            });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                setError(errorData.message || 'Signup failed.');
-                return;
+        else {
+            const response = await register(
+                formData.name,
+                formData.email,
+                formData.password
+            );
+            if(response && response.user) {
+                setIsLoggedIn(true);
+                setUser(response.user);
+                navigate("/dashboard");
+            } else {
+                setError(response.message || "Registration Failed.")
             }
-
-            setSuccess('Signup Successful, please login.');
-            setIsSignUp(false);
-        } catch (err) {
-            console.error('API error:', err);
-            setError('An unexpected error occurred.');
         }
-    };
+    }
+    catch (error) {
+        console.error("Auth Error:", error);
+    }
+  }
+
+   
 
     return (
         <div className="flex flex-col items-center justify-start">
@@ -82,43 +90,64 @@ const HomePage: React.FC = () => {
                 />
             </div>
             <div className="bg-white p-8 rounded-md shadow-md w-96 mt-4">
-                <h2 className="text-2xl font-semibold mb-4 text-center">
-                    {error && (
-                        <p className="text-red-500 text-sm mb-2">{error}</p>
-                    )}
-                    {success && (
-                        <p className="text-green-500 text-sm mb-2">{success}</p>
-                    )}
-                    {isSignUp ? 'Sign Up' : 'Sign In'}
-                </h2>
-                {isSignUp ? (
-                    <SignUpForm onSignUp={handleSignUp} error={error} />
-                ) : (
-                    <SignInForm onSignIn={handleSignIn} />
-                )}
-                <p className="text-center mt-4">
-                    {isSignUp ? (
-                        <>
-                            Already have an account?{' '}
-                            <button
-                                className="text-blue-500 hover:underline"
-                                onClick={() => setIsSignUp(false)}
-                            >
-                                Sign In
-                            </button>
-                        </>
-                    ) : (
-                        <>
-                            Don't have an account?{' '}
-                            <button
-                                className="text-blue-500 hover:underline"
-                                onClick={() => setIsSignUp(true)}
-                            >
-                                Sign Up
-                            </button>
-                        </>
-                    )}
-                </p>
+                 <form onSubmit={handleSubmit} className="space-y-4">
+            {!isLogin && (
+              <input
+                type="text"
+                name="name"
+                placeholder="Full Name"
+                onChange={handleChange}
+                value={formData.name}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
+                required
+              />
+            )}
+            <input
+              type="email"
+              name="email"
+              placeholder="Email Address"
+              onChange={handleChange}
+              value={formData.email}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
+              required
+            />
+            <input
+              type="password"
+              name="password"
+              placeholder="Password"
+              onChange={handleChange}
+              value={formData.password}
+              className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
+              required
+            />
+            {!isLogin && (
+              <input
+                type="password"
+                name="confirmPassword"
+                placeholder="Confirm Password"
+                onChange={handleChange}
+                value={formData.confirmPassword}
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
+                required
+              />
+            )}
+            <button
+  type="submit"
+  className="w-full py-3 bg-sky-600 text-white rounded-lg shadow-md hover:bg-sky-700 transition"
+>
+  {isLogin ? "Login" : "Register"}
+</button>
+            <p className="text-center mt-5 text-sm text-gray-600">
+            {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+            <button
+              onClick={toggleMode}
+              className="text-sky-700 font-semibold hover:underline"
+            >
+              {isLogin ? "Register here" : "Login here"}
+            </button>
+          </p>
+          {error && <p className="text-red-600 text-sm">{error}</p>}
+          </form>
             </div>
         </div>
     );

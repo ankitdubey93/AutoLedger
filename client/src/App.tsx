@@ -1,9 +1,9 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import HomePage from './Pages/HomePage';
-import Dashboard from './Pages/Dashboard';
-import JournalEntries from './Pages/JournalEntries';
-import ProtectedRoute from './components/ProtectedRoute';
-import AuthProvider from './context/AuthProvider';
+// import Dashboard from './Pages/Dashboard';
+// import JournalEntries from './Pages/JournalEntries';
+// import ProtectedRoute from './components/ProtectedRoute';
+import { AuthProvider } from './context/AuthContext';
 
 const App = () => {
     return (
@@ -11,13 +11,13 @@ const App = () => {
             <AuthProvider>
                 <Routes>
                     <Route path="/" element={<HomePage />} />
-                    <Route element={<ProtectedRoute />}>
+                    {/* <Route element={<ProtectedRoute />}>
                         <Route path="/dashboard" element={<Dashboard />} />
-                        <Route
+                         <Route
                             path="/journal-entries"
                             element={<JournalEntries />}
                         />
-                    </Route>
+                    </Route> */}
                 </Routes>
             </AuthProvider>
         </Router>

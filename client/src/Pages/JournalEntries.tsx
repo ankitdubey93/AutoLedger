@@ -1,451 +1,451 @@
-import React, { useState, useEffect, useCallback, useContext } from 'react';
-import { AuthContext } from '../context/AuthContext';
-import { useNavigate } from 'react-router-dom';
-import { authenticatedFetch } from '../utils/fetch';
+// import React, { useState, useEffect, useCallback } from 'react';
+// // import { useAuth } from '../context/AuthContext';
+// import { useNavigate } from 'react-router-dom';
 
-interface AccountEntry {
-    accountName: string;
-    debit: number;
-    credit: number;
-}
 
-interface JournalEntry {
-    _id: string;
-    date: string;
-    description: string;
-    accounts: AccountEntry[];
-    userId: string;
-}
+// interface AccountEntry {
+//     accountName: string;
+//     debit: number;
+//     credit: number;
+// }
 
-const JournalEntries: React.FC = () => {
-    const { username, logout } = useContext(AuthContext)!;
-    const [entries, setEntries] = useState<JournalEntry[]>([]);
-    const [newDate, setNewDate] = useState<string>('');
-    const [newDescription, setNewDescription] = useState<string>('');
-    const [newAccounts, setNewAccounts] = useState<AccountEntry[]>([
-        { accountName: '', debit: 0, credit: 0 },
-    ]);
-    const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
-    const [editDate, setEditDate] = useState<string>('');
-    const [editDescription, setEditDescription] = useState<string>('');
-    const [editAccounts, setEditAccounts] = useState<AccountEntry[]>([]);
-    const [error, setError] = useState<string | null>(null);
-    const navigate = useNavigate();
+// interface JournalEntry {
+//     _id: string;
+//     date: string;
+//     description: string;
+//     accounts: AccountEntry[];
+//     userId: string;
+// }
 
-    const fetchEntries = useCallback(async () => {
-        try {
-            const response = await authenticatedFetch('/api/journal-entries');
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            const data = await response.json();
-            setEntries(data);
-        } catch (error) {
-            console.error('Error fetching journal entries: ', error);
-        }
-    }, []);
+// const JournalEntries: React.FC = () => {
+//     // const { username, logout } = useContext(AuthContext)!;
+//     const [entries, setEntries] = useState<JournalEntry[]>([]);
+//     const [newDate, setNewDate] = useState<string>('');
+//     const [newDescription, setNewDescription] = useState<string>('');
+//     const [newAccounts, setNewAccounts] = useState<AccountEntry[]>([
+//         { accountName: '', debit: 0, credit: 0 },
+//     ]);
+//     const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null);
+//     const [editDate, setEditDate] = useState<string>('');
+//     const [editDescription, setEditDescription] = useState<string>('');
+//     const [editAccounts, setEditAccounts] = useState<AccountEntry[]>([]);
+//     const [error, setError] = useState<string | null>(null);
+//     const navigate = useNavigate();
 
-    useEffect(() => {
-        fetchEntries();
-    }, [fetchEntries]);
+//     const fetchEntries = useCallback(async () => {
+//         try {
+//             const response = await authenticatedFetch('/api/journal-entries');
+//             if (!response.ok) {
+//                 throw new Error(`HTTP error! status: ${response.status}`);
+//             }
+//             const data = await response.json();
+//             setEntries(data);
+//         } catch (error) {
+//             console.error('Error fetching journal entries: ', error);
+//         }
+//     }, []);
 
-    const handleAddEntry = async () => {
-        if (!newDate || !newDescription.trim() || newAccounts.length === 0) {
-            setError('Please fill in all fields before adding an entry.');
-            return;
-        }
-        try {
-            const token = localStorage.getItem('token');
-            if (!token) return;
+//     useEffect(() => {
+//         fetchEntries();
+//     }, [fetchEntries]);
 
-            const response = await fetch('/api/journal-entries', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify({
-                    date: new Date(newDate),
-                    description: newDescription,
-                    accounts: newAccounts,
-                }),
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            fetchEntries();
-            setNewDate('');
-            setNewDescription('');
-            setNewAccounts([{ accountName: '', debit: 0, credit: 0 }]);
-            setError(null);
-        } catch (error) {
-            console.error('Error adding journal entry: ', error);
-            setError('Failed to add entry. Please try again.');
-        }
-    };
+//     const handleAddEntry = async () => {
+//         if (!newDate || !newDescription.trim() || newAccounts.length === 0) {
+//             setError('Please fill in all fields before adding an entry.');
+//             return;
+//         }
+//         try {
+//             const token = localStorage.getItem('token');
+//             if (!token) return;
 
-    const handleAccountChange = (
-        index: number,
-        field: keyof AccountEntry,
-        value: string | number
-    ) => {
-        const updatedAccounts = [...newAccounts];
-        updatedAccounts[index][field] = value as never;
-        setNewAccounts(updatedAccounts);
-    };
+//             const response = await fetch('/api/journal-entries', {
+//                 method: 'POST',
+//                 headers: {
+//                     'Content-Type': 'application/json',
+//                     Authorization: `Bearer ${token}`,
+//                 },
+//                 body: JSON.stringify({
+//                     date: new Date(newDate),
+//                     description: newDescription,
+//                     accounts: newAccounts,
+//                 }),
+//             });
+//             if (!response.ok) {
+//                 throw new Error(`HTTP error! status: ${response.status}`);
+//             }
+//             fetchEntries();
+//             setNewDate('');
+//             setNewDescription('');
+//             setNewAccounts([{ accountName: '', debit: 0, credit: 0 }]);
+//             setError(null);
+//         } catch (error) {
+//             console.error('Error adding journal entry: ', error);
+//             setError('Failed to add entry. Please try again.');
+//         }
+//     };
 
-    const addAccountField = () => {
-        setNewAccounts([
-            ...newAccounts,
-            { accountName: '', debit: 0, credit: 0 },
-        ]);
-    };
+//     const handleAccountChange = (
+//         index: number,
+//         field: keyof AccountEntry,
+//         value: string | number
+//     ) => {
+//         const updatedAccounts = [...newAccounts];
+//         updatedAccounts[index][field] = value as never;
+//         setNewAccounts(updatedAccounts);
+//     };
 
-    const handleEdit = (entry: JournalEntry) => {
-        setEditingEntry(entry);
-        setEditDate(entry.date.slice(0, 10));
-        setEditDescription(entry.description);
-        setEditAccounts(entry.accounts);
-    };
+//     const addAccountField = () => {
+//         setNewAccounts([
+//             ...newAccounts,
+//             { accountName: '', debit: 0, credit: 0 },
+//         ]);
+//     };
 
-    const handleEditAccountChange = (
-        index: number,
-        field: keyof AccountEntry,
-        value: string | number
-    ) => {
-        const updatedAccounts = [...editAccounts];
-        updatedAccounts[index][field] = value as never;
-        setEditAccounts(updatedAccounts);
-    };
+//     const handleEdit = (entry: JournalEntry) => {
+//         setEditingEntry(entry);
+//         setEditDate(entry.date.slice(0, 10));
+//         setEditDescription(entry.description);
+//         setEditAccounts(entry.accounts);
+//     };
 
-    const handleUpdateEntry = async () => {
-        if (!editingEntry) return;
+//     const handleEditAccountChange = (
+//         index: number,
+//         field: keyof AccountEntry,
+//         value: string | number
+//     ) => {
+//         const updatedAccounts = [...editAccounts];
+//         updatedAccounts[index][field] = value as never;
+//         setEditAccounts(updatedAccounts);
+//     };
 
-        try {
-            const token = localStorage.getItem('token');
-            if (!token) return;
+//     const handleUpdateEntry = async () => {
+//         if (!editingEntry) return;
 
-            const response = await fetch(
-                `/api/journal-entries/${editingEntry._id}`,
-                {
-                    method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        Authorization: `Bearer ${token}`,
-                    },
-                    body: JSON.stringify({
-                        date: new Date(editDate).toISOString(),
-                        description: editDescription,
-                        accounts: editAccounts,
-                    }),
-                }
-            );
+//         try {
+//             const token = localStorage.getItem('token');
+//             if (!token) return;
 
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            await fetchEntries();
-            setEditingEntry(null);
-        } catch (error) {
-            console.error('Error updating journal entry:', error);
-        }
-    };
+//             const response = await fetch(
+//                 `/api/journal-entries/${editingEntry._id}`,
+//                 {
+//                     method: 'PUT',
+//                     headers: {
+//                         'Content-Type': 'application/json',
+//                         Authorization: `Bearer ${token}`,
+//                     },
+//                     body: JSON.stringify({
+//                         date: new Date(editDate).toISOString(),
+//                         description: editDescription,
+//                         accounts: editAccounts,
+//                     }),
+//                 }
+//             );
 
-    const handleDeleteEntry = async (id: string) => {
-        try {
-            const token = localStorage.getItem('token');
-            if (!token) return;
+//             if (!response.ok) {
+//                 throw new Error(`HTTP error! status: ${response.status}`);
+//             }
+//             await fetchEntries();
+//             setEditingEntry(null);
+//         } catch (error) {
+//             console.error('Error updating journal entry:', error);
+//         }
+//     };
 
-            const response = await fetch(`/api/journal-entries/${id}`, {
-                method: 'DELETE',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                },
-            });
-            if (!response.ok) {
-                throw new Error(`HTTP error! status: ${response.status}`);
-            }
-            fetchEntries();
-        } catch (error) {
-            console.error('Error deleting journal entry: ', error);
-        }
-    };
+//     const handleDeleteEntry = async (id: string) => {
+//         try {
+//             const token = localStorage.getItem('token');
+//             if (!token) return;
 
-    const handleDeleteAccount = (
-        index: number,
-        isEditingPhase: boolean = false
-    ) => {
-        if (isEditingPhase) {
-            const updatedAccounts = [...editAccounts];
-            updatedAccounts.splice(index, 1);
-            setEditAccounts(updatedAccounts);
-        } else {
-            const updatedAccounts = [...newAccounts];
-            updatedAccounts.splice(index, 1);
-            setNewAccounts(updatedAccounts);
-        }
-    };
+//             const response = await fetch(`/api/journal-entries/${id}`, {
+//                 method: 'DELETE',
+//                 headers: {
+//                     Authorization: `Bearer ${token}`,
+//                 },
+//             });
+//             if (!response.ok) {
+//                 throw new Error(`HTTP error! status: ${response.status}`);
+//             }
+//             fetchEntries();
+//         } catch (error) {
+//             console.error('Error deleting journal entry: ', error);
+//         }
+//     };
 
-    return (
-        <div>
-            <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
-                <h1 className="text-2xl font-semibold">Journal Entries</h1>
-                <button
-                    onClick={() => navigate('/dashboard')}
-                    className="text-white font-bold py-2 px-4 rounded"
-                >
-                    Dashboard
-                </button>
-                <button
-                    onClick={logout}
-                    className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
-                >
-                    SignOut
-                </button>
-            </header>
-            <div className="p-2">
-                {username && (
-                    <p className="text-gray-600 mb-4">
-                        Logged in as {username}
-                    </p>
-                )}
-                {error && <p className="text-red-500 font-semibold">{error}</p>}
+//     const handleDeleteAccount = (
+//         index: number,
+//         isEditingPhase: boolean = false
+//     ) => {
+//         if (isEditingPhase) {
+//             const updatedAccounts = [...editAccounts];
+//             updatedAccounts.splice(index, 1);
+//             setEditAccounts(updatedAccounts);
+//         } else {
+//             const updatedAccounts = [...newAccounts];
+//             updatedAccounts.splice(index, 1);
+//             setNewAccounts(updatedAccounts);
+//         }
+//     };
 
-                <div className="mb-4 flex space-x-2">
-                    <input
-                        type="date"
-                        value={newDate}
-                        onChange={(e) => setNewDate(e.target.value)}
-                        className="border rounded p-2"
-                    />
-                    <input
-                        type="text"
-                        placeholder="Description"
-                        value={newDescription}
-                        onChange={(e) => setNewDescription(e.target.value)}
-                        className="border rounded p-2 max-w-xs"
-                    />
-                </div>
+//     return (
+//         <div>
+//             <header className="bg-blue-600 text-white p-4 flex justify-between items-center">
+//                 <h1 className="text-2xl font-semibold">Journal Entries</h1>
+//                 <button
+//                     onClick={() => navigate('/dashboard')}
+//                     className="text-white font-bold py-2 px-4 rounded"
+//                 >
+//                     Dashboard
+//                 </button>
+//                 <button
+//                     onClick={logout}
+//                     className="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded"
+//                 >
+//                     SignOut
+//                 </button>
+//             </header>
+//             <div className="p-2">
+//                 {username && (
+//                     <p className="text-gray-600 mb-4">
+//                         Logged in as {username}
+//                     </p>
+//                 )}
+//                 {error && <p className="text-red-500 font-semibold">{error}</p>}
 
-                {newAccounts.map((account, index) => (
-                    <div key={index} className="mb-2 flex space-x-2">
-                        <input
-                            type="text"
-                            placeholder="Account Name"
-                            value={account.accountName}
-                            onChange={(e) =>
-                                handleAccountChange(
-                                    index,
-                                    'accountName',
-                                    e.target.value
-                                )
-                            }
-                            className="border rounded p-2"
-                        />
-                        <input
-                            type="number"
-                            placeholder="Debit"
-                            value={account.debit}
-                            onChange={(e) =>
-                                handleAccountChange(
-                                    index,
-                                    'debit',
-                                    Number(e.target.value)
-                                )
-                            }
-                            className="border rounded p-2"
-                        />
-                        <input
-                            type="number"
-                            placeholder="Credit"
-                            value={account.credit}
-                            onChange={(e) =>
-                                handleAccountChange(
-                                    index,
-                                    'credit',
-                                    Number(e.target.value)
-                                )
-                            }
-                            className="border rounded p-2"
-                        />
-                        <button
-                            onClick={() => handleDeleteAccount(index)}
-                            className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
-                        >
-                            Delete Account
-                        </button>
-                    </div>
-                ))}
+//                 <div className="mb-4 flex space-x-2">
+//                     <input
+//                         type="date"
+//                         value={newDate}
+//                         onChange={(e) => setNewDate(e.target.value)}
+//                         className="border rounded p-2"
+//                     />
+//                     <input
+//                         type="text"
+//                         placeholder="Description"
+//                         value={newDescription}
+//                         onChange={(e) => setNewDescription(e.target.value)}
+//                         className="border rounded p-2 max-w-xs"
+//                     />
+//                 </div>
 
-                <button
-                    onClick={addAccountField}
-                    className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-2 rounded mb-2 mr-2"
-                >
-                    Add Account
-                </button>
+//                 {newAccounts.map((account, index) => (
+//                     <div key={index} className="mb-2 flex space-x-2">
+//                         <input
+//                             type="text"
+//                             placeholder="Account Name"
+//                             value={account.accountName}
+//                             onChange={(e) =>
+//                                 handleAccountChange(
+//                                     index,
+//                                     'accountName',
+//                                     e.target.value
+//                                 )
+//                             }
+//                             className="border rounded p-2"
+//                         />
+//                         <input
+//                             type="number"
+//                             placeholder="Debit"
+//                             value={account.debit}
+//                             onChange={(e) =>
+//                                 handleAccountChange(
+//                                     index,
+//                                     'debit',
+//                                     Number(e.target.value)
+//                                 )
+//                             }
+//                             className="border rounded p-2"
+//                         />
+//                         <input
+//                             type="number"
+//                             placeholder="Credit"
+//                             value={account.credit}
+//                             onChange={(e) =>
+//                                 handleAccountChange(
+//                                     index,
+//                                     'credit',
+//                                     Number(e.target.value)
+//                                 )
+//                             }
+//                             className="border rounded p-2"
+//                         />
+//                         <button
+//                             onClick={() => handleDeleteAccount(index)}
+//                             className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+//                         >
+//                             Delete Account
+//                         </button>
+//                     </div>
+//                 ))}
 
-                <button
-                    onClick={handleAddEntry}
-                    className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
-                >
-                    Add Entry
-                </button>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="table-auto w-full mt-4">
-                    <thead>
-                        <tr className="border-b-2">
-                            <th className="px-4 py-2 text-left w-1/12">Date</th>
-                            <th className="px-4 py-2 text-left w-1/4 max-w-xs">
-                                Description
-                            </th>
-                            <th className="px-4 py-2 text-left w-1/8">
-                                Accounts
-                            </th>
-                            <th className="px-4 py-2 text-left w-1/8">Debit</th>
-                            <th className="px-4 py-2 text-left w-1/8">
-                                Credit
-                            </th>
-                            <th className="px-4 py-2 text-left w-1/12">
-                                Actions
-                            </th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {entries.map((entry) => (
-                            <tr key={entry._id} className="border-b">
-                                <td className="px-4 py-2 text-left">
-                                    {entry.date.slice(0, 10)}
-                                </td>
-                                <td className="px-4 py-2 text-left truncate whitespace-normal break-words max-w-xs">
-                                    {entry.description}
-                                </td>
-                                <td className="px-4 py-2 text-left">
-                                    {entry.accounts.map((account, index) => (
-                                        <div
-                                            key={index}
-                                            className="flex justify-between"
-                                        >
-                                            <span>{account.accountName}</span>
-                                        </div>
-                                    ))}
-                                </td>
-                                <td className="px-4 py-2 text-left">
-                                    {entry.accounts.map((account, index) => (
-                                        <div key={index}>{account.debit}</div>
-                                    ))}
-                                </td>
-                                <td className="px-4 py-2 text-left">
-                                    {entry.accounts.map((account, index) => (
-                                        <div key={index}>{account.credit}</div>
-                                    ))}
-                                </td>
-                                <td className="px-4 py-2 text-left">
-                                    <button
-                                        onClick={() => handleEdit(entry)}
-                                        className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
-                                    >
-                                        Edit
-                                    </button>
-                                    <button
-                                        onClick={() =>
-                                            handleDeleteEntry(entry._id)
-                                        }
-                                        className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded ml-2"
-                                    >
-                                        Delete
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-            {editingEntry && (
-                <div className="mt-4">
-                    <h2>Edit Journal Entry</h2>
-                    <div className="mb-4 flex space-x-2">
-                        <input
-                            type="date"
-                            value={editDate}
-                            onChange={(e) => setEditDate(e.target.value)}
-                            className="border rounded p-2"
-                        />
-                        <input
-                            type="text"
-                            placeholder="Description"
-                            value={editDescription}
-                            onChange={(e) => setEditDescription(e.target.value)}
-                            className="border rounded p-2"
-                        />
-                    </div>
+//                 <button
+//                     onClick={addAccountField}
+//                     className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-2 rounded mb-2 mr-2"
+//                 >
+//                     Add Account
+//                 </button>
 
-                    {editAccounts.map((account, index) => (
-                        <div key={index} className="mb-2 flex space-x-2">
-                            <input
-                                type="text"
-                                placeholder="Account Name"
-                                value={account.accountName}
-                                onChange={(e) =>
-                                    handleEditAccountChange(
-                                        index,
-                                        'accountName',
-                                        e.target.value
-                                    )
-                                }
-                                className="border rounded p-2"
-                            />
-                            <input
-                                type="number"
-                                placeholder="Debit"
-                                value={account.debit}
-                                onChange={(e) =>
-                                    handleEditAccountChange(
-                                        index,
-                                        'debit',
-                                        Number(e.target.value)
-                                    )
-                                }
-                                className="border rounded p-2"
-                            />
-                            <input
-                                type="number"
-                                placeholder="Credit"
-                                value={account.credit}
-                                onChange={(e) =>
-                                    handleEditAccountChange(
-                                        index,
-                                        'credit',
-                                        Number(e.target.value)
-                                    )
-                                }
-                                className="border rounded p-2"
-                            />
-                            <button
-                                onClick={() => handleDeleteAccount(index, true)}
-                                className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
-                            >
-                                Delete Account
-                            </button>
-                        </div>
-                    ))}
+//                 <button
+//                     onClick={handleAddEntry}
+//                     className="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+//                 >
+//                     Add Entry
+//                 </button>
+//             </div>
+//             <div className="overflow-x-auto">
+//                 <table className="table-auto w-full mt-4">
+//                     <thead>
+//                         <tr className="border-b-2">
+//                             <th className="px-4 py-2 text-left w-1/12">Date</th>
+//                             <th className="px-4 py-2 text-left w-1/4 max-w-xs">
+//                                 Description
+//                             </th>
+//                             <th className="px-4 py-2 text-left w-1/8">
+//                                 Accounts
+//                             </th>
+//                             <th className="px-4 py-2 text-left w-1/8">Debit</th>
+//                             <th className="px-4 py-2 text-left w-1/8">
+//                                 Credit
+//                             </th>
+//                             <th className="px-4 py-2 text-left w-1/12">
+//                                 Actions
+//                             </th>
+//                         </tr>
+//                     </thead>
+//                     <tbody>
+//                         {entries.map((entry) => (
+//                             <tr key={entry._id} className="border-b">
+//                                 <td className="px-4 py-2 text-left">
+//                                     {entry.date.slice(0, 10)}
+//                                 </td>
+//                                 <td className="px-4 py-2 text-left truncate whitespace-normal break-words max-w-xs">
+//                                     {entry.description}
+//                                 </td>
+//                                 <td className="px-4 py-2 text-left">
+//                                     {entry.accounts.map((account, index) => (
+//                                         <div
+//                                             key={index}
+//                                             className="flex justify-between"
+//                                         >
+//                                             <span>{account.accountName}</span>
+//                                         </div>
+//                                     ))}
+//                                 </td>
+//                                 <td className="px-4 py-2 text-left">
+//                                     {entry.accounts.map((account, index) => (
+//                                         <div key={index}>{account.debit}</div>
+//                                     ))}
+//                                 </td>
+//                                 <td className="px-4 py-2 text-left">
+//                                     {entry.accounts.map((account, index) => (
+//                                         <div key={index}>{account.credit}</div>
+//                                     ))}
+//                                 </td>
+//                                 <td className="px-4 py-2 text-left">
+//                                     <button
+//                                         onClick={() => handleEdit(entry)}
+//                                         className="bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded"
+//                                     >
+//                                         Edit
+//                                     </button>
+//                                     <button
+//                                         onClick={() =>
+//                                             handleDeleteEntry(entry._id)
+//                                         }
+//                                         className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded ml-2"
+//                                     >
+//                                         Delete
+//                                     </button>
+//                                 </td>
+//                             </tr>
+//                         ))}
+//                     </tbody>
+//                 </table>
+//             </div>
+//             {editingEntry && (
+//                 <div className="mt-4">
+//                     <h2>Edit Journal Entry</h2>
+//                     <div className="mb-4 flex space-x-2">
+//                         <input
+//                             type="date"
+//                             value={editDate}
+//                             onChange={(e) => setEditDate(e.target.value)}
+//                             className="border rounded p-2"
+//                         />
+//                         <input
+//                             type="text"
+//                             placeholder="Description"
+//                             value={editDescription}
+//                             onChange={(e) => setEditDescription(e.target.value)}
+//                             className="border rounded p-2"
+//                         />
+//                     </div>
 
-                    <button
-                        onClick={handleUpdateEntry}
-                        className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
-                    >
-                        Update Entry
-                    </button>
-                    <button
-                        onClick={() => setEditingEntry(null)}
-                        className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
-                    >
-                        Cancel
-                    </button>
-                </div>
-            )}
-        </div>
-    );
-};
+//                     {editAccounts.map((account, index) => (
+//                         <div key={index} className="mb-2 flex space-x-2">
+//                             <input
+//                                 type="text"
+//                                 placeholder="Account Name"
+//                                 value={account.accountName}
+//                                 onChange={(e) =>
+//                                     handleEditAccountChange(
+//                                         index,
+//                                         'accountName',
+//                                         e.target.value
+//                                     )
+//                                 }
+//                                 className="border rounded p-2"
+//                             />
+//                             <input
+//                                 type="number"
+//                                 placeholder="Debit"
+//                                 value={account.debit}
+//                                 onChange={(e) =>
+//                                     handleEditAccountChange(
+//                                         index,
+//                                         'debit',
+//                                         Number(e.target.value)
+//                                     )
+//                                 }
+//                                 className="border rounded p-2"
+//                             />
+//                             <input
+//                                 type="number"
+//                                 placeholder="Credit"
+//                                 value={account.credit}
+//                                 onChange={(e) =>
+//                                     handleEditAccountChange(
+//                                         index,
+//                                         'credit',
+//                                         Number(e.target.value)
+//                                     )
+//                                 }
+//                                 className="border rounded p-2"
+//                             />
+//                             <button
+//                                 onClick={() => handleDeleteAccount(index, true)}
+//                                 className="bg-red-500 hover:bg-red-700 text-white font-bold py-1 px-2 rounded"
+//                             >
+//                                 Delete Account
+//                             </button>
+//                         </div>
+//                     ))}
 
-export default JournalEntries;
+//                     <button
+//                         onClick={handleUpdateEntry}
+//                         className="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+//                     >
+//                         Update Entry
+//                     </button>
+//                     <button
+//                         onClick={() => setEditingEntry(null)}
+//                         className="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+//                     >
+//                         Cancel
+//                     </button>
+//                 </div>
+//             )}
+//         </div>
+//     );
+// };
+
+// export default JournalEntries;

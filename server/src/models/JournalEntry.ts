@@ -1,16 +1,17 @@
 import mongoose, { Schema, Document } from "mongoose";
+import { User } from "./User";
 
-interface AccountEntry {
+export interface AccountEntry {
   accountName: string;
   debit: number;
   credit: number;
 }
 
-interface JournalEntry extends Document {
+export interface JournalEntry extends Document {
   date: Date;
-  description: string;
+  description: string;  
   accounts: AccountEntry[];
-  userId: mongoose.Schema.Types.ObjectId;
+  userId: User["_id"];
 }
 
 const JournalEntrySchema: Schema = new Schema({
@@ -24,6 +25,6 @@ const JournalEntrySchema: Schema = new Schema({
     },
   ],
   userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
-});
+}, {timestamps: true});
 
 export default mongoose.model<JournalEntry>("JournalEntry", JournalEntrySchema);
