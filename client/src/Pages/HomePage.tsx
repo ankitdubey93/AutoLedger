@@ -1,156 +1,110 @@
-import Logo from '../../public/Logo-text-big.png';
-import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
-import { login, register } from '../services/fetchServices';
+import { useState } from "react";
+
 
 const HomePage: React.FC = () => {
+  const [isLogIn, setIsLogIn] = useState<boolean>(true);
 
 
-    const [isLogin, setIsLogin] = useState<boolean>(true);
-    const [error, setError] = useState("");
-
-    const [formData, setFormData] = useState({
-        name: "",
-        email: "",
-        password: "",
-        confirmPassword: "",
-    });
-
-    const { setIsLoggedIn, setUser, isLoggedIn } = useAuth();
-    const navigate = useNavigate();
-
-    
-
-    useEffect(() => {
-        if(isLoggedIn) {
-            navigate("/dashboard", {replace: true});
-        }
-    }, [isLoggedIn, navigate]);
-
-      const toggleMode = () => {
-    setIsLogin((prev) => !prev);
-    setFormData({ name: "", email: "", password: "", confirmPassword: "" });
-  };
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const toggleMode = (e: React.FormEvent) => {
     e.preventDefault();
-    if(!isLogin && formData.password !== formData.confirmPassword) {
-        setError("Passwords do not match.");
-        return;
-    }
+    setIsLogIn((prev) => !prev);
+  };
 
-    try {
-        if(isLogin) {
-            const response = await login(formData.email, formData.password);
-            if(response.ok) {
-                setIsLoggedIn(true);
-                setUser(response.user);
-                navigate("/dashboard");
 
-            } else {
-                setError(response.message || "Login Failed");
-            }
+  return (
+    <div className="grid grid-cols-2 min-h-screen bg-gradient-to-br from-black via-gray-900 to-gray-800 text-white">
+      {/* Left side logo and description */}
+      <div className="flex flex-col justify-center items-center">
+        <img src="./AutoLedgerLogo.png" alt="AutoLedger" className="w-128 h-128" />
+        <ul className="text-white text-center text-xl space-y-6 max-w-lg p-6 bg-black/20 rounded-2xl shadow-xl backdrop-blur-sm">
+          <li>Double Entry Bookkeeping System at your ease.</li>
+          <li>Record your expenses and income according to the double-entry bookkeeping system in an interactive way with AutoLedger</li>
+        </ul>
+      </div>
 
-        }
-        else {
-            const response = await register(
-                formData.name,
-                formData.email,
-                formData.password
-            );
-            if(response && response.user) {
-                setIsLoggedIn(true);
-                setUser(response.user);
-                navigate("/dashboard");
-            } else {
-                setError(response.message || "Registration Failed.")
-            }
-        }
-    }
-    catch (error) {
-        console.error("Auth Error:", error);
-    }
-  }
 
-   
-
-    return (
-        <div className="flex flex-col items-center justify-start">
+      {/* Right side Form for registration and logging in */}
+      <div className="flex flex-col justify-center items-center">
+        <form className="w-full max-w-sm p-8 rounded-3xl border-6 border-gray-700 bg-gray-900 bg-opacity-80 shadow-lg transition-shadow duration-300 hover:shadow-2xl">
+          <h1 className="text-2xl font-bold text-center mb-6 p-2">
+            {isLogIn ? "Login to your Account" : "Create an Account"}
+          </h1>
+          {!isLogIn && (
             <div>
-                <img
-                    width={200}
-                    src={Logo}
-                    alt="AutoLedger Logo"
-                    className="max-w-xs mx-auto"
-                />
-            </div>
-            <div className="bg-white p-8 rounded-md shadow-md w-96 mt-4">
-                 <form onSubmit={handleSubmit} className="space-y-4">
-            {!isLogin && (
+
+
+              <label className="font-bold ml-1">Name</label>
               <input
-                type="text"
-                name="name"
-                placeholder="Full Name"
-                onChange={handleChange}
-                value={formData.name}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
-                required
-              />
-            )}
+                  type="text"
+                  name="name"
+                  placeholder="Full Name"
+                  className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
+                  required
+                />
+
+
+            </div>
+            
+          )}
+          <div className="flex flex-col mt-4">
+            <label className="font-bold ml-1">Email</label>
             <input
               type="email"
               name="email"
-              placeholder="Email Address"
-              onChange={handleChange}
-              value={formData.email}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
-              required
+              placeholder="Email"
+              className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
             />
+          </div>
+
+
+          <div className="mt-4">
+            <label className="font-bold ml-1">Password</label>
             <input
               type="password"
               name="password"
               placeholder="Password"
-              onChange={handleChange}
-              value={formData.password}
-              className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
-              required
+              className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
             />
-            {!isLogin && (
+          </div>
+          {!isLogIn && (
+            <div className="mt-4">
+
+
+              <label className="font-bold ml-1">Cofirm Password</label>
               <input
-                type="password"
-                name="confirmPassword"
-                placeholder="Confirm Password"
-                onChange={handleChange}
-                value={formData.confirmPassword}
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 focus:border-transparent transition"
-                required
-              />
-            )}
+                  type="password"
+                  name="confirmPassword"
+                  placeholder="Cofirm Password"
+                  className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
+                  required
+                />
+
+
+            </div>
+          )}
+
+
+          <div className="mt-4">
             <button
-  type="submit"
-  className="w-full py-3 bg-sky-600 text-white rounded-lg shadow-md hover:bg-sky-700 transition"
->
-  {isLogin ? "Login" : "Register"}
-</button>
-            <p className="text-center mt-5 text-sm text-gray-600">
-            {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-            <button
-              onClick={toggleMode}
-              className="text-sky-700 font-semibold hover:underline"
+              type="submit"
+              className="w-full bg-gradient-to-r from-gray-800 via-gray-700 to-black text-white py-2 rounded-xl font-bold text-lg shadow-lg transition hover:from-gray-400 hover:to-black"
             >
-              {isLogin ? "Register here" : "Login here"}
+              {isLogIn ? "Login" : "Register"}
+            </button>
+          </div>
+
+
+          <p className="text-center mt-5 text-sm">
+            {isLogIn ? "Don't have an account?" : "Already have an account?"}{" "}
+            <button onClick={toggleMode} className="font-semibold hover:underline">
+              {isLogIn ? "Register here" : "Login here"}
             </button>
           </p>
-          {error && <p className="text-red-600 text-sm">{error}</p>}
-          </form>
-            </div>
-        </div>
-    );
+        </form>
+      </div>
+    </div>
+  );
 };
+
 
 export default HomePage;
