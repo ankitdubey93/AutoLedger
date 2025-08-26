@@ -1,5 +1,4 @@
-import React, { createContext, useState, useEffect, useContext } from "react";
-
+import { createContext, useContext, useEffect, useState } from "react";
 import { getCurrentUser } from "../services/fetchServices";
 
 interface User {
@@ -7,7 +6,6 @@ interface User {
   name: string;
   email: string;
   emailVerified: boolean;
-  
 }
 
 interface AuthContextType {
@@ -17,16 +15,16 @@ interface AuthContextType {
   setIsLoggedIn: (loggedIn: boolean) => void;
   refreshUserDetails: () => Promise<void>;
   logout: () => void;
-
 }
 
+// ✅ Define context + hook first (stable across refreshes)
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
-  children,
-}) => {
+
+// ✅ Then define provider
+export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const fetchUser = async () => {
@@ -34,31 +32,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
       const data = await getCurrentUser();
       setUser(data.user);
       setIsLoggedIn(true);
-    } catch (err) {
+    } catch {
       setUser(null);
       setIsLoggedIn(false);
     }
   };
 
   const refreshUserDetails = async () => {
-    await fetchUser(); // Reuse same function
+    await fetchUser();
   };
 
-   const logout = () => {
-    // Optional: await logoutApi(); // Call backend logout to clear session
+  const logout = () => {
     setUser(null);
     setIsLoggedIn(false);
-    // If using localStorage or cookies for tokens, clear them here
   };
 
-
-  // Check if the user is already logged in (on initial load)
   useEffect(() => {
     const checkAuth = async () => {
       await fetchUser();
       setLoading(false);
     };
-
     checkAuth();
   }, []);
 
@@ -73,8 +66,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   );
 };
 
+
 export const useAuth = (): AuthContextType => {
   const context = useContext(AuthContext);
   if (!context) throw new Error("useAuth must be used inside AuthProvider.");
   return context;
 };
+
+

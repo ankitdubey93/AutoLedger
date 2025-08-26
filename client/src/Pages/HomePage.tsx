@@ -1,13 +1,78 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAuth } from "../context/AuthContext";
+import { login, register } from "../services/fetchServices";
+import {  useNavigate } from "react-router-dom";
 
 
 const HomePage: React.FC = () => {
   const [isLogIn, setIsLogIn] = useState<boolean>(true);
+  const [formData, setFormData] = useState({
+    name: "",
+    email: "",
+    password: "",
+    confirmPassword: "",
+  });
+
+
+  const navigate = useNavigate();
+
+  const {setIsLoggedIn, setUser, isLoggedIn} = useAuth();
+
+  useEffect(() => {
+    if(isLoggedIn) {
+      navigate("/dashboard", {replace: true});
+    }
+  }, [isLoggedIn, navigate]);
 
 
   const toggleMode = (e: React.FormEvent) => {
     e.preventDefault();
     setIsLogIn((prev) => !prev);
+  };
+
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({...formData, [e.target.name]: e.target.value})
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if(!isLogIn && formData.password !== formData.confirmPassword) {
+        alert("Passwords do not match.");
+        return;
+    } 
+
+    try {
+      if(isLogIn) {
+        const response = await login(formData.email, formData.password);
+        if(response.ok) {
+          setIsLoggedIn(true);
+          setUser(response.user);
+          navigate("/dashboard");
+
+        } else {
+          alert(response.message || "Login failed.")
+        }
+      } else {
+        const response = await register(
+          formData.name,
+          formData.email,
+          formData.password,
+        );
+
+        if(response && response.user) {
+          setIsLoggedIn(true);
+          setUser(response.user);
+          navigate("/dashboard");
+           
+        } else {
+          alert(response.message || "Registration failed.")
+        }
+      }
+ 
+    } catch (error) {
+      console.error("Auth Error:", error);
+    }
   };
 
 
@@ -25,7 +90,7 @@ const HomePage: React.FC = () => {
 
       {/* Right side Form for registration and logging in */}
       <div className="flex flex-col justify-center items-center">
-        <form className="w-full max-w-sm p-8 rounded-3xl border-6 border-gray-700 bg-gray-900 bg-opacity-80 shadow-lg transition-shadow duration-300 hover:shadow-2xl">
+        <form onSubmit={handleSubmit} className="w-full max-w-sm p-8 rounded-3xl border-6 border-gray-700 bg-gray-900 bg-opacity-80 shadow-lg transition-shadow duration-300 hover:shadow-2xl">
           <h1 className="text-2xl font-bold text-center mb-6 p-2">
             {isLogIn ? "Login to your Account" : "Create an Account"}
           </h1>
@@ -37,6 +102,8 @@ const HomePage: React.FC = () => {
               <input
                   type="text"
                   name="name"
+                  onChange={handleChange}
+                  value={formData.name}
                   placeholder="Full Name"
                   className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
                   required
@@ -51,6 +118,8 @@ const HomePage: React.FC = () => {
             <input
               type="email"
               name="email"
+              onChange={handleChange}
+              value={formData.email}
               placeholder="Email"
               className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
             />
@@ -62,6 +131,8 @@ const HomePage: React.FC = () => {
             <input
               type="password"
               name="password"
+              onChange={handleChange}
+              value={formData.password}
               placeholder="Password"
               className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
             />
@@ -74,6 +145,8 @@ const HomePage: React.FC = () => {
               <input
                   type="password"
                   name="confirmPassword"
+                  onChange={handleChange}
+                  value={formData.confirmPassword}
                   placeholder="Cofirm Password"
                   className="w-full px-4 py-2 border-2 rounded-xl bg-gray-800 placeholder-gray-400 text-white"
                   required

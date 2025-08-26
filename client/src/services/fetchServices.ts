@@ -1,11 +1,44 @@
-import { fetchWithAutoRefresh } from "../utils/fetchWithAutoRefresh";
+
 
 const API_BASE_URL = `${import.meta.env.VITE_API_BASE_URL}/api`
 
 
+const fetchWithAutoRefresh = async (
+  input: RequestInfo,
+  init: RequestInit = {}
+): Promise<Response> => {
+  let response = await fetch(input, {
+    ...init,
+    credentials: "include",
+  });
+
+  if (response.status === 401 || response.status === 403) {
+    console.warn("Access token expired. Trying to refresh....");
+
+    const refresh = await fetch(`${API_BASE_URL}/auth/refresh`, {
+      method: "POST",
+      credentials: "include",
+    });
+
+    if (refresh.ok) {
+      console.log("Refresh successful. Retrying request....");
+      response = await fetch(input, {
+        ...init,
+        credentials: "include",
+      });
+    } else {
+      console.error("Refresh failed.");
+      throw new Error("Session expired. Please log in.");
+    }
+  }
+
+  return response;
+};
+
+
 
 export const getCurrentUser = async () => {
-    const response = await fetchWithAutoRefresh(`${API_BASE_URL}/check`, {
+    const response = await fetchWithAutoRefresh(`${API_BASE_URL}/auth/check`, {
         method: "GET",
         credentials: "include",
     });
@@ -19,7 +52,7 @@ export const getCurrentUser = async () => {
 
 
 export const register = async (name: string, email: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/register`, {
+    const response = await fetch(`${API_BASE_URL}/auth/register`, {
         method: "POST",
         credentials: "include",
         headers: {
@@ -33,7 +66,7 @@ export const register = async (name: string, email: string, password: string) =>
 
 
 export const login = async (email: string, password: string) => {
-    const response = await fetch(`${API_BASE_URL}/login`, {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
         method: "POST",
         credentials: "include",
         headers: {

@@ -6,19 +6,35 @@ import journalEntryRoutes from "./routes/journalEntries";
 import authRoute from "./routes/auth";
 import  errorHandler  from "./middleware/errorHandler";
 import ApiError from "./utils/apiError";
+import cookieParser from "cookie-parser";
 
 dotenv.config();
 
 const app = express();
+
+const allowedOrigin = process.env.FRONTEND_URL;
+
+console.log("Allowed Origin:", allowedOrigin);
+
+if(!allowedOrigin) {
+  console.error(
+    "FRONTEND_URL is not defined in the environment variables. CORS might not work correctly."
+  );
+  process.exit(1);
+}
+
 const PORT = process.env.PORT;
 
+
+app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-app.use(cors());
+app.use(cors({
+  origin: allowedOrigin,
+  credentials: true,
+}));
 
 connectDB();
-
 
 app.use("/api/journal-entries", journalEntryRoutes);
 app.use("/api/auth", authRoute);
