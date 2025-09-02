@@ -1,24 +1,12 @@
-import mongoose from "mongoose";
-import dotenv from "dotenv";
+import {Pool} from "pg";
 
-dotenv.config();
+const pool = new Pool({
+  host: process.env.PG_HOST,
+  port: Number(process.env.PG_PORT),
+  user: process.env.PG_USER,
+  password: process.env.PG_PASSWORD,
+  database: process.env.PG_DATABASE,
+});
 
-const MONGO_URI = process.env.MONGO_URI;
 
-
-
-const connectDB = async () => {
-
-  if(!MONGO_URI) {
-    throw new Error("MONGO_URI is not defined in the environment variables");
-  }
-  try {
-    const conn = await mongoose.connect(MONGO_URI);
-    console.log(`MongoDB Connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.error("MongoDB connection error:", error);
-    process.exit(1); // Exit process on failure
-  }
-};
-
-export default connectDB;
+export default pool;

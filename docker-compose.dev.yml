@@ -1,13 +1,19 @@
 version: "3.8"
 
 services:
-  mongodb:
-    image: mongo
-    container_name: mongo_dev
+  postgres:
+    image: postgres:16
+    container_name: postgres_dev
+    restart: always
+    environment:
+      POSTGRES_USER: autodb_user
+      POSTGRES_PASSWORD: autodb_pass
+      POSTGRES_DB: autodb
     ports:
-      - "27017:27017"
+      - "5432:5432"
     volumes:
-      - mongo-data:/data/db
+      - postgres-data:/var/lib/postgresql/data
+      - ./server/src/migrations:/migrations
 
   redis:
     image: redis
@@ -16,4 +22,4 @@ services:
       - "6379:6379"
 
 volumes:
-  mongo-data:
+  postgres-data:

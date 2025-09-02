@@ -1,11 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
-import {User} from "../models/User";
+import pool from "../db/connect";
 import jwt from "jsonwebtoken";
 import ApiError from "../utils/apiError";
 import crypto from "crypto";
 import { generateAccessToken, generateRefreshToken } from "../utils/jwt";
-import { RefreshToken } from "../models/refreshToken";
+
 
 const jwtSecret = process.env.JWT_SECRET as string;
 
@@ -40,8 +40,13 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       throw new ApiError(400, "All fields are required");
     }
 
-    const existingUser = await User.findOne({ email });
-    if (existingUser) {
+    const existingUser = await pool.query(
+      "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
+      [email]
+    );
+
+    
+    if ((existingUser.rowCount ?? 0) > 0 ) {
       throw new ApiError(400, "User already exists");
     }
 
@@ -49,19 +54,24 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     const token = crypto.randomBytes(32).toString("hex");
 
-    const newUser = await new User({ name, email, 
-       password: hashedPassword, 
-       emailVerificationToken: token,
-        emailVerificationTokenExpires: new Date(Date.now() + TOKEN_EXPIRY_5_HOURS),}).save();
+   const result = await pool.query(
+  `INSERT INTO users
+    (name, email, password, email_verification_token, email_verification_token_expires)
+   VALUES ($1, $2, $3, $4, $5)
+   RETURNING id, name, email`,
+  [name, email, hashedPassword, token, new Date(Date.now() + TOKEN_EXPIRY_5_HOURS)]
+);
 
+const newUser = result.rows[0];
       const accessToken = generateAccessToken(newUser._id.toString());
         const refreshToken = generateRefreshToken(newUser._id.toString());
         
         
-        await new RefreshToken({
-            userId: newUser._id, token: refreshToken
-        }).save();
-
+       await pool.query(
+      `INSERT INTO refresh_tokens (user_id, token, created_at)
+       VALUES ($1, $2, NOW())`,
+      [newUser.id, refreshToken]
+    );
         res.cookie("accessToken", accessToken, accessTokenCookieOptions);
         res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
 
@@ -74,112 +84,112 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   }
 };
 
-export const login = async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { email, password } = req.body;
+// export const login = async (req: Request, res: Response, next: NextFunction) => {
+//   try {
+//     const { email, password } = req.body;
 
-    if (!email || !password) {
-      throw new ApiError(400, "Username and password are required");
-    }
+//     if (!email || !password) {
+//       throw new ApiError(400, "Username and password are required");
+//     }
 
-    const user = await User.findOne({ email });
-    if (!user) {
-      throw new ApiError(400, "Invalid credentials");
-    }
+//     const user = await User.findOne({ email });
+//     if (!user) {
+//       throw new ApiError(400, "Invalid credentials");
+//     }
 
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      throw new ApiError(400, "Invalid credentials");
-    }
+//     const isMatch = await bcrypt.compare(password, user.password);
+//     if (!isMatch) {
+//       throw new ApiError(400, "Invalid credentials");
+//     }
 
-    const accessToken = generateAccessToken(user._id.toString());
-        const refreshToken = generateRefreshToken(user._id.toString());
+//     const accessToken = generateAccessToken(user._id.toString());
+//         const refreshToken = generateRefreshToken(user._id.toString());
 
-        await new RefreshToken({userId: user._id, token: refreshToken}).save();
+//         await new RefreshToken({userId: user._id, token: refreshToken}).save();
 
-        res.cookie("accessToken", accessToken, accessTokenCookieOptions);
-        res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
+//         res.cookie("accessToken", accessToken, accessTokenCookieOptions);
+//         res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
 
-    res.status(200).json({
-      user: {
-        _id: user._id, name: user.name, email: user.email
-      },
-    })
-  } catch (err) {
-    next(err);
-  }
-};
+//     res.status(200).json({
+//       user: {
+//         _id: user._id, name: user.name, email: user.email
+//       },
+//     })
+//   } catch (err) {
+//     next(err);
+//   }
+// };
 
-export const checkUser = async (req: Request, res: Response, next: NextFunction) => {
-  const accessToken = req.cookies?.accessToken;
-  console.log(accessToken);
-  if(!accessToken) {
-  res.status(401).json({message: "Not Authenticated."})
-  return;
-  }
+// export const checkUser = async (req: Request, res: Response, next: NextFunction) => {
+//   const accessToken = req.cookies?.accessToken;
+//   console.log(accessToken);
+//   if(!accessToken) {
+//   res.status(401).json({message: "Not Authenticated."})
+//   return;
+//   }
 
-  try {
-    const payload = jwt.verify(
-      accessToken, 
-      process.env.ACCESS_TOKEN_SECRET as string,
-    ) as {userId: string};
+//   try {
+//     const payload = jwt.verify(
+//       accessToken, 
+//       process.env.ACCESS_TOKEN_SECRET as string,
+//     ) as {userId: string};
 
-    const user = await User.findById(payload.userId).select(
-      "name email _id emailVerified"
-    );
+//     const user = await User.findById(payload.userId).select(
+//       "name email _id emailVerified"
+//     );
 
-    if(!user) {
-      res.status(404).json({message: "User not found."})
-      return;
-    }
+//     if(!user) {
+//       res.status(404).json({message: "User not found."})
+//       return;
+//     }
 
-    res.status(200).json({
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        emailVerified: user.emailVerified,
-      }
-    });
-
-
-  } catch (error) {
-    next(error);
-  }
-};
+//     res.status(200).json({
+//       user: {
+//         _id: user._id,
+//         name: user.name,
+//         email: user.email,
+//         emailVerified: user.emailVerified,
+//       }
+//     });
 
 
-export const refreshUser = async (req: Request, res: Response, next: NextFunction) => {
-  const refreshToken = req.cookies?.refreshToken;
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 
-  if(!refreshToken) {
-    res.status(400).json({
-      message: "Refresh token is required."
-    })
-    return;
-  }
 
-  try {
-    const storedToken = await refreshToken.findOne({token: refreshToken});
+// export const refreshUser = async (req: Request, res: Response, next: NextFunction) => {
+//   const refreshToken = req.cookies?.refreshToken;
 
-    if(!storedToken) {
-      res.status(403).json({
-        message: "Invalid refresh token."
-      })
-      return;
-    }
+//   if(!refreshToken) {
+//     res.status(400).json({
+//       message: "Refresh token is required."
+//     })
+//     return;
+//   }
 
-    const payload = jwt.verify(
-      refreshToken, 
-      process.env.REFRESH_TOKEN_SECRET as string,
-    ) as {userId: string};
+//   try {
+//     const storedToken = await refreshToken.findOne({token: refreshToken});
 
-    const newAccessToken = generateAccessToken(payload.userId);
-    res.cookie("accessToken", newAccessToken, accessTokenCookieOptions);
-    res.status(200).json({message: "Access token refreshed."})
-  } catch (error) {
-    next(error);
-  }
-};
+//     if(!storedToken) {
+//       res.status(403).json({
+//         message: "Invalid refresh token."
+//       })
+//       return;
+//     }
+
+//     const payload = jwt.verify(
+//       refreshToken, 
+//       process.env.REFRESH_TOKEN_SECRET as string,
+//     ) as {userId: string};
+
+//     const newAccessToken = generateAccessToken(payload.userId);
+//     res.cookie("accessToken", newAccessToken, accessTokenCookieOptions);
+//     res.status(200).json({message: "Access token refreshed."})
+//   } catch (error) {
+//     next(error);
+//   }
+// };
 
 

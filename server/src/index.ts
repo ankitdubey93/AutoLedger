@@ -34,7 +34,6 @@ app.use(cors({
   credentials: true,
 }));
 
-connectDB();
 
 app.use("/api/journal-entries", journalEntryRoutes);
 app.use("/api/auth", authRoute);
