@@ -28,10 +28,6 @@ const refreshTokenCookieOptions = {
 
 const TOKEN_EXPIRY_5_HOURS = 1000 * 60 * 60 * 5;
 
-export const verifyToken = (req: Request, res: Response) => {
-  res.status(200).json({ message: "Token is valid", user: (req as any).user });
-};
-
 export const register = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { name, email,  password } = req.body;
@@ -46,7 +42,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     );
 
     
-    if ((existingUser.rowCount ?? 0) > 0 ) {
+    if (existingUser.rowCount && existingUser.rowCount > 0 ) {
       throw new ApiError(400, "User already exists");
     }
 
@@ -62,9 +58,12 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
   [name, email, hashedPassword, token, new Date(Date.now() + TOKEN_EXPIRY_5_HOURS)]
 );
 
-const newUser = result.rows[0];
-      const accessToken = generateAccessToken(newUser._id.toString());
-        const refreshToken = generateRefreshToken(newUser._id.toString());
+  const newUser = result.rows[0];
+
+
+
+    const accessToken = generateAccessToken(newUser.id.toString());
+    const refreshToken = generateRefreshToken(newUser.id.toString());
         
         
        await pool.query(
@@ -84,112 +83,120 @@ const newUser = result.rows[0];
   }
 };
 
-// export const login = async (req: Request, res: Response, next: NextFunction) => {
-//   try {
-//     const { email, password } = req.body;
+ export const login = async (req: Request, res: Response, next: NextFunction) => {
+ try {
+     const { email, password } = req.body;
 
-//     if (!email || !password) {
-//       throw new ApiError(400, "Username and password are required");
-//     }
+     if (!email || !password) {
+       throw new ApiError(400, "Username and password are required");
+     }
 
-//     const user = await User.findOne({ email });
-//     if (!user) {
-//       throw new ApiError(400, "Invalid credentials");
-//     }
+     const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+     const user = result.rows[0];
+    
+   if (!user) {
+       throw new ApiError(400, "Invalid credentials");
+     }
 
-//     const isMatch = await bcrypt.compare(password, user.password);
-//     if (!isMatch) {
-//       throw new ApiError(400, "Invalid credentials");
-//     }
+     const isMatch = await bcrypt.compare(password, user.password);
+     if (!isMatch) {
+       throw new ApiError(400, "Invalid credentials");
+     }
 
-//     const accessToken = generateAccessToken(user._id.toString());
-//         const refreshToken = generateRefreshToken(user._id.toString());
+    const accessToken = generateAccessToken(user.id.toString());
+    const refreshToken = generateRefreshToken(user.id.toString());
 
-//         await new RefreshToken({userId: user._id, token: refreshToken}).save();
+    await pool.query(`INSERT INTO refresh_tokens (user_id, token, created_at) VALUES ($1,$2, NOW())`, [user.id, refreshToken]);
 
-//         res.cookie("accessToken", accessToken, accessTokenCookieOptions);
-//         res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
+        res.cookie("accessToken", accessToken, accessTokenCookieOptions);
+        res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
 
-//     res.status(200).json({
-//       user: {
-//         _id: user._id, name: user.name, email: user.email
-//       },
-//     })
-//   } catch (err) {
-//     next(err);
-//   }
-// };
+    res.status(200).json({
+      user: {
+        id: user.id, name: user.name, email: user.email
+      },
+    })
+  } catch (err) {
+    next(err);
+  }
+};
 
-// export const checkUser = async (req: Request, res: Response, next: NextFunction) => {
-//   const accessToken = req.cookies?.accessToken;
-//   console.log(accessToken);
-//   if(!accessToken) {
-//   res.status(401).json({message: "Not Authenticated."})
-//   return;
-//   }
+export const checkUser = async (req: Request, res: Response, next: NextFunction) => {
+  const accessToken = req.cookies?.accessToken;
+ 
+  if(!accessToken) {
+  res.status(401).json({message: "Not Authenticated."})
+  return;
+  }
 
-//   try {
-//     const payload = jwt.verify(
-//       accessToken, 
-//       process.env.ACCESS_TOKEN_SECRET as string,
-//     ) as {userId: string};
+  try {
+    const payload = jwt.verify(
+      accessToken, 
+      process.env.ACCESS_TOKEN_SECRET as string,
+    ) as {userId: string};
 
-//     const user = await User.findById(payload.userId).select(
-//       "name email _id emailVerified"
-//     );
+    const result = await pool.query(
+      "SELECT id, name, email, email_verified FROM users WHERE id=$1", [payload.userId]
+    );
+    const user = result.rows[0];
 
-//     if(!user) {
-//       res.status(404).json({message: "User not found."})
-//       return;
-//     }
+    if(!user) {
+      res.status(404).json({message: "User not found."})
+      return;
+    }
 
-//     res.status(200).json({
-//       user: {
-//         _id: user._id,
-//         name: user.name,
-//         email: user.email,
-//         emailVerified: user.emailVerified,
-//       }
-//     });
-
-
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    res.status(200).json({
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        emailVerified: user.emailVerified,
+      }
+    });
 
 
-// export const refreshUser = async (req: Request, res: Response, next: NextFunction) => {
-//   const refreshToken = req.cookies?.refreshToken;
+  } catch (error) {
+    next(error);
+  }
+};
 
-//   if(!refreshToken) {
-//     res.status(400).json({
-//       message: "Refresh token is required."
-//     })
-//     return;
-//   }
 
-//   try {
-//     const storedToken = await refreshToken.findOne({token: refreshToken});
+export const refreshUser = async (req: Request, res: Response, next: NextFunction) => {
+  const refreshToken = req.cookies?.refreshToken;
 
-//     if(!storedToken) {
-//       res.status(403).json({
-//         message: "Invalid refresh token."
-//       })
-//       return;
-//     }
+  if(!refreshToken) {
+    res.status(400).json({
+      message: "Refresh token is required."
+    })
+    return;
+  }
 
-//     const payload = jwt.verify(
-//       refreshToken, 
-//       process.env.REFRESH_TOKEN_SECRET as string,
-//     ) as {userId: string};
+  try {
+    const result = await pool.query(
+      "SELECT * FROM refresh_tokens WHERE token=$1",
+      [refreshToken]
+    );
 
-//     const newAccessToken = generateAccessToken(payload.userId);
-//     res.cookie("accessToken", newAccessToken, accessTokenCookieOptions);
-//     res.status(200).json({message: "Access token refreshed."})
-//   } catch (error) {
-//     next(error);
-//   }
-// };
+    const storedToken = result.rows[0];
+
+    if(!storedToken) {
+      res.status(403).json({
+        message: "Invalid refresh token."
+      })
+      return;
+    }
+
+    const payload = jwt.verify(
+      refreshToken, 
+      process.env.REFRESH_TOKEN_SECRET as string,
+    ) as {userId: string};
+
+    const newAccessToken = generateAccessToken(payload.userId);
+    res.cookie("accessToken", newAccessToken, accessTokenCookieOptions);
+    res.status(200).json({message: "Access token refreshed."})
+  } catch (error) {
+    next(error);
+  }
+};
 
 

@@ -16,7 +16,7 @@ const fetchWithAutoRefresh = async (
     console.warn("Access token expired. Trying to refresh....");
 
     const refresh = await fetch(`${API_BASE_URL}/auth/refresh`, {
-      method: "POST",
+      method: "GET",
       credentials: "include",
     });
 
