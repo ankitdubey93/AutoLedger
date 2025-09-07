@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { getCurrentUser } from "../services/fetchServices";
+import { getCurrentUser, logoutUser } from "../services/fetchServices";
 
 interface User {
   _id: string;
@@ -44,7 +44,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const logout = async () => {
     try {
-      await logout();
+      await logoutUser();
     } catch (error) {
       console.error("Logout failed", error);  
     } finally {

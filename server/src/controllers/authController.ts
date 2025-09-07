@@ -11,20 +11,20 @@ const jwtSecret = process.env.JWT_SECRET as string;
 
 
 const accessTokenCookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-    maxAge: 15 * 60 * 1000,
-}
+  httpOnly: true,
+  secure: false, // always false in dev
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: 15 * 60 * 1000,
+};
 
 const refreshTokenCookieOptions = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "strict" as const,
-    path: "/",
-    maxAge: 7 * 24 * 60 * 60 * 1000,
-}
+  httpOnly: true,
+  secure: false,
+  sameSite: "strict" as const,
+  path: "/",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
 
 const TOKEN_EXPIRY_5_HOURS = 1000 * 60 * 60 * 5;
 
@@ -76,7 +76,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
 
     res.status(201).json({ message: "User created successfully." , 
-      user: {_id: newUser._id, name: newUser.name, email: newUser.email}
+      user: {id: newUser.id, name: newUser.name, email: newUser.email}
     });
   } catch (err) {
     next(err);
@@ -150,7 +150,7 @@ export const checkUser = async (req: Request, res: Response, next: NextFunction)
         id: user.id,
         name: user.name,
         email: user.email,
-        emailVerified: user.emailVerified,
+        emailVerified: user.email_verified,
       }
     });
 
@@ -200,3 +200,25 @@ export const refreshUser = async (req: Request, res: Response, next: NextFunctio
 };
 
 
+export const logoutUser = async (req: Request,res: Response, next: NextFunction) => {
+   try {
+    const refreshToken = req.cookies?.refreshToken;
+
+    if(refreshToken) {
+      await pool.query(
+        "DELETE FROM refresh_tokens WHERE token = $1", [refreshToken]
+      );
+    }
+
+    res.clearCookie("accessToken", accessTokenCookieOptions);
+    res.clearCookie("refreshToken", refreshTokenCookieOptions);
+
+    res.status(200).json({message: "Logged out successfully."
+      
+    })
+
+   } catch (error) {
+      next(error);
+   }
+
+  }

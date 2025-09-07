@@ -85,11 +85,14 @@ export const login = async (email: string, password: string) => {
 };
 
 
-export const logout = async () => {
+export const logoutUser = async () => {
   const response = await fetch(`${API_BASE_URL}/auth/logout`,{
     method: "POST",
     credentials: "include",
   });
+ if (response.status === 204) {
+    return { message: "Logged out successfully" };
+  }
 
   return response.json();
 }
