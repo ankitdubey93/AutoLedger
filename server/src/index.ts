@@ -36,7 +36,7 @@ app.use(cors({
 
 
 app.use("/api/journal-entries", journalEntryRoutes);
-app.use("/api/auth", authRoute);
+app.use("/api/auth",authRoute);
 
 // Example 404 route handler
 app.all("*", (req, res, next) => {

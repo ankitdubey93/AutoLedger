@@ -42,9 +42,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     await fetchUser();
   };
 
-  const logout = () => {
-    setUser(null);
-    setIsLoggedIn(false);
+  const logout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error("Logout failed", error);  
+    } finally {
+      setUser(null);
+      setIsLoggedIn(false);
+    }
   };
 
   useEffect(() => {
