@@ -26,6 +26,13 @@ const refreshTokenCookieOptions = {
   maxAge: 7 * 24 * 60 * 60 * 1000,
 };
 
+const clearCookieOptions = {
+  httpOnly: true,
+  secure: false,
+  sameSite: 'lax' as const,
+  path: '/',
+};
+
 const TOKEN_EXPIRY_5_HOURS = 1000 * 60 * 60 * 5;
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
@@ -71,8 +78,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
        VALUES ($1, $2, NOW())`,
       [newUser.id, refreshToken]
     );
-        res.cookie("accessToken", accessToken, accessTokenCookieOptions);
-        res.cookie("refreshToken", refreshToken, refreshTokenCookieOptions);
+        res.cookie("accessToken", accessToken, clearCookieOptions);
+        res.cookie("refreshToken", refreshToken, {...clearCookieOptions, sameSite:'strict'});
 
 
     res.status(201).json({ message: "User created successfully." , 
