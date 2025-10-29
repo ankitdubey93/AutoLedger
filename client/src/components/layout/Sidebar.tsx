@@ -9,9 +9,10 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
 
     const navItems = [
         {name: "Dashboard", path: "/dashboard"},
-        {name: "Journal Entries", path: "/journal"},
-        {name: "Dashboard", path: "/reports"},
-        {name: "Dashboard", path: "/settings"},
+        {name: "Transactions", path: "/transactions"},
+        {name: "Journal Entries", path: "/journal-entries"},
+        {name: "Reports", path: "/reports"},
+        {name: "Settings", path: "/settings"},
     ];
 
   return (

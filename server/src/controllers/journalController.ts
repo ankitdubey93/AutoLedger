@@ -1,113 +1,62 @@
 import {Request, Response, NextFunction} from "express";
-import JournalEntry from "../models/JournalEntry";
+
 import { JwtPayload } from "jsonwebtoken";
 import ApiError from "../utils/apiError";
+import { parseTransactionText } from "../utils/parseTransaction";
+import pool from "../db/connect";
 
 interface CustomRequest extends Request {
   user?: JwtPayload;
 }
 
-export const getAllJournalEntries =  async (
-    req: CustomRequest,
-    res: Response,
-    next: NextFunction
-  ) => {
-    try {
-      const userId = req.user?.user.id;
-      if(!userId) {
-        throw new ApiError(401,"Unauthorized.");
-      }
 
-
-      const journalEntries = await JournalEntry.find({ userId });
-      res.status(200).json(journalEntries);
-    } catch (err) {
-      next(err);
-    }
-  };
-
-
-  export const createJournalEntry = async (
+export const generateJournalEntry = async (
   req: CustomRequest,
   res: Response,
   next: NextFunction
 ): Promise<void> => {
   try {
-    const { date, description, accounts } = req.body;
+    const {text} = req.body;
 
-    if (!Array.isArray(accounts) || accounts.length < 2) {
-      throw new ApiError(400, "A journal entry must have at least two accounts.");
+    if(!text || typeof text !== "string") {
+      throw new ApiError(400, "Transaction text is required.")
+    } 
+
+
+    const userId = req.user?.userId;
+
+    if(!userId){
+      throw new ApiError(401, "Unauthorized.");
+
     }
 
-    const userId = req.user?.user.id;
-    if (!userId) {
-      throw new ApiError(401, "Unauthorized");
+
+    const {description, accounts} = parseTransactionText(text);
+
+    if(!accounts || accounts.length < 2) {
+      throw new ApiError(400, "Unable to determine debit and credit accounts from text.");
     }
 
-    const newEntry = new JournalEntry({
-      date,
-      description,
-      accounts,
-      userId,
+
+     const query = `
+      INSERT INTO journal_entries (user_id, date, description, accounts)
+      VALUES ($1, NOW(), $2, $3)
+      RETURNING *;
+    `;
+
+    const values = [userId, description, JSON.stringify(accounts)];
+
+    
+    const result = await pool.query(query, values);
+
+
+    res.status(201).json({
+      message: "Journal entry generated succesfully.",
+      entry: result.rows[0],
     });
 
-    await newEntry.save();
-    res.status(201).json({ message: "Journal entry added successfully." });
-  } catch (err) {
-    next(err);
+
+  } catch (error){
+    next(error);
   }
-};
-
-export const updateJournalEntry = async (
-  req: CustomRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const { date, description, accounts } = req.body;
-    const journalEntry = await JournalEntry.findById(req.params.id);
-
-    if (!journalEntry) {
-      throw new ApiError(404, "Journal entry not found");
-    }
-
-    if (journalEntry.userId.toString() !== req.user?.user.id) {
-      throw new ApiError(403, "Unauthorized");
-    }
-
-    await JournalEntry.findByIdAndUpdate(
-      req.params.id,
-      { date, description, accounts },
-      { new: true }
-    );
-
-    res.status(202).json({ message: "Journal entry updated successfully." });
-  } catch (err) {
-    next(err);
-  }
-};
-
-export const deleteJournalEntry = async (
-  req: CustomRequest,
-  res: Response,
-  next: NextFunction
-): Promise<void> => {
-  try {
-    const journalEntry = await JournalEntry.findById(req.params.id);
-
-    if (!journalEntry) {
-      throw new ApiError(404, "Journal entry not found");
-    }
-
-    if (journalEntry.userId.toString() !== req.user?.user.id) {
-      throw new ApiError(403, "Unauthorized");
-    }
-
-    await JournalEntry.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Journal entry deleted successfully." });
-  } catch (err) {
-    next(err);
-  }
-};
-
-
+}

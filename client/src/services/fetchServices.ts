@@ -84,6 +84,29 @@ export const login = async (email: string, password: string) => {
   };
 };
 
+export const generateJournalFromText = async (text: string) => {
+  const response = await fetchWithAutoRefresh(`${API_BASE_URL}/journal-entries/generate`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({text}),
+  });
+
+
+  if(!response.ok) {
+    throw new Error("Failed to generate journal entry.");
+  }
+
+
+  return response.json();
+};
+
+export const postJournalEntry = async (entry: string) => {
+  return entry;
+}
+
 
 export const logoutUser = async () => {
   const response = await fetch(`${API_BASE_URL}/auth/logout`,{
@@ -96,3 +119,4 @@ export const logoutUser = async () => {
 
   return response.json();
 }
+
