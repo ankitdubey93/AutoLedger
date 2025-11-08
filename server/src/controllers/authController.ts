@@ -15,7 +15,6 @@ const accessTokenCookieOptions = {
   secure: false, // always false in dev
   sameSite: "lax" as const,
   path: "/",
-  maxAge: 15 * 60 * 1000,
 };
 
 const refreshTokenCookieOptions = {
@@ -48,7 +47,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
       [email]
     );
 
-    
+
     if (existingUser.rowCount && existingUser.rowCount > 0 ) {
       throw new ApiError(400, "User already exists");
     }
@@ -71,8 +70,8 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
     const accessToken = generateAccessToken(newUser.id.toString());
     const refreshToken = generateRefreshToken(newUser.id.toString());
-        
-        
+
+
        await pool.query(
       `INSERT INTO refresh_tokens (user_id, token, created_at)
        VALUES ($1, $2, NOW())`,
@@ -82,7 +81,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
         res.cookie("refreshToken", refreshToken, {...clearCookieOptions, sameSite:'strict'});
 
 
-    res.status(201).json({ message: "User created successfully." , 
+    res.status(201).json({ message: "User created successfully." ,
       user: {id: newUser.id, name: newUser.name, email: newUser.email}
     });
   } catch (err) {
@@ -100,7 +99,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
      const result = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
      const user = result.rows[0];
-    
+
    if (!user) {
        throw new ApiError(400, "Invalid credentials");
      }
@@ -130,7 +129,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
 export const checkUser = async (req: Request, res: Response, next: NextFunction) => {
   const accessToken = req.cookies?.accessToken;
- 
+
   if(!accessToken) {
   res.status(401).json({message: "Not Authenticated."})
   return;
@@ -138,7 +137,7 @@ export const checkUser = async (req: Request, res: Response, next: NextFunction)
 
   try {
     const payload = jwt.verify(
-      accessToken, 
+      accessToken,
       process.env.ACCESS_TOKEN_SECRET as string,
     ) as {userId: string};
 
@@ -194,7 +193,7 @@ export const refreshUser = async (req: Request, res: Response, next: NextFunctio
     }
 
     const payload = jwt.verify(
-      refreshToken, 
+      refreshToken,
       process.env.REFRESH_TOKEN_SECRET as string,
     ) as {userId: string};
 
@@ -221,7 +220,7 @@ export const logoutUser = async (req: Request,res: Response, next: NextFunction)
     res.clearCookie("refreshToken", refreshTokenCookieOptions);
 
     res.status(200).json({message: "Logged out successfully."
-      
+
     })
 
    } catch (error) {

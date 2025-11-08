@@ -99,3 +99,61 @@ export const logoutUser = async () => {
   return response.json();
 }
 
+// ----------------------------------------------------
+// JOURNAL ENTRY SERVICES
+// ----------------------------------------------------
+
+/**
+ * Defines the structure for the data sent to the backend to create a new entry.
+ */
+export interface JournalEntryPayload {
+    date: string;
+    description: string;
+    accounts: Array<{
+        account: string;
+        debit: number;
+        credit: number;
+    }>;
+}
+
+
+/**
+ * Fetches all existing journal entries for the current user.
+ * @returns A promise that resolves to an array of journal entry objects.
+ */
+export const getJournalEntries = async () => {
+    const response = await fetchWithAutoRefresh(`${API_BASE_URL}/journal-entries`, {
+        method: "GET",
+        headers: {
+            "Content-Type": "application/json",
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error("Failed to fetch journal entries.");
+    }
+
+    return response.json();
+};
+
+/**
+ * Posts a new journal entry to the server.
+ * @param entry The journal entry object to create.
+ * @returns A promise that resolves to the newly created journal entry object from the server.
+ */
+export const addJournalEntry = async (entry: JournalEntryPayload) => {
+    const response = await fetchWithAutoRefresh(`${API_BASE_URL}/journal-entries`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+        },
+        body: JSON.stringify(entry),
+    });
+
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || "Failed to add journal entry.");
+    }
+
+    return response.json();
+};
