@@ -1,6 +1,5 @@
 import express from "express";
 import auth from "../middleware/auth";
-import { generateJournalEntry, } from "../controllers/journalController";
 
 
 
@@ -29,7 +28,6 @@ const router = express.Router();
 //   deleteJournalEntry
 // );
 
-router.post("/generate", auth, generateJournalEntry);
 
 
 export default router;

@@ -1,14 +1,10 @@
 import express, { Request, Response, NextFunction } from "express";
-import dotenv from "dotenv";
-import cors from "cors";
-import connectDB from "./db/connect";
 import journalEntryRoutes from "./routes/journalEntries";
 import authRoute from "./routes/auth";
 import  errorHandler  from "./middleware/errorHandler";
 import ApiError from "./utils/apiError";
 import cookieParser from "cookie-parser";
-
-dotenv.config();
+import cors from "cors";
 
 const app = express();
 
