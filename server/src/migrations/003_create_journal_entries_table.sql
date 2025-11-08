@@ -7,7 +7,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 CREATE TABLE IF NOT EXISTS journal_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    date TIMESTAMPTZ NOT NULL,
     description TEXT NOT NULL,
     accounts JSONB NOT NULL, -- Array of accounts with debit/credit
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
