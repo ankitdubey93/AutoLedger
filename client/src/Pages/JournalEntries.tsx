@@ -4,8 +4,7 @@ import React from 'react';
 // Import fetch services and necessary types
 import { getJournalEntries, addJournalEntry, JournalEntryPayload } from '../services/fetchServices';
 
-// --- TYPE DEFINITIONS ---
-// Define the structure of an entry fetched from the backend
+// --- TYPE DEFINITIONS (Unchanged) ---
 interface FetchedJournalEntry {
     id: string;
     date: string;
@@ -18,7 +17,6 @@ interface FetchedJournalEntry {
     created_at: string;
 }
 
-// Define the structure for a single line in a journal entry (Debit or Credit)
 interface JournalEntryLine {
   id: number;
   account: string;
@@ -26,7 +24,6 @@ interface JournalEntryLine {
   credit: number;
 }
 
-// Define the structure for the full journal entry being created
 interface NewJournalEntry {
   date: string;
   description: string;
@@ -35,7 +32,7 @@ interface NewJournalEntry {
 // -----------------------
 
 
-// Helper function to format date for display
+// Helper function to format date for display (Unchanged)
 const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -46,13 +43,13 @@ const formatDate = (dateString: string) => {
 
 
 /**
- * 📝 Modal component for adding a new journal entry.
- * Accepts a callback function for successful post.
+ * 📝 Modal component for adding a new journal entry. (Unchanged)
+ * ... (AddJournalEntryModal component code remains exactly the same as previous response)
  */
 const AddJournalEntryModal: React.FC<{ 
     isOpen: boolean; 
     onClose: () => void; 
-    onSuccess: () => void; // Added success handler
+    onSuccess: () => void; 
 }> = ({ isOpen, onClose, onSuccess }) => {
 
     const today = new Date().toISOString().split('T')[0];
@@ -68,7 +65,6 @@ const AddJournalEntryModal: React.FC<{
 
     const totalDebit = useMemo(() => newEntry.lines.reduce((sum, line) => sum + line.debit, 0), [newEntry.lines]);
     const totalCredit = useMemo(() => newEntry.lines.reduce((sum, line) => sum + line.credit, 0), [newEntry.lines]);
-    // Check if totalDebit > 0 is essential to prevent posting empty entries
     const isBalanced = totalDebit === totalCredit && totalDebit > 0; 
     const isValid = isBalanced && newEntry.description.trim() !== '' && newEntry.lines.every(l => l.account.trim() !== '');
 
@@ -106,20 +102,17 @@ const AddJournalEntryModal: React.FC<{
 
         setIsLoading(true);
         
-        // Prepare data for the API (maps the frontend structure to the backend payload structure)
         const payload: JournalEntryPayload = {
             date: newEntry.date,
             description: newEntry.description,
-            // Only send account, debit, and credit fields to the backend
             accounts: newEntry.lines.map(({ account, debit, credit }) => ({ account, debit, credit })),
         };
         
         try {
             await addJournalEntry(payload);
             alert("Journal Entry posted successfully!");
-            onSuccess(); // <<< Call success to trigger data refresh in main component
+            onSuccess(); 
 
-            // Reset modal state
             setNewEntry({
                 date: today,
                 description: '',
@@ -132,7 +125,6 @@ const AddJournalEntryModal: React.FC<{
 
         } catch (error) {
             console.error("Post Entry Error:", error);
-            // Assuming error is an object with a message, or a standard Error object
             alert(`Error posting entry: ${error instanceof Error ? error.message : 'Unknown error occurred.'}`);
         } finally {
             setIsLoading(false);
@@ -225,7 +217,7 @@ const AddJournalEntryModal: React.FC<{
                                     title="Remove Account Line (Min 2 required)"
                                 >
                                     <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 102 0v6a1 1 0 10-2 0V8z" clipRule="evenodd" />
+                                        <path fillRule="evenodd" d="M9 2a1 1 10-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 102 0v6a1 1 0 10-2 0V8z" clipRule="evenodd" />
                                     </svg>
                                 </button>
                             </div>
@@ -287,7 +279,7 @@ const JournalEntries: React.FC = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
-    // Function to fetch data from API
+    // Function to fetch data from API (Unchanged)
     const fetchEntries = useCallback(async () => {
         setIsLoading(true);
         setError(null);
@@ -302,26 +294,25 @@ const JournalEntries: React.FC = () => {
         }
     }, []);
 
-    // Fetch data on initial component mount
+    // Fetch data on initial component mount (Unchanged)
     useEffect(() => {
         fetchEntries();
     }, [fetchEntries]);
 
-    // Function to trigger refresh after successful entry post
+    // Function to trigger refresh after successful entry post (Unchanged)
     const handleEntrySuccess = () => {
         fetchEntries();
     };
 
-    // Filtered entries for display (optional: for search)
+    // Filtered entries for display (Unchanged)
     const filteredEntries = entries.filter(entry => 
         entry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
         entry.accounts.some(line => line.account.toLowerCase().includes(searchTerm.toLowerCase()))
     );
 
- 
+    
     return (
         <Layout>
-            {/* The Modal Component - now includes onSuccess prop */}
             <AddJournalEntryModal 
                 isOpen={isModalOpen} 
                 onClose={() => setIsModalOpen(false)} 
@@ -329,8 +320,7 @@ const JournalEntries: React.FC = () => {
             />
 
             <div className="h-full p-6 w-full">
-                <div className='flex flex-col sm:flex-row sm:justify-between w-full max-w-6xl mb-4 gap-2'>
-                    {/* Reordered buttons/search for standard placement */}
+                <div className='flex flex-col sm:flex-row  w-full max-w-6xl mb-4 gap-2'>
                     <input
                         type="text"
                         placeholder="Search entries..."
@@ -346,68 +336,87 @@ const JournalEntries: React.FC = () => {
                     </button>
                 </div>
                 
-                <div className="w-full overflow-x-auto rounded shadow">
-                    <table className="table-auto w-full text-left">
-                        <thead>
-                            <tr className="border-b bg-gray-50 text-sm uppercase text-gray-600">
-                                <th className="px-4 py-3 w-1/12">S.No.</th>
-                                <th className="px-4 py-3 w-1/12">Date</th>
-                                <th className="px-4 py-3 w-1/4">Description</th>
-                                <th className="px-4 py-3 w-3/12">Accounts</th>
-                                <th className="px-4 py-3 w-1/12 text-right">Debit</th>
-                                <th className="px-4 py-3 w-1/12 text-right">Credit</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {isLoading ? (
-                                <tr>
-                                    <td colSpan={6} className="text-center py-8 text-gray-500">Loading journal entries...</td>
-                                </tr>
-                            ) : error ? (
-                                <tr>
-                                    <td colSpan={6} className="text-center py-8 text-red-500 font-medium">Error: {error}</td>
-                                </tr>
-                            ) : filteredEntries.length === 0 ? (
-                                <tr>
-                                    <td colSpan={6} className="text-center py-8 text-gray-500">No journal entries found. Start by adding one!</td>
-                                </tr>
-                            ) : (
-                                filteredEntries.map((entry, entryIndex) => (
-                                    // Use a fragment to render multiple rows per entry
-                                    <React.Fragment key={entry.id}>
-                                        {/* Render the first row for the entry details */}
-                                        <tr className="border-b hover:bg-gray-50">
-                                            <td className="px-4 py-2 font-medium">{entryIndex + 1}.</td>
-                                            <td className="px-4 py-2 font-medium">{formatDate(entry.date)}</td>
-                                            <td className="px-4 py-2">{entry.description}</td>
-                                            <td className="px-4 py-2 font-semibold">{entry.accounts[0]?.account}</td>
-                                            <td className="px-4 py-2 text-right text-green-700">
-                                                {entry.accounts[0]?.debit > 0 ? `$${entry.accounts[0].debit.toFixed(2)}` : ''}
-                                            </td>
-                                            <td className="px-4 py-2 text-right text-red-700">
-                                                {entry.accounts[0]?.credit > 0 ? `$${entry.accounts[0].credit.toFixed(2)}` : ''}
-                                            </td>
-                                        </tr>
-                                        {/* Render subsequent rows for multi-line entries (indented) */}
-                                        {entry.accounts.slice(1).map((line, lineIndex) => (
-                                            <tr key={`${entry.id}-${lineIndex}`} className="border-b hover:bg-gray-50">
-                                                <td className="px-4 py-2"></td>
-                                                <td className="px-4 py-2"></td>
-                                                <td className="px-4 py-2"></td>
-                                                <td className="px-4 py-2 pl-8 italic">{line.account}</td>
-                                                <td className="px-4 py-2 text-right text-green-700">
+                <div className="w-full rounded shadow">
+                    {/* Header Row using CSS Grid */}
+                    <div className="grid grid-cols-[80px_80px_1fr_250px_100px_100px] border-b bg-gray-50 text-sm uppercase text-gray-600 font-semibold sticky top-0">
+                        <div className="px-4 py-3">S.No.</div>
+                        <div className="px-4 py-3">Date</div>
+                        <div className="px-4 py-3">Description</div>
+                        <div className="px-4 py-3">Accounts</div>
+                        <div className="px-4 py-3 text-right">Debit</div>
+                        <div className="px-4 py-3 text-right">Credit</div>
+                    </div>
+
+                    {/* Content */}
+                    <div className="max-h-[70vh] overflow-y-auto">
+                        {isLoading ? (
+                            <div className="text-center py-8 text-gray-500">Loading journal entries...</div>
+                        ) : error ? (
+                            <div className="text-center py-8 text-red-500 font-medium">Error: {error}</div>
+                        ) : filteredEntries.length === 0 ? (
+                            <div className="text-center py-8 text-gray-500">No journal entries found. Start by adding one!</div>
+                        ) : (
+                            filteredEntries.map((entry, entryIndex) => (
+                                /**
+                                 * 🎯 THIS IS THE NEW WRAPPER DIV YOU WANTED! 
+                                 * It allows you to select, style, or handle events for the entire entry.
+                                 */
+                                <div 
+                                    key={entry.id} 
+                                    className="border-b-4 border-gray-200 hover:bg-gray-900 transition cursor-pointer"
+                                    // Example of how you can add an onClick handler to the whole entry box
+                                    // onClick={() => console.log('Clicked entry:', entry.id)}
+                                >
+                                    {entry.accounts.map((line, lineIndex) => {
+                                        const isFirstLine = lineIndex === 0;
+                                        
+                                        // Determine if this is a Credit line (has a credit amount but no debit amount)
+                                        const isCreditLine = line.credit > 0 && line.debit === 0;
+
+                                        // Each line is now a row in the Grid
+                                        return (
+                                            <div 
+                                                key={`${entry.id}-${lineIndex}`} 
+                                                className={`grid grid-cols-[80px_80px_1fr_250px_100px_100px] text-sm ${!isFirstLine ? 'border-t border-gray-100' : ''}`}
+                                            >
+                                                
+                                                {/* S.No. - Shown only on the first line (Empty div otherwise to hold space) */}
+                                                <div className="px-4 py-2 align-top text-gray-500">
+                                                    {isFirstLine ? `${entryIndex + 1}.` : ''}
+                                                </div>
+                                                
+                                                {/* Date - Shown only on the first line */}
+                                                <div className="px-4 py-2 align-top font-medium text-gray-700">
+                                                    {isFirstLine ? formatDate(entry.date) : ''}
+                                                </div>
+
+                                                {/* Description - Shown only on the first line, wraps text */}
+                                                <div className="px-4 py-2 align-top whitespace-pre-wrap text-gray-700">
+                                                    {isFirstLine ? entry.description : ''}
+                                                </div>
+
+                                                {/* Account Name (Indented for Credit lines) */}
+                                                <div className={`px-4 py-2 font-semibold ${isCreditLine ? 'pl-8' : ''}`}>
+                                                    {isCreditLine && <span className="mr-2 italic text-gray-500 text-xs">To </span>}
+                                                    {line.account}
+                                                </div>
+                                                
+                                                {/* Debit Amount */}
+                                                <div className="px-4 py-2 text-right font-medium">
                                                     {line.debit > 0 ? `$${line.debit.toFixed(2)}` : ''}
-                                                </td>
-                                                <td className="px-4 py-2 text-right text-red-700">
+                                                </div>
+                                                
+                                                {/* Credit Amount */}
+                                                <div className="px-4 py-2 text-right font-medium">
                                                     {line.credit > 0 ? `$${line.credit.toFixed(2)}` : ''}
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </React.Fragment>
-                                ))
-                            )}
-                        </tbody>
-                    </table>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            ))
+                        )}
+                    </div>
                 </div>
             </div>
         </Layout>
