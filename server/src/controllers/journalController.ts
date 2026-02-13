@@ -44,7 +44,7 @@ export const getAllJournalEntries = async (req: CustomRequest, res: Response, ne
 };
 
 
-// --- createJournalEntry (FIX APPLIED HERE) ---
+
 export const createJournalEntry = async (req: CustomRequest, res: Response, next: NextFunction) => {
 
   if (!req.user || !('userId' in req.user)) {
