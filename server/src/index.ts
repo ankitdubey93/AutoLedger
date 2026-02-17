@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from "express";
 import journalEntryRoutes from "./routes/journalEntries";
 import authRoute from "./routes/auth";
+import accountRoutes from './routes/accountRoutes';
+import reportRoutes from './routes/reportRoutes';
 import  errorHandler  from "./middleware/errorHandler";
 import ApiError from "./utils/apiError";
 import cookieParser from "cookie-parser";
@@ -31,8 +33,10 @@ app.use(cors({
 }));
 
 
-app.use("/api/journal-entries", journalEntryRoutes);
+app.use("/api/journals", journalEntryRoutes);
 app.use("/api/auth",authRoute);
+app.use("/api/accounts",accountRoutes);
+app.use("/api/reports", reportRoutes);
 
 // Example 404 route handler
 app.all("*", (req, res, next) => {

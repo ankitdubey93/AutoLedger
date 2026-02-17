@@ -9,7 +9,6 @@ import { generateAccessToken, generateRefreshToken } from "../utils/jwt";
 
 const jwtSecret = process.env.JWT_SECRET as string;
 
-
 const accessTokenCookieOptions = {
   httpOnly: true,
   secure: false, // always false in dev
@@ -35,59 +34,82 @@ const clearCookieOptions = {
 const TOKEN_EXPIRY_5_HOURS = 1000 * 60 * 60 * 5;
 
 export const register = async (req: Request, res: Response, next: NextFunction) => {
-  try {
+  
     const { name, email,  password } = req.body;
 
     if (!name || !email || !password) {
       throw new ApiError(400, "All fields are required");
     }
 
-    const existingUser = await pool.query(
-      "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
-      [email]
-    );
+    const client = await pool.connect();
 
+    try {
+      await client.query('BEGIN');
+      
+      const existingUser = await pool.query(
+        "SELECT * FROM users WHERE LOWER(email) = LOWER($1)",
+        [email]
+      );
 
-    if (existingUser.rowCount && existingUser.rowCount > 0 ) {
-      throw new ApiError(400, "User already exists");
+      if (existingUser.rowCount && existingUser.rowCount > 0 ) {
+        throw new ApiError(400, "User already exists");
+      }
+  
+      const hashedPassword = await bcrypt.hash(password, 10);
+  
+      const verificationToken = crypto.randomBytes(32).toString("hex");
+     
+      const result = await pool.query(
+     `INSERT INTO users
+       (name, email, password, email_verification_token, email_verification_token_expires)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id, name, email`,
+     [name, email, hashedPassword, verificationToken, new Date(Date.now() + TOKEN_EXPIRY_5_HOURS)]
+      );
+        const newUser = result.rows[0];
+
+        const userId = newUser.id;
+
+        // 3. 🚀 THE MAGIC STEP: Seed Default Accounts for this User
+        // We insert multiple rows in one go.
+        await client.query(
+            `INSERT INTO accounts (user_id, name, code, type, description) VALUES 
+            ($1, 'Cash on Hand', '1000', 'Asset', 'Physical cash and petty cash'),
+            ($1, 'Bank Account', '1001', 'Asset', 'Primary business checking account'),
+            ($1, 'Accounts Receivable', '1200', 'Asset', 'Money owed by customers'),
+            ($1, 'Accounts Payable', '2000', 'Liability', 'Unpaid bills to vendors'),
+            ($1, 'Sales Revenue', '4000', 'Revenue', 'Income from goods or services'),
+            ($1, 'Cost of Goods Sold', '5000', 'Expense', 'Direct costs of production'),
+            ($1, 'Office Expenses', '6000', 'Expense', 'General office supplies and utilities')`,
+            [userId]
+        );
+      
+        const accessToken = generateAccessToken(newUser.id.toString());
+        const refreshToken = generateRefreshToken(newUser.id.toString());
+
+        
+        await pool.query(
+       `INSERT INTO refresh_tokens (user_id, token, created_at)
+        VALUES ($1, $2, NOW())`,
+       [newUser.id, refreshToken]
+     );
+
+      await client.query('COMMIT');
+     
+     
+             res.cookie("accessToken", accessToken, clearCookieOptions);
+             res.cookie("refreshToken", refreshToken, {...clearCookieOptions, sameSite:'strict'});
+             
+                 res.status(201).json({ message: "User created successfully." ,
+                   user: {id: newUser.id, name: newUser.name, email: newUser.email}
+                 });
+    }catch (err) {
+        await client.query('ROLLBACK'); // Undo user creation if accounts fail
+        next(err);
+    } finally {
+        client.release();
     }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const token = crypto.randomBytes(32).toString("hex");
-
-   const result = await pool.query(
-  `INSERT INTO users
-    (name, email, password, email_verification_token, email_verification_token_expires)
-   VALUES ($1, $2, $3, $4, $5)
-   RETURNING id, name, email`,
-  [name, email, hashedPassword, token, new Date(Date.now() + TOKEN_EXPIRY_5_HOURS)]
-);
-
-  const newUser = result.rows[0];
-
-
-
-    const accessToken = generateAccessToken(newUser.id.toString());
-    const refreshToken = generateRefreshToken(newUser.id.toString());
-
-
-       await pool.query(
-      `INSERT INTO refresh_tokens (user_id, token, created_at)
-       VALUES ($1, $2, NOW())`,
-      [newUser.id, refreshToken]
-    );
-        res.cookie("accessToken", accessToken, clearCookieOptions);
-        res.cookie("refreshToken", refreshToken, {...clearCookieOptions, sameSite:'strict'});
-
-
-    res.status(201).json({ message: "User created successfully." ,
-      user: {id: newUser.id, name: newUser.name, email: newUser.email}
-    });
-  } catch (err) {
-    next(err);
   }
-};
 
  export const login = async (req: Request, res: Response, next: NextFunction) => {
  try {
