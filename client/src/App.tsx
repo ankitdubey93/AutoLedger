@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import JournalEntries from './Pages/JournalEntries';
 import Reports from './Pages/Reports';
 import Settings from './Pages/Settings';
+import AccountsPage from './Pages/AccountsPage';
 
 const App = () => {
     return (
@@ -17,6 +18,7 @@ const App = () => {
                 <Route path='/journal-entries' element={<ProtectedRoute><JournalEntries/></ProtectedRoute>}/>
                 <Route path='/reports' element={<ProtectedRoute><Reports/></ProtectedRoute>}/>
                 <Route path='/settings' element={<ProtectedRoute><Settings/></ProtectedRoute>}/>
+                <Route path="/accounts" element={<ProtectedRoute><AccountsPage /></ProtectedRoute>} />
             </Routes>
             </AuthProvider>
         </Router>

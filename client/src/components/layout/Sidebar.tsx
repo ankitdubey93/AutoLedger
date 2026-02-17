@@ -12,6 +12,7 @@ const Sidebar: React.FC<SidebarProps> = ({ isOpen }) => {
         {name: "Journal Entries", path: "/journal-entries"},
         {name: "Reports", path: "/reports"},
         {name: "Settings", path: "/settings"},
+        {name: "Chart of Accounts", path: "/accounts"},
     ];
 
   return (

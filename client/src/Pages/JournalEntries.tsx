@@ -1,131 +1,87 @@
 import { useState, useMemo, useEffect, useCallback } from 'react';
 import Layout from '../components/layout/Layout';
 import React from 'react';
-// Import fetch services and necessary types
-import { getJournalEntries, addJournalEntry, JournalEntryPayload } from '../services/fetchServices';
+import { 
+    getJournalEntries, 
+    addJournalEntry, 
+    getAccounts, 
+    JournalEntryPayload 
+} from '../services/fetchServices';
+import { Plus, Search, Trash2, CheckCircle2, AlertCircle } from 'lucide-react';
 
-// --- TYPE DEFINITIONS (Unchanged) ---
-interface FetchedJournalEntry {
+interface Account {
     id: string;
-    date: string;
-    description: string;
-    accounts: Array<{
-        account: string;
-        debit: number;
-        credit: number;
-    }>;
-    created_at: string;
+    name: string;
+    code: string;
 }
 
-interface JournalEntryLine {
-  id: number;
-  account: string;
-  debit: number;
-  credit: number;
-}
-
-interface NewJournalEntry {
-  date: string;
-  description: string;
-  lines: JournalEntryLine[];
-}
-// -----------------------
-
-
-// Helper function to format date for display (Unchanged)
-const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-    });
-};
-
-
-/**
- * 📝 Modal component for adding a new journal entry. (Unchanged)
- * ... (AddJournalEntryModal component code remains exactly the same as previous response)
- */
+// --- DYNAMIC MODAL COMPONENT ---
 const AddJournalEntryModal: React.FC<{ 
     isOpen: boolean; 
     onClose: () => void; 
     onSuccess: () => void; 
 }> = ({ isOpen, onClose, onSuccess }) => {
-
+    const [availableAccounts, setAvailableAccounts] = useState<Account[]>([]);
+    const [isLoading, setIsLoading] = useState(false);
     const today = new Date().toISOString().split('T')[0];
-    const [newEntry, setNewEntry] = useState<NewJournalEntry>({
+    
+    const [newEntry, setNewEntry] = useState({
         date: today,
         description: '',
         lines: [
-            { id: Date.now(), account: '', debit: 0, credit: 0 },
-            { id: Date.now() + 1, account: '', debit: 0, credit: 0 },
+            { id: 1, accountId: '', debit: 0, credit: 0 },
+            { id: 2, accountId: '', debit: 0, credit: 0 },
         ],
     });
-    const [isLoading, setIsLoading] = useState(false);
 
-    const totalDebit = useMemo(() => newEntry.lines.reduce((sum, line) => sum + line.debit, 0), [newEntry.lines]);
-    const totalCredit = useMemo(() => newEntry.lines.reduce((sum, line) => sum + line.credit, 0), [newEntry.lines]);
-    const isBalanced = totalDebit === totalCredit && totalDebit > 0; 
-    const isValid = isBalanced && newEntry.description.trim() !== '' && newEntry.lines.every(l => l.account.trim() !== '');
+    useEffect(() => {
+        if (isOpen) {
+            getAccounts().then(data => setAvailableAccounts(data.accounts));
+        }
+    }, [isOpen]);
 
-    const handleLineChange = (id: number, field: keyof Omit<JournalEntryLine, 'id'>, value: string | number) => {
-        setNewEntry(prev => ({
-            ...prev,
-            lines: prev.lines.map(line =>
-                line.id === id
-                ? { ...line, [field]: typeof value === 'string' && (field === 'debit' || field === 'credit') ? parseFloat(value) || 0 : value }
-                : line
-            ),
-        }));
-    };
+    const totalDebit = useMemo(() => newEntry.lines.reduce((sum, l) => sum + l.debit, 0), [newEntry.lines]);
+    const totalCredit = useMemo(() => newEntry.lines.reduce((sum, l) => sum + l.credit, 0), [newEntry.lines]);
+    const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01 && totalDebit > 0;
 
     const handleAddLine = () => {
         setNewEntry(prev => ({
             ...prev,
-            lines: [...prev.lines, { id: Date.now() + prev.lines.length, account: '', debit: 0, credit: 0 }],
+            lines: [...prev.lines, { id: Date.now(), accountId: '', debit: 0, credit: 0 }]
         }));
     };
 
     const handleRemoveLine = (id: number) => {
-        if (newEntry.lines.length <= 2) return;
-        setNewEntry(prev => ({
-            ...prev,
-            lines: prev.lines.filter(line => line.id !== id),
-        }));
+        if (newEntry.lines.length > 2) {
+            setNewEntry(prev => ({
+                ...prev,
+                lines: prev.lines.filter(l => l.id !== id)
+            }));
+        }
     };
 
     const handlePostEntry = async () => {
-        if (!isValid) {
-            alert("Please ensure the entry is balanced (Debit = Credit > 0), has a description, and all account fields are filled.");
-            return;
-        }
-
         setIsLoading(true);
-        
-        const payload: JournalEntryPayload = {
-            date: newEntry.date,
-            description: newEntry.description,
-            accounts: newEntry.lines.map(({ account, debit, credit }) => ({ account, debit, credit })),
-        };
-        
         try {
+            const payload: JournalEntryPayload = {
+                date: newEntry.date,
+                description: newEntry.description,
+                lines: newEntry.lines.map(({ accountId, debit, credit }) => ({ 
+                    accountId, 
+                    debit: Number(debit), 
+                    credit: Number(credit) 
+                }))
+            };
             await addJournalEntry(payload);
-            alert("Journal Entry posted successfully!");
-            onSuccess(); 
-
+            onSuccess();
+            onClose();
             setNewEntry({
                 date: today,
                 description: '',
-                lines: [
-                    { id: Date.now(), account: '', debit: 0, credit: 0 },
-                    { id: Date.now() + 1, account: '', debit: 0, credit: 0 },
-                ],
+                lines: [{ id: 1, accountId: '', debit: 0, credit: 0 }, { id: 2, accountId: '', debit: 0, credit: 0 }]
             });
-            onClose();
-
-        } catch (error) {
-            console.error("Post Entry Error:", error);
-            alert(`Error posting entry: ${error instanceof Error ? error.message : 'Unknown error occurred.'}`);
+        } catch (error: any) {
+            alert(error.message);
         } finally {
             setIsLoading(false);
         }
@@ -134,131 +90,114 @@ const AddJournalEntryModal: React.FC<{
     if (!isOpen) return null;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 p-4 backdrop-blur-sm"> 
-            <div className="bg-white rounded-lg shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto text-black">
-                <div className="p-6">
-                    <h3 className="text-xl font-semibold mb-4 border-b pb-2">Add New Journal Entry</h3>
-                    
-                    {/* Top Form Fields (Date and Description) */}
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div>
-                            <label htmlFor="date" className="block text-sm font-medium text-gray-700">Date</label>
-                            <input
-                                id="date"
-                                type="date"
-                                value={newEntry.date}
-                                onChange={(e) => setNewEntry(prev => ({ ...prev, date: e.target.value }))}
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                required
-                            />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 text-white">
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden">
+                <div className="p-6 border-b border-gray-800 bg-gray-800/30 flex justify-between items-center">
+                    <div>
+                        <h3 className="text-xl font-bold">New Journal Entry</h3>
+                        <p className="text-xs text-gray-400 mt-1">Ensure your debits and credits are equal.</p>
+                    </div>
+                    <div className={`flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold transition-all ${isBalanced ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+                        {isBalanced ? <CheckCircle2 size={14}/> : <AlertCircle size={14}/>}
+                        {isBalanced ? 'BALANCED' : 'UNBALANCED'}
+                    </div>
+                </div>
+                
+                <div className="p-8 space-y-6 max-h-[60vh] overflow-y-auto">
+                    <div className="grid grid-cols-3 gap-6">
+                        <div className="col-span-1">
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Transaction Date</label>
+                            <input type="date" value={newEntry.date} onChange={e => setNewEntry({...newEntry, date: e.target.value})} className="w-full bg-gray-800 border-gray-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
                         </div>
                         <div className="col-span-2">
-                            <label htmlFor="description" className="block text-sm font-medium text-gray-700">Description</label>
-                            <textarea
-                                id="description"
-                                rows={2}
-                                value={newEntry.description}
-                                onChange={(e) => setNewEntry(prev => ({ ...prev, description: e.target.value }))}
-                                className="mt-1 block w-full border border-gray-300 rounded-md shadow-sm p-2"
-                                placeholder="Brief description of the transaction"
-                                required
-                            />
+                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Description / Memo</label>
+                            <input type="text" value={newEntry.description} onChange={e => setNewEntry({...newEntry, description: e.target.value})} placeholder="Describe this transaction..." className="w-full bg-gray-800 border-gray-700 rounded-xl p-3 text-white focus:border-indigo-500 outline-none" />
                         </div>
                     </div>
 
-                    {/* Accounts Section */}
-                    <h4 className="text-lg font-medium my-4">Accounts Detail</h4>
-                    <div className="space-y-3">
-                        {newEntry.lines.map((line) => (
-                            <div key={line.id} className="flex gap-2 items-center">
-                                {/* Account Field */}
-                                <input
-                                    type="text"
-                                    placeholder="Account Name (e.g., Cash, Sales, Rent Exp)"
-                                    value={line.account}
-                                    onChange={(e) => handleLineChange(line.id, 'account', e.target.value)}
-                                    className="flex-grow border border-gray-300 rounded px-3 py-2 text-sm"
-                                    required
-                                />
-                                
-                                {/* Debit Field */}
-                                <input
-                                    type="number"
-                                    placeholder="Debit"
-                                    value={line.debit > 0 ? line.debit : ''} 
-                                    onChange={(e) => {
-                                        const val = parseFloat(e.target.value) || 0;
-                                        handleLineChange(line.id, 'debit', val);
-                                        if (val > 0) handleLineChange(line.id, 'credit', 0); 
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-12 gap-4 px-2 text-[10px] font-bold text-gray-500 uppercase tracking-widest">
+                            <div className="col-span-6">Account</div>
+                            <div className="col-span-2 text-right">Debit ($)</div>
+                            <div className="col-span-2 text-right">Credit ($)</div>
+                            <div className="col-span-2"></div>
+                        </div>
+
+                        {newEntry.lines.map((line, idx) => (
+                            <div key={line.id} className="grid grid-cols-12 gap-4 items-center animate-in fade-in slide-in-from-top-2 duration-300">
+                                <select 
+                                    className="col-span-6 bg-gray-800 border-gray-700 rounded-xl p-3 text-sm text-white focus:border-indigo-500 outline-none"
+                                    value={line.accountId}
+                                    onChange={e => {
+                                        const newLines = [...newEntry.lines];
+                                        newLines[idx].accountId = e.target.value;
+                                        setNewEntry({...newEntry, lines: newLines});
                                     }}
-                                    className="w-24 border border-gray-300 rounded px-3 py-2 text-sm text-right"
-                                    min="0"
-                                />
-                                
-                                {/* Credit Field */}
-                                <input
-                                    type="number"
-                                    placeholder="Credit"
-                                    value={line.credit > 0 ? line.credit : ''} 
-                                    onChange={(e) => {
-                                        const val = parseFloat(e.target.value) || 0;
-                                        handleLineChange(line.id, 'credit', val);
-                                        if (val > 0) handleLineChange(line.id, 'debit', 0);
-                                    }}
-                                    className="w-24 border border-gray-300 rounded px-3 py-2 text-sm text-right"
-                                    min="0"
-                                />
-                                
-                                {/* Remove Button */}
-                                <button
-                                    onClick={() => handleRemoveLine(line.id)}
-                                    disabled={newEntry.lines.length <= 2}
-                                    className={`text-red-500 hover:text-red-700 p-1 rounded transition ${newEntry.lines.length <= 2 ? 'opacity-50 cursor-not-allowed' : ''}`}
-                                    title="Remove Account Line (Min 2 required)"
                                 >
-                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fillRule="evenodd" d="M9 2a1 1 10-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 102 0v6a1 1 0 10-2 0V8z" clipRule="evenodd" />
-                                    </svg>
-                                </button>
+                                    <option value="">Select an account...</option>
+                                    {availableAccounts.map(acc => (
+                                        <option key={acc.id} value={acc.id}>{acc.code} — {acc.name}</option>
+                                    ))}
+                                </select>
+                                <input 
+                                    type="number" 
+                                    className="col-span-2 bg-gray-800 border-gray-700 rounded-xl p-3 text-sm text-right text-white focus:border-green-500 outline-none" 
+                                    placeholder="0.00"
+                                    onChange={e => {
+                                        const newLines = [...newEntry.lines];
+                                        newLines[idx].debit = parseFloat(e.target.value) || 0;
+                                        setNewEntry({...newEntry, lines: newLines});
+                                    }}
+                                />
+                                <input 
+                                    type="number" 
+                                    className="col-span-2 bg-gray-800 border-gray-700 rounded-xl p-3 text-sm text-right text-white focus:border-red-500 outline-none" 
+                                    placeholder="0.00"
+                                    onChange={e => {
+                                        const newLines = [...newEntry.lines];
+                                        newLines[idx].credit = parseFloat(e.target.value) || 0;
+                                        setNewEntry({...newEntry, lines: newLines});
+                                    }}
+                                />
+                                <div className="col-span-2 flex justify-end">
+                                    {newEntry.lines.length > 2 && (
+                                        <button onClick={() => handleRemoveLine(line.id)} className="text-gray-500 hover:text-red-400 transition-colors">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    )}
+                                </div>
                             </div>
                         ))}
-                        
-                        {/* Add Line Button */}
-                        <button
-                            onClick={handleAddLine}
-                            className="mt-2 text-blue-600 hover:text-blue-800 text-sm font-medium"
-                        >
-                            + Add Another Line
-                        </button>
                     </div>
 
-                    {/* Totals and Post Button */}
-                    <div className="mt-6 pt-4 border-t">
-                        <div className="flex justify-end gap-2 text-lg font-bold mb-4">
-                            <span className="w-24 text-right">Total Debit: **${totalDebit.toFixed(2)}**</span>
-                            <span className="w-24 text-right">Total Credit: **${totalCredit.toFixed(2)}**</span>
+                    <button 
+                        onClick={handleAddLine} 
+                        className="flex items-center gap-2 text-indigo-400 hover:text-indigo-300 text-xs font-bold uppercase tracking-widest transition-colors"
+                    >
+                        <Plus size={16} /> Add Line Item
+                    </button>
+                </div>
+
+                <div className="p-8 bg-gray-800/30 border-t border-gray-800 flex justify-between items-center">
+                    <div className="flex gap-12">
+                        <div>
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Total Debit</p>
+                            <p className="text-2xl font-mono font-bold text-white">${totalDebit.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                         </div>
-                        <div className="flex justify-between items-center">
-                            <p className={`font-semibold ${isBalanced ? 'text-green-600' : 'text-red-600'}`}>
-                                Status: **{isBalanced ? 'Balanced ✅' : 'Unbalanced ❌'}**
-                            </p>
-                            <div>
-                                <button
-                                    onClick={onClose}
-                                    disabled={isLoading}
-                                    className="bg-gray-200 text-gray-800 px-4 py-2 rounded-md mr-2 hover:bg-gray-300 transition disabled:opacity-50"
-                                >
-                                    Cancel
-                                </button>
-                                <button
-                                    onClick={handlePostEntry}
-                                    disabled={!isValid || isLoading}
-                                    className={`px-4 py-2 rounded-md transition ${isValid && !isLoading ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-400 text-gray-700 cursor-not-allowed'}`}
-                                >
-                                    {isLoading ? 'Posting...' : 'Post Entry'}
-                                </button>
-                            </div>
+                        <div>
+                            <p className="text-[10px] text-gray-500 font-bold uppercase tracking-widest mb-1">Total Credit</p>
+                            <p className="text-2xl font-mono font-bold text-white">${totalCredit.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
                         </div>
+                    </div>
+                    <div className="flex gap-4">
+                        <button onClick={onClose} className="px-6 py-3 text-gray-400 font-bold hover:text-white transition-colors">Cancel</button>
+                        <button 
+                            disabled={!isBalanced || isLoading} 
+                            onClick={handlePostEntry}
+                            className={`px-8 py-3 rounded-xl font-bold text-white transition-all shadow-xl ${isBalanced && !isLoading ? 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-500/20' : 'bg-gray-700 text-gray-500 cursor-not-allowed'}`}
+                        >
+                            {isLoading ? 'Posting...' : 'Post Transaction'}
+                        </button>
                     </div>
                 </div>
             </div>
@@ -266,161 +205,106 @@ const AddJournalEntryModal: React.FC<{
     );
 };
 
-
-// -------------------------------------------------------------
-// 📋 Main JournalEntries Component
-// -------------------------------------------------------------
+// --- MAIN PAGE ---
 const JournalEntries: React.FC = () => {
-    const [searchTerm, setSearchTerm] = useState<string>("");
-    const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-    
-    // State to hold fetched data
-    const [entries, setEntries] = useState<FetchedJournalEntry[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [entries, setEntries] = useState<any[]>([]);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [searchTerm, setSearchTerm] = useState("");
 
-    // Function to fetch data from API (Unchanged)
-    const fetchEntries = useCallback(async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-            const data = await getJournalEntries();
-            setEntries(data.entries || []);
-        } catch (err) {
-            console.error("Failed to fetch entries:", err);
-            setError(err instanceof Error ? err.message : "Failed to load entries.");
-        } finally {
-            setIsLoading(false);
-        }
+    const loadData = useCallback(async () => {
+        const data = await getJournalEntries();
+        setEntries(data.entries || []);
     }, []);
 
-    // Fetch data on initial component mount (Unchanged)
-    useEffect(() => {
-        fetchEntries();
-    }, [fetchEntries]);
+    useEffect(() => { loadData(); }, [loadData]);
 
-    // Function to trigger refresh after successful entry post (Unchanged)
-    const handleEntrySuccess = () => {
-        fetchEntries();
-    };
-
-    // Filtered entries for display (Unchanged)
-    const filteredEntries = entries.filter(entry => 
-        entry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.accounts.some(line => line.account.toLowerCase().includes(searchTerm.toLowerCase()))
+    const filteredEntries = entries.filter(e => 
+        e.description.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    
     return (
         <Layout>
-            <AddJournalEntryModal 
-                isOpen={isModalOpen} 
-                onClose={() => setIsModalOpen(false)} 
-                onSuccess={handleEntrySuccess}
-            />
-
-            <div className="h-full p-6 w-full">
-                <div className='flex flex-col sm:flex-row  w-full max-w-6xl mb-4 gap-2'>
-                    <input
-                        type="text"
-                        placeholder="Search entries..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="border border-gray-300 rounded px-4 py-2 w-full sm:w-64"
-                    />
-                    <button
-                        onClick={() => setIsModalOpen(true)}
-                        className="bg-indigo-600 text-white px-4 py-2 rounded shadow-md hover:bg-indigo-700 transition w-full sm:w-auto"
-                    >
-                        + Add Entry
-                    </button>
+            <AddJournalEntryModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onSuccess={loadData} />
+            <div className="p-8 max-w-6xl mx-auto">
+                <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-10">
+                    <div>
+                        <h1 className="text-4xl font-black text-white tracking-tight">Journal Entries</h1>
+                        <p className="text-gray-500 mt-1">Reviewing all transaction logs across your accounts.</p>
+                    </div>
+                    <div className="flex gap-3 w-full md:w-auto">
+                        <div className="relative flex-1 md:w-64">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" size={18} />
+                            <input 
+                                type="text" 
+                                placeholder="Search memos..." 
+                                value={searchTerm}
+                                onChange={e => setSearchTerm(e.target.value)}
+                                className="w-full bg-gray-900 border border-gray-800 rounded-xl py-2.5 pl-10 pr-4 text-white text-sm focus:border-indigo-500 outline-none"
+                            />
+                        </div>
+                        <button 
+                            onClick={() => setIsModalOpen(true)} 
+                            className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl font-bold shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+                        >
+                            <Plus size={20} /> <span className="hidden sm:inline">New Entry</span>
+                        </button>
+                    </div>
                 </div>
-                
-                <div className="w-full rounded shadow">
-                    {/* Header Row using CSS Grid */}
-                    <div className="grid grid-cols-[80px_80px_1fr_250px_100px_100px] border-b bg-gray-50 text-sm uppercase text-gray-600 font-semibold sticky top-0">
-                        <div className="px-4 py-3">S.No.</div>
-                        <div className="px-4 py-3">Date</div>
-                        <div className="px-4 py-3">Description</div>
-                        <div className="px-4 py-3">Accounts</div>
-                        <div className="px-4 py-3 text-right">Debit</div>
-                        <div className="px-4 py-3 text-right">Credit</div>
-                    </div>
 
-                    {/* Content */}
-                    <div className="max-h-[70vh] overflow-y-auto">
-                        {isLoading ? (
-                            <div className="text-center py-8 text-gray-500">Loading journal entries...</div>
-                        ) : error ? (
-                            <div className="text-center py-8 text-red-500 font-medium">Error: {error}</div>
-                        ) : filteredEntries.length === 0 ? (
-                            <div className="text-center py-8 text-gray-500">No journal entries found. Start by adding one!</div>
-                        ) : (
-                            filteredEntries.map((entry, entryIndex) => (
-                                /**
-                                 * 🎯 THIS IS THE NEW WRAPPER DIV YOU WANTED! 
-                                 * It allows you to select, style, or handle events for the entire entry.
-                                 */
-                                <div 
-                                    key={entry.id} 
-                                    className="border-b-4 border-gray-200 hover:bg-gray-900 transition cursor-pointer"
-                                    // Example of how you can add an onClick handler to the whole entry box
-                                    // onClick={() => console.log('Clicked entry:', entry.id)}
-                                >
-                                    {entry.accounts.map((line, lineIndex) => {
-                                        const isFirstLine = lineIndex === 0;
-                                        
-                                        // Determine if this is a Credit line (has a credit amount but no debit amount)
-                                        const isCreditLine = line.credit > 0 && line.debit === 0;
-
-                                        // Each line is now a row in the Grid
-                                        return (
-                                            <div 
-                                                key={`${entry.id}-${lineIndex}`} 
-                                                className={`grid grid-cols-[80px_80px_1fr_250px_100px_100px] text-sm ${!isFirstLine ? 'border-t border-gray-100' : ''}`}
-                                            >
-                                                
-                                                {/* S.No. - Shown only on the first line (Empty div otherwise to hold space) */}
-                                                <div className="px-4 py-2 align-top text-gray-500">
-                                                    {isFirstLine ? `${entryIndex + 1}.` : ''}
-                                                </div>
-                                                
-                                                {/* Date - Shown only on the first line */}
-                                                <div className="px-4 py-2 align-top font-medium text-gray-700">
-                                                    {isFirstLine ? formatDate(entry.date) : ''}
-                                                </div>
-
-                                                {/* Description - Shown only on the first line, wraps text */}
-                                                <div className="px-4 py-2 align-top whitespace-pre-wrap text-gray-700">
-                                                    {isFirstLine ? entry.description : ''}
-                                                </div>
-
-                                                {/* Account Name (Indented for Credit lines) */}
-                                                <div className={`px-4 py-2 font-semibold ${isCreditLine ? 'pl-8' : ''}`}>
-                                                    {isCreditLine && <span className="mr-2 italic text-gray-500 text-xs">To </span>}
-                                                    {line.account}
-                                                </div>
-                                                
-                                                {/* Debit Amount */}
-                                                <div className="px-4 py-2 text-right font-medium">
-                                                    {line.debit > 0 ? `$${line.debit.toFixed(2)}` : ''}
-                                                </div>
-                                                
-                                                {/* Credit Amount */}
-                                                <div className="px-4 py-2 text-right font-medium">
-                                                    {line.credit > 0 ? `$${line.credit.toFixed(2)}` : ''}
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
+                <div className="space-y-6">
+                    {filteredEntries.length === 0 ? (
+                        <div className="text-center py-20 bg-gray-900/50 rounded-3xl border border-dashed border-gray-800">
+                            <p className="text-gray-500">No transactions found matching your search.</p>
+                        </div>
+                    ) : (
+                        filteredEntries.map(entry => (
+                            <div key={entry.id} className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden shadow-sm hover:border-gray-700 transition-all">
+                                <div className="bg-gray-800/30 px-6 py-4 border-b border-gray-800 flex justify-between items-center text-sm">
+                                    <div className="flex items-center gap-4">
+                                        <span className="font-mono text-indigo-400 font-bold uppercase tracking-tighter">
+                                            {new Date(entry.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+                                        </span>
+                                        <span className="w-1 h-1 bg-gray-700 rounded-full"></span>
+                                        <span className="text-white font-medium">{entry.description}</span>
+                                    </div>
+                                    <span className="text-[10px] font-bold text-gray-600 uppercase tracking-widest">ID: {entry.id.split('-')[0]}</span>
                                 </div>
-                            ))
-                        )}
-                    </div>
+                                <div className="overflow-x-auto">
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="text-[10px] text-gray-500 text-left border-b border-gray-800 uppercase tracking-widest font-black">
+                                                <th className="px-8 py-3">Account</th>
+                                                <th className="px-8 py-3 text-right">Debit</th>
+                                                <th className="px-8 py-3 text-right">Credit</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-gray-800/50">
+                                            {entry.lines.map((line: any) => (
+                                                <tr key={line.id} className="group">
+                                                    <td className={`px-8 py-3 transition-all ${line.credit > 0 ? 'pl-16 text-gray-400' : 'text-gray-200 font-semibold'}`}>
+                                                        <div className="flex flex-col">
+                                                            <span>{line.accountName}</span>
+                                                            <span className="text-[10px] text-gray-600 font-mono uppercase tracking-tighter">{line.accountCode}</span>
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-8 py-3 text-right text-green-400 font-mono">
+                                                        {line.debit > 0 ? `$${Number(line.debit).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—'}
+                                                    </td>
+                                                    <td className="px-8 py-3 text-right text-red-400 font-mono">
+                                                        {line.credit > 0 ? `$${Number(line.credit).toLocaleString(undefined, {minimumFractionDigits: 2})}` : '—'}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        ))
+                    )}
                 </div>
             </div>
         </Layout>
-    )
-}
+    );
+};
 
 export default JournalEntries;
