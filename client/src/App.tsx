@@ -7,6 +7,7 @@ import JournalEntries from './Pages/JournalEntries';
 import Reports from './Pages/Reports';
 import Settings from './Pages/Settings';
 import AccountsPage from './Pages/AccountsPage';
+import MagicJournal from './Pages/MagicJournal';
 
 const App = () => {
     return (
@@ -19,6 +20,7 @@ const App = () => {
                 <Route path='/reports' element={<ProtectedRoute><Reports/></ProtectedRoute>}/>
                 <Route path='/settings' element={<ProtectedRoute><Settings/></ProtectedRoute>}/>
                 <Route path="/accounts" element={<ProtectedRoute><AccountsPage /></ProtectedRoute>} />
+                <Route path="/magic-entry" element={<ProtectedRoute><MagicJournal /></ProtectedRoute>} />
             </Routes>
             </AuthProvider>
         </Router>

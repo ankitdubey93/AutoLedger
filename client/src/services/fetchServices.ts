@@ -110,3 +110,14 @@ export const getTrialBalance = async () => {
     const response = await fetchWithAutoRefresh(`${API_BASE_URL}/reports/trial-balance`);
     return response.json();
 };
+
+
+export const analyzeWithAI = async (sentence: string) => {
+    const response = await fetchWithAutoRefresh(`${API_BASE_URL}/ai/analyze`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sentence }),
+    });
+    if (!response.ok) throw new Error("AI Analysis failed.");
+    return response.json();
+};
