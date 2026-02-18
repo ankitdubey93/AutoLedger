@@ -69,7 +69,7 @@ export const createJournalEntry = async (
     const client = await pool.connect();
 
     try {
-        await client.query('BEGIN'); // Start ACID Transaction
+        await client.query('BEGIN'); // Starting ACID Transaction
 
         // Step 1: Insert the Header (Journal Entry)
         const entryResult = await client.query(

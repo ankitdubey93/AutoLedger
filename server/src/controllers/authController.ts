@@ -70,7 +70,7 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
 
         const userId = newUser.id;
 
-        // 3. 🚀 THE MAGIC STEP: Seed Default Accounts for this User
+        // 3.  THE MAGIC STEP: Seed Default Accounts for this User
         // We insert multiple rows in one go.
         await client.query(
             `INSERT INTO accounts (user_id, name, code, type, description) VALUES 

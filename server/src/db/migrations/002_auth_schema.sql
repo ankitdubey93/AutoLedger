@@ -32,3 +32,4 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+

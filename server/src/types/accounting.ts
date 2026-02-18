@@ -18,5 +18,6 @@ export interface JournalEntry {
     id: string;
     date: string;
     description: string;
-    lines: LedgerLine[];
+    lines: LedgerLine[]; // This is how we will handle entries in the code
 }
+

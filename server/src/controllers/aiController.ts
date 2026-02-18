@@ -14,7 +14,7 @@ export const analyzeTransaction = async (req: any, res: Response, next: NextFunc
             [userId]
         );
         
-        // Use the rule engine instead of Gemini
+        // Using the rule engine instead of Gemini
         const suggestion = parseTransaction(sentence, accountsResult.rows);
 
         res.status(200).json({ success: true, suggestion });

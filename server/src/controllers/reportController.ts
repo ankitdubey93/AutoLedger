@@ -13,7 +13,7 @@ export const getTrialBalance = async (req: AuthenticatedRequest, res: Response, 
     const userId = req.user.userId;
 
     try {
-        // 🚀 COMPLEX SQL: Aggregation & Grouping
+        //  COMPLEX SQL: Aggregation & Grouping
         // We join Accounts with Ledger Lines to sum up the values.
         const query = `
             SELECT 
