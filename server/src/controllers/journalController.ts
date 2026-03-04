@@ -2,15 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import ApiError from "../utils/apiError";
 import { journalService } from "../services/journalService";
 
-// --- Interfaces for Type Safety ---
 
-// 1. Extend Express Request to include User (from Auth Middleware)
-export interface AuthenticatedRequest extends Request {
-    user?: {
-        userId: string;
-        [key: string]: any;
-    };
-}
 
 // 2. Define the expected structure of a Line Item from Frontend
 interface JournalLineInput {
@@ -34,7 +26,7 @@ interface CreateJournalEntryBody {
  * @access  Private
  */
 export const createJournalEntry = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
 ) => {
@@ -96,7 +88,7 @@ export const createJournalEntry = async (
  * @access  Private
  */
 export const getAllJournalEntries = async (
-    req: AuthenticatedRequest,
+    req: Request,
     res: Response,
     next: NextFunction
 ) => {

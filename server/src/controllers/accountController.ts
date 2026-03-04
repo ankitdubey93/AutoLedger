@@ -2,16 +2,13 @@ import { Request, Response, NextFunction } from "express";
 import ApiError from "../utils/apiError";
 import { accountService } from "../services/accountService";
 
-// Interface for type safety
-interface AuthenticatedRequest extends Request {
-    user?: { userId: string;[key: string]: any };
-}
+
 
 /**
  * @desc    Get all accounts for the current user
  * @route   GET /api/accounts
  */
-export const getAccounts = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const getAccounts = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user?.userId) return next(new ApiError(401, "Unauthorized"));
 
     try {
@@ -31,7 +28,7 @@ export const getAccounts = async (req: AuthenticatedRequest, res: Response, next
  * @desc    Create a new account in the Chart of Accounts
  * @route   POST /api/accounts
  */
-export const createAccount = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const createAccount = async (req: Request, res: Response, next: NextFunction) => {
     if (!req.user?.userId) return next(new ApiError(401, "Unauthorized"));
 
     const { name, code, type, description } = req.body;
