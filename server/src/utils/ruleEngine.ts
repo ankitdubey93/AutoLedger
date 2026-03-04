@@ -32,13 +32,18 @@ export const parseTransaction = (sentence: string, accounts: Account[]) => {
 
   const isEarning = /received|sold|earned|income|revenue|deposit/.test(input);
 
+  // Guard: ambiguous input matches both spending and earning keywords
+  if (isSpending && isEarning) {
+    throw new Error("Ambiguous transaction: description matches both spending and earning keywords. Please rephrase.");
+  }
+
 
 
   // 3. Find ALL mentioned accounts
 
-  const mentionedAccounts = accounts.filter(acc => 
+  const mentionedAccounts = accounts.filter(acc =>
 
-    input.includes(acc.name.toLowerCase()) || 
+    input.includes(acc.name.toLowerCase()) ||
 
     acc.name.toLowerCase().split(' ').some(word => word.length > 3 && input.includes(word))
 
@@ -70,7 +75,7 @@ export const parseTransaction = (sentence: string, accounts: Account[]) => {
 
       const amount = numbers[index] || numbers[0];
 
-      
+
 
       const isAsset = acc.type === 'Asset';
 
@@ -140,13 +145,19 @@ export const parseTransaction = (sentence: string, accounts: Account[]) => {
 
 
 
-
+  // Final balance verification — the rule engine must never produce an unbalanced entry
+  const toCents = (n: number) => Math.round(Number(n) * 100);
+  const debitSum = lines.reduce((s, l) => s + toCents(l.debit), 0);
+  const creditSum = lines.reduce((s, l) => s + toCents(l.credit), 0);
+  if (debitSum !== creditSum) {
+    throw new Error(`Rule engine produced an unbalanced entry: debit ${debitSum}¢ ≠ credit ${creditSum}¢. Please rephrase your transaction.`);
+  }
 
   return {
 
     description: sentence,
 
-    lines: lines.filter((v, i, a) => a.findIndex(t => t.accountId === v.accountId) === i)
+    lines,
 
   };
 

@@ -13,8 +13,12 @@ import jwt from 'jsonwebtoken';
 import auth from '../middleware/auth';
 import ApiError from '../utils/apiError';
 
+interface TestRequest extends Partial<Request> {
+    user?: any;
+}
+
 // Helper to build a minimal mock request
-const mockRequest = (overrides: Partial<Request> = {}): Partial<Request> => ({
+const mockRequest = (overrides: Partial<Request> = {}): TestRequest => ({
     cookies: {},
     headers: {},
     ...overrides,
@@ -60,7 +64,7 @@ describe('auth middleware', () => {
         auth(req as Request, res as Response, next);
 
         // Should set req.user
-        expect((req as any).user).toEqual(fakePayload);
+        expect(req.user).toEqual(fakePayload);
 
         // next() called with no arguments (success path)
         expect(next).toHaveBeenCalledOnce();
