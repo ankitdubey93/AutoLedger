@@ -11,5 +11,9 @@ echo "PostgreSQL is ready."
 echo "Running migrations..."
 npm run migrate
 
+echo "Running tests..."
+npm test
+echo "All tests passed."
+
 echo "Starting server..."
 exec npm run dev

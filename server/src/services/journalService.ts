@@ -1,5 +1,7 @@
 import pool from "../db/connect";
 import ApiError from "../utils/apiError";
+import { appendToCsv } from "../utils/csvParser";
+import { invalidateCsvCache } from "../utils/ruleEngine";
 
 export interface JournalLineInput {
     accountId: string;
@@ -43,6 +45,33 @@ export const journalService = {
             }
 
             await client.query('COMMIT');
+
+            // Self-learning: append simple 2-line entries to training CSV so the
+            // rule engine improves from real user data over time.
+            if (lines.length === 2 && description.trim().length > 0) {
+                const debitLine  = lines.find(l => l.debit  > 0);
+                const creditLine = lines.find(l => l.credit > 0);
+                if (debitLine && creditLine) {
+                    const namesResult = await pool.query(
+                        'SELECT id, name FROM accounts WHERE id = ANY($1)',
+                        [[debitLine.accountId, creditLine.accountId]],
+                    );
+                    const nameMap: Record<string, string> = {};
+                    for (const row of namesResult.rows) nameMap[row.id] = row.name;
+
+                    const debitName  = nameMap[debitLine.accountId];
+                    const creditName = nameMap[creditLine.accountId];
+                    if (debitName && creditName) {
+                        try {
+                            appendToCsv(description.trim(), debitName, creditName, debitLine.debit);
+                            invalidateCsvCache();
+                        } catch {
+                            // Non-fatal: CSV append failure must never break the journal save
+                        }
+                    }
+                }
+            }
+
             return entryResult.rows[0];
 
         } catch (error: any) {

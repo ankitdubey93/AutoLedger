@@ -98,4 +98,4 @@ Sentence,Debit_Account,Credit_Account,Amount
 "Paid 80 for team building lunch",Meals and Entertainment,Bank,80
 "Accrued 600 rent expense for the current month not yet paid",Rent Expense,Accrued Rent,600
 "Paid 600 to clear the accrued rent liability",Accrued Rent,Bank,600
-"Recorded 100 of deferred tax liability",Income Tax Expense,Deferred Tax Liability,100
+"Recorded 100 of deferred tax liability",Income Tax Expense,Deferred Tax Liability,100"Started Business with Rs. 100000 in Bank Account",Bank,Owner Capital,100000

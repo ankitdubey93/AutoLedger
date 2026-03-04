@@ -70,6 +70,26 @@ export const getAccounts = async () => {
   return response.json();
 };
 
+export interface NewAccountPayload {
+  name: string;
+  code: string;
+  type: string;
+  description: string;
+}
+
+export const createAccount = async (account: NewAccountPayload) => {
+  const response = await fetchWithAutoRefresh(`${API_BASE_URL}/accounts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(account),
+  });
+  if (!response.ok) {
+    const err = await response.json();
+    throw new Error(err.message || 'Failed to create account.');
+  }
+  return response.json();
+};
+
 // --- JOURNAL SERVICES ---
 
 // Unified Interfaces

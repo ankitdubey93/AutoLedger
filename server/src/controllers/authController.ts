@@ -75,14 +75,48 @@ export const register = async (req: Request, res: Response, next: NextFunction) 
     // 3.  THE MAGIC STEP: Seed Default Accounts for this User
     // We insert multiple rows in one go.
     await client.query(
-      `INSERT INTO accounts (user_id, name, code, type, description) VALUES 
-            ($1, 'Cash on Hand', '1000', 'Asset', 'Physical cash and petty cash'),
-            ($1, 'Bank Account', '1001', 'Asset', 'Primary business checking account'),
-            ($1, 'Accounts Receivable', '1200', 'Asset', 'Money owed by customers'),
-            ($1, 'Accounts Payable', '2000', 'Liability', 'Unpaid bills to vendors'),
-            ($1, 'Sales Revenue', '4000', 'Revenue', 'Income from goods or services'),
-            ($1, 'Cost of Goods Sold', '5000', 'Expense', 'Direct costs of production'),
-            ($1, 'Office Expenses', '6000', 'Expense', 'General office supplies and utilities')`,
+      `INSERT INTO accounts (user_id, name, code, type, description) VALUES
+            -- Assets
+            ($1, 'Cash on Hand',              '1000', 'Asset',     'Physical cash and petty cash'),
+            ($1, 'Bank',                       '1001', 'Asset',     'Primary business checking account'),
+            ($1, 'Petty Cash',                 '1010', 'Asset',     'Small cash fund for minor expenses'),
+            ($1, 'Accounts Receivable',        '1100', 'Asset',     'Money owed by customers'),
+            ($1, 'Inventory',                  '1200', 'Asset',     'Goods held for sale'),
+            ($1, 'Prepaid Expenses',           '1300', 'Asset',     'Expenses paid in advance'),
+            ($1, 'Prepaid Insurance',          '1310', 'Asset',     'Insurance premiums paid ahead'),
+            -- Liabilities
+            ($1, 'Accounts Payable',           '2000', 'Liability', 'Unpaid bills to vendors'),
+            ($1, 'Accrued Liabilities',        '2100', 'Liability', 'Expenses incurred but not yet billed'),
+            ($1, 'Unearned Revenue',           '2200', 'Liability', 'Advance payments from customers'),
+            ($1, 'Loan Payable',               '2300', 'Liability', 'Outstanding loan balances'),
+            ($1, 'Taxes Payable',              '2400', 'Liability', 'Tax obligations due'),
+            ($1, 'Credit Card Payable',        '2500', 'Liability', 'Corporate credit card balance'),
+            -- Equity
+            ($1, 'Owner Capital',              '3000', 'Equity',    'Owner investment in the business'),
+            ($1, 'Owner Drawings',             '3100', 'Equity',    'Owner withdrawals from the business'),
+            ($1, 'Retained Earnings',          '3200', 'Equity',    'Accumulated profits reinvested'),
+            -- Revenue
+            ($1, 'Sales Revenue',              '4000', 'Revenue',   'Income from product sales'),
+            ($1, 'Service Revenue',            '4100', 'Revenue',   'Income from services rendered'),
+            ($1, 'Interest Income',            '4200', 'Revenue',   'Interest earned on savings or notes'),
+            ($1, 'Other Income',               '4900', 'Revenue',   'Miscellaneous income'),
+            -- Expenses
+            ($1, 'Cost of Goods Sold',         '5000', 'Expense',   'Direct cost of products sold'),
+            ($1, 'Salaries Expense',           '5100', 'Expense',   'Employee wages and salaries'),
+            ($1, 'Rent Expense',               '5200', 'Expense',   'Office or retail space rent'),
+            ($1, 'Utility Expense',            '5300', 'Expense',   'Electricity, water, internet bills'),
+            ($1, 'Advertising Expense',        '5400', 'Expense',   'Marketing and advertising costs'),
+            ($1, 'Insurance Expense',          '5500', 'Expense',   'Business insurance premiums expensed'),
+            ($1, 'Depreciation Expense',       '5600', 'Expense',   'Periodic asset depreciation'),
+            ($1, 'Interest Expense',           '5700', 'Expense',   'Interest paid on loans'),
+            ($1, 'Professional Fees',          '5800', 'Expense',   'Legal, accounting, consulting fees'),
+            ($1, 'Travel Expense',             '5900', 'Expense',   'Business travel costs'),
+            ($1, 'Meals and Entertainment',    '6000', 'Expense',   'Client meals and team events'),
+            ($1, 'Office Supplies',            '6100', 'Expense',   'Stationery and office consumables'),
+            ($1, 'Software Expense',           '6200', 'Expense',   'Software subscriptions and licenses'),
+            ($1, 'Bank Fees',                  '6300', 'Expense',   'Bank service and transaction charges'),
+            ($1, 'Bad Debt Expense',           '6400', 'Expense',   'Uncollectible customer invoices'),
+            ($1, 'General Expense',            '6900', 'Expense',   'Miscellaneous business expenses')`,
       [userId]
     );
 
