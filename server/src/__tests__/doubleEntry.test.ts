@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Request, Response, NextFunction } from 'express';
-import { createJournalEntry, AuthenticatedRequest } from '../controllers/journalController';
+import { createJournalEntry, getAllJournalEntries, AuthenticatedRequest } from '../controllers/journalController';
 import pool from '../db/connect';
 import ApiError from '../utils/apiError';
 
@@ -128,5 +128,38 @@ describe('journalController - double entry hardening', () => {
 
         // Should NOT call pool.connect
         expect(pool.connect).not.toHaveBeenCalled();
+    });
+
+    it('returns journal entries with pagination metadata', async () => {
+        const mockEntries = [
+            { id: '1', date: '2024-01-01', description: 'Test 1', lines: [] },
+            { id: '2', date: '2024-01-02', description: 'Test 2', lines: [] }
+        ];
+
+        // Mock the service return
+        (pool.query as any).mockResolvedValueOnce({
+            rows: [
+                { ...mockEntries[0], total_count: '2' },
+                { ...mockEntries[1], total_count: '2' }
+            ]
+        });
+
+        const req = {
+            user: { userId: 'user-123' },
+            query: { page: '1', limit: '20' }
+        } as any;
+        const res = mockResponse();
+        const next = mockNext();
+
+        await getAllJournalEntries(req as AuthenticatedRequest, res as Response, next);
+
+        expect(res.status).toHaveBeenCalledWith(200);
+        expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+            success: true,
+            totalCount: 2,
+            currentPage: 1,
+            totalPages: 1,
+            entries: mockEntries
+        }));
     });
 });

@@ -4,7 +4,7 @@ import authRoute from "./routes/auth";
 import accountRoutes from './routes/accountRoutes';
 import reportRoutes from './routes/reportRoutes';
 import aiRoutes from './routes/aiRoutes';
-import  errorHandler  from "./middleware/errorHandler";
+import errorHandler from "./middleware/errorHandler";
 import ApiError from "./utils/apiError";
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -15,7 +15,7 @@ const allowedOrigin = process.env.FRONTEND_URL;
 
 console.log("Allowed Origin:", allowedOrigin);
 
-if(!allowedOrigin) {
+if (!allowedOrigin) {
   console.error(
     "FRONTEND_URL is not defined in the environment variables. CORS might not work correctly."
   );
@@ -34,11 +34,11 @@ app.use(cors({
 }));
 
 
-app.use("/api/journals", journalEntryRoutes);
-app.use("/api/auth",authRoute);
-app.use("/api/accounts",accountRoutes);
-app.use("/api/reports", reportRoutes);
-app.use('/api/ai', aiRoutes);
+app.use("/api/v1/journals", journalEntryRoutes);
+app.use("/api/v1/auth", authRoute);
+app.use("/api/v1/accounts", accountRoutes);
+app.use("/api/v1/reports", reportRoutes);
+app.use("/api/v1/ai", aiRoutes);
 
 // Example 404 route handler
 app.all("*", (req, res, next) => {

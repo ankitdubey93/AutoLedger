@@ -59,9 +59,11 @@ export const journalService = {
     },
 
     /**
-     * Fetches all journal entries for a user, with nested lines information.
+     * Fetches journal entries for a user with pagination, including nested lines.
      */
-    async getEntriesForUser(userId: string) {
+    async getEntriesForUser(userId: string, page: number = 1, limit: number = 20) {
+        const offset = (page - 1) * limit;
+
         const query = `
             SELECT 
                 je.id,
@@ -69,6 +71,7 @@ export const journalService = {
                 je.description,
                 je.source_type,
                 je.created_at,
+                COUNT(*) OVER() as total_count, -- Use window function for total matches
                 COALESCE(
                     JSON_AGG(
                         JSON_BUILD_OBJECT(
@@ -88,9 +91,19 @@ export const journalService = {
             WHERE je.user_id = $1
             GROUP BY je.id
             ORDER BY je.date DESC, je.created_at DESC
+            LIMIT $2 OFFSET $3
         `;
 
-        const result = await pool.query(query, [userId]);
-        return result.rows;
+        const result = await pool.query(query, [userId, limit, offset]);
+
+        const totalCount = result.rows.length > 0 ? parseInt(result.rows[0].total_count) : 0;
+
+        return {
+            entries: result.rows.map(row => {
+                const { total_count, ...entry } = row;
+                return entry;
+            }),
+            totalCount
+        };
     }
 };

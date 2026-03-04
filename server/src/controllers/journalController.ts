@@ -106,11 +106,21 @@ export const getAllJournalEntries = async (
     const userId = req.user.userId;
 
     try {
-        const entries = await journalService.getEntriesForUser(userId);
+        // Parse pagination parameters
+        const page = Math.max(1, parseInt(req.query.page as string) || 1);
+        let limit = Math.max(1, parseInt(req.query.limit as string) || 20);
+        if (limit > 100) limit = 100; // Enforce max limit
+
+        const { entries, totalCount } = await journalService.getEntriesForUser(userId, page, limit);
+
+        const totalPages = Math.ceil(totalCount / limit);
 
         res.status(200).json({
             success: true,
             count: entries.length,
+            totalCount,
+            currentPage: page,
+            totalPages,
             entries,
         });
 
