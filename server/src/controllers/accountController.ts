@@ -1,10 +1,10 @@
 import { Request, Response, NextFunction } from "express";
-import pool from "../db/connect";
 import ApiError from "../utils/apiError";
+import { accountService } from "../services/accountService";
 
 // Interface for type safety
 interface AuthenticatedRequest extends Request {
-    user?: { userId: string; [key: string]: any };
+    user?: { userId: string;[key: string]: any };
 }
 
 /**
@@ -15,19 +15,12 @@ export const getAccounts = async (req: AuthenticatedRequest, res: Response, next
     if (!req.user?.userId) return next(new ApiError(401, "Unauthorized"));
 
     try {
-        // Fetch accounts ordered by code (standard accounting practice)
-        const result = await pool.query(
-            `SELECT id, name, code, type, description 
-             FROM accounts 
-             WHERE user_id = $1 
-             ORDER BY code ASC`,
-            [req.user.userId]
-        );
+        const accounts = await accountService.getAccountsForUser(req.user.userId);
 
         res.status(200).json({
             success: true,
-            count: result.rows.length,
-            accounts: result.rows
+            count: accounts.length,
+            accounts
         });
     } catch (error) {
         next(error);
@@ -55,22 +48,13 @@ export const createAccount = async (req: AuthenticatedRequest, res: Response, ne
     }
 
     try {
-        const result = await pool.query(
-            `INSERT INTO accounts (user_id, name, code, type, description)
-             VALUES ($1, $2, $3, $4, $5)
-             RETURNING *`,
-            [req.user.userId, name, code, type, description]
-        );
+        const account = await accountService.createAccount(req.user.userId, { name, code, type, description });
 
         res.status(201).json({
             success: true,
-            account: result.rows[0]
+            account
         });
     } catch (error: any) {
-        // 🎯 INTERVIEW TIP: Handle the Unique Constraint violation
-        if (error.code === '23505') { 
-            return next(new ApiError(409, `Account code '${code}' already exists.`));
-        }
         next(error);
     }
 };

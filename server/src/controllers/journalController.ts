@@ -1,6 +1,6 @@
 import { Request, Response, NextFunction } from "express";
-import pool from "../db/connect";
 import ApiError from "../utils/apiError";
+import { journalService } from "../services/journalService";
 
 // --- Interfaces for Type Safety ---
 
@@ -44,7 +44,6 @@ export const createJournalEntry = async (
     }
 
     const userId = req.user.userId;
-    // Cast the body to our interface for type safety
     const { date, description, lines } = req.body as CreateJournalEntryBody;
 
     // --- VALIDATION LAYER ---
@@ -73,64 +72,21 @@ export const createJournalEntry = async (
         }
     }
 
-    // --- DATABASE LAYER (Transactional) ---
-
-    // We must use a single client for transactions, not the pool directly
-    const client = await pool.connect();
-
+    // --- SERVICE LAYER ---
     try {
-        await client.query('BEGIN'); // Starting ACID Transaction
-
-        // Step 1: Insert the Header (Journal Entry)
-        const entryResult = await client.query(
-            `INSERT INTO journal_entries (user_id, date, description, source_type)
-             VALUES ($1, $2, $3, 'manual')
-             RETURNING id, date, description, created_at`,
-            [userId, date, description]
-        );
-        const journalEntryId = entryResult.rows[0].id;
-
-        // Step 2: Insert the Ledger Lines
-        // We map over the lines and insert them one by one linked to the header ID
-        for (const line of lines) {
-            await client.query(
-                `INSERT INTO ledger_lines (journal_entry_id, account_id, user_id, debit, credit)
-                 VALUES ($1, $2, $3, $4, $5)`,
-                [journalEntryId, line.accountId, userId, line.debit, line.credit]
-            );
-        }
-
-        await client.query('COMMIT'); // Commit changes to disk
+        const entry = await journalService.createEntry(userId, { date, description, lines });
 
         res.status(201).json({
             success: true,
             message: "Journal Entry posted successfully.",
-            entry: entryResult.rows[0]
+            entry
         });
 
     } catch (error: any) {
-        if (client) {
-            try {
-                await client.query('ROLLBACK');
-            } catch (rollbackErr) {
-                console.error("Rollback failed:", rollbackErr);
-            }
-        }
-
-        console.error("Transaction Failed:", error);
-
         if (error instanceof ApiError) {
             return next(error);
         }
-
-        // Handle Foreign Key violation (e.g., invalid accountId)
-        if (error.code === '23503') {
-            return next(new ApiError(400, "Invalid Account ID provided. Please refresh your accounts list."));
-        }
-
         next(new ApiError(500, error.message || "Failed to create journal entry."));
-    } finally {
-        if (client) client.release();
     }
 };
 
@@ -150,50 +106,15 @@ export const getAllJournalEntries = async (
     const userId = req.user.userId;
 
     try {
-        // --- COMPLEX SQL QUERY ---
-        // This query joins entries, lines, and accounts.
-        // It uses JSON_AGG to nest the lines inside the entry object.
-        // This is much faster than doing a separate query for every single entry.
-
-        const query = `
-            SELECT 
-                je.id,
-                je.date,
-                je.description,
-                je.source_type,
-                je.created_at,
-                -- Aggregate lines into a JSON array
-                COALESCE(
-                    JSON_AGG(
-                        JSON_BUILD_OBJECT(
-                            'id', ll.id,
-                            'accountId', ll.account_id,
-                            'accountName', a.name,   -- Get the readable name from Accounts table
-                            'accountCode', a.code,   -- Get the code (e.g., 1001)
-                            'debit', ll.debit,
-                            'credit', ll.credit
-                        ) ORDER BY ll.debit DESC     -- Show Debits first for standard accounting view
-                    ), 
-                    '[]'
-                ) AS lines
-            FROM journal_entries je
-            LEFT JOIN ledger_lines ll ON je.id = ll.journal_entry_id
-            LEFT JOIN accounts a ON ll.account_id = a.id
-            WHERE je.user_id = $1
-            GROUP BY je.id
-            ORDER BY je.date DESC, je.created_at DESC
-        `;
-
-        const result = await pool.query(query, [userId]);
+        const entries = await journalService.getEntriesForUser(userId);
 
         res.status(200).json({
             success: true,
-            count: result.rows.length,
-            entries: result.rows,
+            count: entries.length,
+            entries,
         });
 
     } catch (error) {
-        console.error("Get Entries Error:", error);
         next(new ApiError(500, "Failed to fetch journal entries."));
     }
 };
