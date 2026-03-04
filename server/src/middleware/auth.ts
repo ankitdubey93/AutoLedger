@@ -1,35 +1,34 @@
-import jwt, {JwtPayload} from 'jsonwebtoken';
+import jwt, { JwtPayload } from 'jsonwebtoken';
 import dotenv from 'dotenv';
 import { Request, Response, NextFunction } from 'express';
+import ApiError from '../utils/apiError';
 dotenv.config();
 
 interface CustomRequest extends Request {
     user?: JwtPayload;
 }
 
-const secretKey = process.env.JWT_SECRET;
+const secretKey = process.env.ACCESS_TOKEN_SECRET;
 
-const auth = (req: CustomRequest,res: Response,next: NextFunction) => {
+const auth = (req: CustomRequest, res: Response, next: NextFunction) => {
 
 
-    const token = req.cookies?.accessToken || 
-    (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
-    
-    
+    const token = req.cookies?.accessToken ||
+        (req.headers.authorization?.startsWith("Bearer ") ? req.headers.authorization.split(" ")[1] : null);
 
-    if(!token) {
-        res.status(401).json({message: 'Authorization denied, no token provided.'});
-        return;
+
+
+    if (!token) {
+        return next(new ApiError(401, 'Authorization denied, no token provided.'));
     }
-    
+
 
     try {
-        const decoded = jwt.verify(token,secretKey as string) as JwtPayload;
-        console.log(decoded);
+        const decoded = jwt.verify(token, secretKey as string) as JwtPayload;
         req.user = decoded;
         next();
-    } catch(error) {
-        res.status(401).json({message: 'Token is not valid.'});
+    } catch (error) {
+        next(new ApiError(401, 'Token is not valid.'));
     }
 };
 
