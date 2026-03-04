@@ -4,13 +4,9 @@ import { Request, Response, NextFunction } from 'express';
 import ApiError from '../utils/apiError';
 dotenv.config();
 
-interface CustomRequest extends Request {
-    user?: JwtPayload;
-}
-
 const secretKey = process.env.ACCESS_TOKEN_SECRET;
 
-const auth = (req: CustomRequest, res: Response, next: NextFunction) => {
+const auth = (req: Request, res: Response, next: NextFunction) => {
 
 
     const token = req.cookies?.accessToken ||
@@ -24,7 +20,7 @@ const auth = (req: CustomRequest, res: Response, next: NextFunction) => {
 
 
     try {
-        const decoded = jwt.verify(token, secretKey as string) as JwtPayload;
+        const decoded = jwt.verify(token, secretKey as string) as JwtPayload & { userId: string };
         req.user = decoded;
         next();
     } catch (error) {

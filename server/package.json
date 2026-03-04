@@ -6,7 +6,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "dev": "nodemon --exec ts-node -r dotenv/config src/index.ts",
+    "dev": "nodemon --exec ts-node --files -r dotenv/config src/index.ts",
     "build": "tsc",
     "start": "nodemon -r dotenv/config ./dist/index.js",
     "migrate": "ts-node src/db/migrate.ts",

@@ -1,6 +1,6 @@
 -- 1. Chart of Accounts: Defines the "buckets" where money goes.
 
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL, -- To keep data private per user
     name TEXT NOT NULL, -- e.g. "Cash in Bank"
@@ -13,7 +13,7 @@ CREATE TABLE accounts (
 
 -- 2. Journal Entries (The Header): The "Who,What,When".
 
-CREATE TABLE journal_entries(
+CREATE TABLE IF NOT EXISTS journal_entries(
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     date DATE NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE journal_entries(
 
 -- 3. Ledger lines (The Atomic Data): The actual Debits and Credits
 
-CREATE TABLE ledger_lines (
+CREATE TABLE IF NOT EXISTS ledger_lines (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     journal_entry_id UUID NOT NULL REFERENCES journal_entries(id) ON DELETE CASCADE,
     account_id UUID NOT NULL REFERENCES accounts(id),

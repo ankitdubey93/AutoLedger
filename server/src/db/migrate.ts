@@ -39,7 +39,7 @@ const migrate = async () => {
         for (const file of files) {
             const filePath = path.join(migrationsDir, file);
             console.log(`⏳ Executing: ${file}...`);
-            
+
             const sql = fs.readFileSync(filePath, 'utf-8');
             await client.query(sql);
         }
@@ -61,8 +61,8 @@ const migrate = async () => {
     } finally {
         client.release();
         await pool.end();
-        process.exit();
+        process.exit(0);
     }
 };
 
-migrate();
+migrate().catch(() => process.exit(1));
