@@ -1,0 +1,101 @@
+Sentence,Debit_Account,Credit_Account,Amount
+"Paid 1500 for monthly office rent via Bank",Rent Expense,Bank,1500
+"Received 5000 from client for web development services",Bank,Service Revenue,5000
+"Bought a new MacBook for 2000 on credit from Apple",Computer Equipment,Accounts Payable,2000
+"Owner invested 10000 personal cash into the business",Bank,Owner Capital,10000
+"Paid 50 for internet bill",Utility Expense,Bank,50
+"Invoiced XYZ Corp 1200 for consultancy",Accounts Receivable,Consulting Revenue,1200
+"Paid 500 towards the Apple Store outstanding invoice",Accounts Payable,Bank,500
+"Withdrew 400 for personal use",Owner Drawings,Bank,400
+"Paid monthly payroll of 3500 to employees via transfer",Salaries Expense,Bank,3500
+"Purchased 300 of raw materials for production",Inventory,Bank,300
+"Sold manufactured parts for 800 cash",Bank,Product Sales,800
+"Recognized 300 cost of goods sold for recent sale",Cost of Goods Sold,Inventory,300
+"Took a business loan of 20000 from the Bank",Bank,Loan Payable,20000
+"Repaid 1000 of the bank loan principal",Loan Payable,Bank,1000
+"Paid 150 in interest for the bank loan",Interest Expense,Bank,150
+"Client paid 1200 for previously issued invoice",Bank,Accounts Receivable,1200
+"Paid annual insurance premium of 1200 upfront",Prepaid Insurance,Bank,1200
+"Amortized 100 of prepaid insurance for the current month",Insurance Expense,Prepaid Insurance,100
+"Purchased office stationery for 75 using Petty Cash",Office Supplies,Petty Cash,75
+"Recorded depreciation of 200 on Computer Equipment",Depreciation Expense,Accumulated Depreciation,200
+"Accrued 400 for accounting services used but not yet billed",Professional Fees,Accrued Liabilities,400
+"Paid 400 to settle accrued accounting fees from last month",Accrued Liabilities,Bank,400
+"Declared a dividend of 1000 to shareholders",Retained Earnings,Dividends Payable,1000
+"Paid the 1000 declared dividend",Dividends Payable,Bank,1000
+"Received 3000 advance payment for a project starting next month",Bank,Unearned Revenue,3000
+"Recognized 1000 of the unearned revenue as work was completed",Unearned Revenue,Service Revenue,1000
+"Client returned defective goods, refunded 150 cash",Sales Returns,Bank,150
+"Restored 50 of inventory from the returned goods",Inventory,Cost of Goods Sold,50
+"Paid 25 bank service charge",Bank Fees,Bank,25
+"Transferred 500 from main bank to petty cash",Petty Cash,Bank,500
+"Purchased 150 of stamps and postage cash",Postage Expense,Bank,150
+"Billed customer 450 for emergency repair work",Accounts Receivable,Repair Revenue,450
+"Customer paid 440 to settle 450 invoice taking a 10 discount",Bank,Accounts Receivable,440
+"Recorded the 10 discount given to customer for early payment",Sales Discounts,Accounts Receivable,10
+"Paid supplier 190 to settle 200 invoice taking a 10 discount",Accounts Payable,Bank,190
+"Recorded the 10 discount received from supplier",Accounts Payable,Purchase Discounts,10
+"Wrote off a 300 uncollectible bad debt",Bad Debt Expense,Accounts Receivable,300
+"Estimated and recorded 250 for future warranty repairs",Warranty Expense,Warranty Liability,250
+"Paid 50 cash for a warranty repair part",Warranty Liability,Bank,50
+"Accrued 1200 for employee bonuses at year end",Bonus Expense,Accrued Payroll,1200
+"Paid the 1200 employee bonuses",Accrued Payroll,Bank,1200
+"Withheld 500 in income taxes from employee paychecks",Salaries Expense,Taxes Payable,500
+"Remitted 500 of withheld taxes to the government",Taxes Payable,Bank,500
+"Accrued 200 in employer payroll taxes",Payroll Tax Expense,Payroll Taxes Payable,200
+"Purchased a delivery van for 15000 using a note payable",Vehicle Asset,Notes Payable,15000
+"Paid 300 for gas for the delivery van",Auto Expense,Bank,300
+"Scrapped an old fully depreciated computer originally costing 800",Accumulated Depreciation,Computer Equipment,800
+"Sold an old desk for 100 cash that had a book value of 80",Bank,Furniture Asset,100
+"Recorded the 20 gain on sale of the old desk",Furniture Asset,Gain on Sale of Assets,20
+"Paid 600 for a 6 month software subscription",Prepaid Expenses,Bank,600
+"Expensed 100 of the software subscription for this month",Software Expense,Prepaid Expenses,100
+"Incurred 400 in advertising costs on credit",Advertising Expense,Accounts Payable,400
+"Paid 200 to Facebook for running digital ads",Advertising Expense,Bank,200
+"Earned 50 in interest from the business savings account",Bank,Interest Income,50
+"Paid 120 for a client business lunch",Meals and Entertainment,Bank,120
+"Accrued 80 in utility expenses at month end",Utility Expense,Accrued Utilities,80
+"Reversed last month's 80 utility accrual",Accrued Utilities,Utility Expense,80
+"Paid 350 for legal fees regarding a contract review",Legal Expense,Bank,350
+"Owner contributed a 500 printer to the business",Computer Equipment,Owner Capital,500
+"Reimbursed employee 150 for travel expenses via bank transfer",Travel Expense,Bank,150
+"Charged 250 on the corporate credit card for hotel stay",Travel Expense,Credit Card Payable,250
+"Paid 250 to settle the corporate credit card balance",Credit Card Payable,Bank,250
+"Received 800 from a short term investment sale",Bank,Short Term Investments,800
+"Recorded 50 loss on the sale of the short term investment",Loss on Sale of Investments,Short Term Investments,50
+"Paid 1000 deposit for a new retail space lease",Security Deposits,Bank,1000
+"Purchased 5000 of inventory on account",Inventory,Accounts Payable,5000
+"Paid 150 for freight charges to deliver the inventory",Inventory,Bank,150
+"Returned 200 of damaged inventory to the supplier",Accounts Payable,Inventory,200
+"Billed 900 for consulting and 100 for sales tax",Accounts Receivable,Consulting Revenue,900
+"Recorded the 100 sales tax liability from the invoice",Accounts Receivable,Sales Tax Payable,100
+"Remitted 100 of collected sales tax to the state",Sales Tax Payable,Bank,100
+"Accrued 300 for property taxes",Property Tax Expense,Property Taxes Payable,300
+"Paid 75 for a local business license",Taxes and Licenses Expense,Bank,75
+"Received a 200 utility deposit refund",Bank,Security Deposits,200
+"Capitalized 4000 of developer costs for internal software",Intangible Assets,Bank,4000
+"Amortized 100 of the internal software asset",Amortization Expense,Accumulated Amortization,100
+"Accrued 150 of interest income on a note receivable",Interest Receivable,Interest Income,150
+"Received 150 cash for the accrued interest",Bank,Interest Receivable,150
+"Issued 5000 in bonds at face value",Bank,Bonds Payable,5000
+"Paid 1000 for a one year maintenance contract",Prepaid Maintenance,Bank,1000
+"Recorded 50 of bad debt expense using the allowance method",Bad Debt Expense,Allowance for Doubtful Accounts,50
+"Wrote off a specific 50 account against the allowance",Allowance for Doubtful Accounts,Accounts Receivable,50
+"Recovered 50 from a previously written off account",Accounts Receivable,Allowance for Doubtful Accounts,50
+"Received the 50 cash from the recovered account",Bank,Accounts Receivable,50
+"Paid 400 to a cleaning service for the office",Janitorial Expense,Bank,400
+"Purchased 1200 of shares in another company",Long Term Investments,Bank,1200
+"Received 60 in dividends from the stock investment",Bank,Dividend Income,60
+"Paid 200 penalty for late tax filing",Penalties and Fines,Bank,200
+"Donated 500 cash to a local charity",Charitable Contributions,Bank,500
+"Recorded a 300 positive inventory adjustment after a stock count",Inventory,Inventory Shrinkage,300
+"Recorded a 100 negative inventory adjustment due to theft",Inventory Shrinkage,Inventory,100
+"Paid 900 for employee health insurance premiums",Employee Benefits Expense,Bank,900
+"Accrued 250 for auditing fees",Audit Expense,Accrued Liabilities,250
+"Purchased domain name and hosting for 120",Software Expense,Bank,120
+"Owner paid 50 of business postage from personal funds",Postage Expense,Owner Capital,50
+"Received 400 grant from the local government",Bank,Other Income,400
+"Paid 80 for team building lunch",Meals and Entertainment,Bank,80
+"Accrued 600 rent expense for the current month not yet paid",Rent Expense,Accrued Rent,600
+"Paid 600 to clear the accrued rent liability",Accrued Rent,Bank,600
+"Recorded 100 of deferred tax liability",Income Tax Expense,Deferred Tax Liability,100
