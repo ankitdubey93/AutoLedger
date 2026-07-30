@@ -30,24 +30,57 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-07-30)
+### Current (verified 2026-07-30, after Phase 0)
 
 ```text
-AutoLedger/                     ← project root (not yet a git repo — Phase 0)
-├── docker-compose.yml          ← postgres, redis, server, client (build contexts do not exist yet)
-├── .env.example                ← JWT secrets; PG_* live in docker-compose
+AutoLedger/
+├── docker-compose.yml          ← postgres + redis only; app runs on the host
+├── .env.example                ← PG_*/REDIS_PORT for compose; no app secrets
 ├── .gitignore
-├── CLAUDE.md                   ← always-in-context rules + doc map
-├── README.md                   ← describes the deleted build; rewrite in Phase 0
-├── package.json                ← stray `{"type":"module"}`; delete or make it a real workspace root
-├── _metadata.json              ← stray Vite dep-cache artifact; delete
+├── CLAUDE.md
+├── README.md
 ├── docs/                       ← this directory
-└── Flowchart/
-    ├── User Authentication Flowchart.drawio
-    └── Transaction Management Flowchart.drawio
+├── study/                      ← interview-prep notes
+├── server/
+│   ├── package.json
+│   ├── tsconfig.json           ← type-checks (noEmit)
+│   ├── tsconfig.build.json     ← emits src/ → dist/
+│   ├── vitest.config.ts
+│   ├── .env.example
+│   └── src/
+│       ├── index.ts            ← listen + graceful shutdown
+│       ├── app.ts              ← createApp(): middleware + route mounting
+│       ├── config/
+│       │   ├── env.ts          ← fail-fast env parsing
+│       │   └── constants.ts    ← API_VERSION, body limit, shutdown timeout
+│       ├── controllers/healthController.ts
+│       ├── services/healthService.ts
+│       ├── routes/
+│       │   ├── index.ts        ← the /api/v1 router; modules mount here
+│       │   └── health.ts
+│       ├── middleware/errorHandler.ts
+│       ├── db/connect.ts       ← pg Pool singleton
+│       ├── utils/apiError.ts
+│       └── __tests__/
+│           ├── app.test.ts     ← unit: middleware wiring
+│           └── health.test.ts  ← integration: real Postgres
+└── client/
+    ├── package.json
+    ├── tsconfig.json
+    ├── vite.config.ts
+    ├── .env.example
+    ├── index.html
+    └── src/
+        ├── main.tsx
+        ├── App.tsx             ← Phase 0 status page
+        ├── index.css
+        ├── vite-env.d.ts       ← types import.meta.env
+        └── services/fetchServices.ts
 ```
 
-`server/` and `client/` do not exist. Phase 0 creates them.
+There is no `Flowchart/` directory — the `.drawio` files an earlier version of this document listed do not exist on disk.
+
+`server/src/db/migrations/`, `middleware/auth.ts`, `types/express.d.ts` and the rest of the target tree below arrive with the phase that needs them.
 
 ### Target layout
 
@@ -56,7 +89,11 @@ Layer-first, with a module subfolder inside each layer. Do **not** invent a para
 ```text
 server/
 ├── src/
-│   ├── index.ts                    ← Express app entry + route mounting
+│   ├── index.ts                    ← process lifecycle: listen + graceful shutdown
+│   ├── app.ts                      ← createApp(): middleware + route mounting
+│   ├── config/
+│   │   ├── env.ts                  ← fail-fast env parsing, the only reader of process.env
+│   │   └── constants.ts            ← API_VERSION and other cross-layer values
 │   ├── controllers/                ← thin HTTP adapters, zero SQL
 │   │   ├── authController.ts
 │   │   └── inventory/stockController.ts
@@ -65,6 +102,7 @@ server/
 │   │   ├── journalService.ts
 │   │   └── inventory/stockService.ts
 │   ├── routes/
+│   │   ├── index.ts                ← the /api/v1 router; every module mounts here
 │   │   ├── auth.ts
 │   │   └── inventory/stockRoutes.ts
 │   ├── middleware/
@@ -86,8 +124,8 @@ server/
 │   │   ├── inventory.ts
 │   │   └── express.d.ts            ← req.user = { id, orgId, role }
 │   └── __tests__/
-├── entrypoint.sh
-├── Dockerfile
+├── tsconfig.json                   ← type-check config (noEmit)
+├── tsconfig.build.json             ← emit config
 ├── vitest.config.ts
 └── package.json
 
@@ -104,9 +142,12 @@ client/
 │   │   └── layout/
 │   ├── services/fetchServices.ts
 │   └── utils/fetchWithAutoRefresh.ts
-├── Dockerfile
+├── index.html
+├── vite.config.ts
 └── package.json
 ```
+
+No `Dockerfile` or `entrypoint.sh` in either tree — the application processes run on the host during development, and a production image is deployment work. See [development.md](development.md#why-not-full-docker).
 
 ---
 
@@ -114,8 +155,8 @@ client/
 
 Each new module lands in this order:
 
-**migration(s) → types → service(s) → controller(s) → routes → mount in `index.ts` → tests → client pages**
+**migration(s) → types → service(s) → controller(s) → routes → mount in `routes/index.ts` → tests → client pages**
 
-Mount under `/api/v1/<module>`. Frontend pages go under `client/src/Pages/<module>/`.
+Mount under `/api/v1/<module>` by adding one `apiRouter.use(...)` line to `server/src/routes/index.ts`. Nothing mounts directly on the app — `app.ts` knows only about the single versioned router. Frontend pages go under `client/src/Pages/<module>/`.
 
-In the same change, update: the status board in `CLAUDE.md`, [api.md](api.md), and [schema.md](schema.md).
+In the same change, update: the status in `CLAUDE.md`, [roadmap.md](roadmap.md), [api.md](api.md), and [schema.md](schema.md).

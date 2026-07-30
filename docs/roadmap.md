@@ -4,7 +4,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 
 | Phase | Scope | Gate |
 |---|---|---|
-| **0** | Scaffold: `git init` + first commit, `server/` and `client/` skeletons, TS strict config, Dockerfiles, entrypoint, Vitest config, `.gitignore` (incl. `coverage/`), drop legacy `JWT_SECRET`, rewrite `README.md` | Blocks everything |
+| **0 ✅ done** | Scaffold — see [Phase 0, as delivered](#phase-0-as-delivered) below | Blocks everything |
 | **1** | Identity + tenancy: migration runner, `organizations`, `users`, `organization_members`, `refresh_tokens`; `authService`; register/login/refresh/logout/switch-org; auth + RBAC middleware | Blocks everything below |
 | **2** | GL core: chart of accounts, journal entries (create/list), reversing entries, trial balance — all `org_id` scoped, all `BIGINT` cents | Blocks 3+ |
 | **3** | GL completion: fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers | |
@@ -22,6 +22,36 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **15** | MagicJournal NL assistant — DB-backed corpus, `org_id` scoped | |
 
 **Integration tests are not a phase.** They start in Phase 1 and grow with every module — see [testing.md](testing.md).
+
+---
+
+## Phase 0, as delivered
+
+The stack boots and browser → Express → PostgreSQL is connected. No business functionality exists.
+
+**Landed:**
+
+- `server/` — Express 5 + TypeScript, layer-first (`controllers/`, `services/`, `routes/`, `middleware/`, `db/`, `config/`, `utils/`, `__tests__/`)
+- Strict TS config, plus `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax` and friends that `strict` does not include. `tsconfig.json` type-checks; `tsconfig.build.json` emits
+- `pg` Pool singleton with an idle-client `error` listener
+- Fail-fast environment parsing that reports every missing variable at once
+- `errorHandler` + `notFoundHandler`; `ApiError` as the one client-visible error type
+- `GET /api/v1/health` — a real `SELECT 1`, `200`/`503`
+- Graceful shutdown on `SIGTERM`/`SIGINT`: stop accepting, evict idle keep-alive sockets, drain, `pool.end()`, forced exit after 10s
+- `client/` — React 19 + Vite 8, typed API layer in `src/services/fetchServices.ts`, a status page proving the three tiers
+- Vitest with `globals: true`; 4 tests passing (3 unit on app wiring, 1 integration against real Postgres)
+- `docker-compose.yml` reduced to `postgres` + `redis`; `JWT_SECRET` deleted
+- Strays removed: root `package.json`, `_metadata.json`
+
+**Deliberately changed from the original Phase 0 scope:**
+
+| Planned | Actual | Why |
+|---|---|---|
+| `server/Dockerfile`, `client/Dockerfile`, `entrypoint.sh` | Not built. Docker runs Postgres + Redis only; app processes run on the host | Dev-loop speed and native file watching. See [development.md](development.md#why-not-full-docker). Containerising the app belongs with deployment, where a multi-stage production image — not a dev image with a source mount — is the real requirement |
+| `entrypoint.sh` runs migrations + full test suite before boot | Not simulated | Its real home is CI, which is not set up yet. Tests are run manually with `npm test` |
+| `git init` + first commit | Already a git repo with history | Done before Phase 0 started; the reset predates it |
+
+**Also not built, and not owed until later:** `react-router-dom` (Phase 1, with the second page), `utils/money.ts` (Phase 2, with the first money column), `types/express.d.ts` and `req.user` (Phase 1), the migration runner and `npm run migrate` / `db:reset` (Phase 1).
 
 ---
 

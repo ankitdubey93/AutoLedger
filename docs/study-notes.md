@@ -26,6 +26,7 @@ study/
 ├── postgresql/
 ├── react/
 ├── architecture/             ← patterns, algorithms, data structures, trade-offs
+├── tooling/                  ← build, test and dev tooling; compilers and bundlers
 └── security-auth/
 ```
 

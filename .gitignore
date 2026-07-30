@@ -1,7 +1,19 @@
 node_modules/
-server/node_modules/
-client/node_modules/
+
+# build output
 server/dist/
-client/build/
+client/dist/
+
+# test coverage — the prior build committed this
+coverage/
+
+# env files: examples are tracked, real ones never are
 .env
-server/.env
+.env.*
+!.env.example
+
+# tooling / editor noise
+*.log
+npm-debug.log*
+.vite/
+.DS_Store

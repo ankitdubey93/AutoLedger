@@ -7,6 +7,10 @@ npm run test:watch        # watch mode
 npm run test:coverage     # coverage — target ≥ 80% on services/ and utils/
 ```
 
+**Current state: 4 tests.** `__tests__/app.test.ts` (unit — middleware wiring, 404 shape, no `X-Powered-By`) and `__tests__/health.test.ts` (integration — a real `SELECT 1` against the Postgres container). Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point.
+
+There is no CI yet. The prior build's `entrypoint.sh` ran the suite before server startup; that gate has no host equivalent and belongs in CI when it is set up.
+
 Tests live in `server/src/__tests__/`, mirroring the source layout (`__tests__/inventory/stockService.test.ts`). Set `globals: true` in `vitest.config.ts` so `describe`/`it`/`expect` need no import.
 
 ## Two tiers, both required

@@ -1,0 +1,39 @@
+{
+  // Editor + `npm run typecheck` config: type-checks everything, emits nothing.
+  // Emitting is tsconfig.build.json's job.
+  "compilerOptions": {
+    "target": "ES2023",
+    "lib": ["ES2023"],
+
+    // NodeNext is the only resolution mode that matches how Node actually
+    // resolves ESM at runtime, which is why relative imports below carry an
+    // explicit `.js` extension even though the source files are `.ts`.
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": ["node", "vitest/globals"],
+
+    "noEmit": true,
+    "sourceMap": true,
+
+    // strict is a bundle of flags; the ones below are NOT included in it and
+    // each closes a real hole. See study/typescript/typescript-foundations.md.
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+
+    // Forbids imports that look like values but only carry types, so the
+    // emitted JS is exactly what the source says. Required for correct ESM.
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "vitest.config.ts"]
+}

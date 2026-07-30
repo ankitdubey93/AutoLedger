@@ -4,7 +4,7 @@
 
 **Category:** Node/Express
 **Introduced by:** Phase 0–1 — `errorHandler.ts`, `auth.ts`, `rbac.ts`
-**Verified against:** Express 4.19 (behaviour differs in Express 5 — noted below)
+**Verified against:** Express 5.2.1 (what this project runs) and Express 4.19 — the async-error behaviour differs, and both are covered below
 
 ---
 
@@ -69,35 +69,59 @@ router.get('/', asyncHandler(journalController.list));
 // 3. Upgrade to Express 5, which forwards a returned promise's rejection to next()
 ```
 
-**Express 5** (stable since 2024) fixes this: if a handler returns a promise that rejects, the rejection is routed to `next()` automatically. Since `CLAUDE.md` pins Express **4**, option 2 is the one to implement — a single `asyncHandler` in `utils/`, applied at the route layer.
+### Express 5 closes it — and that is what we shipped
+
+**Phase 0 installed Express 5.2.1**, which fixes this natively: if a handler returns a promise that rejects, the rejection is routed to `next()` automatically. Verified against 5.2.1 — an `async` handler that throws reaches the 4-arg error middleware with no wrapper:
+
+```ts
+app.get('/boom', async () => { throw new Error('async throw'); });
+app.use((err, _req, res, _next) => res.status(599).json({ caught: err.message }));
+// → 599 {"caught":"async throw"}
+```
+
+So **there is no `asyncHandler` in this codebase and there should not be one.** An earlier version of this note recommended writing one, on the assumption the project was pinned to Express 4; it isn't. If you see `asyncHandler(...)` in a code review here, it's cargo-culted from an Express 4 tutorial.
+
+Two other Express 5 changes worth knowing, both verified against 5.2.1:
+
+- **Path patterns use path-to-regexp v8.** A bare `'/*'` now **throws at startup** (`Missing parameter name`) — wildcards must be named, `'/*splat'`. Optional params changed too: `'/x/:id?'` throws, and the replacement is `'/x{/:id}'`. This is the most common Express 4 → 5 breakage, and it fails loudly at boot rather than silently.
+- `res.status(...).json(...)` chaining, `req.body` being `undefined` rather than `{}` without a body parser, and the removal of long-deprecated helpers like `res.send(status)`.
+
+The Express 4 behaviour above is still worth knowing cold — it's a standard interview question, and most existing codebases are still on 4.
 
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
 |---|---|---|
-| `try/catch` in every controller | No abstraction, but one forgotten `catch` is a hung request and a possible process crash | Rejected as the primary mechanism |
-| `asyncHandler` wrapper at the route layer | One implementation, applied uniformly, visible at the route definition | **Choose this** in Phase 0 |
+| `try/catch` in every controller | No abstraction, but one forgotten `catch` is a hung request and a possible process crash | Rejected |
+| `asyncHandler` wrapper at the route layer | One implementation, applied uniformly — but pure ceremony on Express 5 | Rejected once we were on 5 |
 | `express-async-errors` (monkey-patches Express) | Zero code changes, but patches the framework at import time — invisible magic | Rejected; we'd rather the seam be explicit |
-| Express 5 | Fixes it natively | Not pinned; revisit as a deliberate upgrade |
+| **Express 5's native forwarding** | Fixes it in the framework; nothing to remember, nothing to forget | **Chosen (Phase 0)** |
+
+Choosing the framework version that removes a whole error class beats disciplining ourselves to apply a wrapper on every route forever. The wrapper's failure mode is silent — you notice a missing `asyncHandler` when a request hangs in production.
 
 This is also why `docs/guardrails.md` rule 1 keeps controllers thin: a controller that only validates, delegates, and formats has one obvious failure path to route to `next()`. Business logic in the controller multiplies the places an error can escape.
 
 ## Where it lives in this codebase
 
-Nothing is built yet (Phase 0 pending). Planned:
+Built (Phase 0):
 
-- `server/src/middleware/errorHandler.ts` — the 4-arg terminal handler; formats `ApiError` vs unknown errors
-- `server/src/middleware/auth.ts` — verifies the JWT, attaches `req.user = { id, orgId, role }`
-- `server/src/middleware/rbac.ts` — `requireRole(...)`, runs *after* `auth`
-- `server/src/middleware/idempotency.ts` — Phase 9
+- `server/src/middleware/errorHandler.ts` — the 4-arg terminal handler and `notFoundHandler`; formats `ApiError` vs unknown errors
 - `server/src/utils/apiError.ts` — `ApiError(status, message)`
+- `server/src/app.ts` — `createApp()`, where the ordering below is actually expressed
+- `server/src/__tests__/app.test.ts` — asserts the 404 shape, which only passes if the error handler was registered with the right arity
 
-**Ordering matters:** `cors` → `cookieParser` → `express.json` → routes (`auth` → `rbac` → controller) → 404 handler → `errorHandler` last.
+Planned:
+
+- `server/src/middleware/auth.ts` — verifies the JWT, attaches `req.user = { id, orgId, role }` (Phase 1)
+- `server/src/middleware/rbac.ts` — `requireRole(...)`, runs *after* `auth` (Phase 1)
+- `server/src/middleware/idempotency.ts` — Phase 9
+
+**Ordering matters.** Current, in `app.ts`: `cors` → `express.json` → `/api/v1` router → `notFoundHandler` → `errorHandler`. Once auth exists: `cors` → `cookieParser` → `express.json` → routes (`auth` → `rbac` → controller) → 404 handler → `errorHandler` last.
 
 ## Gotchas
 
 - **Never leak an unknown error's message to the client.** `errorHandler` should surface `ApiError.message` for known 4xx and a generic string for anything else, logging the real error server-side. A raw Postgres error can reveal table and column names.
-- **Never log the decoded JWT payload** (`docs/guardrails.md` rule 11).
+- **Never log the decoded JWT payload** (`docs/guardrails.md` §8; the same rule is numbered 11 in `CLAUDE.md`).
 - **Sending a response and calling `next()`** double-writes. Always `return res.json(...)`.
 - **`express.json()` has a 100kb default body limit.** A large journal batch or bulk import will 413 until raised deliberately.
 - **A 404 is not an error until you make it one.** If no layer matches, Express falls through to its default handler. Add an explicit catch-all before `errorHandler`.

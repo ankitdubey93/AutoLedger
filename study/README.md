@@ -28,7 +28,8 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [event-loop-and-blocking.md](node-express/event-loop-and-blocking.md) | Loop phases, microtask queues, `nextTick` vs `setImmediate`, libuv thread pool, why network I/O doesn't use it, `bcryptjs` blocking the main thread |
-| [express-middleware-and-async-errors.md](node-express/express-middleware-and-async-errors.md) | Router layer stack, `next()` closure, arity-based error-middleware detection, the Express 4 async-throw trap, middleware ordering |
+| [express-middleware-and-async-errors.md](node-express/express-middleware-and-async-errors.md) | Router layer stack, `next()` closure, arity-based error-middleware detection, the Express 4 async-throw trap and how Express 5 closes it, path-to-regexp v8 breakage, middleware ordering |
+| [graceful-shutdown-and-process-lifecycle.md](node-express/graceful-shutdown-and-process-lifecycle.md) | Signal dispositions and exit code 143, `server.close()` vs `closeIdleConnections()`, drain ordering, unref'd watchdog timers, PID 1, why npm swallows signals |
 
 ### TypeScript
 
@@ -48,10 +49,17 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 |---|---|
 | [multi-tenancy-row-level-scoping.md](architecture/multi-tenancy-row-level-scoping.md) | Row-level vs schema-per-tenant vs database-per-tenant, Postgres RLS as a backstop, why `user_id` was the wrong boundary, cross-tenant isolation testing |
 | [stack-overview-request-lifecycle.md](architecture/stack-overview-request-lifecycle.md) | End-to-end request trace; the layering rule and how to test that the boundary is real (also listed under Foundations) |
+| [api-versioning.md](architecture/api-versioning.md) | How Express rewrites `req.url`/`baseUrl` on mount, path vs header vs media-type versioning, what actually counts as a breaking change, Express 5 path syntax |
+
+### Tooling
+
+| Note | Covers |
+|---|---|
+| [typescript-build-and-dev-tooling.md](tooling/typescript-build-and-dev-tooling.md) | Erasure and why transpiling ≠ type-checking, `tsx`/esbuild, TypeScript 7's Go binary, `NodeNext` vs `bundler` resolution and the `.js` extension rule, `verbatimModuleSyntax`, what `strict` omits, Vite's two pipelines and Rolldown, build-time env inlining |
 
 ### React
 
-Foundations only so far — see [react/react-foundations.md](react/react-foundations.md). Concept notes arrive with Phase 1's auth UI, when there is real client code to anchor them to.
+Foundations only so far — see [react/react-foundations.md](react/react-foundations.md). Phase 0's client is a single status page; concept notes arrive with Phase 1's auth UI, when there is real client code to anchor them to.
 
 ### Security & Auth
 
@@ -73,7 +81,7 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | Middleware chain, async error handling | 0–1 | ✅ |
 | Streams & backpressure | 9 (PDF), 14 (uploads) | ◐ |
 | `worker_threads` vs child processes vs queue consumers | 5 | ◐ |
-| Graceful shutdown, connection draining, `SIGTERM` | 0 | ⬜ |
+| Graceful shutdown, connection draining, `SIGTERM` | 0 | ✅ |
 | `AsyncLocalStorage` for request context | 4 (audit actor) | ⬜ |
 | BullMQ: queues, workers, retries, DLQ, idempotent jobs | 5 | ⬜ |
 | Cron scheduling & idempotent batch jobs | 11–12 | ⬜ |
@@ -142,7 +150,7 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | 3-way matching (PO / receipt / invoice) | 8 | ⬜ |
 | Recursive tree resolution & cycle detection (BOM) | 10 | ⬜ |
 | Caching strategies & invalidation | 5+ | ⬜ |
-| API versioning & backward compatibility | 0 | ⬜ |
+| API versioning & backward compatibility | 0 | ✅ |
 
 ### Security & auth
 
@@ -162,9 +170,12 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 
 | Topic | Phase | Status |
 |---|---|---|
+| Transpiling vs type-checking; `tsx`, `tsc`, Vite, module resolution | 0 | ✅ |
 | Unit vs integration vs e2e — what each proves | 1 | ⬜ |
 | Mocking a DB pool, and why it proves less than you think | 1 | ⬜ |
 | Testing transactions and rollback paths | 2 | ⬜ |
 | Testing concurrency (two clients, one row) | 7 | ⬜ |
-| Docker layer caching & multi-stage builds | 0 | ⬜ |
+| Docker layer caching & multi-stage builds | deployment | ⬜ |
 | Debugging a blocked event loop in production | later | ⬜ |
+
+Phase 0 built no Dockerfiles — Postgres and Redis run in containers, the app runs on the host ([development.md](../docs/development.md#why-not-full-docker)). The multi-stage build note is owed when a production image is actually built.

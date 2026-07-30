@@ -2,13 +2,17 @@
 
 Multi-tenant Enterprise ERP suite. PostgreSQL + Express/TypeScript + React. Double-entry accounting is the system of record; every module posts journal entries into the General Ledger.
 
-## State: empty repo, nothing built
+## State: Phase 0 done — scaffold only, no business logic
 
-On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, ~65 files) was **deleted deliberately** for a from-scratch rebuild. There is no legacy code to preserve, extend, or migrate. Do not reference old files by path — they do not exist, and this was never a git repo, so there is no history to recover.
+On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, ~65 files) was **deleted deliberately** for a from-scratch rebuild. There is no legacy code to preserve, extend, or migrate. Do not reference old files by path — they do not exist.
 
-What exists: `docker-compose.yml`, `.env.example`, `.gitignore`, `README.md` (stale), `docs/`, `Flowchart/`. No `server/`, no `client/`, no migrations, no tests.
+**Built:** `server/` (Express 5 + TS strict, `pg` Pool, error handler, fail-fast env config, `GET /api/v1/health`, graceful shutdown), `client/` (React 19 + Vite 8, status page), Vitest with 4 passing tests, `docker-compose.yml` running Postgres + Redis only.
 
-**Nothing in `docs/` is BUILT.** It is all target state. Check the filesystem before claiming any capability exists. Next step is Phase 0 (scaffold) — see [docs/roadmap.md](docs/roadmap.md).
+**Not built:** no migrations, no tables, no auth, no tenancy, no GL. Next step is Phase 1 (identity + tenancy) — see [docs/roadmap.md](docs/roadmap.md).
+
+Dev model: Postgres + Redis in Docker; server and client run from separate terminals on the host. There are no Dockerfiles and no `entrypoint.sh`.
+
+**Assume nothing in `docs/` is built unless it is listed above.** The rest is target state — check the filesystem before claiming any capability exists.
 
 ## Hard rules
 
