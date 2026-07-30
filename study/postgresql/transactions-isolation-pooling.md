@@ -1,0 +1,148 @@
+# Transactions, Isolation Levels & Connection Pooling
+
+> A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
+
+**Category:** PostgreSQL
+**Introduced by:** Phase 1–2 — `db/connect.ts`, `journalService.createEntry`
+**Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
+
+---
+
+## Mechanism
+
+### One connection = one backend process = one session
+
+Postgres forks a dedicated OS process per connection. Session state — the current transaction, `SET LOCAL` settings, temp tables, prepared statements, advisory locks — lives in that backend. Nothing is shared between connections.
+
+`pg`'s `Pool` keeps a set of these connections (default `max: 10`) and hands one out per `pool.connect()`. **`pool.query()` grabs an arbitrary idle connection, runs one statement, and releases it.**
+
+That single fact explains guardrail 5:
+
+```ts
+const client = await pool.connect();
+await client.query('BEGIN');
+await client.query('INSERT INTO journal_entries ...');  // ✅ in the transaction
+await pool.query('INSERT INTO ledger_lines ...');       // ❌ DIFFERENT connection.
+                                                        //    Different session.
+                                                        //    Autocommitted immediately.
+await client.query('ROLLBACK');
+// journal_entries insert is rolled back. ledger_lines insert is NOT.
+// You now have orphaned ledger lines and an unbalanced book.
+```
+
+The rollback only unwinds work on `client`'s session. The stray statement committed the instant it ran, because outside an explicit transaction Postgres wraps every statement in its own implicit one. There is no error, no warning — just silent partial writes. For a double-entry ledger this is the worst possible failure mode: the invariant that debits equal credits is broken in a way no constraint catches, because the constraint is *across rows*, not within one.
+
+The rule that follows: once you check out a client, every query in that block uses `client`, and you `release()` it in a `finally` — a leaked client is permanently gone from a pool of 10, and ten leaks deadlock the app.
+
+### MVCC and what isolation levels actually do
+
+Postgres doesn't lock rows for reads. Every row version carries `xmin`/`xmax` (the transactions that created and deleted it), and each statement or transaction takes a **snapshot** deciding which versions are visible. Readers never block writers; writers never block readers.
+
+| Level | Prevents | Still allows | Postgres notes |
+|---|---|---|---|
+| READ UNCOMMITTED | — | — | **Treated as READ COMMITTED.** Postgres cannot do dirty reads at all |
+| **READ COMMITTED** | dirty reads | non-repeatable reads, phantoms, lost updates | **The default.** A *new snapshot per statement* |
+| REPEATABLE READ | + non-repeatable reads, phantoms | write skew | Snapshot isolation: one snapshot for the whole transaction. Stronger than the SQL standard requires — phantoms are gone too |
+| SERIALIZABLE | everything | — | Serializable Snapshot Isolation (SSI). Doesn't block; **aborts** offenders with SQLSTATE `40001` |
+
+The critical, non-obvious point about READ COMMITTED: **each statement gets a fresh snapshot**. So inside one transaction, two identical `SELECT`s can return different data if another transaction committed in between. That's fine for most CRUD and catastrophic for read-then-write logic:
+
+```sql
+-- Two sessions, both READ COMMITTED, running concurrently:
+SELECT quantity FROM stock WHERE item_id = $1;   -- both read 10
+-- both decide 10 >= 8, so the sale is fine
+UPDATE stock SET quantity = 2 WHERE item_id = $1; -- last writer wins
+-- Sold 16 units of a 10-unit stock. This is the lost update problem.
+```
+
+### Three fixes, and when each applies
+
+**1. `SELECT ... FOR UPDATE`** — pessimistic row lock. Takes an exclusive lock on the returned rows; a second `FOR UPDATE` on the same row blocks until the first transaction ends, then (in READ COMMITTED) re-reads the *latest* committed version.
+
+```sql
+BEGIN;
+SELECT quantity FROM stock WHERE item_id = $1 FOR UPDATE;  -- second session waits here
+UPDATE stock SET quantity = quantity - 8 WHERE item_id = $1;
+COMMIT;
+```
+
+Lock strengths, weakest to strongest: `FOR KEY SHARE` → `FOR SHARE` → `FOR NO KEY UPDATE` → `FOR UPDATE`. Use `FOR NO KEY UPDATE` when you won't touch the primary key; it conflicts less with FK checks. `FOR UPDATE SKIP LOCKED` is the idiomatic way to build a queue-consumer; `NOWAIT` fails fast instead of waiting.
+
+**2. Atomic in-statement arithmetic** — `SET quantity = quantity - 8` reads and writes in one statement, so no window exists. Combine with a CHECK constraint (`quantity >= 0`) and let the DB reject oversell. Simplest option when the logic fits in one statement.
+
+**3. SERIALIZABLE + retry** — no locks, but the transaction may abort at commit with `40001`, and the caller *must* retry. Right choice when the read set is complex and hard to enumerate for locking; wrong choice if you have no retry loop.
+
+### Deadlocks
+
+Two transactions locking the same rows in opposite order deadlock. Postgres detects this after `deadlock_timeout` (default **1s**) and kills one with SQLSTATE `40P01`. Prevention is discipline, not configuration: **always acquire locks in a deterministic order** — e.g. sort item IDs before locking stock rows.
+
+### `BIGINT` arrives as a string
+
+`pg` returns `int8`/`BIGINT` and `NUMERIC` as **JavaScript strings**, not numbers. This is deliberate: `Number.MAX_SAFE_INTEGER` is 9,007,199,254,740,991 (2⁵³−1), and a 64-bit integer exceeds it, so silent precision loss would be possible. `int4` and `int2` come back as numbers.
+
+Since every money column in this schema is `BIGINT` cents, **every money value read from the DB is a string in JS until parsed.** Parse deliberately in the service layer. You can override globally with `pg.types.setTypeParser(20, BigInt)` — but that makes values non-JSON-serialisable, so prefer explicit conversion.
+
+## Why we chose it here
+
+| Decision | Reasoning |
+|---|---|
+| Explicit `BEGIN`/`COMMIT` on a checked-out client | Journal entry + its ledger lines must be all-or-nothing. Partial writes break the double-entry invariant permanently |
+| READ COMMITTED (the default) for GL writes | The balance invariant is enforced in-application before insert and by CHECK constraints; we're not doing read-then-write on contended rows |
+| `SELECT ... FOR UPDATE` for inventory (Phase 7) | Stock checkout *is* read-then-write on a hot row. See `docs/roadmap.md` |
+| Append-only ledgers over mutable counters | Sidesteps the lost-update class entirely — appending rows never contends the way `UPDATE counter` does. Current quantity is derived |
+
+That last one is the deepest architectural point: choosing an append-only data model makes a whole category of concurrency bug structurally impossible rather than defended against.
+
+## Where it lives in this codebase
+
+Nothing is built yet (Phase 1–2 pending). Planned:
+
+- `server/src/db/connect.ts` — the `Pool` singleton
+- `server/src/services/journalService.ts` — the `BEGIN`/`COMMIT` block for entry + lines
+- `server/src/services/inventory/stockService.ts` — `FOR UPDATE` on stock rows (Phase 7)
+
+## Gotchas
+
+- **`pool.query` inside a transaction block.** Silent partial commit. The single most damaging bug in this codebase's problem domain.
+- **Not releasing a client in `finally`.** A thrown error before `release()` leaks a connection out of a pool of 10.
+- **Assuming a `SELECT` repeats within a transaction.** It doesn't, at READ COMMITTED.
+- **Long-running transactions.** They hold their snapshot, which blocks `VACUUM` from reclaiming dead tuples and causes table bloat. Never hold a transaction open across an external HTTP call.
+- **`SERIALIZABLE` without a retry loop.** You've converted a correctness bug into an intermittent user-facing 500.
+- **Money read as a string.** `row.debit_cents + 100` yields `"5000100"`. Parse at the service boundary.
+- **Connection pooling in serverless.** Each instance opens its own pool; Postgres has a hard `max_connections` (default 100). PgBouncer in transaction mode is the usual answer — but it breaks session-scoped features like prepared statements and `SET LOCAL`.
+
+## Interview Q&A
+
+**Q: What's the default isolation level in PostgreSQL, and what anomaly does it still permit?**
+A: READ COMMITTED. It guarantees you never see uncommitted data, but it takes a fresh snapshot for *every statement*, so within one transaction the same query can return different rows if another transaction commits in between — non-repeatable reads and phantoms are both possible. The one that actually causes production bugs is the lost update: two transactions read the same value, both compute from it, and the second write silently overwrites the first.
+
+**Q: How would you prevent overselling inventory under concurrent requests?**
+A: Three viable approaches. First, `SELECT ... FOR UPDATE` on the stock row inside the transaction — pessimistic, the second request blocks until the first commits, then re-reads the current value. Second, do the arithmetic in the statement itself, `SET quantity = quantity - $1`, with a `CHECK (quantity >= 0)` so the database rejects an oversell atomically. Third, SERIALIZABLE with a retry loop on SQLSTATE 40001. For AutoLedger the choice is `FOR UPDATE`, because checkout is genuinely read-then-write with business rules in between. But the deeper design choice is that stock movements are an append-only ledger with quantity derived, which reduces how often we contend a single row at all.
+
+**Q: Explain why `pool.query` inside a `BEGIN` block is a bug.**
+A: A transaction is session state, and in Postgres a session is a connection — a dedicated backend process. `pool.connect()` gives you one specific connection; `pool.query()` grabs whatever is idle, which is almost certainly a different one. So a statement issued via `pool.query` runs outside your transaction on another session, and because Postgres implicitly wraps standalone statements, it commits immediately. Your later `ROLLBACK` unwinds the client's work and leaves that statement's effects in place. Silent partial write, no error. In a double-entry ledger that means a journal entry whose lines don't balance — an invariant violation no single-row constraint can catch.
+
+**Q: Postgres has no dirty reads even at READ UNCOMMITTED. Why?**
+A: MVCC. A writer creates a new row version stamped with its transaction ID rather than overwriting in place, and visibility is determined by snapshot rules — an uncommitted version simply isn't visible to other snapshots. There's no mechanism by which a reader *could* observe uncommitted data, so READ UNCOMMITTED is accepted for standards compliance and silently treated as READ COMMITTED.
+
+**Q: What's write skew, and which isolation level does it need?**
+A: Two transactions read an overlapping set of rows, each checks an invariant that spans them, and each writes a *different* row — so neither write conflicts, but together they break the invariant. The classic case is an on-call rota where two people each check "someone else is on call" and both remove themselves. Snapshot isolation (Postgres REPEATABLE READ) allows it, because it only detects write-write conflicts on the same row. You need SERIALIZABLE, which tracks read dependencies and aborts one transaction, or you materialise the conflict by locking a row that represents the invariant.
+
+**Q: Why does node-postgres return `BIGINT` as a string?**
+A: Because JavaScript numbers are IEEE 754 doubles, exactly representing integers only up to 2⁵³−1 — about 9.007×10¹⁵. A 64-bit integer can exceed that, so parsing into a `number` risks silent precision loss. Returning a string is lossless and lets the application decide. It matters a lot for us: every money column is `BIGINT` cents, so amounts arrive as strings and must be parsed explicitly in the service layer. Concatenating instead of adding is a real bug that unit tests need to cover.
+
+**Q: Tell me about a time you had to reason about transaction boundaries.**
+A: The rule I enforce on AutoLedger came from a bug pattern in its predecessor: a service opened a transaction, wrote its rows, committed, and then ran a follow-up query via `pool.query` for a side effect, with the error swallowed as non-fatal. It worked, but it was a template waiting to be copied wrong — the next person to add a statement inside the transaction block would reach for `pool.query` too and get a silent partial write. So the guardrail is two-part: every query inside a transaction uses the checked-out client, and no post-`COMMIT` follow-up work in the same function at all. If something must happen after commit, it becomes a queued job with real retry semantics instead of a fire-and-forget with a swallowed error.
+
+## Follow-ups they'll dig into
+
+- "How do you retry a serialization failure safely?" (Only if the transaction is side-effect-free outside the DB; cap attempts; add jitter. And the retry must re-run the *reads*, not just the writes.)
+- "What's the difference between `FOR UPDATE` and `FOR NO KEY UPDATE`?" (The latter doesn't block FK checks that only need key stability — fewer false conflicts.)
+- "How would you implement a job queue in Postgres?" (`SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1` — consumers grab different rows without blocking each other.)
+- "Why do long transactions cause table bloat?" (An open snapshot pins dead tuples; `VACUUM` can't reclaim rows still visible to any live snapshot.)
+
+## See also
+
+- [../architecture/multi-tenancy-row-level-scoping.md](../architecture/multi-tenancy-row-level-scoping.md)
+- [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md)
+- `docs/guardrails.md` rules 5 and 7

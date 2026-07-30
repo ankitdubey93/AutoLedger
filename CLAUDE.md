@@ -30,6 +30,14 @@ Violating any of these is a bug, not a style choice. Full detail and code exampl
 14. **No dependency before the phase that needs it.** No ORM. Redis runs but nothing connects to it until Phase 5 — don't claim queueing works.
 15. **Every module ships tests**, including a cross-tenant isolation test. Without one it is not done.
 
+## Standing task: study notes
+
+The user is preparing for **Backend / React + Node.js + TypeScript** interviews. `study/` holds interview notes generated from this project's own decisions.
+
+**Every change that introduces something new owes a study note in the same change** — a Node/Express mechanism, a TypeScript feature, a PostgreSQL feature, a React pattern, an architectural pattern, or a data-structure choice. Extend the existing note if the topic is already covered; create one from `study/TEMPLATE.md` if not. Update the index and coverage tracker in [study/README.md](study/README.md).
+
+Notes need **mechanism-level depth** (how it works underneath, not what the API is), the **alternatives we rejected and why**, gotchas, and **4–8 interview questions with full written answers**. Accuracy outranks completeness — the user will repeat these in an interview, so state the version you verified against and flag anything you are unsure of. Convention: [docs/study-notes.md](docs/study-notes.md).
+
 ## Docs
 
 Read the relevant file before working — they are not in context by default.
@@ -43,6 +51,7 @@ Read the relevant file before working — they are not in context by default.
 | [docs/api.md](docs/api.md) | Adding or changing a route — response shape, pagination, error conventions |
 | [docs/development.md](docs/development.md) | Running the stack, env vars, Docker, adding a dependency |
 | [docs/testing.md](docs/testing.md) | Writing tests — unit vs integration tiers and what each must cover |
+| [docs/study-notes.md](docs/study-notes.md) | Writing a study note — required sections and the accuracy bar |
 
 ## Keeping docs honest
 
