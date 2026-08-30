@@ -43,3 +43,7 @@ At minimum:
 3. Its `org_id` authorization scoping
 
 **A module without a cross-tenant isolation test is not done.**
+
+---
+
+Why Vitest rather than Jest, and the patterns for writing these tests — AAA, `it.each`, asserting on rejections, test doubles, `supertest`, and the `vi.mock` hoisting trap — are in [study/tooling/testing-with-vitest.md](../study/tooling/testing-with-vitest.md).

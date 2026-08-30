@@ -56,6 +56,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [typescript-build-and-dev-tooling.md](tooling/typescript-build-and-dev-tooling.md) | Erasure and why transpiling ≠ type-checking, `tsx`/esbuild, TypeScript 7's Go binary, `NodeNext` vs `bundler` resolution and the `.js` extension rule, `verbatimModuleSyntax`, what `strict` omits, Vite's two pipelines and Rolldown, build-time env inlining |
+| [testing-with-vitest.md](tooling/testing-with-vitest.md) | Why Vitest over Jest (ESM mocking, the `require`-registry problem, verified Jest 30 failures), forks vs threads isolation, **how to write a test** — AAA, `it.each`, error paths, test doubles, supertest, real-DB integration, coverage as a negative signal, the `vi.mock` hoisting trap |
 
 ### React
 
@@ -171,9 +172,11 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | Topic | Phase | Status |
 |---|---|---|
 | Transpiling vs type-checking; `tsx`, `tsc`, Vite, module resolution | 0 | ✅ |
-| Unit vs integration vs e2e — what each proves | 1 | ⬜ |
-| Mocking a DB pool, and why it proves less than you think | 1 | ⬜ |
-| Testing transactions and rollback paths | 2 | ⬜ |
+| Test runner choice: Vitest vs Jest, ESM mocking, isolation pools | 0 | ✅ |
+| Writing tests: AAA, table-driven, error paths, doubles, supertest | 0 | ✅ |
+| Unit vs integration vs e2e — what each proves | 1 | ✅ |
+| Mocking a DB pool, and why it proves less than you think | 1 | ✅ |
+| Testing transactions and rollback paths | 2 | ◐ |
 | Testing concurrency (two clients, one row) | 7 | ⬜ |
 | Docker layer caching & multi-stage builds | deployment | ⬜ |
 | Debugging a blocked event loop in production | later | ⬜ |
