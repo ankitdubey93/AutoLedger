@@ -20,6 +20,16 @@ The access token carries the active `org_id`. Switching organization means issui
 
 **Never read the active org from a request header, query param, or body** — that is a trivially forgeable tenant boundary.
 
+`switch-org` rotates the **refresh** token too, not just the access token. The refresh row stores the session's active org, so replacing only the access token would let the next silent refresh read the stale value and quietly drag the user back to the previous organization.
+
+### The 15-minute revocation window — a deliberate trade
+
+`middleware/auth.ts` performs **no database query**. The token's signature proves we issued it and that it was not altered, and that is treated as sufficient for its 15-minute life.
+
+The consequence, stated plainly: **removing someone from an organization does not take effect until their current access token expires — up to 15 minutes.** Refresh *does* re-validate membership, so the window is bounded and cannot be extended.
+
+The alternative — checking membership on every request — puts a query in front of every route and gives up the reason for using stateless tokens at all. If a module ever needs immediate revocation (a compliance requirement, say), the answer is a short-lived denylist in Redis from Phase 5, not a per-request join.
+
 ### Roles
 
 Start with a small fixed set and expand only when a module needs it: `OWNER`, `ADMIN`, `ACCOUNTANT`, `VIEWER`. Stored as a TEXT column with a CHECK constraint (Phase 1).
@@ -30,7 +40,15 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-07-30, after Phase 0)
+### Current (verified 2026-08-30, after Phase 1)
+
+Phase 1 added, on the server: `db/migrate.ts`, `db/reset.ts`, `db/migrations/001_organizations_and_users.sql`, `types/auth.ts`, `types/express.d.ts`, `utils/jwt.ts`, `utils/cookies.ts`, `utils/validate.ts`, `utils/requireUser.ts`, `services/authService.ts`, `services/organizationService.ts`, `middleware/auth.ts`, `middleware/rbac.ts`, `controllers/authController.ts`, `controllers/organizationController.ts`, `routes/auth.ts`, `routes/organizations.ts`, and five test files plus `__tests__/setup/` and `__tests__/helpers/`.
+
+On the client: `context/AuthContext.tsx`, `context/OrgContext.tsx`, `components/ProtectedRoute.tsx`, `components/layout/{AppLayout,OrgSwitcher}.tsx`, `Pages/auth/{LoginPage,RegisterPage}.tsx`, `Pages/{DashboardPage,NotFoundPage}.tsx`, `utils/fetchWithAutoRefresh.ts`, `vitest.config.ts` and `src/__tests__/`.
+
+The Phase 0 tree below is unchanged and still accurate for the files it lists.
+
+### As of Phase 0 (2026-07-30)
 
 ```text
 AutoLedger/
@@ -80,7 +98,7 @@ AutoLedger/
 
 There is no `Flowchart/` directory — the `.drawio` files an earlier version of this document listed do not exist on disk.
 
-`server/src/db/migrations/`, `middleware/auth.ts`, `types/express.d.ts` and the rest of the target tree below arrive with the phase that needs them.
+`server/src/db/migrations/`, `middleware/auth.ts` and `types/express.d.ts` landed in Phase 1 (listed above). The remainder of the target tree below arrives with the phase that needs it.
 
 ### Target layout
 

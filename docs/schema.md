@@ -1,6 +1,8 @@
 # Database Schema
 
-**No migrations exist yet.** Everything below is the target. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001_organizations_and_users.sql`.** Phase 2 onward is still the target. Keep this file verified against `server/src/db/migrations/`.
+
+Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
 Migrations live in `server/src/db/migrations/` **only**, applied in sorted filename order.
 
@@ -17,21 +19,35 @@ Migrations live in `server/src/db/migrations/` **only**, applied in sorted filen
 
 ---
 
-## Phase 1 — Identity & tenancy
+## Phase 1 — Identity & tenancy ✅ applied
+
+`schema_migrations (version PK, filename, checksum, applied_at)` is created by the runner itself, not by a migration file.
 
 **`organizations`** — the tenant boundary
-`id` UUID PK · `name` TEXT NOT NULL · `slug` TEXT UNIQUE · `base_currency` CHAR(3) NOT NULL DEFAULT `'USD'` · `created_at` · `updated_at`
+`id` UUID PK DEFAULT `gen_random_uuid()` · `name` TEXT NOT NULL CHECK non-blank · `slug` TEXT UNIQUE NOT NULL · `base_currency` CHAR(3) NOT NULL DEFAULT `'USD'` CHECK `~ '^[A-Z]{3}$'` · `created_at` · `updated_at`
+
+The currency CHECK is not decoration: `CHAR(3)` alone accepts `'usd'`, `'123'` and `'   '`.
 
 **`users`** — global identity, no `org_id`
-`id` UUID PK · `name` TEXT · `email` TEXT NOT NULL · `password` TEXT NOT NULL (bcrypt) · `email_verified` BOOLEAN DEFAULT false · `email_verification_token` TEXT · `email_verification_token_expires` TIMESTAMPTZ · `created_at` · `updated_at`
-Constraint: `UNIQUE (LOWER(email))` via functional unique index.
+`id` UUID PK · `name` TEXT · `email` TEXT NOT NULL · `password` TEXT NOT NULL (bcrypt) · `email_verified` BOOLEAN NOT NULL DEFAULT false · `email_verification_token` TEXT · `email_verification_token_expires` TIMESTAMPTZ · `created_at` · `updated_at`
+Constraint: `UNIQUE (LOWER(email))` via `ux_users_email_lower`.
+
+The three `email_verification*` columns exist but **nothing writes them**. There is no mailer and no verify endpoint, and login deliberately does not check `email_verified`. Generating a token nobody can redeem would be dead scaffolding; they are wired up in a later phase.
 
 **`organization_members`** — membership + role
 `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `role` TEXT NOT NULL CHECK IN (`OWNER`,`ADMIN`,`ACCOUNTANT`,`VIEWER`) · `created_at`
-Constraint: `UNIQUE (org_id, user_id)`. Index on `user_id`.
+Constraint: `UNIQUE (org_id, user_id)`. Index `idx_org_members_user_id` on `user_id`.
 
 **`refresh_tokens`**
-`id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token` TEXT UNIQUE NOT NULL · `expires_at` TIMESTAMPTZ NOT NULL · `created_at`
+`id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token_hash` TEXT UNIQUE NOT NULL · `org_id` UUID FK → `organizations` ON DELETE CASCADE (nullable) · `expires_at` TIMESTAMPTZ NOT NULL · `created_at`
+Indexes: `idx_refresh_tokens_user_id`, `idx_refresh_tokens_expires_at`.
+
+Two deliberate differences from the original plan:
+
+- **`token_hash`, not `token`.** The column stores a SHA-256 digest, so a database dump yields no usable sessions. A fast hash is correct here — the token is a 200+ bit random value, and bcrypt exists to slow down guessing of *low*-entropy human passwords.
+- **`org_id`** carries the session's active organization, so a rotated access token lands in the same org. Nullable, and a *hint* rather than a tenant scope — this table is org-less in the same sense `users` is.
+
+**Trigger:** `set_updated_at()` fires `BEFORE UPDATE` on `organizations` and `users`.
 
 ---
 
@@ -66,7 +82,11 @@ Exactly five, forever: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`. Do 
 
 ### Default chart of accounts
 
-Seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
+**Not seeded yet — this begins in Phase 2.** `accounts` does not exist, so Phase 1's `/auth/register` creates only the user, the organization and the OWNER membership.
+
+**Phase 2 therefore owes a backfill.** Every organization registered during Phase 1 has zero accounts, so adding the seed to `register` is not sufficient on its own — Phase 2 needs either a data migration for existing organizations or an idempotent seed-on-first-access. Recorded in [roadmap.md](roadmap.md).
+
+From Phase 2, seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
 
 | Range | Type |
 |---|---|

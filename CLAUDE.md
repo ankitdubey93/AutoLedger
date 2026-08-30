@@ -2,13 +2,17 @@
 
 Multi-tenant Enterprise ERP suite. PostgreSQL + Express/TypeScript + React. Double-entry accounting is the system of record; every module posts journal entries into the General Ledger.
 
-## State: Phase 0 done — scaffold only, no business logic
+## State: Phase 1 done — identity + tenancy; no accounting yet
 
 On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, ~65 files) was **deleted deliberately** for a from-scratch rebuild. There is no legacy code to preserve, extend, or migrate. Do not reference old files by path — they do not exist.
 
-**Built:** `server/` (Express 5 + TS strict, `pg` Pool, error handler, fail-fast env config, `GET /api/v1/health`, graceful shutdown), `client/` (React 19 + Vite 8, status page), Vitest with 4 passing tests, `docker-compose.yml` running Postgres + Redis only.
+**Built:**
+- **Phase 0** — `server/` (Express 5 + TS strict, `pg` Pool, error handler, fail-fast env, `GET /api/v1/health`, graceful shutdown), `client/` (React 19 + Vite 8), Postgres + Redis in Docker.
+- **Phase 1** — migration runner with a checksum guard (`npm run migrate` / `db:reset`); migration 001 (`organizations`, `users`, `organization_members`, `refresh_tokens`); `authService`; `/api/v1/auth` (register, login, **POST** refresh, logout, check, switch-org) and `/api/v1/organizations` (`/`, `/members`); auth + RBAC middleware; httpOnly cookie sessions with refresh rotation and reuse detection. Client: router, `AuthContext`/`OrgContext`, `ProtectedRoute`, login/register/dashboard, single-flight auto-refresh. **91 server tests + 12 client tests.**
 
-**Not built:** no migrations, no tables, no auth, no tenancy, no GL. Next step is Phase 1 (identity + tenancy) — see [docs/roadmap.md](docs/roadmap.md).
+**Not built:** no GL, no accounts, no journal entries, no money columns anywhere yet. Next step is Phase 2 (GL core) — see [docs/roadmap.md](docs/roadmap.md). Phase 2 also owes the default chart of accounts **and a backfill** for orgs registered during Phase 1.
+
+`server/.env` now requires `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET` — at least 32 chars and different from each other, or the server refuses to boot.
 
 Dev model: Postgres + Redis in Docker; server and client run from separate terminals on the host. There are no Dockerfiles and no `entrypoint.sh`.
 

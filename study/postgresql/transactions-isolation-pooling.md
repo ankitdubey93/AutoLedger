@@ -82,11 +82,56 @@ Two transactions locking the same rows in opposite order deadlock. Postgres dete
 
 Since every money column in this schema is `BIGINT` cents, **every money value read from the DB is a string in JS until parsed.** Parse deliberately in the service layer. You can override globally with `pg.types.setTypeParser(20, BigInt)` — but that makes values non-JSON-serialisable, so prefer explicit conversion.
 
+### A failed statement poisons the whole transaction
+
+This one costs people an afternoon. In PostgreSQL, **any** error inside a transaction block puts it into an aborted state, and every subsequent statement fails with:
+
+```
+current transaction is aborted, commands ignored until end of transaction block
+```
+
+So the familiar "try the insert, catch the duplicate, try again" pattern **does not work inside a transaction** — the first `23505` has already poisoned the block, and the retry cannot run.
+
+Phase 1's registration hits this directly: `organizations.slug` is globally unique and organization names collide constantly ("Acme"). Two ways out:
+
+**`SAVEPOINT`** — a nested rollback point. `SAVEPOINT s; …; ROLLBACK TO s;` recovers the transaction to a known-good state, so a caught error is survivable. Correct, but it costs a round trip per attempt and clutters the code.
+
+**`ON CONFLICT DO NOTHING`** — better here, because *no error is ever raised*:
+
+```sql
+INSERT INTO organizations (name, slug) VALUES ($1, $2)
+ON CONFLICT (slug) DO NOTHING
+RETURNING id
+```
+
+A conflict yields zero rows instead of an exception, so the transaction stays healthy and the loop simply tries the next candidate slug. Retrying inside the transaction becomes ordinary control flow.
+
+Worth knowing that `ON CONFLICT DO UPDATE` (upsert) can deadlock under concurrency when multiple rows are inserted in different orders — same deterministic-ordering discipline as above.
+
+### `DELETE … RETURNING` as an atomic claim
+
+`RETURNING` is not only a convenience for getting the generated id back. It makes a read-and-claim a **single atomic statement**, which is a genuinely useful concurrency primitive.
+
+Refresh-token rotation needs "find this token and consume it, exactly once". SELECT-then-DELETE races: both transactions read the row, both proceed. Instead:
+
+```sql
+DELETE FROM refresh_tokens WHERE token_hash = $1
+RETURNING user_id, org_id, expires_at
+```
+
+Under READ COMMITTED the first transaction locks and deletes the row. The second blocks on that row lock, and when the first commits, re-evaluates its `WHERE` against the updated row version — which no longer exists — and returns **zero rows**. Exactly one winner, decided by the database.
+
+And zero rows becomes *information*: a valid token signature with no matching row means it was already consumed, i.e. replayed. See [jwt-and-refresh-rotation.md](../security-auth/jwt-and-refresh-rotation.md).
+
+The same shape works for a simple job queue: `DELETE FROM jobs WHERE id = (SELECT id FROM jobs ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`.
+
 ## Why we chose it here
 
 | Decision | Reasoning |
 |---|---|
 | Explicit `BEGIN`/`COMMIT` on a checked-out client | Journal entry + its ledger lines must be all-or-nothing. Partial writes break the double-entry invariant permanently |
+| `DELETE … RETURNING` to consume a refresh token | Read-then-write would let two concurrent refreshes both succeed. One statement makes the claim atomic — and turns "zero rows" into replay detection |
+| `ON CONFLICT DO NOTHING` for slug allocation | A caught `23505` would abort the enclosing transaction, so retrying needs either this or a `SAVEPOINT` per attempt |
 | READ COMMITTED (the default) for GL writes | The balance invariant is enforced in-application before insert and by CHECK constraints; we're not doing read-then-write on contended rows |
 | `SELECT ... FOR UPDATE` for inventory (Phase 7) | Stock checkout *is* read-then-write on a hot row. See `docs/roadmap.md` |
 | Append-only ledgers over mutable counters | Sidesteps the lost-update class entirely — appending rows never contends the way `UPDATE counter` does. Current quantity is derived |
@@ -95,7 +140,13 @@ That last one is the deepest architectural point: choosing an append-only data m
 
 ## Where it lives in this codebase
 
-Nothing is built yet (Phase 1–2 pending). Planned:
+Built in Phase 1:
+
+- `server/src/services/authService.ts` — `register` (one transaction, `ON CONFLICT` slug loop), `rotateRefreshToken` (`DELETE … RETURNING`), `login`, `switchOrg`. Every query inside a transaction uses the checked-out `client`, never `pool`
+- `server/src/db/migrate.ts` — one transaction per migration file, plus a session-level advisory lock
+- `server/src/db/connect.ts` — the `Pool` singleton with its idle-client `error` listener
+
+Phase 2 additions, still pending:
 
 - `server/src/db/connect.ts` — the `Pool` singleton
 - `server/src/services/journalService.ts` — the `BEGIN`/`COMMIT` block for entry + lines

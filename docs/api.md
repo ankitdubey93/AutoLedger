@@ -1,6 +1,6 @@
 # API Reference
 
-**One endpoint exists: `GET /api/v1/health`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -68,18 +68,78 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 
 ---
 
-## Planned surface — Phases 1–2
-
 ### Auth — `/api/v1/auth`
 
-| Method | Path | Description |
-|---|---|---|
-| POST | `/register` | Create user + organization + owner membership + seed chart of accounts, in one transaction |
-| POST | `/login` | Sets access + refresh tokens as httpOnly cookies |
-| GET | `/check` | Verify session; return user, active org, role |
-| GET | `/refresh` | New access token from the refresh cookie |
-| POST | `/switch-org` | Re-issue access token scoped to another org the user belongs to |
-| POST | `/logout` | Clear cookies + delete the refresh token row |
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/register` | none | Create user + organization + OWNER membership, in one transaction |
+| POST | `/login` | none | Sets access + refresh tokens as httpOnly cookies |
+| POST | `/refresh` | refresh cookie | Rotate both tokens |
+| POST | `/logout` | none | Clear cookies + delete the refresh token row |
+| GET | `/check` | access cookie | Verify session; return user, active org, role, memberships |
+| POST | `/switch-org` | access cookie | Re-issue the session scoped to another org the user belongs to |
+
+**`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
+
+**`/register` does not seed a chart of accounts.** `accounts` is a Phase 2 table; see [schema.md](schema.md). It also does not log you in — it returns `201` and the client calls `/login` next.
+
+`/logout` is public on purpose: clearing cookies must work even when the access token has already expired.
+
+#### Session body
+
+Returned by `/login`, `/check`, `/refresh` and `/switch-org`:
+
+```json
+{
+  "success": true,
+  "user": { "id": "…", "name": "Ada", "email": "ada@example.com",
+            "emailVerified": false, "createdAt": "2026-08-30T14:38:35.587Z" },
+  "organization": { "id": "…", "name": "Acme Traders", "slug": "acme-traders",
+                    "baseCurrency": "USD", "createdAt": "…" },
+  "role": "OWNER",
+  "memberships": [ { "orgId": "…", "orgName": "Acme Traders", "orgSlug": "acme-traders",
+                     "role": "OWNER", "joinedAt": "…" } ],
+  "accessTokenExpiresAt": "2026-08-30T14:53:36.166Z"
+}
+```
+
+`accessTokenExpiresAt` exists because the token lives in an httpOnly cookie the browser cannot read — the client needs the server to state the expiry.
+
+#### Cookies
+
+| Cookie | Path | Lifetime | Flags |
+|---|---|---|---|
+| `autoledger_at` | `/` | 15m | `HttpOnly`, `SameSite=Lax`, `Secure` in production |
+| `autoledger_rt` | `/api/v1/auth` | 7d | `HttpOnly`, `SameSite=Lax`, `Secure` in production |
+
+Names are prefixed because cookies ignore ports — every app on `localhost` shares one jar. The refresh cookie is path-scoped so it is not attached to ordinary API calls.
+
+#### Refresh rotation and reuse detection
+
+Each refresh consumes its token and issues a new one, claimed atomically with `DELETE … RETURNING`. Presenting a token that was already rotated — a valid signature with no matching row — is treated as replay: the user's entire token family is deleted and the request 401s. Membership is re-validated on every refresh, so a revoked member does not keep refreshing indefinitely.
+
+#### CSRF posture
+
+Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a single-origin CORS allow-list, and JSON-only bodies (an HTML form cannot send `Content-Type: application/json`, so it cannot reach a handler without a preflight it will fail). No `csurf` — it is deprecated, and rule 14 defers new dependencies anyway. Double-submit tokens are deferred until there is a reason for them.
+
+**Not yet mitigated: login brute-force.** There is no rate limiting. `express-rate-limit` is a scheduled decision in [development.md](development.md), not an oversight.
+
+---
+
+### Organizations — `/api/v1/organizations`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The caller's active organization |
+| GET | `/members` | `OWNER`, `ADMIN` | Everyone in the active organization |
+
+The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
+
+`/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the dashboard renders as an explanatory notice rather than an error.
+
+---
+
+## Planned surface — Phase 2
 
 ### Accounts — `/api/v1/accounts`
 

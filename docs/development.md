@@ -52,11 +52,13 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 |---|---|
 | `npm run dev` | `tsx watch src/index.ts` — restarts on change, no build step |
 | `npm run typecheck` | `tsc --noEmit`. **`tsx` does not type-check** — run this |
-| `npm run build` | `tsc -p tsconfig.build.json` → `dist/` |
+| `npm run build` | `tsc -p tsconfig.build.json` → `dist/`, **then copies `src/db/migrations/*.sql`** — `tsc` only emits JS, so without the copy step `dist/db/migrations/` would be empty and the built server could not migrate |
 | `npm start` | Runs the built `dist/index.js` |
+| `npm run migrate` | Applies pending migrations |
+| `npm run db:reset` | **Destructive.** Drops schema `public` and re-runs every migration. Refuses when `NODE_ENV=production` |
 | `npm test` | Vitest, single run |
 | `npm run test:watch` | Vitest watch mode |
-| `npm run test:coverage` | Coverage over `services/` and `utils/` |
+| `npm run test:coverage` | Coverage over `services/`, `utils/` and `middleware/` |
 
 ### `client/`
 
@@ -66,8 +68,8 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run build` | Type-check, then Vite production build → `dist/` |
 | `npm run preview` | Serves the built bundle |
-
-`npm run migrate` and `npm run db:reset` do **not** exist yet — the migration runner arrives in Phase 1.
+| `npm test` | Vitest + jsdom + Testing Library, single run |
+| `npm run test:watch` | Vitest watch mode |
 
 ---
 
@@ -97,10 +99,18 @@ No application secrets live here.
 | `PG_USER` | **yes** | |
 | `PG_PASSWORD` | **yes** | |
 | `PG_DATABASE` | **yes** | |
-| `ACCESS_TOKEN_SECRET` | not yet | Access JWTs (15m). Becomes required in Phase 1 |
-| `REFRESH_TOKEN_SECRET` | not yet | Refresh JWTs (7d). Becomes required in Phase 1 |
+| `ACCESS_TOKEN_SECRET` | **yes** | Access JWTs (15m). ≥32 chars |
+| `REFRESH_TOKEN_SECRET` | **yes** | Refresh JWTs (7d). ≥32 chars, and **must differ** from the access secret |
 
-Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart. The token secrets are listed in `.env.example` but not yet enforced — nothing reads them until auth exists, and validating unused config would be a false claim.
+Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
+
+Generate the two secrets with two separate runs of:
+
+```bash
+openssl rand -hex 32
+```
+
+They must be different. If one key signed both token types, a stolen 7-day refresh token would verify as an access token and the short access TTL would buy nothing — so `env.ts` refuses to boot when they match.
 
 `JWT_SECRET` is **gone** — removed from `docker-compose.yml` and `.env.example` in Phase 0. Do not reintroduce it ([guardrails.md](guardrails.md) rule 8).
 
@@ -158,12 +168,23 @@ Installed in Phase 0:
 | `react`, `react-dom` 19 | client | |
 | `vite` 8, `@vitejs/plugin-react` | client (dev) | Dev server + production bundler |
 
-Deliberately **not** installed yet: `react-router-dom` (Phase 1, with the second page), `jsonwebtoken` / `bcrypt` (Phase 1), `zod` (when validation has something to validate).
+Added in Phase 1:
+
+| Package | Layer | Why |
+|---|---|---|
+| `jsonwebtoken` | server | Access + refresh JWTs |
+| `bcrypt` | server | Password hashing. The native build hashes on the libuv threadpool, so it does not block the event loop the way pure-JS `bcryptjs` does |
+| `cookie-parser` | server | Reads the httpOnly auth cookies. Unsigned — the JWTs carry their own signature |
+| `react-router-dom` 7 | client | Routing, arriving with the second page as planned |
+| `vitest`, `jsdom`, `@testing-library/*` | client (dev) | The client had no test runner before Phase 1 |
+
+Deliberately **not** installed: `zod`. Phase 1's request bodies are flat objects of five scalars, which a ~80-line hand-rolled `utils/validate.ts` covers clearly (and it is unit-tested, because it is security-relevant). **Revisit trigger:** Phase 2's journal entries take a nested `lines[]` array, and hand-rolling nested-array validation is where a schema library starts paying for itself.
 
 Approved for later phases, add only when the module that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
+| `express-rate-limit` | throttling `/auth/login` and `/auth/register`. **Currently unmitigated** — brute-forcing a password is not rate limited today. Deferred deliberately rather than overlooked | 2 |
 | `bullmq` + `ioredis` | background workers (payroll batches, PDF rendering, FX polling, depreciation cron) | 5 |
 | `ajv` | JSON Schema validation for QMS dynamic `JSONB` forms | 12 |
 | `pg_trgm` (PG extension) | CRM fuzzy search | 12 |
@@ -188,3 +209,11 @@ Approved for later phases, add only when the module that needs it is being built
 **Browser console shows a CORS error** — `FRONTEND_URL` in `server/.env` must exactly match the origin serving the page, scheme and port included.
 
 **Type errors do not appear when running `npm run dev`** — correct. `tsx` strips types without checking them. Run `npm run typecheck`.
+
+**Server exits with "ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET must be different"** — exactly what it says. Generate two independent values with `openssl rand -hex 32`.
+
+**Migration fails with "column … does not exist" on a fresh checkout** — the Docker volume outlives the code. `docker compose down` does *not* delete `postgres-data`, so a database can still hold tables from an older schema; `CREATE TABLE IF NOT EXISTS` then silently no-ops against the stale table and the next statement fails. This actually happened when Phase 1 landed: the volume still carried the pre-2026-07-30 build's `users`, `accounts` and `refresh_tokens`. Fix with `npm run db:reset`, or `docker compose down -v` to drop the volume outright. Both are destructive — back up first with `docker exec autodb_postgres pg_dump -U autodb_user -d autodb > backup.sql`.
+
+**Every authenticated request 401s, with no CORS error to explain it** — check that `VITE_API_BASE_URL` and the page origin both use `localhost`, not a mix of `localhost` and `127.0.0.1`. Same-site is computed from the registrable domain, and IP literals are not in the Public Suffix List, so each is its own site: `localhost:5173` → `127.0.0.1:5000` is genuinely cross-site and the browser silently withholds every `SameSite=Lax` cookie. Ports are irrelevant to this — `localhost:5173` → `localhost:5000` is same-site and works.
+
+**Integration tests fail with `database "autodb_test" does not exist`** — normally self-healing: `globalSetup` creates it. If it persists, Postgres is not reachable at all. The suite deliberately uses a **separate** database so its `TRUNCATE` between tests can never touch your dev data.

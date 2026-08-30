@@ -45,6 +45,23 @@ function integer(name: string, fallback: number): number {
   return parsed;
 }
 
+/**
+ * A signing key short enough to brute-force makes the signature decorative.
+ * 32 hex characters is the floor; `openssl rand -hex 32` gives 64.
+ */
+const MIN_SECRET_LENGTH = 32;
+
+function secret(name: string): string {
+  const value = required(name);
+  if (value !== '' && value.length < MIN_SECRET_LENGTH) {
+    problems.push(
+      `${name} must be at least ${MIN_SECRET_LENGTH} characters, got ${value.length}. ` +
+        'Generate one with: openssl rand -hex 32',
+    );
+  }
+  return value;
+}
+
 function nodeEnv(): NodeEnv {
   const value = optional('NODE_ENV', 'development');
   if (!(NODE_ENVS as readonly string[]).includes(value)) {
@@ -64,7 +81,25 @@ const parsed = {
   PG_USER: required('PG_USER'),
   PG_PASSWORD: required('PG_PASSWORD'),
   PG_DATABASE: required('PG_DATABASE'),
+
+  // Two separate keys, deliberately. See docs/guardrails.md rule 8 — there is
+  // no JWT_SECRET.
+  ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),
+  REFRESH_TOKEN_SECRET: secret('REFRESH_TOKEN_SECRET'),
 } as const;
+
+// If the two keys are equal, a refresh token verifies as an access token: a
+// stolen 7-day refresh cookie would become an unlimited-lifetime credential,
+// and the whole point of the short access TTL disappears. Cheap check, real bug.
+if (
+  parsed.ACCESS_TOKEN_SECRET !== '' &&
+  parsed.ACCESS_TOKEN_SECRET === parsed.REFRESH_TOKEN_SECRET
+) {
+  problems.push(
+    'ACCESS_TOKEN_SECRET and REFRESH_TOKEN_SECRET must be different values — ' +
+      'sharing one key lets a refresh token authenticate as an access token',
+  );
+}
 
 if (problems.length > 0) {
   throw new Error(

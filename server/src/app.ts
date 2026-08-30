@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import apiRouter from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { env } from './config/env.js';
@@ -19,6 +20,12 @@ export function createApp(): Express {
   // `credentials: true` is required for the httpOnly refresh cookie in Phase 1,
   // and it forbids a wildcard origin, so FRONTEND_URL is mandatory.
   app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+
+  // Populates `req.cookies`, which the auth middleware reads the access token
+  // from. Must run before any route that authenticates. Unsigned: the tokens
+  // are JWTs and carry their own signature, so cookie signing would only add a
+  // second secret to manage.
+  app.use(cookieParser());
 
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 

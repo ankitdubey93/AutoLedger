@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import healthRoutes from './health.js';
+import authRoutes from './auth.js';
+import organizationRoutes from './organizations.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -11,5 +13,9 @@ import healthRoutes from './health.js';
 const apiRouter = Router();
 
 apiRouter.use('/health', healthRoutes);
+
+// Phase 1 — identity + tenancy.
+apiRouter.use('/auth', authRoutes);
+apiRouter.use('/organizations', organizationRoutes);
 
 export default apiRouter;

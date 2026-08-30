@@ -5,8 +5,8 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | Phase | Scope | Gate |
 |---|---|---|
 | **0 ✅ done** | Scaffold — see [Phase 0, as delivered](#phase-0-as-delivered) below | Blocks everything |
-| **1** | Identity + tenancy: migration runner, `organizations`, `users`, `organization_members`, `refresh_tokens`; `authService`; register/login/refresh/logout/switch-org; auth + RBAC middleware | Blocks everything below |
-| **2** | GL core: chart of accounts, journal entries (create/list), reversing entries, trial balance — all `org_id` scoped, all `BIGINT` cents | Blocks 3+ |
+| **1 ✅ done** | Identity + tenancy — see [Phase 1, as delivered](#phase-1-as-delivered) below | Blocks everything below |
+| **2** | GL core: chart of accounts, journal entries (create/list), reversing entries, trial balance — all `org_id` scoped, all `BIGINT` cents. **Also owes: seed the default chart at registration, plus a backfill for organizations created during Phase 1** ([schema.md](schema.md)) | Blocks 3+ |
 | **3** | GL completion: fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers | |
 | **4** | CDC audit trail: `audit_logs` JSONB table, `OLD`/`NEW` snapshot triggers on all financial tables | Blocks compliance claims |
 | **5** | Background jobs: `bullmq` + `ioredis`, Redis healthcheck + `depends_on`, worker process, retry/DLQ policy | Blocks 9, 11, 12, 13 |
@@ -52,6 +52,34 @@ The stack boots and browser → Express → PostgreSQL is connected. No business
 | `git init` + first commit | Already a git repo with history | Done before Phase 0 started; the reset predates it |
 
 **Also not built, and not owed until later:** `react-router-dom` (Phase 1, with the second page), `utils/money.ts` (Phase 2, with the first money column), `types/express.d.ts` and `req.user` (Phase 1), the migration runner and `npm run migrate` / `db:reset` (Phase 1).
+
+---
+
+## Phase 1, as delivered
+
+You can register, sign in, stay signed in across reloads, switch organizations, and see a dashboard of real data. The tenancy boundary is enforced and tested.
+
+**Landed:**
+
+- Migration runner (`db/migrate.ts`) — sorted application, per-file transaction, `schema_migrations` ledger, session-level advisory lock, filename/gap validation, and a **SHA-256 checksum guard that refuses to run when an applied migration has been edited**. Plus `db/reset.ts`, `npm run migrate`, `npm run db:reset`
+- `001_organizations_and_users.sql` — `organizations`, `users`, `organization_members`, `refresh_tokens`, the shared `set_updated_at()` trigger, `UNIQUE (LOWER(email))`, role and currency CHECKs, FK indexes
+- `authService` (all SQL) — register in one transaction with `ON CONFLICT` slug allocation, login with a dummy-hash timing equaliser, refresh rotation via `DELETE … RETURNING` with reuse detection and family invalidation, switch-org, logout
+- `middleware/auth.ts` (token-only, no DB round trip) and `middleware/rbac.ts` (`requireRole`)
+- `utils/jwt.ts`, `utils/cookies.ts`, `utils/validate.ts` (hand-rolled, no zod), `utils/requireUser.ts`, `types/express.d.ts`
+- `/api/v1/auth` (6 routes) and `/api/v1/organizations` (2 routes) — see [api.md](api.md)
+- Client: `react-router-dom`, `AuthContext` (three-state machine), `OrgContext`, `ProtectedRoute`, `AppLayout` + `OrgSwitcher`, login/register/dashboard/404 pages, single-flight `fetchWithAutoRefresh`
+- **91 server tests** (up from 4) including the cross-tenant isolation suite, and **12 client tests** — the client had no runner before this phase
+
+**Deliberately changed from the original Phase 1 scope:**
+
+| Planned | Actual | Why |
+|---|---|---|
+| `GET /auth/refresh` | `POST /auth/refresh` | Rotation is state-changing, and `SameSite=Lax` still sends cookies on a top-level cross-site navigation — a `GET` would be a logout-CSRF hole |
+| `register` seeds the chart of accounts | Deferred to Phase 2 | `accounts` is a Phase 2 table. Phase 2 inherits a backfill obligation |
+| `refresh_tokens.token` | `refresh_tokens.token_hash` | A dump of the table must not yield usable sessions |
+| — | Added `GET /organizations/members` | Phase 1 otherwise has no org-scoped table, so the mandatory cross-tenant isolation test would have had nothing to test and `rbac.ts` nothing to guard |
+
+**Known gaps, deliberate:** no login rate limiting (`express-rate-limit` is a scheduled decision in [development.md](development.md)); no email verification (columns exist, nothing writes them); a revoked membership stays effective for up to 15 minutes, which is the trade the short access-token TTL buys ([architecture.md](architecture.md)).
 
 ---
 

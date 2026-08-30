@@ -81,16 +81,56 @@ The predecessor scoped everything by `user_id`, which cannot express the thing a
 
 The residual role for `user_id` is `created_by` — an audit field. Keeping it as an *access* check alongside `org_id` would be actively harmful: it would break the core requirement that a colleague can see the invoice you raised.
 
+## RBAC vs ABAC
+
+**RBAC** — permission is a function of a role name. `requireRole('OWNER', 'ADMIN')`. Roles are a small closed set, checks are `O(1)` and stateless, and the whole policy fits on one screen.
+
+**ABAC** — permission is a function of *attributes* of the subject, the resource, the action and the environment. "An ACCOUNTANT may approve an invoice under $10,000 in an open fiscal period, if they did not create it." That is not expressible as a role name: it depends on the resource's amount, the period's state, and the relationship between the actor and the record.
+
+The dividing question is **whether the answer depends on the specific row**. If it does, RBAC alone cannot express it.
+
+Phase 1 is plain RBAC with four roles stored as a `TEXT` column with a CHECK constraint — not `roles`/`permissions` tables. Building a permission engine before there are permissions to manage means maintaining an abstraction nobody uses, and the four names are trivially migrated into tables later if a module needs granularity.
+
+The honest limit: the moment a rule mentions an amount, a document state, or "unless you created it", RBAC is finished and you want ABAC-style policy evaluation. Approval limits in Phase 8 are the likely trigger.
+
+**ReBAC** (relationship-based, as in Google Zanzibar) is the third option — permission as reachability in a graph, for deeply nested ownership. Overkill here.
+
+## The 15-minute revocation window
+
+`middleware/auth.ts` does **no** database query — the signed token is treated as authoritative for its 15-minute life. The consequence, stated rather than hidden: **removing someone from an organization does not take effect until their access token expires.**
+
+The window is bounded, because `POST /auth/refresh` re-validates membership from `organization_members` on every rotation. So the worst case is one access-token lifetime, not "until they log out".
+
+The alternative — a membership lookup on every request — puts a query in front of every route and gives up the reason for stateless tokens. If immediate revocation is ever genuinely required, the answer is a short-lived denylist in Redis (available from Phase 5), not a per-request join.
+
 ## Where it lives in this codebase
 
-Nothing is built yet (Phase 1 pending). Planned:
+Built in Phase 1:
 
-- `server/src/db/migrations/001_organizations_and_users.sql` — `organizations`, `users`, `organization_members`
-- `server/src/middleware/auth.ts` — resolves `{ id, orgId, role }` onto `req.user`
+- `server/src/db/migrations/001_organizations_and_users.sql` — `organizations`, `users`, `organization_members`, with `UNIQUE (org_id, user_id)` and an index on `user_id`
+- `server/src/middleware/auth.ts` — resolves `{ id, orgId, role }` onto `req.user` from the token alone
 - `server/src/middleware/rbac.ts` — `requireRole(...)`
 - `server/src/routes/auth.ts` — `POST /auth/switch-org`
+- `server/src/services/organizationService.ts` — every query takes `orgId` first and carries an `org_id` predicate
+- `server/src/__tests__/tenantIsolation.test.ts` — the suite below
 
 Full model: `docs/architecture.md`. Table definitions: `docs/schema.md`.
+
+## What the isolation suite actually asserts
+
+The fixture is the important part: **user A** in org A only, **user C** in org B only, and **user B in both**.
+
+User B is the one people leave out, and without him the suite is worthless — a bug that returns an empty list to *everybody* passes every "A cannot see B's data" assertion. So the suite checks both directions.
+
+| # | Assertion | Why it exists |
+|---|---|---|
+| 1 | A's `switch-org` into org B → 403 **and no `Set-Cookie`** | A 403 that still minted a token would hand over the access it just refused |
+| 2 | A's `/auth/check` never mentions org B | Asserted against the **raw response text**, so a leak through an unexamined field still fails |
+| 3 | A's member list contains A and B, never C | The basic scope check |
+| 4 | Same request with `?orgId=B`, `X-Org-Id: B` **and** a body naming B → byte-identical to #3 | Directly tests "the org comes only from the token" |
+| 5 | B switches to org B and now **does** see C | The one that stops "return nothing to everyone" from passing as isolation |
+| 6 | A replayed rotated refresh token → 401, family deleted | Session isolation, not just row isolation |
+| 7 | `organizationService.listMembers(orgB)` called directly → correct rows | Proves the predicate is in the query, not in a controller a future module might bypass |
 
 ## Gotchas
 

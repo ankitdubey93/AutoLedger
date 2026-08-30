@@ -73,6 +73,34 @@ Plan node types you must recognise in `EXPLAIN` output: `Seq Scan`, `Index Scan`
 
 Plus modifiers that matter more than people expect: **partial** indexes (`WHERE is_active`), **expression** indexes (`LOWER(email)` — how our case-insensitive uniqueness works), and **covering** indexes (`INCLUDE (...)`) to enable index-only scans.
 
+### The extended query protocol — why parameterisation actually works
+
+"Use parameterized queries" is repeated everywhere and almost never explained. The mechanism is in the wire protocol, and knowing it is what separates a memorised rule from an understood one.
+
+The **simple query protocol** sends one string, which the server parses and executes. If you built that string by concatenation, the user's input *is* SQL text — the parser has no way to know which characters you meant as data. `'; DROP TABLE users; --` is a perfectly well-formed statement boundary.
+
+The **extended query protocol** splits it into separate messages:
+
+| Message | Carries |
+|---|---|
+| **Parse** | The SQL text with `$1`, `$2` placeholders → a prepared statement |
+| **Bind** | The **parameter values**, as a separate length-prefixed binary/text array → a portal |
+| **Execute** | Run the portal |
+
+The decisive point: **the values in `Bind` never pass through the SQL parser.** By the time they arrive the statement has already been parsed and its plan tree fixed — placeholders are leaf nodes in that tree, and Bind fills them with typed values. There is no string being assembled anywhere, so there is no escaping to get wrong. Injection is not "prevented" so much as *structurally impossible*: data never occupies a position where it could become syntax.
+
+This is why `pg`'s `pool.query('… WHERE org_id = $1', [orgId])` is safe and template-literal interpolation is not — and why client-side "escaping" libraries are a weaker answer to the same problem.
+
+**What parameterisation cannot protect.** Placeholders only stand in for *values*. Table names, column names, `ORDER BY` targets and `ASC`/`DESC` are **identifiers**, part of the statement's structure, and cannot be bound:
+
+```sql
+SELECT * FROM journal_entries ORDER BY $1   -- sorts by a constant string; not an error, just wrong
+```
+
+So a user-supplied sort column has to be validated a different way — whitelist it against a constant map ([guardrails rule 4](../../docs/guardrails.md)), never `quote_ident` and hope. That is a genuinely common gap in otherwise parameterised codebases.
+
+A side benefit: a parsed statement can be re-executed with new Bind values, so prepared statements avoid re-planning. `pg` exposes this via named statements.
+
 ## What it does best, and how
 
 **Enforcing correctness.** Not just as a slogan — the mechanism is that Postgres lets you push invariants *below* the application, where no code path can bypass them. `CHECK` constraints, `UNIQUE` on expressions, `FOREIGN KEY` with `ON DELETE` behaviour, and `EXCLUDE USING GIST` (which can make overlapping date ranges physically impossible to insert) mean a bug in one service can't corrupt the data. Combined with real transactions and WAL durability, "the database is the source of truth" is literally enforceable.

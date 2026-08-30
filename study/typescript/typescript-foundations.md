@@ -123,6 +123,43 @@ const TRANSITIONS = {
 
 `as const` then `typeof X[number]` is the standard way to derive a union from a runtime array — one source of truth for both, which is exactly what you want for roles and account types.
 
+### Declaration merging — how `req.user` gets typed
+
+Express's `Request` is defined in `@types/express`, which we do not control, yet the auth middleware needs to attach `req.user`. **Declaration merging** is the mechanism: two declarations of the same interface in the same scope are combined rather than one shadowing the other. It is the type-level counterpart of "interfaces are open".
+
+```ts
+// server/src/types/express.d.ts
+import type { AuthUser } from './auth.js';
+
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthUser;
+    }
+  }
+}
+```
+
+Three things here are easy to get wrong, and each fails differently:
+
+1. **The `import` makes this file a *module*.** A `.d.ts` with no top-level import/export is a *script*, and its declarations are already global. Add an import and everything inside becomes module-local — so the augmentation silently does nothing and `req.user` still errors. `declare global` re-opens the global scope from inside a module. This is the classic failure, and the symptom (no error, just no effect) gives no hint of the cause.
+2. **The specifier ends in `.js`.** NodeNext resolution applies to `.d.ts` files too.
+3. **The file must be in `include`.** Ambient declarations are picked up by the *program*, not by imports — nothing imports `express.d.ts`. Our `tsconfig.json` has `include: ["src"]`, so it is covered.
+
+Note `user?:` is genuinely optional, because it really is absent on public routes. The temptation is then `req.user!` in every protected controller — an assertion the compiler cannot verify, which turns a route accidentally mounted without the auth middleware into a runtime `TypeError` instead of a clean 401. `requireUser(req)` narrows it in one place and throws `ApiError(401)` instead.
+
+### `exactOptionalPropertyTypes` and the `| null` rule
+
+Under this flag, `{ a?: string }` and `{ a: string | undefined }` are different types: the first means "may be absent", the second "is present and may be undefined". Assigning an explicit `undefined` to an optional property is an error.
+
+It is correct, and it is friction — every object built from a database row needs conditional spreads:
+
+```ts
+...(latencyMs !== null ? { latencyMs } : {})
+```
+
+The simplest way out is a convention rather than a workaround: **type nullable database columns as `T | null`, never `field?: T`.** `null` is a value, so it assigns freely; it also matches what the `pg` driver actually returns, and it removes the "absent vs present-but-undefined" question entirely. Applied throughout `types/auth.ts`, that single decision eliminated essentially all of the flag's friction.
+
 ## What it does best, and how
 
 **Making large-scale refactoring safe.** The mechanism is that the checker is a whole-program analysis: change a function signature or rename a field and *every* call site that no longer fits becomes a compile error. In plain JavaScript the same change is a grep and a hope. This compounds — it's why TypeScript's value grows with codebase size and team size, and why it's near-mandatory for a fifteen-module ERP.
