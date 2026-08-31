@@ -3,7 +3,7 @@ import * as organizationService from '../services/organizationService.js';
 import { requireUser } from '../utils/requireUser.js';
 
 /**
- * Thin adapters over organizationService. Zero SQL (guardrails rule 1).
+ * Thin adapters over organizationService. Zero SQL (guardrails rule 2).
  *
  * Note what these handlers never read: `req.params.orgId`, `req.query.orgId`,
  * or an `X-Org-Id` header. The organization comes from `requireUser(req).orgId`

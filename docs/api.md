@@ -1,12 +1,12 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
-- All routes prefixed `/api/v1/`. The prefix is declared once, in `server/src/config/constants.ts`, and applied in `app.ts`; module routers mount on the shared `apiRouter` in `server/src/routes/index.ts`.
+- All routes prefixed `/api/v1/`. The prefix is declared once, in `server/src/config/constants.ts`, and applied in `app.ts`; every router mounts on the shared `apiRouter` in `server/src/routes/index.ts`.
+- **Platform routes are app-less:** `/auth`, `/organizations`, `/apps`, `/health`. **App routes are namespaced:** `/api/v1/<app-slug>/<module>`, e.g. `/api/v1/ledger-core/journals`. The slugs are the single source of truth in `server/src/config/apps.ts` — see [architecture.md](architecture.md#suite-structure).
 - From Phase 1, every route except `/auth/*` and `/health` requires the `auth` middleware.
-- Mount modules at `/api/v1/<module>`.
 - Success: `{ success: true, ... }`. List endpoints add `count`, `totalCount`, `currentPage`, `totalPages`.
 - Pagination defaults to `page=1&limit=20`, `limit` capped at 100.
 - Errors: throw or `next(new ApiError(status, message))` and let `errorHandler.ts` format them. Never hand-roll an error response.
@@ -135,20 +135,49 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 
-`/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the dashboard renders as an explanatory notice rather than an error.
+`/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the client renders as an explanatory notice rather than an error.
 
 ---
 
-## Planned surface — Phase 2
+### Apps — `/api/v1/apps`
 
-### Accounts — `/api/v1/accounts`
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The suite's app registry |
+
+```json
+{
+  "success": true,
+  "count": 7,
+  "apps": [
+    {
+      "slug": "ledger-core",
+      "name": "LedgerCore",
+      "domain": "Core Accounting & Systems",
+      "tagline": "Double-entry ledger, multi-currency, QuickBooks sync.",
+      "skills": ["Double-entry integrity", "DB constraints", "Multi-currency", "QuickBooks API sync"],
+      "status": "building"
+    }
+  ]
+}
+```
+
+Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. This is a static list today, not a per-org entitlement — every organization sees the same seven apps. See [roadmap.md](roadmap.md#app-map).
+
+---
+
+## Planned surface — by app
+
+### LedgerCore — `/api/v1/ledger-core` — Phase 3+
+
+#### Accounts — `/api/v1/ledger-core/accounts`
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/` | List the org's accounts, ordered by code |
 | POST | `/` | Create an account |
 
-### Journals — `/api/v1/journals`
+#### Journals — `/api/v1/ledger-core/journals`
 
 | Method | Path | Description |
 |---|---|---|
@@ -156,8 +185,12 @@ The active organization comes **only** from the verified access token. `orgId` i
 | POST | `/` | Create a balanced entry (min 2 lines, debits == credits in cents) |
 | POST | `/:id/reverse` | Post the reversing entry for a posted journal |
 
-### Reports — `/api/v1/reports`
+#### Reports — `/api/v1/ledger-core/reports`
 
 | Method | Path | Description |
 |---|---|---|
 | GET | `/trial-balance` | Per-account debit/credit totals, type-aware `net_balance`, `isBalanced` |
+
+### The other six apps
+
+TaxGuard AI, AP-Flow, FP&A Engine, UnitEcon, BoardDeck Automator, and ForecasterPro have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.

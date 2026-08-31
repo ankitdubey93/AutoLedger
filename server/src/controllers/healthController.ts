@@ -5,7 +5,7 @@ import { env } from '../config/env.js';
 
 /**
  * Thin adapter: call the service, choose a status code, shape the body.
- * No SQL, no logic — docs/guardrails.md rule 1.
+ * No SQL, no logic — docs/guardrails.md rule 2.
  */
 export const getHealth: RequestHandler = async (_req, res) => {
   const db = await healthService.checkDatabase();

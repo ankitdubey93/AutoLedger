@@ -82,7 +82,7 @@ const parsed = {
   PG_PASSWORD: required('PG_PASSWORD'),
   PG_DATABASE: required('PG_DATABASE'),
 
-  // Two separate keys, deliberately. See docs/guardrails.md rule 8 — there is
+  // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),
   REFRESH_TOKEN_SECRET: secret('REFRESH_TOKEN_SECRET'),

@@ -36,6 +36,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [branded-types-for-money.md](typescript/branded-types-for-money.md) | IEEE 754 and why floats can't hold money, integer cents, `BIGINT` vs `NUMERIC`, structural vs nominal typing, branding with `unique symbol`, branded IDs for tenant safety |
+| [const-assertions-and-satisfies.md](typescript/const-assertions-and-satisfies.md) | Type widening, `as const` freezing to literals, deriving a union with `(typeof X)[number]`, `satisfies` as a non-widening check, why not `zod` for a static list, `isAppSlug` as the required runtime predicate |
 
 ### PostgreSQL
 
@@ -51,6 +52,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [multi-tenancy-row-level-scoping.md](architecture/multi-tenancy-row-level-scoping.md) | Row-level vs schema-per-tenant vs database-per-tenant, Postgres RLS as a backstop, why `user_id` was the wrong boundary, **RBAC vs ABAC vs ReBAC**, the 15-minute revocation window, and the 7 concrete cross-tenant isolation tests |
 | [stack-overview-request-lifecycle.md](architecture/stack-overview-request-lifecycle.md) | End-to-end request trace; the layering rule and how to test that the boundary is real (also listed under Foundations) |
 | [api-versioning.md](architecture/api-versioning.md) | How Express rewrites `req.url`/`baseUrl` on mount, path vs header vs media-type versioning, what actually counts as a breaking change, Express 5 path syntax |
+| [modular-monolith-app-namespacing.md](architecture/modular-monolith-app-namespacing.md) | One deploy vs many, why the app slug is a routing convention and not a security boundary, table-naming as the data-layer half of the same convention, monorepo/microservices rejected and why, the app↔GL integration point |
 
 ### Tooling
 
@@ -64,6 +66,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [context-effects-and-data-fetching.md](react/context-effects-and-data-fetching.md) | The three-state session union and why it fixes the login flash, StrictMode double-invoke, `AbortController` vs the `ignore` flag (and the CORS-preflight interaction that forced the switch), splitting a context to control re-renders, cache invalidation on org switch via remount keys, React 19 additions |
+| [routing-nested-and-dynamic-segments.md](react/routing-nested-and-dynamic-segments.md) | Nested routes as a tree not a lookup table, layout routes and `<Outlet/>`, dynamic segments vs splats, `useParams` typing gap, `<Navigate>` vs `navigate()`, the remount-by-`key` cache-invalidation trick |
 
 ### Security & Auth
 
@@ -81,49 +84,53 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 
 **✅** covered by a dedicated note · **◐** covered at foundations level only, deep-dive still owed when the phase lands · **⬜** not covered.
 
+**Phase numbers were renumbered in Phase 2**, when AutoLedger became a suite of seven apps and the module-based roadmap (Inventory, Procurement, MRP, Payroll, QMS, CRM, EAM) was dropped — see [roadmap.md](../docs/roadmap.md#dropped-from-scope). A topic whose only owning phase was one of the dropped modules is marked **dropped** below rather than left pointing at a phase number that no longer exists; it stays in the tracker as a record of what was covered by the old plan; See [roadmap.md](../docs/roadmap.md) for the current phase table.
+
 ### Node & Express
 
 | Topic | Phase | Status |
 |---|---|---|
 | Event loop, microtasks, thread pool | 0–1 | ✅ |
 | Middleware chain, async error handling | 0–1 | ✅ |
-| Streams & backpressure | 9 (PDF), 14 (uploads) | ◐ |
-| `worker_threads` vs child processes vs queue consumers | 5 | ◐ |
+| Streams & backpressure | 8 (AP-Flow OCR uploads), 12 (BoardDeck `.pptx`) | ◐ |
+| `worker_threads` vs child processes vs queue consumers | 6 | ◐ |
 | Graceful shutdown, connection draining, `SIGTERM` | 0 | ✅ |
-| `AsyncLocalStorage` for request context | 4 (audit actor) | ⬜ |
-| BullMQ: queues, workers, retries, DLQ, idempotent jobs | 5 | ⬜ |
-| Cron scheduling & idempotent batch jobs | 11–12 | ⬜ |
+| `AsyncLocalStorage` for request context | 5 (audit actor) | ⬜ |
+| BullMQ: queues, workers, retries, DLQ, idempotent jobs | 6 | ⬜ |
+| Cron scheduling & idempotent batch jobs | 12 (BoardDeck close automation) | ⬜ |
 
 ### TypeScript
 
 | Topic | Phase | Status |
 |---|---|---|
-| Branded types, structural vs nominal typing | 2 | ✅ |
+| Branded types, structural vs nominal typing | 3 | ✅ |
 | Declaration merging (`req.user`) | 1 | ✅ |
-| Discriminated unions for FSM state | 8 | ◐ |
-| Generics & constrained type parameters | 2 | ✅ |
+| Discriminated unions for FSM state | 8 (AP-Flow document status) | ◐ |
+| Generics & constrained type parameters | 3 | ✅ |
 | `unknown` vs `any`, type guards, narrowing | 1 | ✅ |
-| Utility types (`Pick`, `Omit`, `Partial`, `Record`) | 2 | ◐ |
+| Utility types (`Pick`, `Omit`, `Partial`, `Record`) | 3 | ◐ |
 | Conditional & mapped types | later | ⬜ |
-| `satisfies`, `as const`, literal inference | 2 | ✅ |
+| `satisfies`, `as const`, deriving a union from data | 2 | ✅ |
 | `strict` mode: what each flag actually buys | 0 | ✅ |
 
 ### PostgreSQL
 
 | Topic | Phase | Status |
 |---|---|---|
-| Transactions, isolation, pooling | 1–2 | ✅ |
-| Index types: B-tree, GIN, GiST, partial, covering | 2+ | ✅ |
-| `EXPLAIN ANALYZE` and reading a query plan | 2+ | ◐ |
-| Constraints: CHECK, UNIQUE, EXCLUDE, deferrable | 1–2 | ✅ |
-| Triggers & `updated_at`; CDC audit snapshots | 4 | ⬜ |
-| `WITH RECURSIVE` CTEs + cycle detection | 10 | ⬜ |
-| Window functions (running balances, ledger reports) | 3 | ⬜ |
-| `EXCLUDE USING GIST` + `btree_gist` for date ranges | 11 | ⬜ |
-| `JSONB`: operators, indexing, when *not* to use it | 12 | ◐ |
-| `pg_trgm` fuzzy search | 12 | ⬜ |
+| Transactions, isolation, pooling | 1, 3 | ✅ |
+| Index types: B-tree, GIN, GiST, partial, covering | 3+ | ✅ |
+| `EXPLAIN ANALYZE` and reading a query plan | 3+ | ◐ |
+| Constraints: CHECK, UNIQUE, EXCLUDE, deferrable | 1, 3 | ✅ |
+| Triggers & `updated_at`; CDC audit snapshots | 5 | ⬜ |
+| `WITH RECURSIVE` CTEs + cycle detection | dropped (was MRP/BOM) | ⬜ |
+| Window functions (running balances, ledger reports) | 4 (LedgerCore P&L/balance sheet) | ⬜ |
+| `EXCLUDE USING GIST` + `btree_gist` for date ranges | dropped (was HR/Payroll leave overlap) | ⬜ |
+| `JSONB`: operators, indexing, when *not* to use it | dropped (was QMS forms) | ◐ |
+| `pg_trgm` fuzzy search | dropped (was CRM) | ⬜ |
+| `pgvector`: similarity search, index types (IVFFlat/HNSW) | 13 (TaxGuard AI) | ⬜ |
 | Partitioning strategies | later | ⬜ |
 | Migration design: additive, idempotent, zero-downtime | 0–1 | ✅ |
+
 ### React
 
 | Topic | Phase | Status |
@@ -132,31 +139,35 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | Hook rules and why they exist (the call-order model) | 1 | ✅ |
 | `useEffect` dependency array, cleanup, double-invoke in StrictMode | 1 | ✅ |
 | Context: composition, re-render cost, splitting providers | 1 | ✅ |
-| `useMemo` / `useCallback` / `React.memo` — when they actually help | 2 | ◐ |
+| Nested routes, layout routes, dynamic segments | 2 | ✅ |
+| `useMemo` / `useCallback` / `React.memo` — when they actually help | 3+ | ◐ |
 | Data fetching, races, cancellation, cache invalidation on org switch | 1–2 | ✅ |
-| Controlled vs uncontrolled forms | 2 | ◐ |
+| Controlled vs uncontrolled forms | 3+ | ◐ |
 | React 19 specifics (`use`, Actions, compiler) | 1 | ✅ |
-| Error boundaries & suspense | 2 | ◐ |
+| Error boundaries & suspense | 3+ | ◐ |
 
 ### Architecture & patterns
 
 | Topic | Phase | Status |
 |---|---|---|
 | Multi-tenancy isolation strategies | 1 | ✅ |
-| Double-entry bookkeeping as an invariant system | 2 | ⬜ |
-| Append-only ledgers vs mutable counters | 2, 7 | ⬜ |
-| Event sourcing vs CRUD — and where we sit | 2 | ⬜ |
-| Finite state machines for document lifecycle | 8 | ⬜ |
-| Idempotency keys for financial mutations | 9 | ⬜ |
-| Optimistic vs pessimistic concurrency control | 7 | ⬜ |
+| Modular monolith: app boundaries without a network boundary | 2 | ✅ |
+| Double-entry bookkeeping as an invariant system | 3 | ⬜ |
+| Append-only ledgers vs mutable counters | 3 | ⬜ |
+| Event sourcing vs CRUD — and where we sit | 3 | ⬜ |
+| Finite state machines for document lifecycle | 8 (AP-Flow) | ⬜ |
+| Idempotency keys for financial mutations | 8+ | ⬜ |
+| Optimistic vs pessimistic concurrency control | dropped (was Inventory `FOR UPDATE`) | ⬜ |
 | Layered architecture: controller / service / data | 0 | ✅ |
 | Full request lifecycle across all five layers | 0 | ✅ |
-| Immutability & reversing entries over mutation | 2 | ⬜ |
-| Derived state vs stored state (trade-offs) | 2–3 | ⬜ |
-| FIFO / weighted-average-cost valuation algorithms | 7 | ⬜ |
-| 3-way matching (PO / receipt / invoice) | 8 | ⬜ |
-| Recursive tree resolution & cycle detection (BOM) | 10 | ⬜ |
-| Caching strategies & invalidation | 5+ | ⬜ |
+| Immutability & reversing entries over mutation | 3 | ⬜ |
+| Derived state vs stored state (trade-offs) | 3–4 | ⬜ |
+| FIFO / weighted-average-cost valuation algorithms | dropped (was Inventory) | ⬜ |
+| 3-way matching (PO / receipt / invoice) | 8 (AP-Flow) | ⬜ |
+| Recursive tree resolution & cycle detection (BOM) | dropped (was Manufacturing/MRP) | ⬜ |
+| RAG: chunking, embeddings, retrieval, citation grounding | 13 (TaxGuard AI) | ⬜ |
+| PII redaction before an external model call | 13 (TaxGuard AI) | ⬜ |
+| Caching strategies & invalidation | 6+ | ⬜ |
 | API versioning & backward compatibility | 0 | ✅ |
 
 ### Security & auth
@@ -171,7 +182,7 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | RBAC vs ABAC modelling | 1 | ✅ |
 | SQL injection & why parameterisation works | 1 | ✅ |
 | OWASP Top 10 mapped to this codebase | later | ⬜ |
-| Presigned uploads: threat model | 14 | ⬜ |
+| Presigned uploads: threat model | 8 (AP-Flow document capture) | ⬜ |
 
 ### Testing & tooling
 
@@ -182,8 +193,8 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 | Writing tests: AAA, table-driven, error paths, doubles, supertest | 0 | ✅ |
 | Unit vs integration vs e2e — what each proves | 1 | ✅ |
 | Mocking a DB pool, and why it proves less than you think | 1 | ✅ |
-| Testing transactions and rollback paths | 2 | ◐ |
-| Testing concurrency (two clients, one row) | 7 | ⬜ |
+| Testing transactions and rollback paths | 3 | ◐ |
+| Testing concurrency (two clients, one row) | dropped (was Inventory `FOR UPDATE`) | ⬜ |
 | Docker layer caching & multi-stage builds | deployment | ⬜ |
 | Debugging a blocked event loop in production | later | ⬜ |
 

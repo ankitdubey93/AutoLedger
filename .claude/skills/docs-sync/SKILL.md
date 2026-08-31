@@ -13,7 +13,7 @@ Direction of truth is one-way: **the filesystem is right, the doc is wrong.** Ne
 
 ```bash
 grep -rn "router\.\(get\|post\|put\|patch\|delete\)" server/src/routes/ 2>/dev/null
-grep -rn "app.use('/api/v1" server/src/index.ts 2>/dev/null
+grep -n "apiRouter.use(" server/src/routes/index.ts 2>/dev/null
 ```
 
 Compare against the tables in `api.md`. Report and fix:
@@ -21,7 +21,8 @@ Compare against the tables in `api.md`. Report and fix:
 - Route exists in code, missing from the doc → add it.
 - Route documented, absent from code → it is **planned**, not built. Move it out of any "built" section or mark it clearly.
 - Method/path mismatch (documented `PUT`, actual `POST`) → the code wins; also check whether the `PUT` violates the immutability rule.
-- A mounted router not reachable because `index.ts` never mounts it → that is a bug, not a doc issue. Report it as such.
+- A mounted router not reachable because `routes/index.ts` never mounts it on `apiRouter` — that is a bug, not a doc issue. Report it as such. Also flag anything mounted directly on `app` in `app.ts`/`index.ts` instead of on `apiRouter` — that violates the single-router rule in [architecture.md](../../../docs/architecture.md#suite-structure).
+- A platform route (`/auth`, `/organizations`, `/apps`, `/health`) documented under an app prefix, or an app route documented without its `/api/v1/<app-slug>/` prefix, is a doc bug — cross-check the slug against `server/src/config/apps.ts`.
 
 ## 2. Migrations vs [docs/schema.md](../../../docs/schema.md)
 
@@ -80,6 +81,14 @@ ls -R study/
 ```
 
 `study/README.md` is the index and coverage tracker required by [docs/study-notes.md](../../../docs/study-notes.md) — if notes exist without it, create it. Every note listed in the index must exist, and every note file must be listed.
+
+## 8. App registry vs roadmap and README
+
+```bash
+grep -n "slug:" server/src/config/apps.ts 2>/dev/null
+```
+
+`server/src/config/apps.ts` is the single source of truth for which apps exist and their slugs. Every app it lists must appear in [roadmap.md](../../../docs/roadmap.md)'s app map, [README.md](../../../README.md)'s app table, and `CLAUDE.md`'s app table — same name, same domain. An app whose `status` in the registry is `'building'` must have at least one real route reachable under its slug (cross-check against step 1); a `'planned'` app must not.
 
 ## Report
 

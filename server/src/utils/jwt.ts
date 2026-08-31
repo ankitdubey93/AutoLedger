@@ -15,7 +15,7 @@ import { isRole, type AuthUser, type RefreshClaims } from '../types/auth.js';
  * That is why access tokens are short-lived and refresh tokens are checked
  * against a database row. See study/security-auth/jwt-and-refresh-rotation.md.
  *
- * Nothing here logs a payload (guardrails rule 8).
+ * Nothing here logs a payload (guardrails rule 11).
  */
 
 /** The two token kinds are signed with different keys — env.ts enforces that they differ. */

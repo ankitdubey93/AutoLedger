@@ -99,7 +99,7 @@ The Express 4 behaviour above is still worth knowing cold — it's a standard in
 
 Choosing the framework version that removes a whole error class beats disciplining ourselves to apply a wrapper on every route forever. The wrapper's failure mode is silent — you notice a missing `asyncHandler` when a request hangs in production.
 
-This is also why `docs/guardrails.md` rule 1 keeps controllers thin: a controller that only validates, delegates, and formats has one obvious failure path to route to `next()`. Business logic in the controller multiplies the places an error can escape.
+This is also why `docs/guardrails.md` rule 2 keeps controllers thin: a controller that only validates, delegates, and formats has one obvious failure path to route to `next()`. Business logic in the controller multiplies the places an error can escape.
 
 ## Where it lives in this codebase
 

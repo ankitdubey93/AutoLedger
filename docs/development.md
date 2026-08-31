@@ -112,7 +112,7 @@ openssl rand -hex 32
 
 They must be different. If one key signed both token types, a stolen 7-day refresh token would verify as an access token and the short access TTL would buy nothing — so `env.ts` refuses to boot when they match.
 
-`JWT_SECRET` is **gone** — removed from `docker-compose.yml` and `.env.example` in Phase 0. Do not reintroduce it ([guardrails.md](guardrails.md) rule 8).
+`JWT_SECRET` is **gone** — removed from `docker-compose.yml` and `.env.example` in Phase 0. Do not reintroduce it ([guardrails.md](guardrails.md) rule 11).
 
 ### `client/.env`
 
@@ -131,7 +131,7 @@ Only `VITE_`-prefixed variables reach the bundle, and Vite **inlines them at bui
 | PostgreSQL 16 | `autodb_postgres` | 5432 | `pg_isready` | The server |
 | Redis 7 | `autodb_redis` | 6379 | none yet | **Nothing** |
 
-**Redis is provisioned but must not be claimed.** The container runs so the port is reserved and the topology is visible, but no code connects to it. Phase 5 adds `bullmq` + `ioredis`, a worker process, a healthcheck, and `REDIS_HOST` / `REDIS_PORT`. Until then, queueing does not work.
+**Redis is provisioned but must not be claimed.** The container runs so the port is reserved and the topology is visible, but no code connects to it. Phase 6 adds `bullmq` + `ioredis`, a worker process, a healthcheck, and `REDIS_HOST` / `REDIS_PORT` — shared infrastructure, not owned by any one app. Until then, queueing does not work.
 
 The Postgres volume `postgres-data` survives `docker compose down`. Only `down -v` destroys it.
 
@@ -178,21 +178,22 @@ Added in Phase 1:
 | `react-router-dom` 7 | client | Routing, arriving with the second page as planned |
 | `vitest`, `jsdom`, `@testing-library/*` | client (dev) | The client had no test runner before Phase 1 |
 
-Deliberately **not** installed: `zod`. Phase 1's request bodies are flat objects of five scalars, which a ~80-line hand-rolled `utils/validate.ts` covers clearly (and it is unit-tested, because it is security-relevant). **Revisit trigger:** Phase 2's journal entries take a nested `lines[]` array, and hand-rolling nested-array validation is where a schema library starts paying for itself.
+Deliberately **not** installed: `zod`. Phase 1's request bodies are flat objects of five scalars, which a ~80-line hand-rolled `utils/validate.ts` covers clearly (and it is unit-tested, because it is security-relevant). **Revisit trigger:** LedgerCore's journal entries (Phase 3) take a nested `lines[]` array, and hand-rolling nested-array validation is where a schema library starts paying for itself.
 
-Approved for later phases, add only when the module that needs it is being built:
+Nothing new in Phase 2 — the app registry is a static in-code list (`config/apps.ts`), not a request body, so it needs no validation library and no migration.
+
+Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
-| `express-rate-limit` | throttling `/auth/login` and `/auth/register`. **Currently unmitigated** — brute-forcing a password is not rate limited today. Deferred deliberately rather than overlooked | 2 |
-| `bullmq` + `ioredis` | background workers (payroll batches, PDF rendering, FX polling, depreciation cron) | 5 |
-| `ajv` | JSON Schema validation for QMS dynamic `JSONB` forms | 12 |
-| `pg_trgm` (PG extension) | CRM fuzzy search | 12 |
-| `btree_gist` (PG extension) | leave-overlap `EXCLUDE` constraints | 11 |
-| S3-compatible SDK | presigned uploads | 14 |
-| Tesseract or AWS Textract | OCR | 14 |
+| `express-rate-limit` | throttling `/auth/login` and `/auth/register`. **Currently unmitigated** — brute-forcing a password is not rate limited today. Deferred deliberately rather than overlooked | 3 |
+| `bullmq` + `ioredis` | background workers, shared across apps (PDF rendering, FX polling, depreciation cron, forecast batches) | 6 |
+| OCR (Tesseract or AWS Textract) | AP-Flow's invoice capture | 8 |
+| `pptxgenjs` or similar | BoardDeck Automator's `.pptx` generation | 12 |
+| `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 13 |
+| An LLM / embeddings SDK | TaxGuard AI. Reverses the prior "no LLM dependency" ruling — see [roadmap.md](roadmap.md#phase-2-as-delivered) | 13 |
 
-**No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, `WITH RECURSIVE` BOM resolution, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
+**No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, recursive CTEs, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
 
 ---
 

@@ -92,7 +92,7 @@ It does **not** include these, which we enable explicitly:
 | `noFallthroughCasesInSwitch` | a missing `break` |
 | `noUnusedLocals` / `noUnusedParameters` | dead bindings |
 
-`noUncheckedIndexedAccess` is the one that matters most here. `SORT_COLUMNS[req.query.sort]` returning `string` rather than `string | undefined` is how an unwhitelisted value reaches a SQL identifier — see [guardrails.md](../../docs/guardrails.md) rule 5.
+`noUncheckedIndexedAccess` is the one that matters most here. `SORT_COLUMNS[req.query.sort]` returning `string` rather than `string | undefined` is how an unwhitelisted value reaches a SQL identifier — see [guardrails.md](../../docs/guardrails.md) rule 4.
 
 `noUnusedParameters` has a deliberate escape hatch: parameters prefixed with `_` are exempt. That is what lets our error middleware declare `(err, _req, res, _next)` — Express detects error handlers by **arity**, so the fourth parameter must exist even though nothing uses it, and the underscore keeps the compiler quiet without disabling the check.
 

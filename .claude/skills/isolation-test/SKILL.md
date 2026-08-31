@@ -7,7 +7,7 @@ description: Write AutoLedger's required integration tests against real PostgreS
 
 The prior build mocked the pool in every test, so its migrations, CHECK constraints and triggers were never executed by CI — and the bugs that killed it lived exactly there. These tests run against a **real** PostgreSQL instance with migrations applied.
 
-**A module without a cross-tenant isolation test is not done.** Treat a missing one as a blocking gap, not a TODO.
+**A module without a cross-tenant isolation test is not done.** Treat a missing one as a blocking gap, not a TODO. This is per app, not per suite — LedgerCore's fixture proves nothing about AP-Flow's tables, so each app's first org-scoped module needs its own instance of the fixture below.
 
 ## Fixture: two orgs, one shared user, one foreign user
 
@@ -44,7 +44,7 @@ That last one catches the forged-tenant class of bug directly — include it eve
 ```ts
 it('does not leak org B rows to an org A caller', async () => {
   const res = await request(app)
-    .get(`/api/v1/journals/${secret.id}`)
+    .get(`/api/v1/ledger-core/journals/${secret.id}`)
     .set('Cookie', tokenFor(userA, orgA));
   expect(res.status).toBe(404);
   expect(JSON.stringify(res.body)).not.toContain(secret.id);
@@ -52,11 +52,27 @@ it('does not leak org B rows to an org A caller', async () => {
 
 it('ignores a forged org id in the body', async () => {
   const res = await request(app)
-    .post('/api/v1/journals')
+    .post('/api/v1/ledger-core/journals')
     .set('Cookie', tokenFor(userA, orgA))
     .send({ ...validPayload, org_id: orgB.id });
   const row = await db.query('SELECT org_id FROM journal_entries WHERE id = $1', [res.body.entry.id]);
   expect(row.rows[0].org_id).toBe(orgA.id);
+});
+```
+
+## App boundary is not a tenancy boundary
+
+The `:appSlug` segment in the URL (`/api/v1/<app-slug>/...`) namespaces routing only — it must never leak into a query as if it scoped anything. Add one assertion alongside the forged-`org_id` case:
+
+```ts
+it('ignores an app slug that does not match the mounted router', async () => {
+  // Hitting an app's route through a different app's prefix should 404 at
+  // the router level, not be silently accepted — there is no app-level scope
+  // to bypass, but a route that responds to the wrong prefix is a routing bug.
+  const res = await request(app)
+    .get('/api/v1/taxguard/journals')
+    .set('Cookie', tokenFor(userA, orgA));
+  expect(res.status).toBe(404);
 });
 ```
 
@@ -83,7 +99,7 @@ Assert on the **constraint name** in the error, not just "it threw" — otherwis
 it('bumps updated_at on update', async () => { /* read, update, assert strictly greater */ });
 ```
 
-From Phase 4 on, also assert the `audit_logs` row: correct `org_id`, actor, table, operation, and that `OLD`/`NEW` JSONB snapshots hold the real values.
+From Phase 5 on, also assert the `audit_logs` row: correct `org_id`, actor, table, operation, and that `OLD`/`NEW` JSONB snapshots hold the real values.
 
 ## Migrations
 

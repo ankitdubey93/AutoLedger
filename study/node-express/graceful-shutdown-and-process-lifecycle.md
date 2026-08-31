@@ -95,7 +95,7 @@ Graceful shutdown is therefore the first half of a pair. The second is the Phase
 | `close()` + `closeIdleConnections()` + `pool.end()` + unref'd force-exit | ~20 lines, drains in 9 ms, bounded worst case | **Chosen** |
 | A library (`stoppable`, `terminus`) | Adds health-check and readiness wiring | Rejected — a dependency for 20 lines we should understand |
 
-Related: [guardrails.md](../../docs/guardrails.md) rule 6 (transaction safety) is what shutdown protects, and rule 6's "no post-`COMMIT` follow-up work" is the same concern from the other direction — work queued after a commit is work a shutdown can lose.
+Related: [guardrails.md](../../docs/guardrails.md) rule 5 (transaction safety) is what shutdown protects, and rule 5's "no post-`COMMIT` follow-up work" is the same concern from the other direction — work queued after a commit is work a shutdown can lose.
 
 ## Where it lives in this codebase
 

@@ -10,7 +10,11 @@ import { useAuth, useAuthActions } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
 
 /**
- * The authenticated home page.
+ * The account page: identity, organization, membership, and session details
+ * that apply across the whole suite rather than to any one app. This used to
+ * be the post-login landing page; the app chooser (Pages/AppChooserPage.tsx)
+ * took that role when AutoLedger became a suite of apps — see /account's
+ * link from PlatformLayout's header.
  *
  * Every value below comes from a real Phase 1 endpoint. There is no
  * placeholder data and no link to a screen that does not exist — the modules
@@ -199,40 +203,41 @@ function HealthPanel() {
         </dl>
       )}
 
-      <h3 className="panel-subhead">Modules</h3>
+      <h3 className="panel-subhead">Platform</h3>
       <ul className="module-list">
         <li>
           <span className="status--good">✓</span> Identity &amp; tenancy
         </li>
+        <li>
+          <span className="status--good">✓</span> App registry
+        </li>
         {/* Disabled, not linked. A link to an empty table would be a lie. */}
         <li className="module-list__pending">
-          Chart of accounts <span className="chip chip--muted">Phase 2</span>
+          LedgerCore — chart of accounts <span className="chip chip--muted">Phase 3</span>
         </li>
         <li className="module-list__pending">
-          Journal entries <span className="chip chip--muted">Phase 2</span>
+          LedgerCore — journal entries <span className="chip chip--muted">Phase 3</span>
         </li>
         <li className="module-list__pending">
-          Trial balance <span className="chip chip--muted">Phase 2</span>
+          LedgerCore — trial balance <span className="chip chip--muted">Phase 3</span>
         </li>
       </ul>
     </section>
   );
 }
 
-export default function DashboardPage() {
+export default function AccountPage() {
   const auth = useAuth();
   const { organization, role } = useOrg();
 
-  // AppLayout renders behind ProtectedRoute, so this is defensive only.
+  // PlatformLayout renders behind ProtectedRoute, so this is defensive only.
   if (auth.status !== 'authenticated') return null;
 
   return (
     <div className="dashboard">
       <header>
-        <h1>Dashboard</h1>
-        <p className="subtitle">
-          Phase 1 — identity and tenancy. Accounting modules arrive in Phase 2.
-        </p>
+        <h1>Account</h1>
+        <p className="subtitle">Your identity, organization, and session — across every app in the suite.</p>
       </header>
 
       <div className="grid">

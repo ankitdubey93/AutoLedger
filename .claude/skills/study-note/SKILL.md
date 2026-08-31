@@ -38,7 +38,7 @@ grep -ril "<concept>" study/
 
 If the concept is already covered, **extend that note** — add the new angle and new Q&A. Do not create a near-duplicate. One topic per file, kebab-case, named for the concept and not the feature that prompted it: `transactions-isolation-pooling.md`, never `phase-2-notes.md`. Notes outlive their phase.
 
-Categories: `node-express/`, `typescript/`, `postgresql/`, `react/`, `architecture/`, `security-auth/`.
+Categories: `node-express/`, `typescript/`, `postgresql/`, `react/`, `architecture/`, `security-auth/`, `tooling/`.
 
 ## 3. Write it
 

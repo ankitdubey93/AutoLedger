@@ -185,6 +185,89 @@ footer {
   color: var(--muted);
 }
 
+/* -------------------------------------------------- Phase 2: the app suite */
+
+.app-header__brand-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.app-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s ease;
+}
+
+a.app-card:hover,
+a.app-card:focus-visible {
+  border-color: var(--good);
+}
+
+.app-card--disabled {
+  opacity: 0.55;
+}
+
+.app-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.app-card__name {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.app-card__domain {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.app-card__skills {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+
+.app-card__skills li::before {
+  content: '· ';
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.app-shell__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.app-shell__title {
+  margin: 0;
+}
+
 /* ------------------------------------------------------------------- forms */
 
 .form {

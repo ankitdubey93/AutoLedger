@@ -99,7 +99,7 @@ it('gives two tokens issued in the same second different values', () => {
 | **Access + refresh with rotation and family invalidation** | Two-tab race (below) | **Chosen** |
 | One secret for both token types | One less env var | **Rejected — this is a vulnerability.** A refresh token would verify as an access token, so a stolen 7-day credential becomes an unlimited-lifetime one. `env.ts` refuses to boot if the two match |
 
-[guardrails.md rule 8](../../docs/guardrails.md) fixes the TTLs and forbids reintroducing the prior build's vestigial `JWT_SECRET`.
+[guardrails.md rule 11](../../docs/guardrails.md) fixes the TTLs and forbids reintroducing the prior build's vestigial `JWT_SECRET`.
 
 ## Where it lives in this codebase
 
@@ -113,7 +113,7 @@ it('gives two tokens issued in the same second different values', () => {
 
 - **`jwt.verify` returns `string | JwtPayload`.** The string branch is real (a token signed over a plain string payload) and must be rejected, not cast away. Narrowed once, inside `utils/jwt.ts`.
 - **A valid signature does not mean a well-formed payload.** A token we signed before a schema change could carry a role that no longer exists. `verifyAccessToken` re-validates `sub`, `orgId` and `role` and throws on anything unexpected, so a missing `orgId` can never become `undefined` inside a query's scope.
-- **Never log a decoded payload** (rule 8). It contains the user id, the active org, and the role.
+- **Never log a decoded payload** (rule 11). It contains the user id, the active org, and the role.
 - **Error messages are deliberately uniform.** Expired, malformed and bad-signature all produce "Invalid or expired token" — distinguishing them tells an attacker which half of a forgery attempt worked.
 - **The two-tab race is real and accepted.** Two tabs refreshing in the same instant both present the pre-rotation cookie; the loser trips reuse detection and logs the user out everywhere. Client-side single-flight closes the same-tab case, and the cross-tab window is narrow because the cookie jar is shared. The alternative — a grace period where a just-rotated token still works — reopens the replay hole it exists to close.
 - **`exp` is checked by the verifier against its own clock.** Skew between issuer and verifier causes spurious rejections; `jsonwebtoken` exposes `clockTolerance` for that.

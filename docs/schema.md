@@ -1,14 +1,23 @@
 # Database Schema
 
-**Applied: `001_organizations_and_users.sql`.** Phase 2 onward is still the target. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001_organizations_and_users.sql`.** Phase 3 onward is still the target. Keep this file verified against `server/src/db/migrations/`.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
-Migrations live in `server/src/db/migrations/` **only**, applied in sorted filename order.
+Migrations live in `server/src/db/migrations/` **only**, applied in sorted filename order — one shared sequence across every app in the suite, not one per app.
+
+## Table naming across apps
+
+All seven apps share one database and one migration sequence. Table names disambiguate which app owns them:
+
+- **LedgerCore is unprefixed** (`accounts`, `journal_entries`, `ledger_lines`) — it is the shared system of record every other app posts into, the same reason `organizations` and `users` are unprefixed platform tables.
+- **Every other app prefixes its own tables** with its slug: `ap_flow_invoices`, `fpa_scenarios`, `taxguard_documents`, `unitecon_cohorts`, `boarddeck_decks`, `forecaster_budgets`. An app's tables are never read by another app directly — cross-app effects go through LedgerCore's GL via `source_type` / `source_id`.
+
+Migration filenames tag the app they belong to: `NNN_<app-slug>_<subject>.sql`, e.g. `002_ledger-core_accounts.sql`. Platform migrations (like `001`) carry no app tag.
 
 ## Migration rules
 
-- Strict sequential 3-digit prefix, descriptive suffix: `001_organizations_and_users.sql`, `002_general_ledger.sql`. No gaps, no branches.
+- Strict sequential 3-digit prefix, app tag, descriptive suffix: `001_organizations_and_users.sql` (platform), `002_ledger-core_accounts.sql`. No gaps, no branches.
 - **Additive and idempotent.** Use `IF NOT EXISTS` / `IF EXISTS`. **Never edit an applied migration** — write a new one.
 - Data-destructive changes (dropping a column, narrowing a type) require explicit sign-off before being written.
 - Money columns are `BIGINT` cents. No `DECIMAL` money, ever.
@@ -51,7 +60,7 @@ Two deliberate differences from the original plan:
 
 ---
 
-## Phase 2 — General Ledger
+## Phase 3 — General Ledger (LedgerCore)
 
 **`accounts`** — chart of accounts, per organization
 `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` · `code` TEXT NOT NULL · `name` TEXT NOT NULL · `type` TEXT NOT NULL CHECK IN (`Asset`,`Liability`,`Equity`,`Revenue`,`Expense`) · `description` TEXT · `is_active` BOOLEAN DEFAULT true · `created_at` · `updated_at`
@@ -82,11 +91,11 @@ Exactly five, forever: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`. Do 
 
 ### Default chart of accounts
 
-**Not seeded yet — this begins in Phase 2.** `accounts` does not exist, so Phase 1's `/auth/register` creates only the user, the organization and the OWNER membership.
+**Not seeded yet — this begins in Phase 3.** `accounts` does not exist, so `/auth/register` still creates only the user, the organization and the OWNER membership.
 
-**Phase 2 therefore owes a backfill.** Every organization registered during Phase 1 has zero accounts, so adding the seed to `register` is not sufficient on its own — Phase 2 needs either a data migration for existing organizations or an idempotent seed-on-first-access. Recorded in [roadmap.md](roadmap.md).
+**Phase 3 therefore owes a backfill.** Every organization registered during Phases 1–2 has zero accounts, so adding the seed to `register` is not sufficient on its own — Phase 3 needs either a data migration for existing organizations or an idempotent seed-on-first-access. Recorded in [roadmap.md](roadmap.md).
 
-From Phase 2, seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
+From Phase 3, seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
 
 | Range | Type |
 |---|---|

@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 91 server tests + 12 client tests.**
+**Current state: 95 server tests + 15 client tests.**
 
 Server, in `server/src/__tests__/`:
 
@@ -22,14 +22,15 @@ Server, in `server/src/__tests__/`:
 | `auth.test.ts` | integration | register/login/check/refresh/logout, cookie flags, rotation, reuse detection |
 | `tenantIsolation.test.ts` | integration | **The mandatory cross-tenant suite** |
 | `validate.test.ts`, `jwt.test.ts`, `rbac.test.ts` | unit | Pure logic — no database |
+| `platform/apps.test.ts` | integration | `GET /apps` auth requirement, registry shape, `isAppSlug` |
 
-Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh) and `ProtectedRoute.test.tsx` (the `checking` state).
+Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), and `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error).
 
 Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point.
 
 There is no CI yet. The prior build's `entrypoint.sh` ran the suite before server startup; that gate has no host equivalent and belongs in CI when it is set up.
 
-Tests live in `server/src/__tests__/`, mirroring the source layout (`__tests__/inventory/stockService.test.ts`). Set `globals: true` in `vitest.config.ts` so `describe`/`it`/`expect` need no import.
+Tests live in `server/src/__tests__/`, mirroring the source layout — platform tests under `__tests__/platform/`, an app's tests under `__tests__/<app-slug>/` (e.g. `__tests__/ledger-core/journalService.test.ts`). One test root and one test database for the whole suite; apps do not get their own. Set `globals: true` in `vitest.config.ts` so `describe`/`it`/`expect` need no import.
 
 ### Test database
 
@@ -40,7 +41,7 @@ The suite runs against **`autodb_test`, never `autodb`**, so its `TRUNCATE` betw
 Two things that are easy to get wrong here, both learned the hard way:
 
 - **`test.env` applies to test *workers*, not to `globalSetup`.** globalSetup reads its environment from dotenv, so taking `PG_DATABASE` from `process.env` there silently migrates and truncates the *development* database. The name lives in one shared constant, `__tests__/setup/testDatabase.ts`, imported by both.
-- **`fileParallelism: false` is required.** Vitest runs test files in parallel workers by default; these files share one database and truncate between tests, so parallel files delete each other's fixtures mid-assertion — producing failures that look exactly like tenant-isolation bugs.
+- **`fileParallelism: false` is required.** Vitest runs test files in parallel workers by default; these files share one database and truncate between tests, so parallel files delete each other's fixtures mid-assertion — producing failures that look exactly like tenant-isolation bugs. This does not change per app: `autodb_test` and `fileParallelism: false` stay suite-wide, not per-app, or the same failure mode reappears the moment two apps' tests run at once.
 
 ## Two tiers, both required
 
@@ -79,7 +80,7 @@ At minimum:
 2. Its ROLLBACK path under a mid-transaction failure
 3. Its `org_id` authorization scoping
 
-**A module without a cross-tenant isolation test is not done.**
+**A module without a cross-tenant isolation test is not done — one per app, not one for the whole suite.** `tenantIsolation.test.ts` covers the platform tables (`organizations`, `organization_members`); each app's first org-scoped table needs its own instance of the same fixture shape, because a bug in one app's scoping is invisible to a test that only ever queries another app's tables.
 
 ---
 

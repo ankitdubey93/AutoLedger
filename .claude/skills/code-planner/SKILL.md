@@ -27,10 +27,13 @@ Docs describe target state. The filesystem is the only authority on what is buil
 
 ```bash
 ls server/src/db/migrations/ server/src/services/ server/src/routes/ server/src/__tests__/
+ls server/src/config/apps.ts client/src/apps/ 2>/dev/null
 ls client/src/Pages/ client/src/context/ 2>/dev/null
 ls study/*/
 git status --short
 ```
+
+Check `server/src/config/apps.ts` for the app's slug and `status` — a plan for an app still `'planned'` is a plan to flip that to `'building'` as part of its own scope, not an assumption that it already is.
 
 Then **read the closest existing analogue in full** — `authService.ts` and `organizationService.ts` for a service, `routes/organizations.ts` for routes, `001_organizations_and_users.sql` for a migration. You are about to tell the executor to copy these patterns, so you must know what they actually contain.
 
@@ -40,13 +43,13 @@ Open the plan with a short **Starting state** — what exists that this work bui
 
 Read [docs/roadmap.md](../../../docs/roadmap.md).
 
-- Which phase does this work belong to?
+- Which phase — and which app — does this work belong to?
 - Are its prerequisite phases actually built, verified in step 1?
-- Does it depend on a gated phase? Phase 5 (background jobs) gates 9, 11, 12, 13. Phase 6 gates 7, 8, 9. Phase 7 gates 8, 10.
+- Does it depend on a gated phase? Phase 6 (background jobs) gates 8 (AP-Flow), 12 (BoardDeck Automator), 13 (TaxGuard AI). Phase 9 (FP&A Engine) gates 10 (ForecasterPro). Phase 4 (LedgerCore GL completion) gates 9 and 11.
 
 If a prerequisite is missing, **stop and say so**. Then offer the largest slice that *is* legal today, and name the blocked remainder as a separate future plan. Do not plan across a gate and leave the reader to discover it.
 
-Also carry forward any debt the roadmap assigns to this phase — e.g. Phase 2 owes the default chart of accounts **and a backfill** for organizations registered during Phase 1. Unpaid roadmap debt is a step in the plan, not a footnote.
+Also carry forward any debt the roadmap assigns to this phase — e.g. Phase 3 owes the default chart of accounts **and a backfill** for organizations registered during Phases 1–2. Unpaid roadmap debt is a step in the plan, not a footnote.
 
 ## 3. Decompose into slices
 
@@ -71,13 +74,14 @@ The single highest-value thing you can give the executor. Fix every identifier *
 **Names — use exactly these, do not rename:**
 | Kind | Name |
 |---|---|
+| App slug | `ledger-core` (from `server/src/config/apps.ts`) |
 | Table | `accounts` |
 | Columns | `id, org_id, code, name, type, parent_id, is_active, created_by, created_at, updated_at` |
-| Type | `Account`, `AccountType` in `server/src/types/accounts.ts` |
-| Service file / exports | `services/accountService.ts` → `listAccounts`, `createAccount`, `getAccountById` |
-| Controller exports | `controllers/accountController.ts` → `list`, `create`, `getOne` |
-| Route base | `/api/v1/accounts` |
-| Test file | `server/src/__tests__/accounts/accounts.test.ts` |
+| Type | `Account`, `AccountType` in `server/src/types/ledger-core.ts` |
+| Service file / exports | `services/ledger-core/accountService.ts` → `listAccounts`, `createAccount`, `getAccountById` |
+| Controller exports | `controllers/ledger-core/accountController.ts` → `list`, `create`, `getOne` |
+| Route base | `/api/v1/ledger-core/accounts` |
+| Test file | `server/src/__tests__/ledger-core/accounts.test.ts` |
 ```
 
 Without this, step 4's controller imports `getAccount` while step 3's service exported `getAccountById`, and the executor "fixes" it by writing a second function.
@@ -123,7 +127,7 @@ Rules for filling it in:
 - **Read first** — one to three real files to open before writing, ideally the closest existing analogue. "Mirror `organizationService.ts`" is worth more to a weaker model than three paragraphs of description, because the repo's conventions are already in that file.
 - **Files** — real paths, marked `(new)` or `(edit)`. For `(edit)`, name the function or block to change. A step with no file paths is not a step, it is a wish.
 - **Contract** — **write it out literally, copy-pasteable**: the actual signatures, the actual column list, the actual route table with methods and status codes, the actual error message strings. Do not describe the shape and hope. Services take `orgId` first; money fields are `*Cents: number`.
-- **Guardrails** — cite the numbered rules from [CLAUDE.md](../../../CLAUDE.md) that actually bite *here*. Not all fifteen — the two or three a tired executor would get wrong in this specific file.
+- **Guardrails** — cite the numbered rules from [CLAUDE.md](../../../CLAUDE.md) that actually bite *here*. Not all sixteen — the two or three a tired executor would get wrong in this specific file.
 - **Proof** — the exact command plus the expected result. "Tests pass" is not a proof; `npm test -- accounts` with a named cross-tenant 404 assertion is. Every step needs one it can run *before* the next step begins.
 - **If it fails** — the sanctioned recovery, and the forbidden ones (see §6). This field is what keeps a stuck executor from routing around a guardrail.
 - **Owes** — the doc and study-note obligations this step creates, paid in the same step.
@@ -198,12 +202,13 @@ Each is cheap to choose now and expensive to retrofit. State the decision in the
 
 - **Scoping** — every new table carries `org_id`; every query in the plan has an `org_id` predicate. Name the one or two tables that legitimately do not, with the reason.
 - **Money** — which columns are `BIGINT *_cents`. If this is the first money column in the project, `utils/money.ts` is a step.
-- **Transaction boundary** — state what commits together. A document and its journal entry commit together or not at all. Anything owed after `COMMIT` is a queued job (Phase 5), which means it is gated.
+- **Transaction boundary** — state what commits together. A document and its journal entry commit together or not at all. Anything owed after `COMMIT` is a queued job (Phase 6), which means it is gated.
 - **Lifecycle** — if the module has statuses, the FSM transition table is a step in `types/`, and the status CHECK constraint in the migration must match it exactly.
 - **Immutability** — posted documents get `POST /:id/reverse`. If the plan contains a `PUT` or `DELETE` on a posted document, it is wrong; replan that step.
 - **Roles** — the `requireRole(...)` set per route, decided deliberately. Do not plan everything as ADMIN.
 - **FKs** — `ON DELETE CASCADE` for children of the org or parent document, `RESTRICT` for audit references like `created_by`.
-- **Dependencies** — any new package, and the phase that entitles it ([docs/development.md](../../../docs/development.md)). No ORM, ever. No `ioredis`/`bullmq` before Phase 5.
+- **App boundary** — confirm no step reads or writes another app's tables directly; a cross-app effect is a step that calls LedgerCore's `journalService` with `source_type`/`source_id`, never a direct query (rule #16).
+- **Dependencies** — any new package, and the phase that entitles it ([docs/development.md](../../../docs/development.md)). No ORM, ever. No `ioredis`/`bullmq` before Phase 6. No LLM/embeddings SDK outside Phase 13.
 
 ## 10. Output
 

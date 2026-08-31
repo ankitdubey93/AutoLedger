@@ -84,7 +84,7 @@ export interface HealthResponse {
  * effects in development, and aborting request #1 while its CORS preflight was
  * still in flight made request #2 — which was queued behind that same
  * preflight — fail with a TypeError. Components use an `ignore` flag instead;
- * see the note in Pages/DashboardPage.tsx.
+ * see the note in Pages/AccountPage.tsx.
  */
 export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
   return apiFetch<HealthResponse>('/health', { signal: signal ?? null });
@@ -207,4 +207,27 @@ export function listMembers(signal?: AbortSignal): Promise<{
   members: OrganizationMember[];
 }> {
   return apiFetch('/organizations/members', { signal: signal ?? null });
+}
+
+/* --------------------------------------------------------------------- apps */
+
+/** Mirrors server/src/types/apps.ts. */
+export type AppStatus = 'building' | 'planned';
+
+export interface AppSummary {
+  slug: string;
+  name: string;
+  domain: string;
+  tagline: string;
+  skills: string[];
+  status: AppStatus;
+}
+
+/** GET /apps — the suite's app registry, shown on the chooser. */
+export function listApps(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  apps: AppSummary[];
+}> {
+  return apiFetch('/apps', { signal: signal ?? null });
 }

@@ -13,8 +13,7 @@ Migrations are the hardest thing to fix after the fact — an applied migration 
 ls server/src/db/migrations/
 ```
 
-Next file = highest existing prefix + 1, 3 digits, descriptive snake_case suffix:
-`003_inventory_stock.sql`. No gaps. No branches. `server/src/db/migrations/` is the **only** migration directory — if you find SQL anywhere else, stop and report it.
+Next file = highest existing prefix + 1, 3 digits, `<app-slug>`, descriptive snake_case suffix: `002_ledger-core_accounts.sql`. One shared sequence across the whole suite — no gaps, no branches, and no per-app numbering. Platform migrations (auth, organizations, the app registry) carry no app tag, e.g. `001_organizations_and_users.sql`. `server/src/db/migrations/` is the **only** migration directory — if you find SQL anywhere else, stop and report it.
 
 ## 2. Decide: new file or edit?
 

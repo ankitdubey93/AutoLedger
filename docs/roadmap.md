@@ -1,4 +1,6 @@
-# Build Roadmap & Module Map
+# Build Roadmap & App Map
+
+AutoLedger is a suite, not a single application. Phases 0–1 built the platform every app in the suite shares — identity, tenancy, RBAC. Phase 2 added the platform layer that turns "one app" into "a chooser over several apps." From Phase 3 onward, each phase belongs to exactly one app.
 
 Phases are sequential. Where a **Gate** is listed, do not start the gated work first — ask before reordering.
 
@@ -6,20 +8,18 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 |---|---|---|
 | **0 ✅ done** | Scaffold — see [Phase 0, as delivered](#phase-0-as-delivered) below | Blocks everything |
 | **1 ✅ done** | Identity + tenancy — see [Phase 1, as delivered](#phase-1-as-delivered) below | Blocks everything below |
-| **2** | GL core: chart of accounts, journal entries (create/list), reversing entries, trial balance — all `org_id` scoped, all `BIGINT` cents. **Also owes: seed the default chart at registration, plus a backfill for organizations created during Phase 1** ([schema.md](schema.md)) | Blocks 3+ |
-| **3** | GL completion: fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers | |
-| **4** | CDC audit trail: `audit_logs` JSONB table, `OLD`/`NEW` snapshot triggers on all financial tables | Blocks compliance claims |
-| **5** | Background jobs: `bullmq` + `ioredis`, Redis healthcheck + `depends_on`, worker process, retry/DLQ policy | Blocks 9, 11, 12, 13 |
-| **6** | Master data: customers, vendors, products/items, tax codes, units of measure | Blocks 7, 8, 9 |
-| **7** | Inventory & WMS | Blocks 8, 10 |
-| **8** | Procurement / P2P | |
-| **9** | Sales & Invoicing / O2C, incl. idempotency middleware + PDF workers | Needs 5 |
-| **10** | Manufacturing / MRP | Needs 7 |
-| **11** | HR & Payroll | Needs 5 |
-| **12** | CRM, QMS, EAM | |
-| **13** | Multi-currency FX engine | Needs 5 |
-| **14** | Document processing: presigned uploads + OCR | |
-| **15** | MagicJournal NL assistant — DB-backed corpus, `org_id` scoped | |
+| **2 ✅ done** | Platform: app registry, chooser, app-scoped routing — see [Phase 2, as delivered](#phase-2-as-delivered) below | Blocks 3+ |
+| **3** | LedgerCore — GL core: chart of accounts, journal entries (create/list), reversing entries, trial balance — all `org_id` scoped, all `BIGINT` cents. **Also owes: seed the default chart at registration, plus a backfill for organizations created before this phase** ([schema.md](schema.md)) | Blocks 4+ |
+| **4** | LedgerCore — GL completion: fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers | |
+| **5** | Shared — CDC audit trail: `audit_logs` JSONB table, `OLD`/`NEW` snapshot triggers on every financial table, across every app | Blocks compliance claims |
+| **6** | Shared — background jobs: `bullmq` + `ioredis`, Redis healthcheck + `depends_on`, worker process, retry/DLQ policy | Blocks 8, 12, 13 |
+| **7** | LedgerCore — multi-currency FX engine + QuickBooks API sync | Needs 6 |
+| **8** | AP-Flow — multimodal OCR invoice parsing, 3-way matching, COGS tracking | Needs 6 |
+| **9** | FP&A Engine — 3-statement financial linking, scenario modeling, cash runway forecasting | Needs 4 |
+| **10** | ForecasterPro — driver-based rolling forecasting, headcount planning, zero-based budgeting | Needs 9 |
+| **11** | UnitEcon — cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance | Needs 4 |
+| **12** | BoardDeck Automator — monthly close automation, BvA variance, automated `.pptx` deck generation | Needs 6, 10 |
+| **13** | TaxGuard AI — tax act parsing, RAG over `pgvector`, PII redaction | Needs 6 |
 
 **Integration tests are not a phase.** They start in Phase 1 and grow with every module — see [testing.md](testing.md).
 
@@ -51,7 +51,7 @@ The stack boots and browser → Express → PostgreSQL is connected. No business
 | `entrypoint.sh` runs migrations + full test suite before boot | Not simulated | Its real home is CI, which is not set up yet. Tests are run manually with `npm test` |
 | `git init` + first commit | Already a git repo with history | Done before Phase 0 started; the reset predates it |
 
-**Also not built, and not owed until later:** `react-router-dom` (Phase 1, with the second page), `utils/money.ts` (Phase 2, with the first money column), `types/express.d.ts` and `req.user` (Phase 1), the migration runner and `npm run migrate` / `db:reset` (Phase 1).
+**Also not built, and not owed until later:** `react-router-dom` (Phase 1, with the second page), `utils/money.ts` (Phase 3, with the first money column), `types/express.d.ts` and `req.user` (Phase 1), the migration runner and `npm run migrate` / `db:reset` (Phase 1).
 
 ---
 
@@ -75,7 +75,7 @@ You can register, sign in, stay signed in across reloads, switch organizations, 
 | Planned | Actual | Why |
 |---|---|---|
 | `GET /auth/refresh` | `POST /auth/refresh` | Rotation is state-changing, and `SameSite=Lax` still sends cookies on a top-level cross-site navigation — a `GET` would be a logout-CSRF hole |
-| `register` seeds the chart of accounts | Deferred to Phase 2 | `accounts` is a Phase 2 table. Phase 2 inherits a backfill obligation |
+| `register` seeds the chart of accounts | Deferred to Phase 3 (was Phase 2 before the platform layer was inserted) | `accounts` belongs to LedgerCore, not the platform. LedgerCore's first phase inherits a backfill obligation |
 | `refresh_tokens.token` | `refresh_tokens.token_hash` | A dump of the table must not yield usable sessions |
 | — | Added `GET /organizations/members` | Phase 1 otherwise has no org-scoped table, so the mandatory cross-tenant isolation test would have had nothing to test and `rbac.ts` nothing to guard |
 
@@ -83,78 +83,95 @@ You can register, sign in, stay signed in across reloads, switch organizations, 
 
 ---
 
-## Module map
+## Phase 2, as delivered
 
-The domain and DB pattern intended for each module. All planned; none built.
+AutoLedger's post-login landing page is now an app chooser, not a single dashboard. `AppLayout` was renamed `PlatformLayout` and now hosts two things: the chooser at `/`, and a per-app shell (`AppShell`) mounted at `/app/:appSlug`. The old dashboard content (identity, organization, membership, session) moved to `/account` — it is suite-level, not app-level, and does not belong on either the chooser or inside an app.
 
-### Finance & General Ledger — Phases 2–3
+**Landed:**
 
-The immutable source of truth. Strict double-entry validation inside `BEGIN...COMMIT`, all amounts integer cents. Every other module posts journal entries here via `source_type` / `source_id`.
+- `server/src/config/apps.ts` — the static app registry, `as const satisfies readonly AppDefinition[]`, one entry per app in the [App map](#app-map) below
+- `GET /api/v1/apps` — authenticated, not role-gated; returns the registry as-is (no per-org entitlement yet)
+- Client: `apps/registry.ts` (slug → element, for route wiring only — display data comes from the API), `useActiveApp` hook, `AppChooserPage` at `/`, `AppShell` at `/app/:appSlug`, `AccountPage` at `/account` (renamed from `DashboardPage`)
+- Nothing under any app slug has features yet. `AppShell` renders a header and an empty outlet for `ledger-core` (the only `'building'` app); every other slug redirects back to `/`
 
-*Includes:* chart of accounts, manual journal entries, reversing entries, trial balance, fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers.
+**Deliberately changed from the original module-based roadmap:**
 
-### Inventory & Warehouse Management (WMS) — Phase 7
+The roadmap through Phase 15 used to describe one ERP with modules (inventory, procurement, MRP, payroll, QMS, CRM, EAM) all posting into a shared GL. That plan is replaced by the [App map](#app-map) below — seven separate portfolio applications, each demonstrating a different accounting or engineering skill, sharing one identity/tenancy platform and (for LedgerCore specifically) one GL. See [Dropped from scope](#dropped-from-scope).
 
-Multi-location stock tracking, FIFO/WAC valuation, bin-level routing.
+**LLM integration is no longer out of scope.** The previous ruling ("Do not add an LLM dependency, API key, or provider SDK without an explicit decision recorded here first") is reversed by this entry: TaxGuard AI (Phase 13) requires RAG over `pgvector` and an LLM/embeddings SDK. The decision is recorded here, as that ruling required.
 
-*Pattern:* pessimistic locking (`SELECT ... FOR UPDATE`) on stock rows during checkout to prevent overselling under concurrency. Stock movements are an append-only ledger mirroring the GL — **current quantity is derived, never a mutable counter**.
+**No migration in this phase.** The app registry is a static code list, not a database table — there is no per-org entitlement to persist yet. If entitlement becomes real (e.g. a paid tier that unlocks specific apps), it becomes a migration then, not now.
 
-### Procurement (Procure-to-Pay) — Phase 8
+---
 
-Requisitions, purchase orders, goods receipts, vendor invoicing.
+## App map
 
-*Pattern:* FSM-enforced status progression; automated 3-way matching across PO, receipt, and invoice.
+The domain, headline skills, and DB/engineering pattern for each app in the suite.
 
-### Sales & Invoicing (Order-to-Cash) — Phase 9
+### LedgerCore — Core Accounting & Systems — Phases 3–4, 7
 
-Customer orders, fulfillment tracking, tax calculation.
+The system of record every other app posts into. Double-entry integrity, DB constraints, multi-currency, and a QuickBooks API sync.
 
-*Pattern:* idempotency-key middleware on all financial mutations, so a retried request after a network drop cannot double-bill. BullMQ workers for CPU-bound PDF invoice generation.
+*Includes:* chart of accounts, manual journal entries, reversing entries, trial balance, fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers, multi-currency FX, QuickBooks Online sync.
 
-### Manufacturing (MRP) & Bill of Materials — Phase 10
+*Pattern:* strict double-entry validation inside `BEGIN...COMMIT`, all amounts integer cents. `source_type` / `source_id` on `journal_entries` is the hook every other app uses to post into the GL.
 
-Multi-tier BOMs, work orders, raw material conversion.
+### TaxGuard AI — Compliance & AI Workflows — Phase 13
 
-*Pattern:* `WITH RECURSIVE` CTEs to resolve deeply nested component trees in a single query. **Cycle detection is mandatory** — a BOM that contains itself must be rejected at write time.
+Tax-law question answering grounded in real statute text, not model recall.
 
-### Human Resources & Payroll — Phase 11
+*Pattern:* RAG over `pgvector`, PII redaction before any text reaches a model provider, tax act parsing into retrievable chunks with citations.
 
-Employee profiles, attendance, leave, salary generation.
+### AP-Flow — Operational Accounting — Phase 8
 
-*Pattern:* batch processing via cron-triggered BullMQ jobs. `EXCLUDE USING GIST` constraints make overlapping leave date ranges physically impossible at the DB layer (requires `btree_gist`).
+Invoice capture to posted, matched, paid.
 
-### Quality Management System (QMS) — Phase 12
+*Pattern:* multimodal OCR invoice parsing, automated 3-way matching across PO, receipt, and invoice, COGS tracking. Posts into LedgerCore via `source_type = 'ap_flow'`.
 
-Incoming goods inspections, checklists, quarantine holds.
+### FP&A Engine — Financial Modeling — Phase 9
 
-*Pattern:* customer-definable inspection forms stored as `JSONB`, validated in Node with `Ajv`. Schema versions are stored alongside submissions so old records stay interpretable.
+A linked 3-statement model you can stress-test.
 
-### CRM & Lead Pipeline — Phase 12
+*Pattern:* 3-statement financial linking (income statement → balance sheet → cash flow, changes propagate), scenario modeling, cash runway forecasting.
 
-Deals, contacts, top-of-funnel activity.
+### ForecasterPro — Budgeting & Planning — Phase 10
 
-*Pattern:* full-text and fuzzy search via `pg_trgm` trigram indexes.
+Driver-based forecasts instead of a spreadsheet copied forward.
 
-### Equipment Asset Management (EAM) — Phase 12
+*Pattern:* driver-based rolling forecasting, headcount planning, zero-based budgeting. Builds on FP&A Engine's linked model.
 
-Fixed asset register and depreciation schedules.
+### UnitEcon — Commercial Analytics — Phase 11
 
-*Pattern:* nightly cron job computes depreciation and auto-posts balancing journal entries to the GL. **Must be idempotent** — running twice for the same date posts once.
+Unit economics, not just revenue.
+
+*Pattern:* cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance decomposition.
+
+### BoardDeck Automator — Board Reporting & Close — Phase 12
+
+Close the books, generate the board deck.
+
+*Pattern:* monthly close automation, budget-vs-actual (BvA) variance, automated `.pptx` deck generation. Depends on background jobs (Phase 6) and ForecasterPro's budgets (Phase 10).
 
 ---
 
 ## Cross-cutting infrastructure
 
-**Audit trail & CDC (Phase 4).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, table name, operation, and timestamp. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other. No compliance claim is valid until this lands.
+**Audit trail & CDC (Phase 5).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, table name, operation, and timestamp — shared across every app. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other. No compliance claim is valid until this lands.
 
-**Multi-currency FX (Phase 13).** Background workers poll external rate APIs; realized and unrealized FX gain/loss computed on payment settlement. Rates are stored with their effective date and **never re-fetched retroactively** for historical transactions.
-
-**Document processing (Phase 14).** Presigned-URL uploads to S3 / Cloudflare R2; async OCR (Tesseract or AWS Textract) in Node workers for receipt parsing.
+**Background jobs (Phase 6).** `bullmq` + `ioredis`, a worker process, retry/DLQ policy — shared infrastructure that AP-Flow, ForecasterPro, BoardDeck Automator, and TaxGuard AI all build on.
 
 ---
 
-## Deferred / out of scope
+## Dropped from scope
 
-**MagicJournal (Phase 15).** The prior build shipped a local rule-based keyword-scoring engine that drafted journal entries from plain English, trained on a runtime-appended CSV. It worked, but it was a convenience feature on an unsound foundation, and its training corpus was a tracked file mutated at runtime (permanent version-control churn). Deliberately deferred to the end. If it returns, the corpus lives in a **database table scoped by `org_id`**, never a tracked CSV.
+The prior roadmap (Phases 6–14, before this restructure) planned Inventory & WMS, Procurement/P2P, Manufacturing/MRP, HR & Payroll, QMS, CRM, and EAM as modules of one ERP. None of that scope survives the restructure — the seven apps above are the roadmap now. The engineering patterns those modules would have demonstrated are kept here only as a record, since some are genuinely interesting interview material even though nothing will be built against them:
 
-**LLM integration — out of scope.** No LLM integration is planned. Do not add an LLM dependency, API key, or provider SDK without an explicit decision recorded here first.
+- **Inventory & WMS** — pessimistic locking (`SELECT ... FOR UPDATE`) on stock rows; append-only movement ledger; current quantity always derived, never a mutable counter.
+- **Procurement / P2P** — FSM-enforced status progression; automated 3-way matching (the pattern AP-Flow now owns instead).
+- **Manufacturing / MRP & BOM** — `WITH RECURSIVE` CTEs to resolve nested component trees; mandatory cycle detection.
+- **HR & Payroll** — batch processing via cron-triggered jobs; `EXCLUDE USING GIST` constraints (requires `btree_gist`) to make overlapping leave ranges physically impossible.
+- **QMS** — customer-definable inspection forms as `JSONB`, validated with `Ajv`, schema-versioned.
+- **CRM** — full-text and fuzzy search via `pg_trgm` trigram indexes.
+- **EAM** — nightly cron job computing depreciation and auto-posting balancing journal entries; must be idempotent.
+
+**MagicJournal**, the prior build's rule-based keyword-scoring engine that drafted journal entries from plain English, is also dropped rather than revived — TaxGuard AI's RAG approach supersedes the idea it was reaching for, done properly this time (a database-backed, `org_id`-scoped corpus instead of a tracked CSV mutated at runtime).

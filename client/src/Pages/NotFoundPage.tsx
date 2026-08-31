@@ -5,11 +5,11 @@ export default function NotFoundPage() {
     <main className="shell shell--narrow">
       <h1>Not found</h1>
       <p className="muted">
-        That page does not exist. Most of AutoLedger is not built yet — see{' '}
+        That page does not exist. Most of the suite is not built yet — see{' '}
         <code>docs/roadmap.md</code>.
       </p>
       <p>
-        <Link to="/">Back to the dashboard</Link>
+        <Link to="/">Back to the app chooser</Link>
       </p>
     </main>
   );

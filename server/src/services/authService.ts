@@ -22,8 +22,8 @@ import {
 } from '../types/auth.js';
 
 /**
- * All identity and session SQL. Controllers never query (guardrails rules 1
- * and 2) — the prior build leaked SQL into authController and never got it
+ * All identity and session SQL. Controllers never query (guardrails rule 2)
+ * — the prior build leaked SQL into authController and never got it
  * back out, so authService exists from day one.
  */
 
@@ -174,7 +174,7 @@ export async function buildSession(
 /**
  * Signs both tokens and persists the refresh row. Always called with the
  * transaction's own client so the row and whatever else the caller is doing
- * commit or roll back together (rule 6).
+ * commit or roll back together (rule 5).
  */
 async function issueSession(
   client: Queryable,

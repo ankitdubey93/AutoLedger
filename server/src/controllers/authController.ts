@@ -15,7 +15,7 @@ import {
 
 /**
  * Thin HTTP adapters: read input, call the service, shape the response
- * (guardrails rule 1). Zero SQL.
+ * (guardrails rule 2). Zero SQL.
  *
  * These are also the only handlers that set or clear cookies — the tokens the
  * service returns are transport-level concerns, and keeping `res.cookie` out

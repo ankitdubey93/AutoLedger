@@ -1,11 +1,13 @@
 ---
 name: guardrail-review
-description: Audit AutoLedger server code against the 15 hard rules — tenant scoping, no SQL in controllers, integer cents, parameterized queries, transaction client discipline, posted-document immutability, FK constraints, token handling. Use before committing, when finishing a module, on request for a review, or when asked whether code is safe to ship.
+description: Audit AutoLedger server code against the 16 hard rules — tenant scoping, no SQL in controllers, integer cents, parameterized queries, transaction client discipline, posted-document immutability, FK constraints, token handling, app-boundary namespacing. Use before committing, when finishing a module, on request for a review, or when asked whether code is safe to ship.
 ---
 
 # Guardrail review
 
 Audits a diff (or a directory) against the rules in [CLAUDE.md](../../../CLAUDE.md) and [docs/guardrails.md](../../../docs/guardrails.md). Four of these rules were violated by the prior build and the violations compounded until a rewrite was cheaper than a repair.
+
+All greps below are `-r` — they already reach into an app's subfolder (`server/src/services/ledger-core/…`) as well as the unprefixed platform files (`server/src/services/authService.ts`). Nothing app-specific to add there; the review just covers more files as apps land.
 
 ## Scope the review
 
@@ -78,7 +80,7 @@ grep -rn -A 40 "client.query('BEGIN')" server/src/services/ | grep "pool.query"
 
 - A `pool.query` between `BEGIN` and `COMMIT` silently escapes the transaction → violation.
 - Missing `ROLLBACK` in `catch` or missing `client.release()` in `finally` → violation (pool exhaustion).
-- Work after `COMMIT` inside the same function → violation. It is a queued job (Phase 5) or it is not part of the operation.
+- Work after `COMMIT` inside the same function → violation. It is a queued job (Phase 6) or it is not part of the operation.
 
 ### 6. Immutability of posted documents
 
@@ -130,7 +132,18 @@ A module with no cross-tenant isolation test **is not done** — report it as a 
 git diff HEAD -- server/package.json client/package.json
 ```
 
-Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 5 → violation.
+Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 6 → violation. An LLM/embeddings SDK anywhere outside Phase 13 (TaxGuard AI) → violation — the "no LLM" ruling still applies to every other app.
+
+### 13. App boundaries
+
+```bash
+grep -rn "org_id" server/src/services/*/  2>/dev/null | grep -v "\$"
+grep -rln "req.params.appSlug\|req.params.app" server/src/services/ server/src/controllers/ 2>/dev/null
+```
+
+- The `:appSlug` route param must never be used as (or substitute for) the tenancy scope — `orgId` from the verified token is still the only predicate that matters. A service reading `req.params.appSlug` at all is a smell worth reading closely.
+- An app's service querying a table that belongs to a different app (e.g. `ap-flow`'s service selecting from `journal_entries` directly instead of going through LedgerCore's `journalService`) → violation. Cross-app effects go through the GL via `source_type`/`source_id`, never a direct cross-app query.
+- A slug not present in `server/src/config/apps.ts` reachable through any route → violation; unknown slugs must 404.
 
 ## Report
 
