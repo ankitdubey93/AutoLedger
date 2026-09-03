@@ -23,4 +23,8 @@ router.get(
   organizationController.listMembers,
 );
 
+// Editing the organization's name or base currency is administrative, same
+// tier as the member list.
+router.patch('/', authenticate, requireRole('OWNER', 'ADMIN'), organizationController.update);
+
 export default router;

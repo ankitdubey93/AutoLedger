@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001_organizations_and_users.sql`.** Phase 3 onward is still the target. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001`–`005`.** `organizations`, `users`, `organization_members`, `refresh_tokens`, `accounts`, `journal_entries`, `ledger_lines` and `ledger_settings` all exist, with the balance, immutability and `updated_at` triggers live. The **Phase 4+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -60,26 +60,116 @@ Two deliberate differences from the original plan:
 
 ---
 
-## Phase 3 — General Ledger (LedgerCore)
+## Phase 3 — General Ledger (LedgerCore) ✅ applied
 
 **`accounts`** — chart of accounts, per organization
-`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` · `code` TEXT NOT NULL · `name` TEXT NOT NULL · `type` TEXT NOT NULL CHECK IN (`Asset`,`Liability`,`Equity`,`Revenue`,`Expense`) · `description` TEXT · `is_active` BOOLEAN DEFAULT true · `created_at` · `updated_at`
-Constraint: `UNIQUE (org_id, code)`.
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `code` TEXT NOT NULL · `name` TEXT NOT NULL · `type` TEXT NOT NULL CHECK IN (`Asset`,`Liability`,`Equity`,`Revenue`,`Expense`) · `parent_id` UUID FK → `accounts` ON DELETE RESTRICT (nullable) · `is_postable` BOOLEAN NOT NULL DEFAULT true · `description` TEXT · `is_active` BOOLEAN NOT NULL DEFAULT true · `created_by` UUID FK → `users` ON DELETE RESTRICT (nullable — the seed has no actor) · `created_at` · `updated_at`
 
-**`journal_entries`** — transaction headers
-`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` · `created_by` UUID NOT NULL FK → `users` · `entry_date` DATE NOT NULL · `description` TEXT · `source_type` TEXT NOT NULL DEFAULT `'manual'` · `source_id` UUID · `reverses_entry_id` UUID FK → `journal_entries` · `created_at` · `updated_at`
+Constraints:
+- `UNIQUE (org_id, code)`
+- `chk_account_not_own_parent` — `parent_id IS NULL OR parent_id <> id`
 
-`source_type` / `source_id` are the hook every future module uses to link its own documents to the GL. `reverses_entry_id` links a reversing entry to its original.
-Index on `(org_id, entry_date)` and `(org_id, source_type, source_id)`.
+Index on `(org_id, code)` (the unique constraint serves it), `(org_id, parent_id)`, and `parent_id`.
+
+`parent_id` is a self-referencing FK giving the chart a tree: `1000 Assets → 1100 Current Assets → 1110 Operating Cash`. Two rules the column alone cannot express are enforced in `accountService` and covered by tests: **a parent must belong to the same organization and carry the same `type`** (an Expense cannot hang under Assets), and **the graph must stay acyclic** (checked with a `WITH RECURSIVE` walk before an update is accepted). A single-column CHECK stops only the trivial self-parent case, which is why it is the only one in the DDL.
+
+`is_postable` separates header accounts from leaves. `1000 Assets` is a rollup for reporting and must never receive a posting; `1110 Operating Cash` must. A trigger on `ledger_lines` rejects a line whose account has `is_postable = false` — the same "the database is the guardrail" posture as the balance check.
+
+**`journal_entries`** — transaction headers, **immutable once written**
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` **ON DELETE RESTRICT** · `created_by` UUID NOT NULL FK → `users` ON DELETE RESTRICT · `entry_date` DATE NOT NULL · `description` TEXT · `source_type` TEXT NOT NULL DEFAULT `'manual'` · `source_id` UUID · `reverses_entry_id` UUID FK → `journal_entries` ON DELETE RESTRICT · `created_at`
+
+`source_type` / `source_id` are the hook every future module uses to link its own documents to the GL — AP-Flow posts with `source_type = 'ap_flow'` and `source_id` pointing at its own document row. `reverses_entry_id` links a reversing entry to its original.
+
+Indexes: `idx_journal_entries_org_date` on `(org_id, entry_date)`, `idx_journal_entries_org_source` on `(org_id, source_type, source_id)`, and `ux_journal_entries_reverses` — a **partial unique** index on `reverses_entry_id WHERE reverses_entry_id IS NOT NULL`. Partial because the overwhelming majority of entries reverse nothing and the NULLs would otherwise all collide; unique because an entry may be reversed at most once, which is what makes the double-reversal check race-safe rather than a check-then-act.
+
+Two deliberate departures from the rest of the schema:
+
+- **No `updated_at`, and no `set_updated_at` trigger.** The row can never be updated, so an update timestamp would be a column that is guaranteed to equal `created_at` forever — dead scaffolding that implies a capability the table does not have.
+- **`org_id` is `ON DELETE RESTRICT`, not `CASCADE`.** You cannot delete an organization that has posted journals. This is the correct accounting answer independently, and it is also the only way immutability and cascade can coexist: a `BEFORE DELETE` trigger that rejects every delete would abort the cascade anyway, and it is better to fail at the parent with a clear FK error than deep inside a trigger. Nothing in the application deletes organizations today.
 
 **`ledger_lines`** — atomic debits/credits
-`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` · `journal_entry_id` UUID NOT NULL FK → `journal_entries` ON DELETE CASCADE · `account_id` UUID NOT NULL FK → `accounts` · `debit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`debit_cents >= 0`) · `credit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`credit_cents >= 0`)
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `journal_entry_id` UUID NOT NULL FK → `journal_entries` ON DELETE CASCADE · `account_id` UUID NOT NULL FK → `accounts` ON DELETE RESTRICT · `debit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`debit_cents >= 0`) · `credit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`credit_cents >= 0`) · `currency_code` CHAR(3) NOT NULL CHECK `~ '^[A-Z]{3}$'` · `fx_rate` NUMERIC(18,8) NOT NULL DEFAULT 1 CHECK (`fx_rate > 0`) · `base_debit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`base_debit_cents >= 0`) · `base_credit_cents` BIGINT NOT NULL DEFAULT 0 CHECK (`base_credit_cents >= 0`) · `created_at`
 
 Constraints:
 - `chk_line_nonzero` — NOT (`debit_cents = 0` AND `credit_cents = 0`)
 - `chk_exclusive_debit_credit` — NOT (`debit_cents > 0` AND `credit_cents > 0`)
+- `chk_base_nonzero` and `chk_exclusive_base_debit_credit` — the same pair on the base-currency columns
+- `chk_side_agrees_with_base` — a line debited in its own currency is debited in base currency too: `(debit_cents > 0) = (base_debit_cents > 0)`
 
 Index on `(org_id, account_id)` and `journal_entry_id`.
+
+**The currency columns exist from Phase 3 even though the FX engine is Phase 8.** Phase 8 builds rate lookup, realized gain/loss on settlement, and period-end revaluation. The *columns* cannot wait for it: once a line has been written without its native amount and the rate used, that information is gone and no later migration can reconstruct it. For a single-currency organization every line is written with `currency_code` = the org's `base_currency`, `fx_rate` = 1, and the base columns equal to the native ones — so the trial balance and every statement in Phase 4 are already correct in base currency with no retrofit. **All reporting sums the `base_*` columns**; the native columns are for display and for Phase 8's settlement arithmetic.
+
+### The balance invariant is enforced by the database
+
+Rule 3 and rule 7 are application rules that `journalService` upholds. They are *also* upheld one layer down, so that a bug, a migration script, or a `psql` session cannot write an unbalanced entry:
+
+```sql
+-- fires once at COMMIT, not per statement, so a multi-line entry can be
+-- inserted a line at a time without ever being transiently "unbalanced"
+CREATE CONSTRAINT TRIGGER trg_ledger_lines_balanced
+  AFTER INSERT OR UPDATE OR DELETE ON ledger_lines
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION assert_journal_entry_balanced();
+```
+
+`assert_journal_entry_balanced()` resolves the entry as `COALESCE(NEW.journal_entry_id, OLD.journal_entry_id)`, returns immediately if that entry no longer exists, and otherwise raises unless the entry's lines satisfy **`SUM(debit_cents) = SUM(credit_cents)`, `SUM(base_debit_cents) = SUM(base_credit_cents)`, and `COUNT(*) >= 2`**. Integer equality, never an epsilon — that is the whole reason the columns are `BIGINT` cents.
+
+A second constraint trigger, `trg_journal_entries_have_lines`, fires `AFTER INSERT ON journal_entries`, also deferred, and runs the same assertion. Without it a header could be inserted with no lines at all: nothing would ever touch `ledger_lines`, so the first trigger would never fire, and a zero-line entry would satisfy "debits equal credits" vacuously.
+
+**Immutability is enforced the same way.** `reject_mutation()` is a `BEFORE UPDATE OR DELETE` trigger on both `journal_entries` and `ledger_lines`, raising `ERRCODE = '0A000'` (`feature_not_supported`) with a message naming rule 6 and pointing at `POST /:id/reverse`. Corrections are reversing entries; there is no other path, and there is no route that could offer one.
+
+`TRUNCATE` does **not** fire row-level triggers, so `resetTables()` in the test fixtures is unaffected and integration tests still get a clean database between cases.
+
+---
+
+## Phase 3.5 — Onboarding & Settings (LedgerCore) ✅ applied
+
+**`005_ledger-core_settings.sql`.** Additive: one new constraint on `accounts`, one new table.
+
+`accounts` gains `ux_accounts_org_id_id` — `UNIQUE (org_id, id)`. Logically redundant (`id` alone is already unique), but a composite `FOREIGN KEY` requires its target column set to be declared unique as that exact tuple, so this is the price of letting `ledger_settings.cash_account_id` reference `accounts` scoped by tenant rather than by id alone. See [study/postgresql/composite-foreign-keys-for-tenancy.md](../study/postgresql/composite-foreign-keys-for-tenancy.md).
+
+**`ledger_settings`** — one row per organization, LedgerCore's onboarding and settings
+`org_id` UUID **PRIMARY KEY** FK → `organizations` ON DELETE CASCADE · `legal_name` TEXT (nullable) · `fiscal_year_start_month` SMALLINT NOT NULL CHECK BETWEEN 1 AND 12 · `fiscal_year_start_day` SMALLINT NOT NULL DEFAULT 1 CHECK BETWEEN 1 AND 28 · `books_start_date` DATE NOT NULL · `industry` TEXT (nullable) · `timezone` TEXT NOT NULL DEFAULT `'UTC'` · `cash_account_id` UUID (nullable) · `onboarded_at` TIMESTAMPTZ NOT NULL DEFAULT now() · `created_at` · `updated_at`
+
+`org_id` is the primary key, not a separate `id` — there is exactly one settings row per organization, and keying on the scope column indexes it for free.
+
+Constraint:
+- `fk_ledger_settings_cash_account` — **composite** `FOREIGN KEY (org_id, cash_account_id) REFERENCES accounts (org_id, id) ON DELETE RESTRICT`. Makes a cross-tenant `cash_account_id` physically unrepresentable, not merely service-checked. `MATCH SIMPLE` (the default): a `NULL cash_account_id` — no cash account configured yet — satisfies the constraint without being checked, which is exactly the wanted behavior. `RESTRICT`, not `SET NULL`: a composite FK's `SET NULL` nulls *every* column in the key, including `org_id`, which is this table's `NOT NULL` primary key — `RESTRICT` never actually fires in practice, since `accounts` rows are never deleted (retired via `is_active = false` instead).
+
+Index on `cash_account_id`.
+
+**Deliberately no seed row and no backfill migration.** The absence of a `ledger_settings` row *is* the "onboarding not yet completed" signal — correct for every organization that predates this migration, which is why `onboarded_at` is `NOT NULL`: the row only ever exists once onboarding actually completed. `GET /ledger-core/settings` returns `200` with `onboardedAt: null` and sensible defaults for a missing row, never a `404`.
+
+**`organizationName` and `baseCurrency` are not columns on this table.** Both remain on `organizations` (Phase 1) and are edited through `PATCH /organizations`, a platform route — see [architecture.md](architecture.md#suite-structure)'s platform/app split. `ledger_settings` only owns fields LedgerCore itself is responsible for.
+
+**Not built in this phase:** `fiscal_periods`, period close/lock, and any trigger rejecting a posting into a closed period — all Phase 4, unchanged by this migration. `fiscal_year_start_month`/`_day` here are a *setting* consumed by report queries in application code; no period rows exist anywhere in the schema yet.
+
+---
+
+## Phase 4+ — target tables
+
+Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible and so Phase 3 can seed forward-compatible accounts rather than leaving later phases a backfill.
+
+**`fiscal_periods`** (Phase 4) — `id` · `org_id` · `starts_on` DATE · `ends_on` DATE · `status` TEXT CHECK IN (`open`,`closed`,`locked`) · `closed_by` · `closed_at`. `EXCLUDE USING GIST` on `(org_id WITH =, daterange(starts_on, ends_on) WITH &&)` so overlapping periods are physically impossible — requires `btree_gist`. A posting into a closed period is rejected by trigger.
+
+**`audit_logs`** (Phase 5) — `id` · `org_id` · `table_name` · `row_id` · `operation` TEXT CHECK IN (`INSERT`,`UPDATE`,`DELETE`) · `old_row` JSONB · `new_row` JSONB · `actor_user_id` · `client_ip` INET · `occurred_at`. Written by a generic trigger function attached to every financial table. Append-only, same `reject_mutation()` treatment.
+
+**`bank_transactions`** (Phase 6) — `id` · `org_id` · `statement_import_id` · `posted_on` DATE · `amount_cents` BIGINT (signed — a bank line is directional, unlike a ledger line) · `currency_code` · `counterparty` TEXT · `memo` TEXT · `external_ref` TEXT · `status` TEXT CHECK IN (`unmatched`,`suggested`,`reconciled`,`ignored`) · `dedupe_hash` TEXT with `UNIQUE (org_id, dedupe_hash)` so re-importing the same statement is idempotent.
+
+**`reconciliation_matches`** (Phase 6) — `id` · `org_id` · `bank_transaction_id` · `journal_entry_id` · `score` SMALLINT CHECK between 0 and 100 · `score_breakdown` JSONB (the amount/date/name components, so a score is explainable rather than a magic number) · `decided_by` · `decided_at` · `status` TEXT CHECK IN (`suggested`,`accepted`,`rejected`).
+
+**`fx_rates`** (Phase 8) — `id` · `base_code` CHAR(3) · `quote_code` CHAR(3) · `rate_date` DATE · `rate` NUMERIC(18,8) · `source` TEXT. `UNIQUE (base_code, quote_code, rate_date)`. **No `org_id`** — an exchange rate is a fact about the world, not tenant data; this is one of the two tables that legitimately has no tenant scope (`users` is the other). Lookup is "the latest rate on or before this date", never an exact-date match, because rate feeds have gaps on weekends and holidays.
+
+**`quickbooks_connections`** (Phase 9) — `id` · `org_id` UNIQUE · `realm_id` TEXT · `access_token_encrypted` · `refresh_token_encrypted` · `expires_at` · `connected_by` · `last_synced_at`. Tokens are encrypted at rest, never logged (rule 11).
+
+**`ap_flow_documents`** (Phase 10) — `id` · `org_id` · `sha256` TEXT · `mime_type` TEXT · `byte_size` BIGINT · `original_filename` TEXT · `page_count` INT · `redaction_status` TEXT CHECK IN (`pending`,`redacted`,`failed`) · `redacted_regions` JSONB (the bounding boxes that were masked, so the decision is auditable) · `uploaded_by` · `created_at`. `UNIQUE (org_id, sha256)` — uploading the same receipt twice is one document.
+
+**`ap_flow_extractions`** (Phase 10) — `id` · `org_id` · `document_id` · `model` TEXT · `payload` JSONB (the structured invoice) · `field_confidence` JSONB (per-field 0–1, what the review UI colours) · `extracted_at`. One row per extraction attempt; a re-run adds a row rather than overwriting one.
+
+**`ap_flow_line_items`** (Phase 11) — `id` · `org_id` · `document_id` · `line_no` INT · `description` TEXT · `amount_cents` BIGINT · `tax_cents` BIGINT · `suggested_account_id` FK → `accounts` · `confirmed_account_id` FK → `accounts`. Distinct accounts per line is the point: one supermarket receipt splits across `6130 Office Supplies` and `6140 Kitchen & Breakroom`.
+
+**`ap_flow_vendor_account_map`** (Phase 11) — `id` · `org_id` · `vendor_name_normalized` TEXT · `account_id` FK → `accounts` · `hit_count` INT · `last_used_at`. `UNIQUE (org_id, vendor_name_normalized)`. The organization's own posting history, which is consulted **before** any model is asked to classify — a vendor seen ten times needs no inference.
 
 ---
 
@@ -91,11 +181,11 @@ Exactly five, forever: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`. Do 
 
 ### Default chart of accounts
 
-**Not seeded yet — this begins in Phase 3.** `accounts` does not exist, so `/auth/register` still creates only the user, the organization and the OWNER membership.
+**Seeded ✅.** `authService.register` calls `accountService.seedDefaultChart(client, orgId)` inside the transaction that creates the organization — on the checked-out `client`, so a rollback takes the chart with it.
 
-**Phase 3 therefore owes a backfill.** Every organization registered during Phases 1–2 has zero accounts, so adding the seed to `register` is not sufficient on its own — Phase 3 needs either a data migration for existing organizations or an idempotent seed-on-first-access. Recorded in [roadmap.md](roadmap.md).
+**The backfill is applied ✅.** `003_ledger-core_backfill_chart.sql` seeds every organization that had none, which covers the ones registered during Phases 1–2. It freezes its target list in a temp table before the first insert, because a `NOT EXISTS` predicate repeated per statement would match nothing after the roots were written.
 
-From Phase 3, seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
+Seeded per **organization** at registration, inside the same transaction that creates the org. Code ranges:
 
 | Range | Type |
 |---|---|
@@ -106,3 +196,38 @@ From Phase 3, seeded per **organization** at registration, inside the same trans
 | 5000–6999 | Expenses |
 
 Reports rely on the numbering convention — keep the ranges intact when extending the seed. The seed belongs in a service (`accountService.seedDefaultChart`), not inlined in a controller.
+
+Indentation below is `parent_id`. **H** marks a header account (`is_postable = false`) — a rollup for reporting that can never receive a posting.
+
+| Code | Name | Type | | Code | Name | Type |
+|---|---|---|---|---|---|---|
+| **1000** | Assets | Asset **H** | | **4000** | Revenue | Revenue **H** |
+| 1100 | · Current Assets | Asset **H** | | 4100 | · Product Revenue | Revenue |
+| 1110 | · · Operating Cash | Asset | | 4200 | · Service Revenue | Revenue |
+| 1120 | · · Accounts Receivable | Asset | | 4800 | · Sales Returns & Allowances | Revenue |
+| 1130 | · · Prepaid Expenses | Asset | | 4910 | · Realized FX Gain | Revenue |
+| 1140 | · · Inventory | Asset | | **5000** | Cost of Goods Sold | Expense **H** |
+| 1180 | · · GST/VAT Input Credit | Asset | | 5100 | · Direct Materials | Expense |
+| 1400 | · Non-Current Assets | Asset **H** | | 5200 | · Direct Labor | Expense |
+| 1500 | · · Fixed Assets / Equipment | Asset | | 5300 | · Freight & Duty | Expense |
+| 1590 | · · Accumulated Depreciation | Asset | | **6000** | Operating Expenses | Expense **H** |
+| **2000** | Liabilities | Liability **H** | | 6100 | · Salaries & Wages | Expense |
+| 2010 | · Current Liabilities | Liability **H** | | 6110 | · Rent & Utilities | Expense |
+| 2100 | · · Accounts Payable | Liability | | 6120 | · Software & IT Infrastructure | Expense |
+| 2120 | · · Accrued Liabilities | Liability | | 6130 | · Office Supplies | Expense |
+| 2140 | · · GST/VAT Output Payable | Liability | | 6140 | · Kitchen & Breakroom | Expense |
+| 2160 | · · Payroll Liabilities | Liability | | 6200 | · Professional Fees | Expense |
+| 2500 | · Non-Current Liabilities | Liability **H** | | 6300 | · Travel & Entertainment | Expense |
+| 2510 | · · Notes Payable | Liability | | 6400 | · Marketing & Advertising | Expense |
+| **3000** | Equity | Equity **H** | | 6500 | · Depreciation Expense | Expense |
+| 3100 | · Common Stock / Owner's Capital | Equity | | 6600 | · Bank Fees | Expense |
+| 3200 | · Retained Earnings | Equity | | 6810 | · Realized FX Loss | Expense |
+| 3300 | · Owner's Draw | Equity | | 6820 | · Unrealized FX Gain/Loss | Expense |
+
+**Forty-four accounts: 34 postable leaves and 10 header rollups.** The two counts matter separately — only the 34 can receive a posting, and only they appear on a trial balance. Three groups exist to pay debts forward rather than because Phase 3 needs them, which is deliberate — adding an account to the seed later means writing *another* backfill for every organization created in between:
+
+- **`1180` / `2140` (tax)** — AP-Flow splits input tax out of an invoice total into a dedicated account (Phase 11).
+- **`4910` / `6810` / `6820` (FX)** — the multi-currency engine posts realized gain or loss on settlement and unrealized movement at period end (Phase 8).
+- **`5000` and `6000` are both `Expense`.** COGS and operating expenses are separated by code range and by parent, not by a sixth account type. Rule 12 is not negotiable: the type list is exactly five. The P&L (Phase 4) derives gross profit from the `5xxx` range, which is why the ranges above are load-bearing rather than cosmetic.
+
+Codes are chosen to match the worked examples in [ledger-core.md](ledger-core.md) and [ap-flow.md](ap-flow.md) literally — `6120 Software & IT Infrastructure` debited against `2100 Accounts Payable` for a cloud bill, `1500 Fixed Assets / Equipment` against `1110 Operating Cash` for a hardware receipt, and a supermarket receipt split across `6130` and `6140`.

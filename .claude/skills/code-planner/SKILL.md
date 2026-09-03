@@ -45,7 +45,7 @@ Read [docs/roadmap.md](../../../docs/roadmap.md).
 
 - Which phase — and which app — does this work belong to?
 - Are its prerequisite phases actually built, verified in step 1?
-- Does it depend on a gated phase? Phase 6 (background jobs) gates 8 (AP-Flow), 12 (BoardDeck Automator), 13 (TaxGuard AI). Phase 9 (FP&A Engine) gates 10 (ForecasterPro). Phase 4 (LedgerCore GL completion) gates 9 and 11.
+- Does it depend on a gated phase? Phase 7 (background jobs) gates 9 (QuickBooks), 10 (AP-Flow), 15 (BoardDeck Automator), 16 (TaxGuard AI). Phase 12 (FP&A Engine) gates 13 (ForecasterPro). Phase 4 (LedgerCore live statements) gates 12 and 14. Phase 8 (FX engine) gates 11 (AP-Flow posting).
 
 If a prerequisite is missing, **stop and say so**. Then offer the largest slice that *is* legal today, and name the blocked remainder as a separate future plan. Do not plan across a gate and leave the reader to discover it.
 
@@ -202,13 +202,13 @@ Each is cheap to choose now and expensive to retrofit. State the decision in the
 
 - **Scoping** — every new table carries `org_id`; every query in the plan has an `org_id` predicate. Name the one or two tables that legitimately do not, with the reason.
 - **Money** — which columns are `BIGINT *_cents`. If this is the first money column in the project, `utils/money.ts` is a step.
-- **Transaction boundary** — state what commits together. A document and its journal entry commit together or not at all. Anything owed after `COMMIT` is a queued job (Phase 6), which means it is gated.
+- **Transaction boundary** — state what commits together. A document and its journal entry commit together or not at all. Anything owed after `COMMIT` is a queued job (Phase 7), which means it is gated.
 - **Lifecycle** — if the module has statuses, the FSM transition table is a step in `types/`, and the status CHECK constraint in the migration must match it exactly.
 - **Immutability** — posted documents get `POST /:id/reverse`. If the plan contains a `PUT` or `DELETE` on a posted document, it is wrong; replan that step.
 - **Roles** — the `requireRole(...)` set per route, decided deliberately. Do not plan everything as ADMIN.
 - **FKs** — `ON DELETE CASCADE` for children of the org or parent document, `RESTRICT` for audit references like `created_by`.
 - **App boundary** — confirm no step reads or writes another app's tables directly; a cross-app effect is a step that calls LedgerCore's `journalService` with `source_type`/`source_id`, never a direct query (rule #16).
-- **Dependencies** — any new package, and the phase that entitles it ([docs/development.md](../../../docs/development.md)). No ORM, ever. No `ioredis`/`bullmq` before Phase 6. No LLM/embeddings SDK outside Phase 13.
+- **Dependencies** — any new package, and the phase that entitles it ([docs/development.md](../../../docs/development.md)). No ORM, ever. No `ioredis`/`bullmq` before Phase 7. No LLM/embeddings SDK outside Phase 10 (AP-Flow vision) and Phase 16 (TaxGuard AI).
 
 ## 10. Output
 

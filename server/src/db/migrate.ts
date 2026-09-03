@@ -18,8 +18,19 @@ import { MIGRATIONS_ADVISORY_LOCK_KEY } from '../config/constants.js';
  * See study/postgresql/migrations-and-schema-evolution.md.
  */
 
-/** `001_organizations_and_users.sql` — 3-digit prefix, snake_case, no gaps. */
-const MIGRATION_FILENAME = /^(\d{3})_[a-z0-9_]+\.sql$/;
+/**
+ * `001_organizations_and_users.sql` — 3-digit prefix, snake_case, no gaps.
+ *
+ * The hyphen in the character class is deliberate and load-bearing: from Phase 3
+ * a migration is tagged with the app that owns it, `NNN_<app-slug>_<subject>.sql`
+ * (docs/schema.md), and every app slug in `config/apps.ts` may contain a hyphen —
+ * `002_ledger-core_accounts.sql`. Without it the runner rejects the naming
+ * convention the schema doc mandates. Platform migrations carry no app tag.
+ *
+ * Exported so the filename contract can be asserted directly rather than
+ * inferred from a runner failure.
+ */
+export const MIGRATION_FILENAME = /^(\d{3})_[a-z0-9_-]+\.sql$/;
 
 /**
  * `import.meta.dirname` would be shorter, but it is a Node-ESM-only property:
@@ -57,8 +68,9 @@ async function loadMigrations(): Promise<Migration[]> {
     const match = MIGRATION_FILENAME.exec(filename);
     if (!match) {
       throw new Error(
-        `Invalid migration filename "${filename}". Expected NNN_snake_case.sql, ` +
-          'e.g. 002_general_ledger.sql (docs/schema.md).',
+        `Invalid migration filename "${filename}". Expected NNN_snake_case.sql ` +
+          'for a platform migration, or NNN_<app-slug>_<subject>.sql for an app ' +
+          'migration, e.g. 002_ledger-core_accounts.sql (docs/schema.md).',
       );
     }
 

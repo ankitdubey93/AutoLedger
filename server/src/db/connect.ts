@@ -1,5 +1,25 @@
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { env } from '../config/env.js';
+
+/**
+ * PostgreSQL `DATE` (OID 1082) is returned as a plain string, not a JS `Date`.
+ *
+ * By default `pg` parses it into a `Date` at **local** midnight. Calling
+ * `.toISOString()` on that then converts to UTC, so in any timezone east of UTC
+ * an `entry_date` of 2026-08-15 comes back as "2026-08-14" — the accounting
+ * date silently moves to the previous day, and in a timezone west of UTC it
+ * would move forward instead. A test caught this on the very first journal
+ * entry posted; in production it would have been a period-end reporting bug
+ * that appears for some users and not others.
+ *
+ * The deeper point is that a `DATE` has no time and no timezone. Representing
+ * it as an instant is lossy by definition, and there is no timezone in which
+ * the conversion is meaningful. Keeping it a string is not a workaround.
+ *
+ * `TIMESTAMPTZ` is unaffected and still parses to a `Date`, correctly — it
+ * genuinely is an instant.
+ */
+types.setTypeParser(types.builtins.DATE, (value: string) => value);
 
 /**
  * One Pool for the whole process. A PostgreSQL connection is a forked backend

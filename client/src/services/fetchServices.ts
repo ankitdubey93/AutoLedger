@@ -231,3 +231,274 @@ export function listApps(signal?: AbortSignal): Promise<{
 }> {
   return apiFetch('/apps', { signal: signal ?? null });
 }
+
+/* -------------------------------------------------------------- ledger-core */
+
+/**
+ * Mirrors server/src/types/ledger-core.ts, hand-written rather than imported.
+ * The two packages build independently, so the server's types are not reachable
+ * from here — the same reason `AppSummary` above is mirrored.
+ *
+ * Money is `*Cents: number` throughout: integer minor units, never a float
+ * (guardrails rule 3). `fxRate` stays a string for the same reason the server
+ * keeps it one — it is a NUMERIC, and a float would lose precision.
+ */
+export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+
+export interface Account {
+  id: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  parentId: string | null;
+  isPostable: boolean;
+  isActive: boolean;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AccountNode extends Account {
+  children: AccountNode[];
+}
+
+export interface LedgerLine {
+  id: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  debitCents: number;
+  creditCents: number;
+  currencyCode: string;
+  fxRate: string;
+  baseDebitCents: number;
+  baseCreditCents: number;
+}
+
+export interface JournalEntry {
+  id: string;
+  entryDate: string;
+  description: string | null;
+  sourceType: string;
+  sourceId: string | null;
+  reversesEntryId: string | null;
+  createdBy: string;
+  createdAt: string;
+  lines: LedgerLine[];
+}
+
+export interface TrialBalanceRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  debitCents: number;
+  creditCents: number;
+  netBalanceCents: number;
+}
+
+/** GET /ledger-core/accounts — the flat chart, ordered by code. */
+export function listAccounts(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  accounts: Account[];
+}> {
+  return apiFetch('/ledger-core/accounts', { signal: signal ?? null });
+}
+
+/** GET /ledger-core/accounts?tree=true — the same chart, nested by parentId. */
+export function listAccountTree(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  accounts: AccountNode[];
+}> {
+  return apiFetch('/ledger-core/accounts?tree=true', { signal: signal ?? null });
+}
+
+/** GET /ledger-core/journals — paginated, lines nested. */
+export function listJournals(
+  params: { page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  entries: JournalEntry[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/journals${suffix}`, { signal: signal ?? null });
+}
+
+export interface JournalLineInput {
+  accountId: string;
+  debitCents: number;
+  creditCents: number;
+}
+
+/** POST /ledger-core/journals — debits must equal credits, in integer cents. */
+export function createJournal(body: {
+  entryDate: string;
+  description: string | null;
+  lines: JournalLineInput[];
+}): Promise<{ success: boolean; entry: JournalEntry }> {
+  return apiFetch('/ledger-core/journals', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/**
+ * POST /ledger-core/journals/:id/reverse — the only correction path.
+ * There is no update and no delete, by design (guardrails rule 6).
+ */
+export function reverseJournal(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; entry: JournalEntry }> {
+  return apiFetch(`/ledger-core/journals/${id}/reverse`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/** GET /ledger-core/reports/trial-balance — aggregated from raw lines each call. */
+export function getTrialBalance(
+  asOf: string | null = null,
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  asOf: string | null;
+  isBalanced: boolean;
+  totalDebitCents: number;
+  totalCreditCents: number;
+  count: number;
+  rows: TrialBalanceRow[];
+}> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  return apiFetch(`/ledger-core/reports/trial-balance${suffix}`, { signal: signal ?? null });
+}
+
+/* ------------------------------------------------- ledger-core: settings & dashboard */
+
+/** Mirrors server/src/types/ledger-core.ts's FiscalYearWindow. */
+export interface FiscalYearWindow {
+  startDate: string;
+  endDate: string;
+  label: string;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's LedgerSettings. */
+export interface LedgerSettings {
+  organizationName: string;
+  legalName: string | null;
+  baseCurrency: string;
+  fiscalYearStartMonth: number;
+  fiscalYearStartDay: number;
+  booksStartDate: string;
+  industry: string | null;
+  timezone: string;
+  cashAccountId: string | null;
+  /** `null` when the wizard has never been completed for this organization. */
+  onboardedAt: string | null;
+  currentFiscalYear: FiscalYearWindow;
+  /** `true` once any ledger line exists — base currency can no longer change. */
+  baseCurrencyLocked: boolean;
+}
+
+/** Mirrors server/src/services/ledger-core/settingsService.ts's OnboardingInput. */
+export interface OnboardingInput {
+  organizationName: string;
+  legalName: string | null;
+  baseCurrency: string;
+  fiscalYearStartMonth: number;
+  fiscalYearStartDay: number;
+  booksStartDate: string;
+  industry: string | null;
+  timezone: string;
+  cashAccountId: string | null;
+}
+
+/** GET /ledger-core/settings — a missing settings row means "not yet onboarded", not a 404. */
+export async function getLedgerSettings(signal?: AbortSignal): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
+    signal: signal ?? null,
+  });
+  return body.settings;
+}
+
+/** POST /ledger-core/settings/onboarding — idempotent; re-submitting overwrites, never 409s. */
+export async function completeLedgerOnboarding(input: OnboardingInput): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>(
+    '/ledger-core/settings/onboarding',
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+  return body.settings;
+}
+
+/** PATCH /ledger-core/settings — refused with 409 until onboarding has completed once. */
+export async function updateLedgerSettings(input: Partial<OnboardingInput>): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return body.settings;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's TrendPoint. */
+export interface TrendPoint {
+  month: string;
+  revenueCents: number;
+  expenseCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's DashboardSummary. */
+export interface DashboardSummary {
+  asOf: string;
+  fiscalYear: FiscalYearWindow;
+  position: {
+    assetsCents: number;
+    liabilitiesCents: number;
+    equityCents: number;
+    currentEarningsCents: number;
+    cashCents: number | null;
+    equationHolds: boolean;
+  };
+  performance: {
+    yearToDate: { revenueCents: number; expenseCents: number; netIncomeCents: number };
+    currentMonth: { revenueCents: number; expenseCents: number; netIncomeCents: number };
+  };
+  activity: { entryCountYtd: number; recentEntries: JournalEntry[] };
+  integrity: { totalDebitCents: number; totalCreditCents: number; isBalanced: boolean };
+  trend: TrendPoint[];
+}
+
+/** GET /ledger-core/reports/dashboard — aggregated from raw lines each call, never cached. */
+export async function getLedgerDashboard(
+  asOf: string | null = null,
+  signal?: AbortSignal,
+): Promise<DashboardSummary> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  const body = await apiFetch<{ success: boolean } & DashboardSummary>(
+    `/ledger-core/reports/dashboard${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...summary } = body;
+  return summary;
+}
+
+/* ---------------------------------------------------- organizations: update */
+
+/** PATCH /organizations — the organization's name and/or base currency. OWNER/ADMIN only. */
+export async function updateOrganization(input: {
+  name?: string;
+  baseCurrency?: string;
+}): Promise<OrganizationSummary> {
+  const body = await apiFetch<{ success: boolean; organization: OrganizationSummary }>('/organizations', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return body.organization;
+}

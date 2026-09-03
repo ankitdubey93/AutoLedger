@@ -82,7 +82,7 @@ Nothing is built yet (Phase 0 pending). When auth lands:
 - **`hashSync` in a request handler is a self-inflicted outage.** At bcrypt cost factor 10, one hash is tens to low hundreds of milliseconds; in pure JS, slower still. Sync-hashing on a login route means concurrent logins queue behind each other and *every unrelated request* waits too.
 - **A recursive `process.nextTick` starves I/O.** The nextTick queue drains before the loop advances, so it never reaches the poll phase. Use `setImmediate` for "yield and continue" work.
 - **`await` in a loop serialises.** `for (const x of xs) await f(x)` is sequential; `Promise.all(xs.map(f))` is concurrent. In the ERP context, be deliberate: sequential is sometimes exactly what you want inside a transaction, where interleaving queries on one client would corrupt the batch.
-- **CPU-bound work belongs off the main thread.** PDF rendering and payroll batches are why the roadmap puts BullMQ workers in Phase 5 — separate processes, so a heavy job cannot stall the API.
+- **CPU-bound work belongs off the main thread.** PDF rendering and payroll batches are why the roadmap puts BullMQ workers in Phase 7 — separate processes, so a heavy job cannot stall the API.
 - **`UV_THREADPOOL_SIZE` is read once at startup.** Setting it after the first thread-pool use has no effect.
 
 ## Interview Q&A
@@ -114,4 +114,4 @@ A: On AutoLedger we standardised on `bcryptjs` rather than native `bcrypt` to ke
 ## See also
 
 - [express-middleware-and-async-errors.md](express-middleware-and-async-errors.md)
-- `docs/roadmap.md` Phase 5 — why background jobs are a separate process
+- `docs/roadmap.md` Phase 7 — why background jobs are a separate process

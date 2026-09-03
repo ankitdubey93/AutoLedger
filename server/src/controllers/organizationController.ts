@@ -1,5 +1,7 @@
 import type { RequestHandler } from 'express';
 import * as organizationService from '../services/organizationService.js';
+import { updateOrganizationSchema } from '../schemas/organizationSchema.js';
+import { parseBody } from '../utils/parseBody.js';
 import { requireUser } from '../utils/requireUser.js';
 
 /**
@@ -24,4 +26,12 @@ export const listMembers: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const members = await organizationService.listMembers(user.orgId);
   res.json({ success: true, count: members.length, members });
+};
+
+/** PATCH /organizations — edit the active organization's name and/or base currency. */
+export const update: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(updateOrganizationSchema, req.body);
+  const organization = await organizationService.updateOrganization(user.orgId, input);
+  res.json({ success: true, organization });
 };

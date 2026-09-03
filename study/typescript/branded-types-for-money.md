@@ -3,8 +3,8 @@
 > TypeScript's type system is structural, so `Cents` and `Dollars` are the same type and freely interchangeable — branding fakes nominal typing to make that mix-up a compile error, at zero runtime cost.
 
 **Category:** TypeScript
-**Introduced by:** Phase 2 — `utils/money.ts`, `BIGINT` cents columns
-**Verified against:** TypeScript 5.x, IEEE 754 double-precision
+**Introduced by:** Phase 3 — `utils/money.ts`, `BIGINT` cents columns
+**Verified against:** TypeScript 7.0.2, Node 24, IEEE 754 double-precision. Code verified: `server/src/utils/money.ts` (Phase 3)
 
 ---
 
@@ -32,7 +32,7 @@ This says a one-cent discrepancy is acceptable. In accounting it isn't — that'
 
 ```ts
 const toCents = (n: number) => Math.round(Number(n) * 100);
-if (totalDebitCents !== totalCreditCents) throw new ApiError(400, 'Entry is unbalanced.');
+if (totalDebitCents !== totalCreditCents) throw new ApiError(422, 'Entry is unbalanced.');
 ```
 
 ### Why `BIGINT` and not `NUMERIC`
@@ -81,13 +81,13 @@ export const cents = (n: number): Cents => {
   return n as Cents;
 };
 
-export const toCents = (dollars: Dollars): Cents => cents(Math.round(dollars * 100));
-
 const pay = (amount: Cents) => { ... };
 pay(1999);                    // ❌ Argument of type 'number' is not assignable to 'Cents'
 pay(19.99 as Dollars);        // ❌ 'Dollars' is not assignable to 'Cents'
 pay(cents(1999));             // ✅
 ```
+
+Note what the middle line demonstrates and also what it costs: `19.99 as Dollars` is an *unchecked* cast, and casting is the one thing that can forge a brand. The type system stops you passing dollars where cents belong, but it cannot stop you asserting that a number is dollars in the first place. That is why the shipped `utils/money.ts` gives every branded value a checked constructor and exports no way to make one without it.
 
 The brand is erased at compile time — a `Cents` **is** a `number` at runtime, so arithmetic and JSON serialisation work with no wrapper allocation and no performance cost.
 
@@ -128,10 +128,14 @@ Conversion lives in exactly one module, `utils/money.ts`, so the parse-from-stri
 
 ## Where it lives in this codebase
 
-Nothing is built yet (Phase 2 pending). Planned:
+Built in Phase 3:
 
-- `server/src/utils/money.ts` — `Cents`, `cents()`, `toCents()`, `formatCents()`, and the string parser for `pg` results
-- `server/src/types/accounting.ts` — `Cents` on line and entry types
+- `server/src/utils/money.ts` — `Cents`, and the only functions permitted to produce one: `cents()` (checked constructor), `toCents()` (major units → cents), `parseCents()` (the `pg` `BIGINT` string parser), `formatCents()`, `addCents()`, `sumCents()`
+- `server/src/__tests__/money.test.ts` — unit tier, no database
+
+**One deliberate departure from the sketch above:** `toCents` takes a plain `number`, not a branded `Dollars`. At an HTTP boundary the value arrives from `JSON.parse` as a `number`, so requiring `Dollars` would force callers to write `body.amount as Dollars` — an unchecked cast at precisely the point the check matters most, which is the first gotcha below. `Dollars` remains a good illustration of the pattern and a genuinely useful type *inside* a calculation where both units are in play; it is not exported, because nothing in the codebase currently has that shape.
+
+Not yet applied: `Cents` does not appear on the `ledger_lines` DTOs in `types/ledger-core.ts`, which use plain `number`. Branding the transport types would mean re-validating on every `JSON.parse` boundary crossing for a value the database CHECK constraints already guarantee. The brand earns its keep in the calculation path — `sumCents` over an entry's lines — which is where it is used.
 
 ## Gotchas
 
@@ -166,7 +170,7 @@ A: On AutoLedger, money is integer cents end to end, and the type is branded rat
 ## Follow-ups they'll dig into
 
 - "How do you split 100 cents three ways?" (You can't exactly — pick an allocation strategy, usually largest-remainder, and make it explicit rather than letting rounding decide.)
-- "What about currencies without cents, like JPY, or three-decimal ones like KWD?" (The "minor unit" exponent varies; hardcoding ×100 is a bug. ISO 4217 carries the exponent — store it per currency, which matters once the Phase 13 FX engine lands.)
+- "What about currencies without cents, like JPY, or three-decimal ones like KWD?" (The "minor unit" exponent varies; hardcoding ×100 is a bug. ISO 4217 carries the exponent — store it per currency, which matters once the Phase 8 FX engine lands.)
 - "What's `unique symbol` and why use it for the brand?" (A type-level-unique symbol; it makes the marker unforgeable and keeps it out of autocomplete, unlike a string-keyed property.)
 - "Difference between `as const`, `satisfies`, and a type annotation?" (Common follow-up once branding shows you know the type system — `satisfies` validates without widening or discarding literal inference.)
 

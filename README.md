@@ -4,9 +4,9 @@ A suite of seven portfolio applications sharing one multi-tenant platform: Postg
 
 | App | Domain | Core skills |
 |---|---|---|
-| LedgerCore | Core Accounting & Systems | Double-entry integrity, DB constraints, multi-currency, QuickBooks API sync |
-| TaxGuard AI | Compliance & AI Workflows | RAG, vector databases, PII redaction, tax act parsing |
-| AP-Flow | Operational Accounting | Multimodal OCR invoice parsing, 3-way matching, COGS tracking |
+| LedgerCore | Core Accounting & Systems | Double-entry enforced by DB trigger, immutable ledger, multi-currency FX, bank reconciliation, QuickBooks API sync |
+| TaxGuard AI | Compliance & AI Workflows | RAG, vector databases, tax act parsing |
+| AP-Flow | Operational Accounting | Multimodal OCR invoice parsing, PII pixel masking, history-driven COA mapping, human-in-the-loop review |
 | FP&A Engine | Financial Modeling | 3-statement linking, scenario modeling, cash runway forecasting |
 | UnitEcon | Commercial Analytics | Cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance |
 | BoardDeck Automator | Board Reporting & Close | Monthly close automation, BvA variance, automated `.pptx` deck generation |
@@ -14,17 +14,18 @@ A suite of seven portfolio applications sharing one multi-tenant platform: Postg
 
 Double-entry accounting is the suite's system of record: LedgerCore is the General Ledger every other app posts into, rather than each app keeping its own private notion of money. All amounts are integer `BIGINT` cents; all business data is scoped to an `organization`.
 
-## Status — Phase 2 complete (platform layer)
+## Status — Phase 3 complete (LedgerCore GL core)
 
-Auth, tenancy, and the app registry work. **LedgerCore is the only app with real feature routes — none of the seven has GL, invoicing, forecasting, or any other business functionality yet.**
+Auth, tenancy, the app registry, and **LedgerCore's general ledger** work. The other six apps are `'planned'` — visible on the chooser, no routes behind them.
 
 | Built | Not built |
 |---|---|
-| Express + TypeScript server, strict compiler config | Any app's actual features — GL, invoicing, forecasting, all of it (Phase 3+) |
-| Migrations, auth, tenancy, RBAC, org switching (Phase 1) | Background jobs — Redis runs but nothing connects to it (Phase 6) |
-| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | Everything in [docs/roadmap.md](docs/roadmap.md) phases 3–13 |
-| React + Vite client: login/register, app chooser, account page | |
-| Vitest, 95 server tests + 15 client tests | |
+| Express + TypeScript server, strict compiler config | P&L, balance sheet, fiscal periods (Phase 4) |
+| Migrations, auth, tenancy, RBAC, org switching (Phase 1) | Background jobs — Redis runs but nothing connects to it (Phase 7) |
+| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | Bank reconciliation, multi-currency FX, QuickBooks sync (Phases 6, 8, 9) |
+| **LedgerCore (Phase 3): chart of accounts, journal entries, reversing entries, trial balance — with the balance invariant and immutability enforced by database triggers** | The audit trail — no compliance claim is valid yet (Phase 5) |
+| React + Vite client: login/register, app chooser, account page, LedgerCore's three pages | AP-Flow's OCR pipeline and the other five apps (Phases 10–16) |
+| Vitest, 191 server tests + 27 client tests | |
 
 Nothing under `docs/` describes working code unless this table says so — it is target-state design. See [docs/roadmap.md](docs/roadmap.md).
 
@@ -88,6 +89,8 @@ study/      Interview-prep notes generated from this project's decisions
 | File | Contents |
 |---|---|
 | [docs/roadmap.md](docs/roadmap.md) | Phase order, gates, per-app DB patterns |
+| [docs/ledger-core.md](docs/ledger-core.md) | LedgerCore's full spec and build ladder |
+| [docs/ap-flow.md](docs/ap-flow.md) | AP-Flow's OCR/PII pipeline spec |
 | [docs/guardrails.md](docs/guardrails.md) | The 16 non-negotiable engineering rules |
 | [docs/architecture.md](docs/architecture.md) | Suite structure, tenancy model, RBAC, repository layout |
 | [docs/schema.md](docs/schema.md) | Table definitions and constraints |

@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 95 server tests + 15 client tests.**
+**Current state: 191 server tests + 27 client tests.**
 
 Server, in `server/src/__tests__/`:
 
@@ -23,8 +23,14 @@ Server, in `server/src/__tests__/`:
 | `tenantIsolation.test.ts` | integration | **The mandatory cross-tenant suite** |
 | `validate.test.ts`, `jwt.test.ts`, `rbac.test.ts` | unit | Pure logic — no database |
 | `platform/apps.test.ts` | integration | `GET /apps` auth requirement, registry shape, `isAppSlug` |
+| `money.test.ts` | unit | Branded `Cents`, rounding half-away-from-zero, the `BIGINT`-string parser and its precision cliff |
+| `rateLimit.test.ts` | unit | 429 after the limit, the error envelope, successful logins not counted |
+| `ledger-core/accounts.test.ts` | integration | The 44-account seed, the tree, re-parent cycle rejection, **cross-tenant isolation** |
+| `ledger-core/journals.test.ts` | integration | Posting, unbalanced rejection, reversal, ROLLBACK, forged `sourceType`, **cross-tenant isolation** |
+| `ledger-core/ledgerConstraints.test.ts` | integration | **The database as the guardrail** — every case bypasses the service and writes raw SQL |
+| `ledger-core/reports.test.ts` | integration | Trial balance totals, type-aware balances, `asOf`, and that no summary table exists |
 
-Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), and `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error).
+Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), and `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs).
 
 Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point.
 
@@ -64,6 +70,19 @@ Run against a **real PostgreSQL database** with migrations applied. The prior bu
 - Triggers fire (`updated_at`, later `audit_logs` snapshots)
 - **Cross-tenant isolation**: a user in org A cannot read or write any row in org B, for every endpoint
 
+**Constraint and trigger tests assert the SQLSTATE, not the message string.** `23505` for a unique violation, `23514` for a CHECK, `0A000` for the immutability trigger. Messages get reworded; error codes are the contract.
+
+From Phase 3 a third thing must be tested, and it is easy to get wrong: **the deferred balance trigger fires at `COMMIT`, not at `INSERT`.** A test that inserts one unbalanced line and expects an immediate rejection will pass for the wrong reason or fail confusingly. The assertion belongs on the `COMMIT`:
+
+```ts
+await client.query('BEGIN');
+await client.query('INSERT INTO ledger_lines ...');   // succeeds — deferred
+await client.query('INSERT INTO ledger_lines ...');   // succeeds — deferred
+await expect(client.query('COMMIT')).rejects.toThrow(/balance/i);
+```
+
+Write these against the raw pool, deliberately bypassing the service. The point of the trigger is that it holds when the service is not involved, so a test that goes through `journalService` proves the service, not the database.
+
 ### The cross-tenant fixture
 
 `tenantIsolation.test.ts` establishes the shape every later module should copy: **user A** in org A only, **user C** in org B only, and **user B in both**.
@@ -81,6 +100,8 @@ At minimum:
 3. Its `org_id` authorization scoping
 
 **A module without a cross-tenant isolation test is not done — one per app, not one for the whole suite.** `tenantIsolation.test.ts` covers the platform tables (`organizations`, `organization_members`); each app's first org-scoped table needs its own instance of the same fixture shape, because a bug in one app's scoping is invisible to a test that only ever queries another app's tables.
+
+**No test makes a network call.** From Phase 9 (QuickBooks) and Phase 10 (vision extraction) the codebase talks to external APIs; those are stubbed at the `fetch` boundary in tests, always. A suite that needs an API key to pass is a suite that fails in CI and gets skipped, and a stubbed call is also the only way to test the error paths — a rate limit, a truncated response, an expired token — that matter most and never happen on demand.
 
 ---
 

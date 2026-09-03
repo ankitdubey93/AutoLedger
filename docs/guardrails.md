@@ -47,13 +47,15 @@ Validation **and** storage are both in integer cents. There is no `DECIMAL` mone
 const toCents = (n: number) => Math.round(Number(n) * 100);
 const totalDebitCents  = lines.reduce((s, l) => s + toCents(l.debit), 0);
 const totalCreditCents = lines.reduce((s, l) => s + toCents(l.credit), 0);
-if (totalDebitCents !== totalCreditCents) throw new ApiError(400, "Entry is unbalanced.");
+if (totalDebitCents !== totalCreditCents) throw new ApiError(422, "Entry is unbalanced.");
 
 // WRONG
 if (Math.abs(totalDebit - totalCredit) > 0.01) { ... }  // accumulates float error
 ```
 
-Every money column is `BIGINT` cents — `debit_cents`, `credit_cents`, `amount_cents`, `unit_price_cents`. Conversion helpers live in one place, `utils/money.ts`. This applies to reports too: an `isBalanced` flag is an integer equality check, never an epsilon comparison.
+Every money column is `BIGINT` cents — `debit_cents`, `credit_cents`, `amount_cents`, `unit_price_cents`. Conversion helpers live in one place, `utils/money.ts`, which arrives in Phase 3 with the first money column. This applies to reports too: an `isBalanced` flag is an integer equality check, never an epsilon comparison.
+
+**Cents at the boundary too, not just in the database.** A request or an extracted document that carries `450.00` is converted on the way in, before anything sums it — `JSON.parse` produces an IEEE-754 double, and there is no exception to this rule for values that are "only in transit".
 
 ## 4. Parameterized queries only
 
@@ -84,17 +86,29 @@ try {
 }
 ```
 
-Never do post-`COMMIT` follow-up work inside the same function and call it part of the operation. If something must happen after commit, it is a queued job (Phase 6), not a fire-and-forget query with a swallowed error.
+Never do post-`COMMIT` follow-up work inside the same function and call it part of the operation. If something must happen after commit, it is a queued job (Phase 7), not a fire-and-forget query with a swallowed error. This is the specific reason financial-event webhooks wait for the queue rather than shipping with the ledger: an HTTP call cannot happen inside the transaction, and firing it after `COMMIT` without a queue loses the notification on any crash between the two.
 
 ## 6. Posted financial documents are immutable
 
 Posted journals are append-only. Corrections happen through **reversing entries** — a new entry with debits and credits swapped, linked to the original via `reverses_entry_id` — never by mutating or deleting a posted row. There is no `PUT /journals/:id` and no `DELETE /journals/:id`; there is `POST /journals/:id/reverse`.
+
+From Phase 3 this is **also enforced by the database**: `reject_mutation()` is a `BEFORE UPDATE OR DELETE` trigger on `journal_entries` and `ledger_lines` that raises `0A000` naming this rule. A route that violated the rule would fail at runtime rather than corrupt the ledger. `journal_entries.org_id` is `ON DELETE RESTRICT` for the same reason — a cascade from `organizations` would otherwise be a delete the trigger has to abort.
 
 This propagates to every app that posts financial documents: invoices, budgets, board decks get reversed or superseded, not silently edited in place.
 
 ## 7. A ledger line has exactly one side populated
 
 Both `debit_cents > 0` and `credit_cents > 0` is invalid, and so is both being zero. Rejected in the service before the DB is touched, **and** enforced by CHECK constraints in the migration. Application validation and DB constraints are belt and braces — write both.
+
+The entry-level rule — `SUM(debits) = SUM(credits)`, at least two lines — cannot be a CHECK constraint, because a CHECK sees one row and this spans many. From Phase 3 it is a `DEFERRABLE INITIALLY DEFERRED` constraint trigger that fires at `COMMIT`, so lines can be inserted one at a time without being transiently invalid, plus a second deferred trigger on `journal_entries AFTER INSERT` to catch a header written with no lines at all. Integer equality, never an epsilon.
+
+```ts
+// CORRECT
+if (totalDebits !== totalCredits) throw new ApiError(422, '...');
+
+// WRONG — the reason money is BIGINT cents is so this is never needed
+if (Math.abs(totalDebits - totalCredits) < 0.01) { /* ... */ }
+```
 
 ## 8. Every foreign key is declared
 
@@ -130,13 +144,15 @@ const PO_TRANSITIONS: Record<PoStatus, PoStatus[]> = {
 
 `Asset`, `Liability`, `Equity`, `Revenue`, `Expense` — never a sixth. Enforced by a CHECK constraint on `accounts.type` (LedgerCore, Phase 3) and mirrored in application validation. See [schema.md](schema.md#conventions).
 
+Cost of Goods Sold is the one that tempts people into a sixth type. It is not one — COGS accounts are `Expense`, separated from operating expenses by the `5xxx` code range and by their parent account, which is how the P&L derives gross profit.
+
 ## 13. Migrations are additive, idempotent, and never edited after landing
 
 `server/src/db/migrations/` is the **only** migration directory, sequential 3-digit prefix, one shared sequence across every app (`NNN_<app-slug>_<subject>.sql`; platform migrations carry no app tag). Use `IF NOT EXISTS` / `IF EXISTS`. **Never edit an applied migration** — write a new one. Destructive changes (dropping a column, narrowing a type) need explicit sign-off first. Full detail: [schema.md](schema.md#migration-rules).
 
 ## 14. No dependency before the phase that needs it
 
-Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies — including Redis (provisioned since Phase 0, unused until Phase 6) and any LLM/embeddings SDK (unused until Phase 13). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
+Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies — including Redis (provisioned since Phase 0, unused until Phase 7) and any LLM/embeddings SDK. The LLM carve-out covers exactly two apps, **AP-Flow's vision extraction (Phase 10)** and **TaxGuard AI's RAG (Phase 16)**, and nothing else; both are recorded in [roadmap.md](roadmap.md#phase-renumbering--2026-09-01). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
 
 ## 15. Every module ships tests, including a cross-tenant isolation test
 

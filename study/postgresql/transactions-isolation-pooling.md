@@ -3,7 +3,7 @@
 > A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 1–2 — `db/connect.ts`, `journalService.createEntry`
+**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`
 **Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
 
 ---
@@ -82,6 +82,27 @@ Two transactions locking the same rows in opposite order deadlock. Postgres dete
 
 Since every money column in this schema is `BIGINT` cents, **every money value read from the DB is a string in JS until parsed.** Parse deliberately in the service layer. You can override globally with `pg.types.setTypeParser(20, BigInt)` — but that makes values non-JSON-serialisable, so prefer explicit conversion.
 
+### `DATE` arrives as a `Date`, and that is the bug
+
+The mirror-image problem, and a more dangerous one because it fails silently and only for some users. `pg` parses `DATE` (OID 1082) into a JavaScript `Date` at **local midnight**:
+
+```ts
+// entry_date is DATE '2026-08-15'; process TZ is Asia/Kolkata (UTC+05:30)
+row.entry_date                      // 2026-08-15T00:00:00 local
+row.entry_date.toISOString()        // "2026-08-14T18:30:00.000Z"
+  .slice(0, 10)                     // "2026-08-14"  ← a day early
+```
+
+Phase 3 shipped exactly this and the first journal-entry test caught it: posted `2026-08-15`, read back `2026-08-14`. West of UTC it would have moved forward instead, and at UTC+0 it would never reproduce at all — a bug that appears for some users and not others, on some machines and not others.
+
+The deeper point is that **a `DATE` has no time and no timezone**, so representing it as an instant is lossy by definition; there is no timezone in which the conversion is meaningful. Keeping it a string is not a workaround, it is the correct representation:
+
+```ts
+types.setTypeParser(types.builtins.DATE, (value: string) => value);   // 'YYYY-MM-DD'
+```
+
+`TIMESTAMPTZ` is deliberately left alone — it genuinely *is* an instant, and parsing it to a `Date` is right. The distinction to carry: an accounting date is a calendar fact, a `created_at` is a moment in time, and conflating them is how period-end reporting quietly lands in the wrong month.
+
 ### A failed statement poisons the whole transaction
 
 This one costs people an afternoon. In PostgreSQL, **any** error inside a transaction block puts it into an aborted state, and every subsequent statement fails with:
@@ -132,8 +153,8 @@ The same shape works for a simple job queue: `DELETE FROM jobs WHERE id = (SELEC
 | Explicit `BEGIN`/`COMMIT` on a checked-out client | Journal entry + its ledger lines must be all-or-nothing. Partial writes break the double-entry invariant permanently |
 | `DELETE … RETURNING` to consume a refresh token | Read-then-write would let two concurrent refreshes both succeed. One statement makes the claim atomic — and turns "zero rows" into replay detection |
 | `ON CONFLICT DO NOTHING` for slug allocation | A caught `23505` would abort the enclosing transaction, so retrying needs either this or a `SAVEPOINT` per attempt |
-| READ COMMITTED (the default) for GL writes | The balance invariant is enforced in-application before insert and by CHECK constraints; we're not doing read-then-write on contended rows |
-| `SELECT ... FOR UPDATE` for inventory (Phase 7) | Stock checkout *is* read-then-write on a hot row. See `docs/roadmap.md` |
+| READ COMMITTED (the default) for GL writes | The balance invariant is enforced in-application before insert, by CHECK constraints, and by a deferred constraint trigger at `COMMIT`; we're not doing read-then-write on contended rows |
+| `SELECT ... FOR UPDATE` | Not used anywhere. It was planned for inventory stock checkout, which is genuinely read-then-write on a hot row — but Inventory was dropped from scope, and no surviving app has that shape. See [roadmap.md](../../docs/roadmap.md#dropped-from-scope) |
 | Append-only ledgers over mutable counters | Sidesteps the lost-update class entirely — appending rows never contends the way `UPDATE counter` does. Current quantity is derived |
 
 That last one is the deepest architectural point: choosing an append-only data model makes a whole category of concurrency bug structurally impossible rather than defended against.
@@ -146,11 +167,10 @@ Built in Phase 1:
 - `server/src/db/migrate.ts` — one transaction per migration file, plus a session-level advisory lock
 - `server/src/db/connect.ts` — the `Pool` singleton with its idle-client `error` listener
 
-Phase 2 additions, still pending:
+Phase 3 additions, still pending:
 
-- `server/src/db/connect.ts` — the `Pool` singleton
-- `server/src/services/journalService.ts` — the `BEGIN`/`COMMIT` block for entry + lines
-- `server/src/services/inventory/stockService.ts` — `FOR UPDATE` on stock rows (Phase 7)
+- `server/src/services/ledger-core/journalService.ts` — the `BEGIN`/`COMMIT` block writing an entry and its lines together, every statement on the checked-out `client`
+- `004_ledger-core_journals.sql` — the `DEFERRABLE INITIALLY DEFERRED` constraint trigger, which is a transaction-scoped mechanism and belongs in this note when it lands: it is the clearest example in the codebase of work that happens *at* `COMMIT` rather than before it
 
 ## Gotchas
 
@@ -163,6 +183,9 @@ Phase 2 additions, still pending:
 - **Connection pooling in serverless.** Each instance opens its own pool; Postgres has a hard `max_connections` (default 100). PgBouncer in transaction mode is the usual answer — but it breaks session-scoped features like prepared statements and `SET LOCAL`.
 
 ## Interview Q&A
+
+**Q: Tell me about a subtle bug you found in a driver's type handling.**
+A: `node-postgres` parses a PostgreSQL `DATE` into a JavaScript `Date` at local midnight. My code then called `.toISOString().slice(0, 10)` to get `YYYY-MM-DD` back — which converts to UTC, so on my machine at UTC+05:30 an accounting date of the 15th came back as the 14th. A test caught it on the very first journal entry I posted. What makes it nasty is that it's timezone-dependent: west of UTC it shifts forward instead, and at UTC+0 it never reproduces — so it's the kind of thing that ships and then appears for some users and not others. The fix was a global type parser returning `DATE` as a raw string, and the reasoning matters more than the fix: a `DATE` has no time and no timezone, so turning it into an instant is lossy by definition — there's no timezone in which the conversion is meaningful. I left `TIMESTAMPTZ` parsing to a `Date`, because that genuinely is an instant. The general lesson is that an accounting date is a calendar fact and a `created_at` is a moment in time, and conflating the two is how a period-end report quietly lands in the wrong month.
 
 **Q: What's the default isolation level in PostgreSQL, and what anomaly does it still permit?**
 A: READ COMMITTED. It guarantees you never see uncommitted data, but it takes a fresh snapshot for *every statement*, so within one transaction the same query can return different rows if another transaction commits in between — non-repeatable reads and phantoms are both possible. The one that actually causes production bugs is the lost update: two transactions read the same value, both compute from it, and the second write silently overwrites the first.

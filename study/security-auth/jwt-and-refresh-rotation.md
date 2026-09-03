@@ -93,7 +93,7 @@ it('gives two tokens issued in the same second different values', () => {
 
 | Option | Trade-off | Verdict |
 |---|---|---|
-| Server-side sessions (session id → Redis) | Trivially revocable, but every request hits Redis, and Redis has no consumer until Phase 5 | Rejected for now — genuinely reasonable, and the honest answer to "why not sessions?" is scale-vs-simplicity, not correctness |
+| Server-side sessions (session id → Redis) | Trivially revocable, but every request hits Redis, and Redis has no consumer until Phase 7 | Rejected for now — genuinely reasonable, and the honest answer to "why not sessions?" is scale-vs-simplicity, not correctness |
 | Long-lived access token, no refresh | One fewer moving part; a leak lasts days | Rejected — unacceptable for financial data |
 | Access + refresh, refresh **not** rotated | Simpler; a stolen refresh token works for its full 7 days undetected | Rejected — rotation is what makes theft *detectable* |
 | **Access + refresh with rotation and family invalidation** | Two-tab race (below) | **Chosen** |

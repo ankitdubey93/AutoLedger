@@ -80,7 +80,7 @@ grep -rn -A 40 "client.query('BEGIN')" server/src/services/ | grep "pool.query"
 
 - A `pool.query` between `BEGIN` and `COMMIT` silently escapes the transaction → violation.
 - Missing `ROLLBACK` in `catch` or missing `client.release()` in `finally` → violation (pool exhaustion).
-- Work after `COMMIT` inside the same function → violation. It is a queued job (Phase 6) or it is not part of the operation.
+- Work after `COMMIT` inside the same function → violation. It is a queued job (Phase 7) or it is not part of the operation.
 
 ### 6. Immutability of posted documents
 
@@ -132,7 +132,7 @@ A module with no cross-tenant isolation test **is not done** — report it as a 
 git diff HEAD -- server/package.json client/package.json
 ```
 
-Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 6 → violation. An LLM/embeddings SDK anywhere outside Phase 13 (TaxGuard AI) → violation — the "no LLM" ruling still applies to every other app.
+Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 7 → violation. An LLM/embeddings SDK anywhere outside Phase 10 (AP-Flow vision extraction) and Phase 16 (TaxGuard AI) → violation — the "no LLM" ruling still applies to every other app.
 
 ### 13. App boundaries
 

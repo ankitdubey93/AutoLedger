@@ -211,15 +211,17 @@ function HealthPanel() {
         <li>
           <span className="status--good">✓</span> App registry
         </li>
-        {/* Disabled, not linked. A link to an empty table would be a lie. */}
-        <li className="module-list__pending">
-          LedgerCore — chart of accounts <span className="chip chip--muted">Phase 3</span>
+        <li>
+          <span className="status--good">✓</span> LedgerCore — chart of accounts, journal entries, trial
+          balance
         </li>
-        <li className="module-list__pending">
-          LedgerCore — journal entries <span className="chip chip--muted">Phase 3</span>
+        <li>
+          <span className="status--good">✓</span> LedgerCore — onboarding, settings &amp; dashboard
         </li>
+        {/* Disabled, not linked. A link to an empty report would be a lie. */}
         <li className="module-list__pending">
-          LedgerCore — trial balance <span className="chip chip--muted">Phase 3</span>
+          LedgerCore — P&amp;L, balance sheet &amp; fiscal periods{' '}
+          <span className="chip chip--muted">Phase 4</span>
         </li>
       </ul>
     </section>

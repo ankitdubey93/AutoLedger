@@ -9,7 +9,7 @@ import RegisterPage from './Pages/auth/RegisterPage';
 import AppChooserPage from './Pages/AppChooserPage';
 import AccountPage from './Pages/AccountPage';
 import NotFoundPage from './Pages/NotFoundPage';
-import { APP_ELEMENTS } from './apps/registry';
+import ActiveAppRoutes from './apps/ActiveAppRoutes';
 
 /**
  * Provider composition, outermost first:
@@ -44,14 +44,15 @@ export default function App() {
                 <Route path="/dashboard" element={<Navigate to="/account" replace />} />
 
                 {/*
-                  One child Route per app, keyed by slug. A "/*" catch-all for
-                  an app's own nested routes lands here once an app ships more
-                  than an index page — none has yet.
+                  One splat child, not one Route per app. The app that owns
+                  :appSlug is resolved at render time and brings its own nested
+                  routes — LedgerCore ships three pages, and generating sibling
+                  `index` routes per slug would make several routes match the
+                  same path with the first winning regardless of the slug.
                 */}
                 <Route path="/app/:appSlug" element={<AppShell />}>
-                  {Object.entries(APP_ELEMENTS).map(([slug, Element]) => (
-                    <Route key={slug} index element={<Element />} />
-                  ))}
+                  <Route path="*" element={<ActiveAppRoutes />} />
+                  <Route index element={<ActiveAppRoutes />} />
                 </Route>
               </Route>
             </Route>

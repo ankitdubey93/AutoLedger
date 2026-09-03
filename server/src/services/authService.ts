@@ -3,6 +3,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
 import { ApiError } from '../utils/apiError.js';
 import { slugify } from '../utils/validate.js';
+import { seedDefaultChart } from './ledger-core/accountService.js';
 import {
   accessTokenExpiry,
   hashRefreshToken,
@@ -227,17 +228,18 @@ export interface RegisterInput {
 }
 
 /**
- * Creates the user, their organization, and the OWNER membership binding them —
- * all or nothing.
- *
- * Note what is NOT here: the default chart of accounts. docs/api.md described
- * seeding it at registration, but `accounts` is a Phase 2 table and does not
- * exist yet. Phase 2 owes both the seed and a backfill for organizations
- * created during Phase 1 — recorded in docs/roadmap.md.
+ * Creates the user, their organization, the OWNER membership binding them, and
+ * the default 44-account chart of accounts — all or nothing, in one
+ * transaction. An organization without a chart cannot post anything, so
+ * seeding it is part of creating one, not a follow-up step that could fail on
+ * its own and leave a half-usable tenant behind.
  *
  * Registration does not log you in; the client calls /login next. Issuing
  * tokens here would drag session state into the identity transaction for no
- * benefit.
+ * benefit. It also does not collect LedgerCore's onboarding details (fiscal
+ * year, base currency, cash account) — that is `POST
+ * /ledger-core/settings/onboarding`, completed once the user picks LedgerCore
+ * for the first time (Phase 3.5).
  */
 export async function register(input: RegisterInput): Promise<PublicUser> {
   const passwordHash = await bcrypt.hash(input.password, BCRYPT_COST);
@@ -292,6 +294,15 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
       'INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, $3)',
       [orgId, userId, 'OWNER'],
     );
+
+    // An organization without a chart of accounts cannot post anything, so the
+    // chart is part of creating one — not a follow-up step that could fail on
+    // its own and leave a half-usable tenant behind.
+    //
+    // `client`, never `pool`: a stray pool.query here would run on a different
+    // connection and commit immediately, leaving a chart of accounts behind for
+    // an organization that the rollback erased (guardrails rule 5).
+    await seedDefaultChart(client, orgId);
 
     const user = await loadUser(client, userId);
     await client.query('COMMIT');

@@ -17,7 +17,7 @@ Read [docs/roadmap.md](../../../docs/roadmap.md).
 
 - Which phase does this module belong to, and which app owns it?
 - Are its prerequisite phases actually **built** — verified on the filesystem, not claimed in a doc?
-- Does it depend on a gated phase (Phase 6 background jobs gates 8, 12, 13)?
+- Does it depend on a gated phase (Phase 7 background jobs gates 9, 10, 15, 16)?
 
 If a prerequisite is missing, **stop and say so** before writing code. Do not build ahead of a gate without asking.
 
@@ -71,7 +71,7 @@ try {
 
 - Validate the invariant **before** touching the DB, and rely on the CHECK constraint as the second line.
 - If the module posts to the GL and it is not LedgerCore itself, it does so inside the same transaction via LedgerCore's `journalService`, tagging `source_type` (the app slug) / `source_id`. A document and its journal entry commit together or not at all. Never write directly into another app's tables — see guardrail 16.
-- Anything that must happen after commit is a queued job (Phase 6), never a fire-and-forget query.
+- Anything that must happen after commit is a queued job (Phase 7), never a fire-and-forget query.
 
 ## 4. Controller — `server/src/controllers/<app>/<name>Controller.ts`
 

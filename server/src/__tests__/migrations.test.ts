@@ -1,6 +1,9 @@
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { pool, closePool } from '../db/connect.js';
-import { runMigrations } from '../db/migrate.js';
+import { MIGRATION_FILENAME, runMigrations } from '../db/migrate.js';
 import { resetTables, uniqueEmail } from './helpers/factories.js';
 
 /**
@@ -30,34 +33,77 @@ async function errorCode(fn: () => Promise<unknown>): Promise<string | undefined
 
 afterAll(closePool);
 
+/**
+ * Pure assertions on the filename contract — no database involved. They live
+ * here rather than in a file of their own because the rule they protect is a
+ * migration rule, and it is one the runner enforces before it ever connects.
+ */
+describe('migration filename contract', () => {
+  it('accepts a platform migration', () => {
+    expect(MIGRATION_FILENAME.test('001_organizations_and_users.sql')).toBe(true);
+  });
+
+  it('accepts an app-tagged filename with a hyphenated slug', () => {
+    // Every app slug in config/apps.ts may contain a hyphen. Rejecting these
+    // would make the NNN_<app-slug>_<subject>.sql convention in docs/schema.md
+    // unusable for ledger-core, ap-flow and fpa-engine alike.
+    expect(MIGRATION_FILENAME.test('002_ledger-core_accounts.sql')).toBe(true);
+    expect(MIGRATION_FILENAME.test('010_ap-flow_documents.sql')).toBe(true);
+  });
+
+  it('still rejects uppercase, spaces and a missing prefix', () => {
+    expect(MIGRATION_FILENAME.test('002_Ledger Core.sql')).toBe(false);
+    expect(MIGRATION_FILENAME.test('002_LedgerCore_accounts.sql')).toBe(false);
+    expect(MIGRATION_FILENAME.test('2_ledger-core_accounts.sql')).toBe(false);
+    expect(MIGRATION_FILENAME.test('002_ledger-core_accounts.txt')).toBe(false);
+  });
+
+  it('captures the version as the first group', () => {
+    expect(MIGRATION_FILENAME.exec('004_ledger-core_journals.sql')?.[1]).toBe('004');
+  });
+});
+
+/**
+ * Expectations are derived from the migrations directory rather than
+ * hard-coded, so adding a migration does not require editing this file. A
+ * hard-coded list rots on every phase, and a rotting test gets "fixed" by
+ * loosening it — which is precisely how the assertion that matters gets lost.
+ */
+const migrationsDir = path.join(fileURLToPath(new URL('../db/migrations', import.meta.url)));
+const migrationFiles = (await readdir(migrationsDir)).filter((f) => f.endsWith('.sql')).sort();
+
 describe('migration runner', () => {
-  it('has applied 001 and recorded it in the ledger', async () => {
+  it('has applied every migration on disk and recorded each in the ledger', async () => {
     const { rows } = await pool.query<{ version: string; filename: string; checksum: string }>(
       'SELECT version, filename, checksum FROM schema_migrations ORDER BY version',
     );
 
-    expect(rows).toHaveLength(1);
-    expect(rows[0]?.version).toBe('001');
-    expect(rows[0]?.filename).toBe('001_organizations_and_users.sql');
-    // 64 hex characters — a real SHA-256, not a placeholder.
-    expect(rows[0]?.checksum).toMatch(/^[0-9a-f]{64}$/);
+    expect(rows.map((r) => r.filename)).toEqual(migrationFiles);
+    // Prefixes are strictly sequential from 001, with no gaps.
+    expect(rows.map((r) => r.version)).toEqual(
+      migrationFiles.map((_, i) => String(i + 1).padStart(3, '0')),
+    );
+    // 64 hex characters each — real SHA-256s, not placeholders.
+    for (const row of rows) expect(row.checksum).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('is a no-op when everything is already applied', async () => {
     const { applied, skipped } = await runMigrations();
     expect(applied).toEqual([]);
-    expect(skipped).toEqual(['001_organizations_and_users.sql']);
+    expect(skipped).toEqual(migrationFiles);
   });
 
   it('the SQL itself is idempotent, not just the ledger', async () => {
     // Re-running the runner only proves the bookkeeping works. Clearing the
-    // ledger forces the file to execute a second time against a database that
+    // ledger forces every file to execute a second time against a database that
     // already has every object in it — which is what "additive and idempotent"
-    // in guardrails rule 13 actually demands.
+    // in guardrails rule 13 actually demands. It is also the only check that
+    // 003's backfill does not double-seed an organization that already has a
+    // chart of accounts.
     await pool.query('DELETE FROM schema_migrations');
 
     const { applied } = await runMigrations();
-    expect(applied).toEqual(['001_organizations_and_users.sql']);
+    expect(applied).toEqual(migrationFiles);
   });
 
   it('refuses to run when an applied migration has been edited', async () => {

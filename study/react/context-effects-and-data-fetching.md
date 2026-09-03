@@ -128,7 +128,7 @@ This is the same mechanism as `key` in a list — reconciliation matches element
 |---|---|---|
 | `user \| null` + `loading` boolean | Familiar; expresses impossible states; causes the login flash | Rejected |
 | **Discriminated union with `checking`** | Slightly more verbose | **Chosen** |
-| React Query / SWR | Caching, dedupe, revalidation — genuinely good | Rejected for now (rule 14). The natural revisit is Phase 2, when there are lists to cache |
+| React Query / SWR | Caching, dedupe, revalidation — genuinely good | Rejected for now (rule 14). The natural revisit is Phase 3, when LedgerCore brings real lists to cache |
 | One combined auth context | Simpler | Rejected — action-only consumers would re-render on every session change |
 | `AbortController` everywhere | Frees the connection | Rejected for cheap GETs after the preflight interaction |
 | Redirect from the fetch layer | Fewer moving parts | Rejected — a fetch helper navigating is a layering violation and untestable. It dispatches an event; `ProtectedRoute` redirects declaratively |
@@ -172,7 +172,7 @@ A: Single-flight it with a module-level promise: `refreshPromise ??= doRefresh()
 
 ## Follow-ups they'll dig into
 
-- *"Why not React Query?"* It would give caching, dedupe and revalidation for free — deliberately deferred under the dependency policy, with Phase 2's lists as the natural trigger.
+- *"Why not React Query?"* It would give caching, dedupe and revalidation for free — deliberately deferred under the dependency policy, with Phase 3's LedgerCore lists as the natural trigger.
 - *"Does the client-side route guard provide security?"* No. It's UX. Every protected route is independently enforced by server middleware.
 - *"What about `use()` in React 19?"* Cleaner, but needs a cache to avoid refetching each render.
 - *"Would the React Compiler make the context split unnecessary?"* No — it auto-memoises, but the split is about subscription granularity, which is a different problem.

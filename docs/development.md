@@ -131,7 +131,7 @@ Only `VITE_`-prefixed variables reach the bundle, and Vite **inlines them at bui
 | PostgreSQL 16 | `autodb_postgres` | 5432 | `pg_isready` | The server |
 | Redis 7 | `autodb_redis` | 6379 | none yet | **Nothing** |
 
-**Redis is provisioned but must not be claimed.** The container runs so the port is reserved and the topology is visible, but no code connects to it. Phase 6 adds `bullmq` + `ioredis`, a worker process, a healthcheck, and `REDIS_HOST` / `REDIS_PORT` — shared infrastructure, not owned by any one app. Until then, queueing does not work.
+**Redis is provisioned but must not be claimed.** The container runs so the port is reserved and the topology is visible, but no code connects to it. Phase 7 adds `bullmq` + `ioredis`, a worker process, a healthcheck, and `REDIS_HOST` / `REDIS_PORT` — shared infrastructure, not owned by any one app. Until then, queueing does not work.
 
 The Postgres volume `postgres-data` survives `docker compose down`. Only `down -v` destroys it.
 
@@ -178,20 +178,36 @@ Added in Phase 1:
 | `react-router-dom` 7 | client | Routing, arriving with the second page as planned |
 | `vitest`, `jsdom`, `@testing-library/*` | client (dev) | The client had no test runner before Phase 1 |
 
-Deliberately **not** installed: `zod`. Phase 1's request bodies are flat objects of five scalars, which a ~80-line hand-rolled `utils/validate.ts` covers clearly (and it is unit-tested, because it is security-relevant). **Revisit trigger:** LedgerCore's journal entries (Phase 3) take a nested `lines[]` array, and hand-rolling nested-array validation is where a schema library starts paying for itself.
+Deliberately **not** installed in Phase 1: `zod`. Phase 1's request bodies are flat objects of five scalars, which a hand-rolled `utils/validate.ts` covers clearly (and it is unit-tested, because it is security-relevant). The **revisit trigger** recorded here was LedgerCore's journal entries, whose nested `lines[]` array is where hand-rolling stops paying — see Phase 3 below, where it fired.
 
 Nothing new in Phase 2 — the app registry is a static in-code list (`config/apps.ts`), not a request body, so it needs no validation library and no migration.
+
+Added in Phase 3:
+
+| Package | Layer | Why |
+|---|---|---|
+| `zod` | server | The revisit trigger above, fired. `POST /journals` takes a nested array of line objects with cross-field rules; `z.infer` also makes the schema and the TypeScript type one artifact instead of two that drift. Existing Phase 1 routes keep `utils/validate.ts` — this is an addition, not a rewrite |
+| `express-rate-limit` | server | Throttling `/auth/login` and `/auth/register`. Scheduled for this phase since Phase 1, where it was deferred deliberately rather than overlooked |
+| `tailwindcss` 4 + `@tailwindcss/vite` | client | LedgerCore is the first app with dense UI — a trial-balance grid, a multi-line entry form. v4 configures in CSS (`@import "tailwindcss"`), so there is no `tailwind.config.js`. The existing `index.css` keeps the auth and chooser pages working; new pages are Tailwind-first |
+| `lucide-react` | client | Icon set. Tree-shakes per icon, so unused ones do not ship |
 
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
-| `express-rate-limit` | throttling `/auth/login` and `/auth/register`. **Currently unmitigated** — brute-forcing a password is not rate limited today. Deferred deliberately rather than overlooked | 3 |
-| `bullmq` + `ioredis` | background workers, shared across apps (PDF rendering, FX polling, depreciation cron, forecast batches) | 6 |
-| OCR (Tesseract or AWS Textract) | AP-Flow's invoice capture | 8 |
-| `pptxgenjs` or similar | BoardDeck Automator's `.pptx` generation | 12 |
-| `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 13 |
-| An LLM / embeddings SDK | TaxGuard AI. Reverses the prior "no LLM dependency" ruling — see [roadmap.md](roadmap.md#phase-2-as-delivered) | 13 |
+| `csv-parse` | LedgerCore's bank statement ingestion. Real exports carry quoted commas, embedded newlines and a BOM; a hand-rolled RFC 4180 parser is a trap | 6 |
+| `bullmq` + `ioredis` | background workers, shared across apps (OCR, FX polling, depreciation cron, forecast batches), plus the webhook dispatcher | 7 |
+| `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 9 |
+| `multer` | AP-Flow's multipart document upload | 10 |
+| `tesseract.js` | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine | 10 |
+| `sharp` | rasterizing and masking image buffers for the redaction pipeline | 10 |
+| `pdfjs-dist` | rendering PDF pages to images before OCR | 10 |
+| `@anthropic-ai/sdk` | AP-Flow's vision extraction of redacted documents. Needs `ANTHROPIC_API_KEY` in `server/.env`; tests stub `fetch` and never call out | 10 |
+| `pptxgenjs` or similar | BoardDeck Automator's `.pptx` generation | 15 |
+| `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
+| An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
+
+**Phase 10 also adds a directory, not just packages.** AP-Flow stores original documents hash-addressed under `server/storage/`, which is gitignored. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; the storage service keeps a narrow `put`/`get` interface so object storage is a one-file swap later.
 
 **No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, recursive CTEs, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
 

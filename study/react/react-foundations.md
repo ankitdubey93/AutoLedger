@@ -85,6 +85,32 @@ Setting state doesn't mutate immediately — it **schedules**. Updates within th
 
 **A re-render is not a DOM update.** React re-invokes the function and diffs; if the output is unchanged, no DOM operation happens. That distinction matters when reasoning about performance — "too many re-renders" is only a problem if the render work itself is expensive.
 
+### Controlled forms, and modeling a multi-step form's state
+
+A **controlled** input has no memory of its own — its `value` comes entirely from React state, and every keystroke fires `onChange`, which updates that state, which re-renders the input with the new value:
+
+```tsx
+const [name, setName] = useState('');
+<input value={name} onChange={(e) => setName(e.target.value)} />
+```
+
+The DOM node is not the source of truth; the state is, and the DOM is a projection of it. This is what makes live validation and derived UI possible without reading the DOM — "debits must equal credits, checked as you type" only works because every line's value is already sitting in state the moment it changes, not locked inside an `<input>` the rest of the component can't see without a ref. An **uncontrolled** input inverts this: the DOM holds the value, and you read it out via a `ref` (or let a library like React Hook Form manage subscriptions to it) only when you need to — usually on submit. Uncontrolled avoids a re-render per keystroke, which matters once a form has dozens of fields; controlled costs a render per field per keystroke but makes every value inspectable at all times, which is the trade a small, validation-heavy form should take.
+
+A **multi-step form** — collect step 1, then step 2, then step 3, submit once — adds a second kind of state on top of the field values: which step is currently showing, and what data has already been confirmed. The naive version is a bare number:
+
+```tsx
+const [step, setStep] = useState(1); // 1 | 2 | 3, but the type says `number`
+```
+
+which type-checks for `step = 47` just as happily as `step = 2`. A **discriminated union** closes that gap the same way it does for a document's lifecycle status:
+
+```ts
+type WizardStep = { step: 1 } | { step: 2 } | { step: 3 };
+const [wizardStep, setWizardStep] = useState<WizardStep>({ step: 1 });
+```
+
+Now `wizardStep.step` can only ever be one of the three literal values the type declares — an invalid step number is a compile error, not a runtime surprise a few `onClick` handlers later. Each of a wizard's per-step form fields is independently controlled (its own `useState`, its own `onChange`), and the step object is a *separate* piece of state that only decides which block of controlled inputs is currently rendered — advancing a step doesn't touch the field values at all, so a user going Back to a previous step still sees what they typed. The submit itself only fires once, from the last step, over all the accumulated field state — the wizard's job is entirely about *when* to show which fields, never about how each individual field behaves once it's showing.
+
 ### Context and its cost
 
 Context passes values down without prop threading. The mechanism to understand: **every consumer re-renders when the context value changes by identity**. Put an object literal in a provider and you create a new identity on every parent render, re-rendering every consumer. Hence: memoise provider values, and split contexts by change frequency — a rarely-changing auth/org context should not be the same provider as a fast-changing UI state.
@@ -132,7 +158,7 @@ Context passes values down without prop threading. The mechanism to understand: 
 
 ## Vocabulary that shows up in interviews
 
-**declarative vs imperative** · **component** · **element** (the object JSX produces) · **props vs state** · **reconciliation / diffing** · **virtual DOM** · **fiber** · **render phase vs commit phase** · **key** · **hook** · **batching** · **lifting state up** · **controlled vs uncontrolled** · **memoisation** · **concurrent rendering / transitions** · **Suspense** · **error boundary**
+**declarative vs imperative** · **component** · **element** (the object JSX produces) · **props vs state** · **reconciliation / diffing** · **virtual DOM** · **fiber** · **render phase vs commit phase** · **key** · **hook** · **batching** · **lifting state up** · **controlled vs uncontrolled** · **discriminated union** · **memoisation** · **concurrent rendering / transitions** · **Suspense** · **error boundary**
 
 ## Interview Q&A
 
@@ -157,13 +183,19 @@ A: Less often than they're used. `useMemo` when a computation is genuinely expen
 **Q: How would you handle data fetching, and what goes wrong with `useEffect` plus `fetch`?**
 A: I'd reach for a server-state library — TanStack Query — rather than hand-rolling. The naive effect-and-fetch approach has four problems: no deduplication, so two components asking for the same data make two requests; no cache, so navigating back refetches everything; race conditions, because if the ID changes fast, responses can arrive out of order and the stale one wins unless you cancel or guard with the cleanup function; and no shared loading or error state. It's also worth saying that server data isn't really "state" in the React sense — it's a cache of something you don't own, and it wants invalidation and staleness semantics, not `useState`.
 
+**Q: Controlled versus uncontrolled inputs — which would you reach for, and why?**
+A: Controlled — value lives in state, `onChange` updates it, the DOM is a projection of the state — when you need to inspect, validate, or derive from a value on every keystroke, because the value is always sitting in state where the rest of the component can read it. A journal entry line that has to live-validate "debits and credits can't both be filled in" only works because every keystroke is visible immediately, not locked inside a DOM node. Uncontrolled — read the DOM via a ref only when you need to, usually on submit — trades that away for one fewer render per keystroke, which matters once a form has dozens of fields and none of them need live cross-field validation. For a large, simple form I'd reach for uncontrolled (or a library like React Hook Form built on that idea); for a small form with real-time validation rules, controlled.
+
+**Q: How would you model the state for a multi-step form, and why not just an integer step counter?**
+A: A bare `useState(1)` for the current step type-checks for any number, including ones that don't correspond to a real step — nothing stops `setStep(47)`. A discriminated union — `type WizardStep = { step: 1 } | { step: 2 } | { step: 3 }` — narrows that to exactly the values that are actually valid, so an invalid step becomes a compile error instead of a runtime one a few handlers later. It's the same trick as modeling a document's lifecycle status as a fixed union rather than a free-form string, just applied to UI state instead of persisted state. The step value and the per-field values are deliberately separate pieces of state, too — advancing a step never touches what the user already typed, which is what makes "Back" show their previous answers rather than a blank form.
+
 **Q: Tell me about a React design decision on your project.**
 A: On AutoLedger the interesting one is org switching. It's multi-tenant, and a user can belong to several organizations and switch between them. Every cached query — accounts, journal entries, reports — is scoped to the active org, so switching must invalidate all of it or you render org A's ledger under org B's header, which in a financial app is unacceptable. So the org ID belongs in the cache key of every query rather than being handled by an imperative "clear on switch," because a cache key is declarative and can't be forgotten when someone adds a new query later. That's the same reasoning as the backend rule that every query is scoped by `org_id` — make the scope structural rather than remembered.
 
 ## Follow-ups they'll dig into
 
 - "What's an error boundary and what can't it catch?" (A component catching render-phase errors in its subtree; it does not catch errors in event handlers, async code, or itself.)
-- "Controlled versus uncontrolled inputs — which for a large form?" (Controlled gives validation and derived state at the cost of a render per keystroke; uncontrolled via refs or React Hook Form scales better for big forms.)
+- "How would you persist a half-finished multi-step form across a page reload?" (Serialize the step and field state to `sessionStorage` on change, rehydrate on mount — the discriminated-union step type still guards against restoring a corrupted/invalid step from storage.)
 - "How does `Suspense` actually work?" (A child signals it isn't ready — historically by throwing a promise, now via `use()` — and the nearest boundary renders a fallback until it resolves.)
 - "What is prop drilling and when is context the wrong fix?" (When the value changes often — you convert a threading problem into a re-render problem. Composition or a state library may fit better.)
 - "Why is `key` on a component sometimes used to force a reset?" (A changed key means a different element identity, so React discards the subtree and its state — a deliberate use of heuristic #1.)

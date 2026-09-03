@@ -1,3 +1,16 @@
+/*
+ * Tailwind v4. Configured in CSS, not a tailwind.config.js — that file does not
+ * exist and should not be created.
+ *
+ * This import must stay FIRST. Everything Tailwind ships lives inside
+ * `@layer theme, base, components, utilities`, and unlayered CSS always beats
+ * layered CSS regardless of order or specificity — so the hand-written rules
+ * below automatically win over Preflight's resets. That is what lets the
+ * pre-Phase-3 pages keep their styling untouched while LedgerCore's new pages
+ * are built utility-first.
+ */
+@import "tailwindcss";
+
 :root {
   --bg: #0f1115;
   --panel: #171a21;
@@ -156,6 +169,13 @@ footer {
   max-width: 64rem;
   margin: 0 auto;
   padding: 2rem 1.25rem 4rem;
+}
+
+/* LedgerCore's sidebar needs more room than the suite-level pages do. Scoped
+   by :has() rather than a route-aware class, so no JS has to know which page
+   is mounted. */
+.app-main:has(.app-shell) {
+  max-width: 90rem;
 }
 
 .dashboard {

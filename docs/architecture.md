@@ -53,7 +53,15 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-08-31, after Phase 2)
+### Current (verified 2026-09-02, after Phase 3.5)
+
+Phase 3.5 added, on the server: `db/migrations/005_ledger-core_settings.sql`, `config/currencies.ts`, `utils/fiscalYear.ts`, `schemas/ledger-core/settingsSchema.ts`, `schemas/organizationSchema.ts`, `services/ledger-core/{settingsService,dashboardService}.ts`, `controllers/ledger-core/settingsController.ts`, `routes/ledger-core/settingsRoutes.ts`, and `__tests__/{fiscalYear,ledger-core/settings,ledger-core/dashboard}.test.ts`. Edited in place: `services/organizationService.ts` (added `updateOrganization`), `controllers/organizationController.ts` and `routes/organizations.ts` (added `PATCH /`), `controllers/ledger-core/reportController.ts` and `routes/ledger-core/reportRoutes.ts` (added `dashboard`), `types/ledger-core.ts` (appended `LedgerSettings`, `DashboardSummary` and their supporting types).
+
+On the client: `Pages/ledger-core/{LedgerCoreSidebar,LedgerSettingsContext,OnboardingPage,DashboardPage,TrendChart,SettingsPage,ReportsPage,fiscalYear}.tsx|ts`, plus three new test files (`ledgerCoreOnboarding`, `ledgerCoreDashboard`, `ledgerCoreFiscalYear`). `Pages/ledger-core/LedgerCoreRoutes.tsx` was rewritten from a tab strip into a sidebar layout with an onboarding gate. `services/fetchServices.ts` gained the settings/dashboard/organization types and wrappers.
+
+Phase 3 — never backfilled into this delta list until now — added, on the server: `db/migrations/{002_ledger-core_accounts,003_ledger-core_backfill_chart,004_ledger-core_journals}.sql`, `utils/{money,parseBody,routeParam}.ts`, `middleware/rateLimit.ts`, `schemas/ledger-core/{accountSchema,journalSchema}.ts`, `types/ledger-core.ts`, `services/ledger-core/{accountService,journalService,reportService}.ts`, `controllers/ledger-core/{accountController,journalController,reportController}.ts`, `routes/ledger-core/{index,accountRoutes,journalRoutes,reportRoutes}.ts`, and `__tests__/{rateLimit,ledger-core/accounts,ledger-core/journals,ledger-core/reports,ledger-core/ledgerConstraints}.test.ts`.
+
+On the client: Tailwind v4 (`vite.config.ts`, `index.css`) and `lucide-react`, `Pages/ledger-core/{LedgerCoreRoutes,AccountsPage,JournalEntryPage,TrialBalancePage,money}.tsx|ts`.
 
 Phase 2 added, on the server: `config/apps.ts`, `types/apps.ts`, `services/appService.ts`, `controllers/appController.ts`, `routes/apps.ts`, and `__tests__/platform/apps.test.ts`.
 
@@ -121,6 +129,8 @@ There is no `Flowchart/` directory — the `.drawio` files an earlier version of
 
 Layer-first, with an **app** subfolder inside each layer (platform code — auth, organizations, apps — stays at the layer root, unprefixed). Do **not** invent a parallel `src/modules/` or `src/apps/` tree on the server.
 
+Two kinds of file sit at a layer root. **Platform** code is identity, tenancy and the registry. **Shared infrastructure** is code more than one app consumes but no app owns — `redactionService.ts` (AP-Flow and TaxGuard AI both redact), `storageService.ts`, `utils/levenshtein.ts`. Both stay unprefixed. Neither reads any app's tables, which is what keeps rule 16 intact: a shared service is a pure transform or a platform concern, never a back door between two apps.
+
 ```text
 server/
 ├── src/
@@ -136,7 +146,11 @@ server/
 │   ├── services/                   ← ALL DB logic lives here
 │   │   ├── authService.ts          ← platform, unprefixed
 │   │   ├── appService.ts           ← platform, unprefixed
+│   │   ├── redactionService.ts     ← shared infra, unprefixed — Phase 10
+│   │   ├── storageService.ts       ← shared infra, unprefixed — Phase 10
 │   │   └── ledger-core/journalService.ts
+│   ├── schemas/                    ← zod request schemas — Phase 3
+│   │   └── ledger-core/journalSchema.ts
 │   ├── routes/
 │   │   ├── index.ts                ← the /api/v1 router; every app mounts here
 │   │   ├── auth.ts                 ← platform, unprefixed
@@ -145,16 +159,21 @@ server/
 │   ├── middleware/
 │   │   ├── auth.ts                 ← JWT verify + active-org resolution
 │   │   ├── rbac.ts                 ← requireRole / requirePermission
+│   │   ├── rateLimit.ts            ← Phase 3
 │   │   ├── idempotency.ts          ← Phase 9
 │   │   └── errorHandler.ts
 │   ├── utils/
 │   │   ├── apiError.ts             ← ApiError(status, message)
 │   │   ├── jwt.ts
+│   │   ├── validate.ts             ← hand-rolled, keeps the Phase 1 auth routes
+│   │   ├── parseBody.ts            ← zod → ApiError(400) bridge — Phase 3
+│   │   ├── levenshtein.ts          ← rolling-array DP — Phase 6
 │   │   └── money.ts                ← toCents / formatCents, single source of truth
 │   ├── db/
 │   │   ├── connect.ts              ← pg Pool singleton
 │   │   ├── migrate.ts              ← migration runner
 │   │   ├── reset.ts                ← dev-only DB reset
+│   │   ├── verifyIntegrity.ts      ← global debits == credits checker — Phase 5
 │   │   └── migrations/             ← ONLY migration directory, one sequence for every app
 │   ├── types/
 │   │   ├── apps.ts                 ← platform, unprefixed
@@ -163,6 +182,7 @@ server/
 │   └── __tests__/
 │       ├── platform/apps.test.ts
 │       └── ledger-core/journal.test.ts
+├── storage/                        ← hash-addressed documents, gitignored — Phase 10
 ├── tsconfig.json                   ← type-check config (noEmit)
 ├── tsconfig.build.json             ← emit config
 ├── vitest.config.ts
@@ -181,7 +201,8 @@ client/
 │   ├── Pages/                      ← capital P
 │   │   ├── AppChooserPage.tsx      ← "/", one card per app
 │   │   ├── AccountPage.tsx         ← "/account", suite-level identity/org/session
-│   │   └── ledger-core/            ← app pages nest under Pages/<app-slug>/
+│   │   ├── ledger-core/            ← app pages nest under Pages/<app-slug>/
+│   │   └── ap-flow/
 │   ├── components/
 │   │   ├── ProtectedRoute.tsx
 │   │   └── layout/

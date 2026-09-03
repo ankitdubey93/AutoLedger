@@ -70,6 +70,31 @@ useEffect(() => { navigate('/login'); }, []);
 
 `replace` (on both forms) swaps the current history entry instead of pushing a new one. Without it, hitting Back after being redirected off a protected route lands you right back on the page that immediately redirects you away again — a broken-feeling loop. `state={{ from: location.pathname }}` is how `LoginPage` knows where to return the user afterward; it's ordinary React Router history state, not a query string, so it doesn't appear in the URL or get bookmarked.
 
+### A third layout depth, and gating a route on data instead of auth
+
+`ProtectedRoute` gates on *auth* state — a `checking` / `authenticated` / `anonymous` union already held in `AuthContext`. Phase 3.5 added a second, structurally identical gate one layer further in: LedgerCore's own routes redirect to an onboarding wizard until a `ledger_settings` row exists for the organization, and redirect *away* from the wizard once it does.
+
+```tsx
+function LedgerCoreGate() {
+  const settings = useLedgerSettings(); // 'loading' | 'ready' | 'error'
+  if (settings.status === 'loading') return <Skeleton />;
+  if (settings.status === 'error') return <ErrorMessage />;
+
+  const onboarded = settings.settings.onboardedAt !== null;
+
+  return (
+    <Routes>
+      <Route path="onboarding" element={onboarded ? <Navigate to=".." replace /> : <OnboardingPage />} />
+      <Route path="*" element={onboarded ? <AppPages /> : <Navigate to="onboarding" replace />} />
+    </Routes>
+  );
+}
+```
+
+The mechanism is identical to `ProtectedRoute`'s — a `<Navigate>` as a `<Route>`'s `element`, decided by a discriminated-union render-time state — but the *source* of that state generalizes: it's whatever context or fetch a given subtree needs to gate on, not specifically authentication. The relative `to=".."` in the `onboarding` route is worth noticing: it navigates up exactly one matched segment, back to whatever this `<Routes>`'s own `path="*"` covers, which is the LedgerCore root (`""`) — not an absolute `/app/ledger-core`, and not dependent on knowing the app's slug at all. That's what makes the gate reusable regardless of which app slug it's mounted under.
+
+This also adds a **third** layout depth to the chrome stack from the previous section: `PlatformLayout` (suite chrome) → `AppShell` (per-app chrome) → now `LedgerCoreGate`'s own `<AppPages>` component, which renders a sidebar plus a further-nested `<Routes>` for the app's individual pages (dashboard, accounts, journals, trial balance, reports, settings). Each layer owns exactly the redirect logic and chrome relevant to its own scope — the platform layer doesn't know LedgerCore has an onboarding concept, and the onboarding gate doesn't know or care what suite chrome wraps it.
+
 ### The remount-by-`key` cache-invalidation trick
 
 Not routing per se, but load-bearing on the route tree: `PlatformLayout`'s `<main>` is keyed on the active organization and a switch counter:
@@ -98,6 +123,7 @@ React's reconciliation compares elements by type *and* key at each position in t
 - `client/src/components/layout/AppShell.tsx` — the inner layout route; resolves `:appSlug` and redirects on `not-found`/`planned` via `<Navigate replace>`
 - `client/src/apps/useActiveApp.ts` — `useParams` usage and the validation against the real registry
 - `client/src/components/ProtectedRoute.tsx` — the earliest layout route in the tree, from Phase 1
+- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
 
 ## Gotchas
 
@@ -123,6 +149,9 @@ A: React's reconciler compares an element's type and key at each tree position t
 
 **Q: A dynamic segment like `:appSlug` gives you a `string` at runtime. How do you turn that into a checked, narrower type?**
 A: You can't do it with a type annotation alone — `useParams`'s generic is unchecked, so declaring the type doesn't validate anything. You need an actual runtime check: a type predicate function, or in this case, comparing the param against a real list fetched from the server (the app registry) and only trusting it once it's found there. Anything short of an actual comparison is just telling the compiler to trust an assertion, which proves nothing about what a user could type into the address bar.
+
+**Q: You've gated a route on authentication state. How would you gate a *different* subtree on some other piece of data, like "has this organization finished onboarding"?**
+A: Same mechanism, different data source. `ProtectedRoute`'s gate is really just "read a discriminated-union state, return `<Navigate>` for one branch and `<Outlet/>`/the real page for the other" — nothing in that shape is specific to auth. LedgerCore's onboarding gate does exactly that against its own settings context instead: loading shows a skeleton, an onboarded organization renders its pages, an unonboarded one gets redirected to a wizard, and the wizard route itself redirects away once onboarding is done. It composes cleanly with the existing tree — it's just one more layout-route-shaped `if` a few levels deeper than `ProtectedRoute`'s.
 
 **Q: Tell me about a routing decision you made because of state that needed to survive navigation.**
 A: The two-layout split — `PlatformLayout` outside, `AppShell` inside — exists specifically so that suite-level UI, like the organization switcher in the header, stays mounted across every navigation within the authenticated app, including switching between different portfolio apps. If there were one combined layout, or if each app's routes each rendered their own copy of the header, either the header would remount (and potentially flicker or lose in-progress state, like a dropdown being open) on every app switch, or the header component would need to be duplicated per app. Nesting the routes let one instance of that chrome persist through the whole session, with only the `<Outlet/>` content changing underneath it.

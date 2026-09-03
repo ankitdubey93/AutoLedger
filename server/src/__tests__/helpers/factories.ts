@@ -11,10 +11,21 @@ import type { Role } from '../../types/auth.js';
  * against another test's "test@example.com".
  */
 
-/** Truncates every Phase 1 table. CASCADE follows the FKs; RESTART IDENTITY resets sequences. */
+/**
+ * Truncates every table. CASCADE follows the FKs; RESTART IDENTITY resets sequences.
+ *
+ * `accounts` is named explicitly even though CASCADE from `organizations` would
+ * reach it — naming it keeps the list a readable inventory of what a test starts
+ * from, and it survives a future FK changing to RESTRICT.
+ *
+ * TRUNCATE does **not** fire row-level triggers, so LedgerCore's immutability
+ * trigger on posted rows does not block a reset between tests.
+ */
 export async function resetTables(): Promise<void> {
   await pool.query(
-    'TRUNCATE organizations, users, organization_members, refresh_tokens RESTART IDENTITY CASCADE',
+    `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
+              ledger_settings
+     RESTART IDENTITY CASCADE`,
   );
 }
 

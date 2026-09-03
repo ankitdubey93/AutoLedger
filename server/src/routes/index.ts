@@ -3,6 +3,7 @@ import healthRoutes from './health.js';
 import authRoutes from './auth.js';
 import organizationRoutes from './organizations.js';
 import appRoutes from './apps.js';
+import ledgerCoreRoutes from './ledger-core/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -28,6 +29,9 @@ apiRouter.use('/apps', appRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that
-// app's first module ships. None yet — LedgerCore is the first, in Phase 3.
+// app's first module ships. The slug must match config/apps.ts.
+
+// Phase 3 — LedgerCore, the general ledger.
+apiRouter.use('/ledger-core', ledgerCoreRoutes);
 
 export default apiRouter;

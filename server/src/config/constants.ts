@@ -66,3 +66,40 @@ export const MIN_PASSWORD_LENGTH = 8;
 
 /** Arbitrary but fixed: the key every migration runner locks on. */
 export const MIGRATIONS_ADVISORY_LOCK_KEY = 4815162342;
+
+// --------------------------------------------------------------- pagination
+
+/**
+ * List endpoints default to 20 rows and cap at 100 (docs/api.md).
+ *
+ * The cap is not politeness: without it a caller can ask for every journal
+ * entry an organization has ever posted in one request, which is a slow query,
+ * a large response, and an easy way to exhaust the connection pool.
+ */
+export const DEFAULT_PAGE_SIZE = 20;
+export const MAX_PAGE_SIZE = 100;
+
+// ------------------------------------------------------------ rate limiting
+
+/**
+ * Login and registration throttling — 10 attempts per 15 minutes per IP.
+ *
+ * Deferred from Phase 1 and paid here, as docs/development.md scheduled. Until
+ * now, brute-forcing a password was unmitigated.
+ *
+ * The window is generous on purpose: this exists to make an automated
+ * credential-stuffing run expensive, not to punish someone who mistypes their
+ * password four times. It is per-IP, which is the honest limit of what a
+ * stateless middleware can do — a distributed attacker with many IPs is
+ * unaffected, and defending against that needs per-account tracking and a
+ * shared store, which arrives with Redis in Phase 7.
+ */
+export const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+
+/**
+ * Tests hash and log in dozens of times against a single loopback IP, so a
+ * production-sized limit would make the suite fail on its own fixtures. The
+ * dedicated 429 test overrides this locally rather than relying on the ambient
+ * value.
+ */
+export const AUTH_RATE_LIMIT_MAX = env.isTest ? 1000 : 10;
