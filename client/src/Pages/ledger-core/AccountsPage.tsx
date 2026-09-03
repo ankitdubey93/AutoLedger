@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Folder, Landmark } from 'lucide-react';
+import { Folder, Landmark, Plus } from 'lucide-react';
 import {
   getAccountBalances,
   listAccountTree,
+  type Account,
   type AccountBalance,
   type AccountNode,
 } from '../../services/fetchServices';
 import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import NewAccountForm from './NewAccountForm';
 
 /**
  * The chart of accounts, as a tree.
@@ -22,6 +24,12 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * for a leaf — and turns each postable row into a link into its ledger. A
  * header has no ledger of its own (its balance is a rollup of its subtree),
  * so it stays plain text.
+ *
+ * Phase 3.7 adds account creation. The chart is seeded at registration but is
+ * not frozen — an org can add accounts, and a new one appears via a refetch
+ * (`reloadToken`) rather than by splicing it into local tree state: the
+ * server owns the tree's shape, and a client-side splice would have to
+ * re-derive parentId nesting itself and would drift from it over time.
  */
 
 export const TYPE_STYLES: Record<string, string> = {
@@ -126,6 +134,8 @@ export default function AccountsPage() {
   const [balances, setBalances] = useState<Map<string, AccountBalance> | null>(null);
   const [balancesUnavailable, setBalancesUnavailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     // The `ignore` flag rather than AbortController — see
@@ -160,7 +170,14 @@ export default function AccountsPage() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [reloadToken]);
+
+  const flatAccounts = useMemo(() => {
+    function walk(nodes: AccountNode[]): Account[] {
+      return nodes.flatMap((node) => [node, ...walk(node.children)]);
+    }
+    return roots === null ? [] : walk(roots);
+  }, [roots]);
 
   return (
     <section className="flex flex-col gap-4">
@@ -172,18 +189,49 @@ export default function AccountsPage() {
             reporting and cannot be posted to.
           </p>
         </div>
-        {roots !== null && (
-          <span className="text-sm text-[var(--muted)] tabular-nums shrink-0">
-            {count} accounts
-          </span>
-        )}
+        <div className="flex items-center gap-3 shrink-0">
+          {roots !== null && (
+            <span className="text-sm text-[var(--muted)] tabular-nums">{count} accounts</span>
+          )}
+          <button
+            type="button"
+            onClick={() => setShowForm((open) => !open)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+          >
+            <Plus size={15} aria-hidden="true" /> New account
+          </button>
+        </div>
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
       {roots === null && error === null && <p className="muted">Loading…</p>}
       {balancesUnavailable && <p className="muted">Balances unavailable.</p>}
 
-      {roots !== null && (
+      {showForm && (
+        <NewAccountForm
+          accounts={flatAccounts}
+          onCreated={() => {
+            setShowForm(false);
+            setReloadToken((t) => t + 1);
+          }}
+          onCancel={() => setShowForm(false)}
+        />
+      )}
+
+      {roots !== null && roots.length === 0 && !showForm && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
+          <p className="text-sm text-[var(--muted)] m-0">This organization has no accounts yet.</p>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+          >
+            Create the first account
+          </button>
+        </div>
+      )}
+
+      {roots !== null && roots.length > 0 && (
         <ul className="list-none m-0 p-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] divide-y divide-[var(--border)]">
           {roots.map((node) => (
             <AccountRow key={node.id} node={node} depth={0} balances={balances} base={base} />

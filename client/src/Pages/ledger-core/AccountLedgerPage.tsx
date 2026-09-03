@@ -232,8 +232,14 @@ export default function AccountLedgerPage() {
                 <td className="p-3 font-mono text-xs text-[var(--muted)]">
                   {row.counterparts.join(', ') || '—'}
                 </td>
-                <td className="p-3 font-mono text-xs text-[var(--muted)]">
-                  {row.entryId.slice(0, 8)}
+                <td className="p-3 font-mono text-xs">
+                  <Link
+                    to={`${base}/journals/${row.entryId}`}
+                    className="text-[var(--muted)] hover:text-[var(--text)]"
+                    title="Open the journal entry this line was posted in"
+                  >
+                    {row.entryId.slice(0, 8)}
+                  </Link>
                 </td>
                 <td className="p-3 text-right tabular-nums">
                   {row.debitCents > 0 ? formatCents(row.debitCents) : ''}

@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import JournalsPage from '../Pages/ledger-core/JournalsPage';
 import JournalDetailPage from '../Pages/ledger-core/JournalDetailPage';
+import NewJournalEntryPage from '../Pages/ledger-core/NewJournalEntryPage';
 import type { Account, JournalEntry } from '../services/fetchServices';
 
 /**
@@ -109,6 +110,33 @@ function mockRegisterRoutes(entries: JournalEntry[]) {
   });
 }
 
+function mockRegisterWithReverse(entries: JournalEntry[], reversalEntry: JournalEntry) {
+  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (init?.method === 'POST' && url.includes('/reverse')) {
+      return Promise.resolve(jsonResponse(200, { success: true, entry: reversalEntry }));
+    }
+    if (url.includes('/ledger-core/journals')) {
+      return Promise.resolve(
+        jsonResponse(200, {
+          success: true,
+          count: entries.length,
+          totalCount: entries.length,
+          currentPage: 1,
+          totalPages: 1,
+          entries,
+        }),
+      );
+    }
+    if (url.includes('/ledger-core/accounts')) {
+      return Promise.resolve(
+        jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
+      );
+    }
+    return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
+  });
+}
+
 function mockDetailRoute(entry: JournalEntry) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -136,16 +164,14 @@ function LocationDisplay() {
 function renderJournalsPage(initialEntry = '/app/ledger-core/journals') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      <LocationDisplay />
       <Routes>
-        <Route
-          path="/app/:appSlug/journals"
-          element={
-            <>
-              <JournalsPage />
-              <LocationDisplay />
-            </>
-          }
-        />
+        <Route path="/app/:appSlug/journals" element={<JournalsPage />} />
+        {/* Stubs so navigating off the register (Reverse, Duplicate) doesn't
+            unmount LocationDisplay along with it — it lives outside Routes,
+            but the register itself must stay matched by *some* route. */}
+        <Route path="/app/:appSlug/journals/new" element={<span data-testid="new-entry-stub" />} />
+        <Route path="/app/:appSlug/journals/:entryId" element={<span data-testid="detail-stub" />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -221,6 +247,119 @@ describe('JournalsPage', () => {
     await waitFor(() => {
       const location = screen.getByTestId('location').textContent ?? '';
       expect(location).toBe('/app/ledger-core/journals');
+    });
+  });
+
+  it('renders a View link per entry pointing at its detail page', async () => {
+    const first = baseEntry();
+    const second = baseEntry({ id: 'entry-2', entryDate: '2026-08-16' });
+    mockRegisterRoutes([first, second]);
+    renderJournalsPage();
+
+    await screen.findAllByRole('link', { name: 'View entry' });
+    const viewLinks = screen.getAllByRole('link', { name: 'View entry' });
+    expect(viewLinks).toHaveLength(2);
+    expect(viewLinks[0]).toHaveAttribute('href', `/app/ledger-core/journals/${first.id}`);
+  });
+
+  it('offers Reverse only on an entry that is neither a reversal nor already reversed', async () => {
+    const plain = baseEntry({ id: 'entry-plain' });
+    const reversal = baseEntry({ id: 'entry-reversal', reversesEntryId: 'entry-plain' });
+    const reversed = baseEntry({ id: 'entry-reversed', reversedByEntryId: 'entry-reversal' });
+    mockRegisterRoutes([plain, reversal, reversed]);
+    renderJournalsPage();
+
+    await screen.findAllByText('AWS August');
+    expect(screen.getAllByRole('button', { name: 'Reverse entry' })).toHaveLength(1);
+  });
+
+  it('posts a reversal and navigates to the new entry', async () => {
+    const entry = baseEntry({ id: 'entry-plain' });
+    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
+    mockRegisterWithReverse([entry], reversal);
+    const user = userEvent.setup();
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
+
+    await waitFor(() => {
+      const location = screen.getByTestId('location').textContent ?? '';
+      expect(location).toBe('/app/ledger-core/journals/rev-1');
+    });
+    const reverseCall = fetchMock.mock.calls.find((call) => {
+      const [input, init] = call as [RequestInfo | URL, RequestInit?];
+      const url = typeof input === 'string' ? input : input.toString();
+      return url.includes('/reverse') && init?.method === 'POST';
+    });
+    expect(reverseCall).toBeDefined();
+  });
+
+  it('Duplicate links to the post form with the entry id as copyFrom', async () => {
+    const entry = baseEntry({ id: 'entry-plain' });
+    mockRegisterRoutes([entry]);
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    const duplicateLink = screen.getByRole('link', { name: 'Duplicate entry' });
+    expect(duplicateLink).toHaveAttribute(
+      'href',
+      `/app/ledger-core/journals/new?copyFrom=${entry.id}`,
+    );
+  });
+});
+
+function mockNewEntryRoutes(copiedEntry: JournalEntry) {
+  fetchMock.mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.endsWith(`/ledger-core/journals/${copiedEntry.id}`)) {
+      return Promise.resolve(jsonResponse(200, { success: true, entry: copiedEntry }));
+    }
+    if (url.includes('/ledger-core/accounts')) {
+      return Promise.resolve(
+        jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
+      );
+    }
+    return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
+  });
+}
+
+function renderNewJournalEntryPage(initialEntry: string) {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path="/app/:appSlug/journals/new" element={<NewJournalEntryPage />} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe('NewJournalEntryPage — ?copyFrom=', () => {
+  it('pre-fills date, description and lines from the copied entry', async () => {
+    const source = baseEntry({ id: 'je-1', entryDate: '2026-08-01', description: 'AWS August' });
+    mockNewEntryRoutes(source);
+    renderNewJournalEntryPage('/app/ledger-core/journals/new?copyFrom=je-1');
+
+    const dateInput = await screen.findByDisplayValue('2026-08-01');
+    expect(dateInput).toBeInTheDocument();
+    expect(screen.getByDisplayValue('AWS August')).toBeInTheDocument();
+    expect(screen.getByLabelText('Debit for line 1')).toHaveValue('450.00');
+    expect(screen.getByLabelText('Credit for line 2')).toHaveValue('450.00');
+  });
+
+  it('does not re-seed the form after the user edits it', async () => {
+    const source = baseEntry({ id: 'je-1', entryDate: '2026-08-01', description: 'AWS August' });
+    mockNewEntryRoutes(source);
+    const user = userEvent.setup();
+    renderNewJournalEntryPage('/app/ledger-core/journals/new?copyFrom=je-1');
+
+    await screen.findByDisplayValue('AWS August');
+    const descriptionInput = screen.getByLabelText('Description');
+    await user.clear(descriptionInput);
+    await user.type(descriptionInput, 'Edited');
+
+    await waitFor(() => {
+      expect(descriptionInput).toHaveValue('Edited');
     });
   });
 });

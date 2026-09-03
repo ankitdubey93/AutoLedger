@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { Plus } from 'lucide-react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Copy, Eye, Plus, RotateCcw } from 'lucide-react';
 import {
   listAccounts,
   listJournals,
+  reverseJournal,
   type Account,
   type JournalEntry,
   type JournalFilters,
@@ -18,6 +19,13 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * register is linkable and survives a reload — the same idiom TrialBalancePage
  * uses for `?type=`. Unlike that page's client-side filter, these filters are
  * server-side: the server holds the full history, not just one page of it.
+ *
+ * Each row offers View, Duplicate and Reverse. There is no edit and never
+ * will be — a posted entry is immutable (guardrails rule 6), enforced again
+ * by a database trigger. Duplicate opens the post form pre-filled from this
+ * entry (`journals/new?copyFrom=<id>`); Reverse posts the offsetting entry
+ * directly, mirroring JournalDetailPage's own `canReverse` rule so the two
+ * surfaces never disagree about which entries are correctable.
  */
 
 const PAGE_LIMIT = 50;
@@ -41,6 +49,7 @@ function accountSummary(entry: JournalEntry): string {
 
 export default function JournalsPage() {
   const base = useAppBasePath();
+  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -48,6 +57,8 @@ export default function JournalsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [reversingId, setReversingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
@@ -98,6 +109,18 @@ export default function JournalsPage() {
       ignore = true;
     };
   }, [from, to, accountId, q, page]);
+
+  async function handleReverse(entryId: string) {
+    setReversingId(entryId);
+    setActionError(null);
+    try {
+      const { entry: reversal } = await reverseJournal(entryId);
+      navigate(`${base}/journals/${reversal.id}`);
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Could not reverse the entry');
+      setReversingId(null);
+    }
+  }
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -192,6 +215,7 @@ export default function JournalsPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
+      {actionError !== null && <p className="status status--bad">{actionError}</p>}
       {!loaded && error === null && <p className="muted">Loading…</p>}
 
       {loaded && (
@@ -212,19 +236,13 @@ export default function JournalsPage() {
                     <th className="p-3 font-medium">Posted by</th>
                     <th className="p-3 font-medium text-right">Amount</th>
                     <th className="p-3 font-medium">Status</th>
+                    <th className="p-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {entries.map((entry) => (
                     <tr key={entry.id} className="border-t border-[var(--border)]">
-                      <td className="p-3 tabular-nums whitespace-nowrap">
-                        <Link
-                          to={`${base}/journals/${entry.id}`}
-                          className="text-[var(--text)] no-underline hover:underline"
-                        >
-                          {entry.entryDate}
-                        </Link>
-                      </td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">{entry.entryDate}</td>
                       <td className="p-3 font-mono text-xs text-[var(--muted)]">
                         {entry.id.slice(0, 8)}
                       </td>
@@ -242,6 +260,38 @@ export default function JournalsPage() {
                           : entry.reversedByEntryId !== null
                             ? pill('Reversed', 'amber')
                             : pill('Posted', 'muted')}
+                      </td>
+                      <td className="p-3">
+                        <div className="flex items-center justify-end gap-1">
+                          <Link
+                            to={`${base}/journals/${entry.id}`}
+                            aria-label="View entry"
+                            title="View entry"
+                            className="flex items-center gap-1 px-2 py-1 rounded-md text-xs no-underline text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)]"
+                          >
+                            <Eye size={14} aria-hidden="true" /> View
+                          </Link>
+                          <Link
+                            to={`${base}/journals/new?copyFrom=${entry.id}`}
+                            aria-label="Duplicate entry"
+                            title="Copy into a new entry — a posted entry can never be edited"
+                            className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--text)] border border-transparent"
+                          >
+                            <Copy size={14} aria-hidden="true" />
+                          </Link>
+                          {entry.reversesEntryId === null && entry.reversedByEntryId === null && (
+                            <button
+                              type="button"
+                              onClick={() => void handleReverse(entry.id)}
+                              disabled={reversingId !== null}
+                              aria-label="Reverse entry"
+                              title="Post the offsetting entry — the only correction path"
+                              className="p-1.5 rounded-md bg-transparent border border-transparent cursor-pointer text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40"
+                            >
+                              <RotateCcw size={14} aria-hidden="true" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}

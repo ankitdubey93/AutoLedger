@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { getTrialBalance, type AccountType, type TrialBalanceRow } from '../../services/fetchServices';
 import { formatCents } from './money';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
  * The trial balance — the report that proves the books balance.
@@ -16,6 +17,11 @@ import { formatCents } from './money';
  * unfiltered even while a type filter is active: they are the proof the
  * books balance, and a filtered subtotal would not be that proof, so the
  * label changes instead of the numbers.
+ *
+ * Every row here is a postable account — reportService.trialBalance filters
+ * on `a.is_postable` — so every row has a ledger of its own and the account
+ * name is always safely linkable. A header account would return 422 from
+ * `GET /:id/ledger` and none can appear in this report.
  */
 
 interface Report {
@@ -32,6 +38,7 @@ function readTypeParam(raw: string | null): AccountType | null {
 }
 
 export default function TrialBalancePage() {
+  const base = useAppBasePath();
   const [asOf, setAsOf] = useState('');
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +165,14 @@ export default function TrialBalancePage() {
                 {visible.map((row) => (
                   <tr key={row.accountId} className="border-t border-[var(--border)]">
                     <td className="p-3 font-mono text-xs text-[var(--muted)]">{row.code}</td>
-                    <td className="p-3">{row.name}</td>
+                    <td className="p-3">
+                      <Link
+                        to={`${base}/accounts/${row.accountId}`}
+                        className="text-[var(--text)] no-underline hover:underline"
+                      >
+                        {row.name}
+                      </Link>
+                    </td>
                     <td className="p-3 text-[var(--muted)]">{row.type}</td>
                     <td className="p-3 text-right tabular-nums">
                       {row.debitCents > 0 ? formatCents(row.debitCents) : ''}

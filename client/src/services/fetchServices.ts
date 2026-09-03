@@ -320,6 +320,28 @@ export function listAccountTree(signal?: AbortSignal): Promise<{
   return apiFetch('/ledger-core/accounts?tree=true', { signal: signal ?? null });
 }
 
+/** Mirrors server/src/schemas/ledger-core/accountSchema.ts's createAccountSchema. */
+export interface CreateAccountInput {
+  code: string;
+  name: string;
+  type: AccountType;
+  parentId: string | null;
+  isPostable: boolean;
+  description: string | null;
+}
+
+/**
+ * POST /ledger-core/accounts — OWNER, ADMIN or ACCOUNTANT.
+ *
+ * Documented failure paths (docs/api.md): 409 Account code already exists ·
+ * 422 Parent account not found · 422 Parent account must have the same type.
+ */
+export function createAccount(
+  input: CreateAccountInput,
+): Promise<{ success: boolean; account: Account }> {
+  return apiFetch('/ledger-core/accounts', { method: 'POST', body: JSON.stringify(input) });
+}
+
 /** Mirrors server/src/types/ledger-core.ts's AccountLedgerRow. */
 export interface AccountLedgerRow {
   lineId: string;

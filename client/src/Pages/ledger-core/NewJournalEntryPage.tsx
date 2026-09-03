@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
-import { createJournal, listAccounts, type Account } from '../../services/fetchServices';
+import { createJournal, getJournal, listAccounts, type Account } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
@@ -17,6 +17,14 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * of posted entries — that list is now JournalsPage, a register with its own
  * filters, and this page's only job after a successful post is to hand off to
  * the new entry's detail page.
+ *
+ * `?copyFrom=<id>` seeds the form from an existing entry — the client-side
+ * half of "reverse and re-enter corrected", since a posted entry can never be
+ * edited (guardrails rule 6). This is a one-shot *seed*, not a source of
+ * truth: it is read once into local state and then the `seeded` latch stops
+ * the effect from re-running and clobbering the user's edits. The amounts
+ * round-trip cents → string → cents through formatCents/parseCentsInput only,
+ * which is exact — never a float division.
  */
 
 interface DraftLine {
@@ -40,6 +48,8 @@ function today(): string {
 export default function NewJournalEntryPage() {
   const base = useAppBasePath();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const copyFrom = params.get('copyFrom');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entryDate, setEntryDate] = useState(today);
@@ -47,6 +57,7 @@ export default function NewJournalEntryPage() {
   const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }, { ...EMPTY_LINE }]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -66,6 +77,36 @@ export default function NewJournalEntryPage() {
       ignore = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (copyFrom === null || seeded) return;
+    let ignore = false;
+
+    getJournal(copyFrom)
+      .then((res) => {
+        if (ignore) return;
+        const source = res.entry;
+        setEntryDate(source.entryDate);
+        setDescription(source.description ?? '');
+        setLines(
+          source.lines.map((line) => ({
+            accountId: line.accountId,
+            debit: line.debitCents > 0 ? formatCents(line.debitCents) : '',
+            credit: line.creditCents > 0 ? formatCents(line.creditCents) : '',
+          })),
+        );
+        setSeeded(true);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setError(err instanceof Error ? err.message : 'Could not load the entry to copy');
+        setSeeded(true);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [copyFrom, seeded]);
 
   const totals = useMemo(() => {
     let debits = 0;
@@ -131,10 +172,13 @@ export default function NewJournalEntryPage() {
     <section className="flex flex-col gap-4">
       <form onSubmit={handlePost} className="flex flex-col gap-4">
         <header>
-          <h2 className="text-lg font-semibold m-0">Post a journal entry</h2>
+          <h2 className="text-lg font-semibold m-0">
+            {copyFrom === null ? 'Post a journal entry' : 'Post a copy of an entry'}
+          </h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            At least two lines, and debits must equal credits exactly. Checked here, again
-            on the server, and once more by the database at commit.
+            {copyFrom === null
+              ? 'At least two lines, and debits must equal credits exactly. Checked here, again on the server, and once more by the database at commit.'
+              : 'Pre-filled from an existing entry. Posting this creates a brand-new entry — the original is untouched, because a posted entry can never be edited.'}
           </p>
         </header>
 

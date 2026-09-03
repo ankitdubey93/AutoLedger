@@ -119,6 +119,24 @@ describe('AccountLedgerPage', () => {
     expect(screen.getAllByText('350.00').length).toBeGreaterThanOrEqual(1);
   });
 
+  it("links a ledger row's reference to its journal entry", async () => {
+    mockLedgerRoute({
+      status: 200,
+      body: {
+        success: true,
+        ...baseLedger(),
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+      },
+    });
+    renderAccountLedgerPage();
+
+    await screen.findByText('AWS July');
+    const referenceLink = screen.getByRole('link', { name: 'entry-1'.slice(0, 8) });
+    expect(referenceLink).toHaveAttribute('href', '/app/ledger-core/journals/entry-1');
+  });
+
   it('renders the header-account explanation on a 422', async () => {
     mockLedgerRoute({
       status: 422,

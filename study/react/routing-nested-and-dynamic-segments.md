@@ -4,7 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 2 — the two-level chrome, `PlatformLayout` → `AppShell` → an app's own pages, plus the `/app/:appSlug` dynamic segment
-**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below; Phase 3.6 added a second dynamic segment one level deeper — see "The list / create / detail split" below
+**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below; Phase 3.6 added a second dynamic segment one level deeper — see "The list / create / detail split" below; Phase 3.7 (2026-09-03) added a query parameter used as a one-shot seed rather than a live filter — see "A query parameter as a one-shot seed, not a source of truth" below
 **Verified against:** react-router-dom 7.18.3, React 19.2.8
 
 > **A note on the examples below:** the "Mechanism" walkthrough that follows describes the route tree **as Phase 2 built it** — `AppShell` nested as a *child* of `PlatformLayout`, so the suite header wrapped every app. That nesting relationship no longer holds: the 2026-09-03 revision made the per-app shell (renamed `AppFrame`) a **sibling** of `PlatformLayout`, not a child, precisely so the suite header stops rendering at all inside an app. The splat-resolution mechanics, the `<Navigate>` vs `navigate()` material, and the remount-by-`key` trick are all still accurate and still exercised in this codebase — only the parent/child relationship between the two named components changed. The new section below explains why that specific change had to be a routing change and not a CSS one.
@@ -210,6 +210,48 @@ This is the same list/create/detail shape most CRUD UIs converge on, and React R
 
 **Why every link between these three pages is absolute, built from `useAppBasePath()`, and not a relative sibling path:** all three routes render inside `AppPages`'s `<Routes>`, which — per "How a relative `to` is actually resolved" above — sits under `App.tsx`'s top-level splat (`<Route path="*" element={<ActiveAppRoutes />} />`). That splat is the deepest path-contributing match at the point any of these three pages resolves a link, so a relative `to` would resolve against the *entire current URL*, not against `journals`. Concretely: a `<Link to="new">` written from inside `JournalDetailPage` (which is itself mounted at `journals/:entryId`) would resolve against `/app/ledger-core/journals/<uuid>`, producing `/app/ledger-core/journals/<uuid>/new` — a URL with no matching route — rather than the intended `/app/ledger-core/journals/new`. Every navigation these three pages perform — the register's row links, the "New entry" button, the post-submit redirect in `NewJournalEntryPage`, the Reverse button's redirect in `JournalDetailPage`, the "back to journal entries" link on a 404 — is instead built as `` `${base}/journals/...` `` from the same `useAppBasePath()` hook the sidebar and the onboarding gate already use, sidestepping tree position entirely.
 
+### A query parameter as a one-shot seed, not a source of truth
+
+`?type=` on the trial balance and `?copyFrom=` on the post-a-journal-entry form both arrive as query parameters, and both get read with the same `useSearchParams()` hook — but they play opposite roles, and treating them the same way is the bug to avoid.
+
+`?type=` is a **live filter**: `TrialBalancePage` never copies it into local state. Every render reads `params.get('type')` directly and filters the already-fetched rows against whatever it finds right now. There is no local variable that could go stale, because there is no local variable — the URL *is* the state, on every render, for as long as the page is mounted.
+
+`?copyFrom=<id>` on `NewJournalEntryPage` is a **one-shot seed**: an existing journal entry's id, used to pre-fill the post form so "reverse and re-enter corrected" doesn't mean retyping every line by hand. If this page treated `copyFrom` the way `TrialBalancePage` treats `type` — reading it fresh on every render and deriving form state from it directly — the form would be unusable: the moment a user edited the description field, the *next* render would re-derive from `copyFrom` and stomp the edit right back to the original entry's description. A live-filter pattern applied to a seed value produces a form that fights the user.
+
+The fix is an effect with a latch:
+
+```ts
+const [seeded, setSeeded] = useState(false);
+
+useEffect(() => {
+  if (copyFrom === null || seeded) return;
+  getJournal(copyFrom).then((res) => {
+    setEntryDate(res.entry.entryDate);
+    setDescription(res.entry.description ?? '');
+    setLines(/* ...mapped from res.entry.lines... */);
+    setSeeded(true);
+  });
+}, [copyFrom, seeded]);
+```
+
+`seeded` is what makes this a *seed* and not a *binding*: once it flips to `true`, the effect's own guard clause (`if (copyFrom === null || seeded) return;`) stops it from running again, no matter how many times `NewJournalEntryPage` re-renders afterward. The `lines`/`entryDate`/`description` state the effect wrote is now owned entirely by the form's own `onChange` handlers, exactly as if the user had typed everything from a blank form. The URL parameter did its one job — providing an initial value — and then gets out of the way.
+
+**Three ways to get "initial state from data that arrives after mount," and why this one:**
+
+1. **`useState(initialValue)` alone** — doesn't work here at all. The initial value has to come from `res.entry`, and that response doesn't exist synchronously at the moment `useState` runs during the first render; there is nothing to pass it yet.
+2. **Force a remount with `key`** — the trick this same note documents elsewhere (`PlatformLayout`'s org-switch `key`) — would work if the *whole component* needed to reset in response to a prop or route change, because remounting re-runs `useState`'s initializer from scratch. It's the wrong tool here because there's only one mount of this page per visit to `journals/new`; nothing external changes the identity of what should be seeded partway through the component's life, so there's no natural "changed key" to hang a remount on.
+3. **An effect with a latch** (chosen) — correct specifically because the seed value depends on an *asynchronous* fetch that resolves after mount, and because the form needs to become independently editable the instant that fetch resolves, not stay bound to the source data for the component's whole lifetime. This is the same "fetch in an effect, guard against re-running, let local state take over afterward" shape [context-effects-and-data-fetching.md](context-effects-and-data-fetching.md) already documents for org-scoped data fetching in general — the only new piece here is that the *purpose* of the fetched value is to become a starting point for editable state, not to be rendered as-is.
+
+**Why the cents round-trip loses nothing.** The seed effect converts `line.debitCents` (an integer, e.g. `45000`) into the text the debit `<input>` shows (`"450.00"`) via `formatCents`, and the user's later edits convert back to cents via `parseCentsInput` on submit. Both functions live in `client/src/Pages/ledger-core/money.ts` and do only integer arithmetic — `formatCents` divides by `100` using `Math.trunc`/`%` (never float division), and `parseCentsInput` multiplies the parsed decimal by `100` and rounds to the nearest integer before checking `Number.isSafeInteger`. `45000 → "450.00" → 45000` is therefore exact for every value these functions accept — there is no lossy intermediate float carrying fractional cents, the way `(45000 / 100).toFixed(2)` could produce for some inputs after floating-point division. Seeding a money field through anything other than this pair of functions — say, dividing by 100 directly in the seed effect — would reintroduce exactly the class of bug guardrails rule 3 (integer cents, never floats) exists to prevent, just relocated to a copy-form feature instead of the original posting form.
+
+**Why Reverse has to mean the same thing in two places.** `JournalDetailPage` and `JournalsPage` (the register) both offer a Reverse action on the same underlying data, and both derive "is this entry correctable" from the identical two fields:
+
+```ts
+const canReverse = entry.reversesEntryId === null && entry.reversedByEntryId === null;
+```
+
+An entry that is itself a reversal (`reversesEntryId !== null`) shouldn't be reversed again — undoing an undo is not a concept this ledger models — and an entry that has already been reversed (`reversedByEntryId !== null`) shouldn't offer a second reversal, since one already exists. If the register had derived this independently — say, by checking only `reversedByEntryId` and forgetting `reversesEntryId` — a user could reverse a reversal entry from the register even though the detail page correctly hides that same button, and the two surfaces would disagree about what's true of the same row. There's no compiler check that catches two hand-written boolean expressions drifting apart like this; the register's rule is a direct copy of the detail page's, not a re-derivation, specifically to keep that from happening. The server re-validates on `POST /:id/reverse` regardless (rule 6 is enforced by a database trigger, not by client trust), so the client-side rule's only job is to keep the button itself from lying about what's about to happen.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -233,6 +275,9 @@ This is the same list/create/detail shape most CRUD UIs converge on, and React R
 - `client/src/Pages/ledger-core/TrialBalancePage.tsx` — `useSearchParams`, `readTypeParam`'s whitelist, and the unfiltered-totals rule
 - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the `journals` / `journals/new` / `journals/:entryId` sibling routes (Phase 3.6), added inside the same splat-mounted `<Routes>` as every other LedgerCore page
 - `client/src/Pages/ledger-core/JournalsPage.tsx`, `NewJournalEntryPage.tsx`, `JournalDetailPage.tsx` — the list/create/detail split, `useParams<{ entryId: string }>()`, and every cross-page link built from `useAppBasePath()`
+- `client/src/Pages/ledger-core/NewJournalEntryPage.tsx` — the `?copyFrom=` one-shot seed effect and its `seeded` latch (Phase 3.7)
+- `client/src/Pages/ledger-core/money.ts` — `formatCents`/`parseCentsInput`, the exact integer round-trip the seed effect relies on
+- `client/src/Pages/ledger-core/JournalsPage.tsx`, `JournalDetailPage.tsx` — the duplicated `canReverse` rule, kept identical on purpose (Phase 3.7)
 
 ## Gotchas
 
@@ -246,6 +291,8 @@ This is the same list/create/detail shape most CRUD UIs converge on, and React R
 - **Moving a route out from under a layout route silently drops whatever that ancestor was doing.** `AppFrame`'s org-switch remount `key` had to be copied over by hand when `/app/:appSlug` stopped being a child of `PlatformLayout` — nothing enforces that an equivalent replaces an ancestor's behavior once the ancestor is gone. Audit for this specifically whenever a route moves in the tree, not just whether the new position renders correctly.
 - **A query-string filter is untrusted input, exactly like a route param.** `?type=` on the trial balance whitelists against the known account types rather than casting whatever string shows up; an unrecognised value degrades to "no filter" instead of throwing or trusting it. The same discipline `useParams` needs applies to every value that arrives via the URL, dynamic segment or query string alike.
 - **A static sibling route beats a dynamic one at the same level, but only because the router scores specificity — it isn't declaration order.** `journals/new` matching before `journals/:entryId` works regardless of which `<Route>` is written first in the JSX; relying on that would be borrowing a mental model (first-match-wins) from a different kind of router.
+- **A query parameter that seeds state needs a latch, or it becomes a binding by accident.** Without the `seeded` guard, `NewJournalEntryPage`'s effect would re-run on every render that still has `copyFrom` in its dependency array satisfied (it always is, since `copyFrom` doesn't change) and overwrite whatever the user just typed the instant a re-render happened to fire — e.g. from React batching an unrelated state update. The bug wouldn't reproduce every keystroke, which is exactly what makes it nasty: it depends on *when* a re-render happens to interleave with the effect, not on anything the user did wrong.
+- **Two components deriving the "same" boolean independently is a drift bug waiting to happen, not a style nitpick.** `JournalsPage`'s Reverse button and `JournalDetailPage`'s Reverse button must agree on `canReverse`, and the way to guarantee that isn't a shared abstraction (there's no `useCanReverse()` hook here) — it's discipline: when one copy changes, the other has to change with it, and a reviewer has to know to check both files whenever either one's reversal logic is touched.
 - **A page mounted at a dynamic segment (`journals/:entryId`) is just as depth-fragile for relative links as one mounted at a static segment.** The splat that makes relative links dangerous here is two levels up (`App.tsx`'s catch-all), not the `:entryId` segment itself — the dynamic segment is a red herring; what matters for `resolveTo` is only whether a splat sits anywhere above the resolving component in the matched chain.
 
 ## Interview Q&A
@@ -294,6 +341,21 @@ A: Because a client-side format check couldn't tell "malformed" apart from "a we
 
 **Q: A page rendered at `journals/:entryId` wants to link to `journals/new`. Does the dynamic segment in its own route make that link more or less fragile than a link from a page at a plain `journals` route?**
 A: No different — the dynamic segment itself isn't what makes relative resolution fragile; what matters is whether a *splat* sits anywhere above the resolving component in the matched chain, because that's the only thing that makes `pathnameBase` and `pathname` diverge for a contributing match. In this codebase every LedgerCore page, whether mounted at a static or a dynamic segment, sits under the same top-level splat two layers up in `App.tsx`, so they're all equally exposed to the same failure mode, and all of them use the same fix — an absolute path from `useAppBasePath()` — regardless of their own route's shape.
+
+**Q: You're using `?type=` to filter the trial balance and `?copyFrom=` to pre-fill a form from an existing entry. Both are query parameters read with `useSearchParams`. What's actually different about how you use them?**
+A: `?type=` is read fresh on every render and never copied anywhere — the filtering logic runs against `params.get('type')` directly each time, so the URL is the only source of truth for as long as the component is mounted. `?copyFrom=` is read exactly once, inside an effect, to populate local `useState` that the user then edits freely — after that first read, the URL parameter is irrelevant to what the form shows. The first is a *live binding*; the second is a *seed*. Using the seed pattern for a live filter would make the filter unable to update without a full remount; using the live-binding pattern for a seed would make the form snap back to the original values on every re-render, which is unusable.
+
+**Q: What would go wrong if `NewJournalEntryPage` read `copyFrom` and set form state directly in the render body, instead of in an effect with a latch?**
+A: Two things. First, you can't — the data behind `copyFrom` is an id, not the entry itself; fetching it is inherently asynchronous, so there's nothing to set synchronously during render even on the first pass. Second, even ignoring that, deriving state directly from a prop or URL value on every render means the derived state can never diverge from its source — exactly what you don't want once the user starts typing. The effect-plus-latch pattern is what lets the initial value come from an async source *and* become independently editable afterward.
+
+**Q: Why does the `seeded` boolean need to exist at all — why not just check `lines.length === 0` or some other proxy for "hasn't been seeded yet"?**
+A: Because the form's own default state already has two lines (`[{...EMPTY_LINE}, {...EMPTY_LINE}]`), so `lines.length === 0` is never actually a state the form is in — it would never fire, or you'd have to weaken the default to an empty array just to make the check work, which breaks the "at least two lines" UX for a plain new entry. More generally, using data shape as a proxy for "has this effect already run" is fragile the moment the shape you're checking can also arise for an unrelated reason. An explicit boolean says exactly one thing — this effect has completed its one job — and can't be confused with anything else.
+
+**Q: The seed effect's dependency array is `[copyFrom, seeded]`. Why does `seeded` need to be in there if the whole point is to stop the effect from re-running?**
+A: Because the effect's guard clause reads `seeded` (`if (copyFrom === null || seeded) return;`), and React's lint rule for effect dependencies requires every reactive value read inside the effect body to be listed — omitting it would be relying on a stale closure holding `false` forever, which happens to work by accident here but is exactly the kind of implicit assumption that breaks the moment the effect is refactored. Listing it makes the guard's behavior explicit: the effect *is* allowed to run again if `seeded` changes, it just immediately no-ops because of the check inside.
+
+**Q: Where does `formatCents`/`parseCentsInput` actually matter for correctness here, versus just being nice code hygiene?**
+A: It's the difference between the copy-seed feature preserving the exact amount that was originally posted, cent for cent, versus silently drifting by a cent on some inputs. `formatCents` turns `45000` into `"450.00"` using integer truncation and modulo, never float division; `parseCentsInput` turns `"450.00"` back into `45000` using integer rounding after multiplying by 100. Both directions are exact for every value the pair can produce, so seeding the form this way is guaranteed lossless. Reaching for `(cents / 100).toFixed(2)` instead would introduce IEEE-754 float division into a codepath specifically carved out to never touch a float with money — a violation of the same rule (guardrails rule 3) the original posting form was built to enforce, just introduced through a new feature instead of the old one.
 
 ## Follow-ups they'll dig into
 

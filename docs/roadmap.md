@@ -181,6 +181,18 @@ A second half-step, like 3.5. It slots between the delivered Phase 3.5 and the u
 
 ---
 
+## Phase 3.7, as delivered
+
+A third half-step, client-only. **No migration, no new server route, no new dependency** — every endpoint this phase's UI calls already existed after Phase 3.6.
+
+**Landed:** the journal register (`JournalsPage`) gains a per-row Actions column — View, Duplicate, Reverse — replacing the date cell's link; Reverse is offered only on an entry that is neither a reversal nor already reversed, mirroring `JournalDetailPage`'s existing `canReverse` rule exactly, since the two surfaces must agree about which entries are correctable. There is still no edit and never will be — rule 6 and migration 004's `BEFORE UPDATE OR DELETE` trigger both forbid it — so Duplicate is the substitute: it opens the post form at `journals/new?copyFrom=<id>`, which seeds the date, description and lines from the copied entry once (an effect with a `seeded` latch, not a live binding — see [study/react/routing-nested-and-dynamic-segments.md § one-shot seed](../study/react/routing-nested-and-dynamic-segments.md#a-query-parameter-as-a-one-shot-seed-not-a-source-of-truth)) and then lets the form behave exactly as if typed from blank. The trial balance's account name and the account ledger's Reference cell are both now links — into that account's ledger, and into the journal entry a line was posted in, respectively — closing the navigation loop chart → ledger → entry → account. The chart of accounts gained a create form (`NewAccountForm`, a new component) reachable from a header button and, when the chart is empty, a dedicated "Create the first account" prompt; it posts to the already-existing `POST /ledger-core/accounts` and the chart refetches on success rather than splicing the new account into local tree state.
+
+**Deliberately not built:** client-side role gating on any of the above. Every action is shown to every member; the server's `requireRole` is the only enforcement, and a `403` renders inline. Adding gating later means threading `OrgProvider` through several presently-provider-free test files — a deferred cost, not an oversight.
+
+**Tests:** 13 cases added to `ledgerCoreJournals.test.tsx` (register actions, `?copyFrom=` seeding), 1 to `ledgerCoreAccountLedger.test.tsx`, a new `ledgerCoreTrialBalance.test.tsx` (2 cases), and 5 to `ledgerCoreAccounts.test.tsx` — 79 client tests total. Server suite unchanged at 280, confirming no server code moved.
+
+---
+
 ## Phase renumbering — 2026-09-01
 
 LedgerCore and AP-Flow were specified in full before Phase 3 started, and both turned out to be roughly three times the scope the table allotted them. Bank reconciliation, the confidence-matching engine, the integrity checker, DB-level balance triggers, sub-account hierarchies, financial webhooks, document storage, and PII redaction as shared infrastructure appeared nowhere in the previous table. Rather than let two phases silently swell, LedgerCore was given a contiguous block (3–9, with shared infrastructure landing where LedgerCore first needs it) and AP-Flow was split in two (10–11). Everything downstream shifted.
