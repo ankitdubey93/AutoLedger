@@ -56,6 +56,8 @@ export interface OrganizationSummary {
   name: string;
   slug: string;
   baseCurrency: string;
+  taxNumber: string | null;
+  businessNumber: string | null;
   createdAt: string;
 }
 

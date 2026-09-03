@@ -24,7 +24,7 @@ import type { Role } from '../../types/auth.js';
 export async function resetTables(): Promise<void> {
   await pool.query(
     `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
-              ledger_settings
+              ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines
      RESTART IDENTITY CASCADE`,
   );
 }

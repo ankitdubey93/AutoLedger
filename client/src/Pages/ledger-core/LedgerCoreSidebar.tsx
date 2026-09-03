@@ -2,12 +2,15 @@ import { NavLink } from 'react-router-dom';
 import {
   BookOpen,
   FileBarChart,
+  FileText,
   LayoutDashboard,
   ListTree,
   Scale,
   Settings as SettingsIcon,
+  Users,
 } from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import CreateMenu from './CreateMenu';
 
 /**
  * LedgerCore's own navigation — a grouped, sticky, full-height rail.
@@ -38,6 +41,13 @@ const NAV_GROUPS = [
     ],
   },
   {
+    heading: 'Sales',
+    items: [
+      { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
+      { to: 'customers', label: 'Customers', icon: Users, end: false },
+    ],
+  },
+  {
     heading: 'Reporting',
     items: [
       { to: 'trial-balance', label: 'Trial Balance', icon: Scale, end: false },
@@ -55,8 +65,11 @@ export default function LedgerCoreSidebar() {
   return (
     <nav
       aria-label="LedgerCore"
-      className="md:w-60 md:shrink-0 md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:overflow-y-auto border-b md:border-b-0 md:border-r border-[var(--border)] md:pr-3 md:py-5"
+      className="no-print md:w-60 md:shrink-0 md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:overflow-y-auto border-b md:border-b-0 md:border-r border-[var(--border)] md:pr-3 md:py-5"
     >
+      <div className="hidden md:block mb-4 px-1">
+        <CreateMenu />
+      </div>
       <div className="flex md:flex-col gap-1 md:gap-6 overflow-x-auto md:overflow-visible pb-2 md:pb-0">
         {NAV_GROUPS.map((group) => (
           <div key={group.heading} className="flex md:flex-col gap-1">

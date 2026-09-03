@@ -213,6 +213,109 @@ export interface TrendPoint {
   expenseCents: number;
 }
 
+/* ---------------------------------------------------------- Phase 3.8 — invoicing */
+
+export interface Customer {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'VOID'] as const;
+export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
+
+export function isInvoiceStatus(value: string): value is InvoiceStatus {
+  return (INVOICE_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The one lifecycle transition table (guardrails rule 10). The `status` CHECK
+ * in migration 009 lists exactly these three values and nothing else — if a
+ * status is ever added, both change in the same migration.
+ */
+export const INVOICE_TRANSITIONS = {
+  DRAFT: ['ISSUED', 'VOID'],
+  ISSUED: ['VOID'],
+  VOID: [],
+} as const satisfies Record<InvoiceStatus, readonly InvoiceStatus[]>;
+
+export function canTransitionInvoice(from: InvoiceStatus, to: InvoiceStatus): boolean {
+  return (INVOICE_TRANSITIONS[from] as readonly InvoiceStatus[]).includes(to);
+}
+
+export interface InvoiceLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  /** Thousandths of a unit — 2500 means 2.5. Never a float. */
+  quantityMilli: number;
+  unitPriceCents: number;
+  revenueAccountId: string;
+  revenueAccountCode: string;
+  revenueAccountName: string;
+  /** Basis points — 1850 means 18.5%. */
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export interface Invoice {
+  id: string;
+  /** `null` while DRAFT — the number is allocated at issue. */
+  invoiceNumber: string | null;
+  status: InvoiceStatus;
+  customerId: string;
+  customerName: string;
+  issueDate: string;
+  dueDate: string;
+  currencyCode: string;
+  customerNameSnapshot: string;
+  customerAddressSnapshot: string | null;
+  customerTaxNumberSnapshot: string | null;
+  notes: string | null;
+  paymentTerms: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: InvoiceLine[];
+}
+
+export interface InvoiceSettings {
+  numberPrefix: string;
+  numberPadding: number;
+  nextNumber: number;
+  defaultDueDays: number;
+  defaultTaxRateBp: number;
+  taxLabel: string;
+  receivableAccountId: string | null;
+  defaultRevenueAccountId: string | null;
+  taxPayableAccountId: string | null;
+  showTaxNumber: boolean;
+  showBusinessNumber: boolean;
+  showLegalName: boolean;
+  billingAddress: string | null;
+  paymentTerms: string | null;
+  footerNotes: string | null;
+  accentColor: string;
+  /** `false` until the organization has saved invoice settings at least once. */
+  configured: boolean;
+}
+
 export interface DashboardSummary {
   asOf: string;
   fiscalYear: FiscalYearWindow;

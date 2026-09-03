@@ -19,7 +19,7 @@ export default function AppTopBar({ app }: { app: AppSummary }) {
   const email = auth.status === 'authenticated' ? auth.user.email : '';
 
   return (
-    <header className="app-topbar sticky top-0 z-30 h-14 flex items-center gap-3 px-4 border-b border-[var(--border)] bg-[var(--panel)]">
+    <header className="app-topbar no-print sticky top-0 z-30 h-14 flex items-center gap-3 px-4 border-b border-[var(--border)] bg-[var(--panel)]">
       <Link
         to="/"
         title="All AutoLedger apps"

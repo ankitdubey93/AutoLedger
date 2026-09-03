@@ -115,6 +115,42 @@ getAccounts(user.id);   // ❌ caught at compile time
 
 Every ID in this schema is a UUID string, so structurally they're identical and interchangeable. Passing a `userId` where `orgId` belongs is the exact shape of a tenant-isolation bug — and branding turns it from a runtime data leak into a compile error.
 
+## Part 3 — Scaling money by a rational factor
+
+`addCents`/`sumCents` cover the arithmetic a journal entry needs: amounts that are already in cents, added together. Phase 3.8's invoice line totals need a different operation — multiplying a cents amount by a *ratio* expressed as two plain integers, because neither an invoice quantity nor a tax rate is itself money:
+
+- a quantity is stored as **thousandths of a unit** (`quantityMilli`: `2500` means `2.5`), never a float, for the same reason cents themselves aren't floats
+- a tax rate is stored as **basis points** (`taxRateBp`: `1850` means `18.5%`)
+
+`netCents = unitPriceCents × quantityMilli ÷ 1000` and `taxCents = netCents × taxRateBp ÷ 10000` are both "cents times an integer, divided by an integer," which is exactly the shape `scaleCents` exists for:
+
+```ts
+export function scaleCents(amount: Cents, numerator: number, denominator: number): Cents {
+  if (!Number.isInteger(denominator) || denominator <= 0) throw new ApiError(400, '...');
+  if (!Number.isInteger(numerator) || numerator < 0) throw new ApiError(400, '...');
+
+  const n = BigInt(numerator);
+  const d = BigInt(denominator);
+  const result = (BigInt(amount) * n + d / 2n) / d;
+
+  return cents(Number(result));
+}
+```
+
+### Why `BigInt`, not `Math.round(amount * numerator / denominator)`
+
+The obvious one-liner does the multiplication in native `number` arithmetic first and rounds after. For an invoice priced at, say, `$999,999,999.99` (99,999,999,999 cents — well inside the columns' permitted range) times a quantity of a million thousandths, `amount * numerator` overflows `Number.MAX_SAFE_INTEGER` (2⁵³−1) *before* the division ever runs, and IEEE-754 double-precision arithmetic doesn't throw when a computation loses precision — it silently returns the nearest representable double. The bug wouldn't show up in a unit test with small, textbook numbers; it would show up on the one invoice with an unusually large line total, and it would show up as a wrong number, not an error. This is precisely the machine-representation problem Part 1 of this note opens with, one level removed: the input columns are safe integers individually, but their *product* isn't guaranteed to be.
+
+`BigInt` arithmetic in JavaScript is arbitrary-precision and exact — no representable range to overflow within the calculation — so multiplying two large safe integers together is exact even when the intermediate product itself exceeds `Number.MAX_SAFE_INTEGER`. Only the *final* result, after dividing back down, gets converted back to a `number` via `cents()`, whose existing safe-integer check (Part 2) is what catches the case where even the final answer is too large to represent exactly — the same checked-constructor discipline this whole module is built around, applied to a new call site rather than invented for it.
+
+### Rounding half up, and why it has to be documented
+
+`(BigInt(amount) * n + d / 2n) / d` is integer division after adding half the denominator — the standard trick for "round to nearest" using only integer operations (no `Math.round`, which operates on floats and reintroduces the precision question this function exists to avoid). `d / 2n` is itself an integer division, so for an odd denominator it truncates toward zero, which biases the rounding boundary very slightly for the exact halfway case on an odd `d`; every actual use of this function passes an even denominator (`1000` for quantity, `10000` for basis points), so the bias never surfaces in practice, but it's a property of the formula worth being explicit about rather than assuming "rounds half up" holds for every possible input. Which direction a rounding rule goes is a business decision every payments and accounting system has to make explicitly and consistently — round-half-up here, matching `toCents`' documented "rounds half away from zero" for the sign-symmetric case — because two different rounding rules applied inconsistently across a codebase is a subtle source of penny-level reconciliation drift over thousands of transactions.
+
+### Why tax is computed per line, then summed — never on the subtotal
+
+`invoiceService.computeLineTotals` calls `scaleCents` twice per line — once for the net amount, once for that line's tax on top of its own net — and only *then* sums every line's net and every line's tax separately into the invoice header's `subtotalCents` and `taxCents`. Computing tax once on the pre-summed subtotal instead (`scaleCents(subtotalCents, taxRateBp, 10000)`) would give the wrong answer the moment two lines carry *different* tax rates, and even for a single uniform rate, summing several already-rounded per-line taxes is not always bit-for-bit identical to rounding the tax on the pre-summed total — the two operations don't commute once rounding is involved. Storing each line's own `netCents`/`taxCents` and requiring the header to equal their sums (`chk_invoices_total` in migration 009) is what keeps the stored numbers self-consistent regardless of how many distinct tax rates an invoice mixes.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -130,7 +166,8 @@ Conversion lives in exactly one module, `utils/money.ts`, so the parse-from-stri
 
 Built in Phase 3:
 
-- `server/src/utils/money.ts` — `Cents`, and the only functions permitted to produce one: `cents()` (checked constructor), `toCents()` (major units → cents), `parseCents()` (the `pg` `BIGINT` string parser), `formatCents()`, `addCents()`, `sumCents()`
+- `server/src/utils/money.ts` — `Cents`, and the only functions permitted to produce one: `cents()` (checked constructor), `toCents()` (major units → cents), `parseCents()` (the `pg` `BIGINT` string parser), `formatCents()`, `addCents()`, `sumCents()`, and — added in Phase 3.8 — `scaleCents()` (money × a rational factor, `BigInt`-exact)
+- `server/src/services/ledger-core/invoiceService.ts` — `computeLineTotals`, the only caller of `scaleCents`
 - `server/src/__tests__/money.test.ts` — unit tier, no database
 
 **One deliberate departure from the sketch above:** `toCents` takes a plain `number`, not a branded `Dollars`. At an HTTP boundary the value arrives from `JSON.parse` as a `number`, so requiring `Dollars` would force callers to write `body.amount as Dollars` — an unchecked cast at precisely the point the check matters most, which is the first gotcha below. `Dollars` remains a good illustration of the pattern and a genuinely useful type *inside* a calculation where both units are in play; it is not exported, because nothing in the codebase currently has that shape.
@@ -146,6 +183,8 @@ Not yet applied: `Cents` does not appear on the `ledger_lines` DTOs in `types/le
 - **Beyond 2⁵³ cents, `Number` loses precision.** Not a concern at ~$90 trillion, but if it ever were, the answer is `BigInt` — and then JSON serialisation needs a custom replacer, since `JSON.stringify` throws on `BigInt`.
 - **Branding doesn't survive `JSON.parse`.** Data crossing the wire re-enters as plain `number`; re-validate at the boundary with the constructor.
 - **Division breaks the model.** Splitting 100 cents three ways can't be exact — you must decide where the remainder lands (largest-remainder allocation) rather than letting rounding scatter it.
+- **`amount * numerator` in native `number` arithmetic can overflow before you ever get to divide.** `scaleCents` exists because `Math.round((amount * numerator) / denominator)` computes the multiplication in floating point *first* — for large-but-individually-valid inputs, the product alone can exceed `Number.MAX_SAFE_INTEGER` and silently lose precision, with no exception raised. `BigInt` the operands before multiplying, divide in `BigInt`, convert back to `number` only at the end.
+- **Summed per-line rounding isn't always identical to rounding the sum.** `scaleCents` is applied per invoice line and the results are summed, never applied once to a pre-summed total — the two are not guaranteed to agree once any rounding is involved, and only the per-line version is correct when lines carry different rates.
 
 ## Interview Q&A
 
@@ -154,6 +193,9 @@ A: IEEE 754 doubles are binary, and most decimal fractions have no exact binary 
 
 **Q: Someone writes `if (Math.abs(debits - credits) < 0.01)` for a balance check. What's wrong with it?**
 A: It declares a one-cent discrepancy acceptable, which in accounting it isn't — that's the difference between a clean audit and reconciling ten thousand entries by hand. It's also not a stable threshold: accumulated float error grows with the number of additions, so a tolerance that passes at a hundred lines can fail at a hundred thousand, or worse, mask a genuine one-cent bug. The correct version converts to integer cents and uses `!==`.
+
+**Q: How do you multiply a `Cents` value by a percentage — say, computing tax on an invoice line — without reintroducing the float problem you just solved?**
+A: The rate has to be stored as an integer too — basis points, not a decimal — so the whole operation is "integer times integer, divided by integer," never a float multiplication. Even then, doing that multiplication in native JS `number` arithmetic can silently overflow: `Number.MAX_SAFE_INTEGER` bounds any *individual* value safely, but the *product* of two safe integers can exceed it, and IEEE-754 doesn't throw on that, it just returns an imprecise result. The fix is to cast both operands to `BigInt`, which is arbitrary-precision, do the multiply-then-divide-with-rounding entirely in `BigInt`, and only convert back to `number` at the very end — where the existing checked constructor catches the case where even the final answer doesn't fit.
 
 **Q: TypeScript is structurally typed. What problem does that cause, and how do you work around it?**
 A: Two types with the same shape are interchangeable, so `type Cents = number` and `type Dollars = number` are the same type — you can pass dollars where cents are expected and get no error at all. The workaround is branding: intersect the primitive with a phantom property, ideally keyed by a `unique symbol` so it can't be forged or collide. That simulates nominal typing. The brand is erased at compile time, so there's no runtime cost — a `Cents` is still just a `number`. The cost is that arithmetic widens back to `number`, so you either re-brand at boundaries or write small operators.

@@ -136,13 +136,13 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 |---|---|---|---|
 | GET | `/` | any member | The caller's active organization |
 | GET | `/members` | `OWNER`, `ADMIN` | Everyone in the active organization |
-| PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name and/or base currency |
+| PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 
 `/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the client renders as an explanatory notice rather than an error.
 
-`PATCH /` (Phase 3.5) is the platform half of LedgerCore's onboarding — organization name and `base_currency` are platform fields, not LedgerCore ones, so they are edited here rather than under `/ledger-core/settings`. Both fields optional, at least one required (`400 No fields to update`).
+`PATCH /` (Phase 3.5) is the platform half of LedgerCore's onboarding — organization name and `base_currency` are platform fields, not LedgerCore ones, so they are edited here rather than under `/ledger-core/settings`. Phase 3.8 adds `taxNumber` and `businessNumber` (each `string | null`, max 64 chars) — a business's tax and legal-entity registration numbers, also platform fields since they identify the legal entity rather than any one app. Whether they print on a LedgerCore invoice is a separate, app-owned choice — see `/ledger-core/settings/invoicing`'s `showTaxNumber`/`showBusinessNumber`. All fields optional, at least one required (`400 No fields to update`).
 
 ---
 
@@ -175,7 +175,7 @@ Not role-gated — every member of an organization may see which apps exist. `st
 
 ---
 
-### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅
+### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅
 
 Full feature spec and the remaining phases: [ledger-core.md](ledger-core.md).
 
@@ -253,6 +253,58 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
 
 Deliberately **not** built here: `fiscal_periods`, period close/lock, and any posting guard tied to a closed period — all Phase 4. This module only stores a fiscal-year *setting*; it creates no period rows.
+
+#### Invoice settings — `/api/v1/ledger-core/settings/invoicing` — Phase 3.8
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Invoice numbering, defaults, and branding for the active organization |
+| PATCH | `/` | `OWNER`, `ADMIN` | Edit invoice settings; creates the row on first write |
+
+A missing `ledger_invoice_settings` row is **not** a 404 — `GET /` returns `200` with sensible defaults (`numberPrefix: 'INV-'`, `numberPadding: 6`, `nextNumber: 1`, `defaultDueDays: 30`, `defaultTaxRateBp: 0`, `taxLabel: 'Tax'`, `showTaxNumber: true`, `showBusinessNumber: false`, `showLegalName: true`, `accentColor: '#2563eb'`, every account id and text field `null`) and `configured: false`. `PATCH /` upserts the row and returns `configured: true`.
+
+`receivableAccountId`, `defaultRevenueAccountId`, and `taxPayableAccountId` are optional overrides — when unset, issuing an invoice falls back to the default chart's `1120`/`4100`-per-line/`2140`. Each is validated against the org's own chart (composite FK): `422 Account does not exist in this organization` if it points at a foreign or missing account.
+
+Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb`, invalid basis points, invalid padding) · `400 No fields to update` · `422 Account does not exist in this organization`.
+
+#### Customers — `/api/v1/ledger-core/customers` — Phase 3.8
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The org's customers, ordered by name. `?q=` filters by name (case-insensitive substring); `?includeInactive=true` includes retired customers (excluded by default) |
+| GET | `/:id` | any member | One customer |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a customer |
+| PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Edit a customer, including retiring it (`isActive: false`) |
+
+Email is lowercased on write. **There is no DELETE** — a customer is retired with `isActive: false`, matching `accounts`, since an invoice may reference one.
+
+Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Customer not found`.
+
+#### Invoices — `/api/v1/ledger-core/invoices` — Phase 3.8
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Paginated, filterable invoices with nested lines — the invoice register |
+| GET | `/:id` | any member | One invoice with its lines |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a draft invoice (never posted directly) |
+| PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Replace a **draft** invoice's fields and lines wholesale |
+| DELETE | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete a **draft** invoice |
+| POST | `/:id/issue` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Allocate a number and post a balanced journal entry |
+| POST | `/:id/void` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Void the invoice; posts a reversing entry if it was issued |
+
+An invoice is a sales (accounts-receivable) document, always in the organization's **base currency** — Phase 3.8's explicit limit; a different currency needs the Phase 8 FX engine. `PATCH`/`DELETE` are legal despite rule 6 because they operate only on `DRAFT` rows, which have posted nothing — refused with `409` by the service and with SQLSTATE `0A000` by a database trigger the instant an invoice leaves `DRAFT`. The only correction path once issued is `POST /:id/void`, which posts a reversing journal entry through the same mechanism `POST /journals/:id/reverse` uses.
+
+**`POST /`** — `customerId`, `issueDate`, `dueDate` (`YYYY-MM-DD`, `>= issueDate`), `notes`, `paymentTerms`, and `lines` (min 1): each line is `description`, `quantityMilli` (thousandths of a unit — `2500` means `2.5`), `unitPriceCents`, `revenueAccountId` (must be a postable `Revenue` account), `taxRateBp` (basis points, default `0`). The server computes `netCents`/`taxCents` per line and `subtotalCents`/`taxCents`/`totalCents` on the header — the client may not supply totals, a number, a status, or a currency.
+
+**`POST /:id/issue`** — optional `entryDate` (defaults to the invoice's `issueDate`). Allocates the next number from invoice settings, posts one journal entry (`sourceType: 'invoice'`, `sourceId: <invoice id>`) debiting the receivable account for the total and crediting each distinct revenue account for its net plus the tax account for the tax total (only if > 0), then flips the invoice to `ISSUED`.
+
+**`POST /:id/void`** — optional `entryDate`. On an `ISSUED` invoice, posts the reversing entry and records `voidJournalEntryId`. On a `DRAFT` invoice, no GL posting occurs at all — nothing was ever posted. Either way the invoice becomes `VOID`, which is terminal.
+
+`GET /` query parameters, all optional: `page`, `limit` · `status` (`DRAFT`/`ISSUED`/`VOID`) · `customerId` · `from`/`to` — inclusive `issueDate` bounds · `q` — matches invoice number or the customer name snapshot.
+
+Failure paths: `400` from the schema · `400 status must be one of DRAFT, ISSUED, VOID` · `422 An invoice needs at least one line` · `422 Due date cannot be before the issue date` · `422 Customer not found` (also another org's customer) · `422 Revenue account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not a Revenue account` · `409 Only a draft invoice can be edited` / `409 Only a draft invoice can be deleted` · `422 No receivable account is configured. Set one in invoice settings.` / `422 No tax account is configured. Set one in invoice settings.` (issue only) · `409 An invoice that is <status> cannot be issued` · `409 This invoice has already been voided`.
+
+**Not built:** payment recording, a `PAID` status, AR aging, an AR subledger report, PDF generation, multi-currency invoices. See [roadmap.md § Phase 3.8](roadmap.md#phase-38-as-delivered).
 
 ---
 

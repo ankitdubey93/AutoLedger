@@ -142,8 +142,13 @@ async function loadOrganization(q: Queryable, orgId: string): Promise<Organizati
     name: string;
     slug: string;
     base_currency: string;
+    tax_number: string | null;
+    business_number: string | null;
     created_at: Date;
-  }>('SELECT id, name, slug, base_currency, created_at FROM organizations WHERE id = $1', [orgId]);
+  }>(
+    'SELECT id, name, slug, base_currency, tax_number, business_number, created_at FROM organizations WHERE id = $1',
+    [orgId],
+  );
 
   const row = rows[0];
   if (row === undefined) return null;
@@ -153,6 +158,8 @@ async function loadOrganization(q: Queryable, orgId: string): Promise<Organizati
     slug: row.slug,
     // CHAR(3) is blank-padded on read in some drivers; trim defensively.
     baseCurrency: row.base_currency.trim(),
+    taxNumber: row.tax_number,
+    businessNumber: row.business_number,
     createdAt: row.created_at.toISOString(),
   };
 }

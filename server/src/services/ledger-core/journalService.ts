@@ -316,6 +316,87 @@ async function assertAccountsArePostable(
 }
 
 /**
+ * Posts one balanced entry on a caller-supplied, already-open transaction
+ * client. Runs no BEGIN, no COMMIT and no ROLLBACK — the caller owns the
+ * transaction, which is what lets a document (an invoice, say) and its
+ * journal entry commit together or not at all (guardrails rule 5).
+ */
+export async function createEntryOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  input: CreateEntryInput,
+): Promise<string> {
+  // Integer equality, never an epsilon. This is the invariant the whole system
+  // exists to protect, and it is checked again by a deferred constraint trigger
+  // at COMMIT so that a bug here cannot write an unbalanced entry.
+  const totalDebits = sumCents(input.lines.map((line) => cents(line.debitCents)));
+  const totalCredits = sumCents(input.lines.map((line) => cents(line.creditCents)));
+
+  if (totalDebits !== totalCredits) {
+    throw new ApiError(
+      422,
+      `Entry is unbalanced: debits ${String(totalDebits)}, credits ${String(totalCredits)}`,
+    );
+  }
+
+  await assertAccountsArePostable(
+    client,
+    orgId,
+    input.lines.map((line) => line.accountId),
+  );
+
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+
+  const { rows: entryRows } = await client.query<{ id: string }>(
+    `INSERT INTO journal_entries (org_id, created_by, entry_date, description, source_type, source_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [
+      orgId,
+      createdBy,
+      input.entryDate,
+      input.description,
+      input.sourceType ?? 'manual',
+      input.sourceId ?? null,
+    ],
+  );
+  const entryId = entryRows[0]?.id;
+  if (entryId === undefined) throw new Error('INSERT ... RETURNING produced no row');
+
+  // One multi-row insert via unnest rather than a statement per line.
+  //
+  // Phase 3 posts base-currency entries only: currency_code is the org's base
+  // currency, fx_rate is 1, and the base_* columns equal the native ones. The
+  // columns exist now because they cannot be retrofitted later — Phase 8
+  // builds the engine that makes them differ.
+  await client.query(
+    `INSERT INTO ledger_lines
+       (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
+        currency_code, fx_rate, base_debit_cents, base_credit_cents)
+     SELECT $1, $2, v.account_id, v.debit_cents, v.credit_cents,
+            $6, 1, v.debit_cents, v.credit_cents
+       FROM unnest($3::uuid[], $4::bigint[], $5::bigint[])
+            AS v(account_id, debit_cents, credit_cents)`,
+    [
+      orgId,
+      entryId,
+      input.lines.map((line) => line.accountId),
+      input.lines.map((line) => line.debitCents),
+      input.lines.map((line) => line.creditCents),
+      baseCurrency,
+    ],
+  );
+
+  return entryId;
+}
+
+/**
  * Posts one balanced entry and its lines, atomically.
  *
  * Everything runs on the checked-out `client` (guardrails rule 5) — a stray
@@ -330,75 +411,11 @@ export async function createEntry(
   createdBy: string,
   input: CreateEntryInput,
 ): Promise<JournalEntry> {
-  // Integer equality, never an epsilon. This is the invariant the whole system
-  // exists to protect, and it is checked again by a deferred constraint trigger
-  // at COMMIT so that a bug here cannot write an unbalanced entry.
-  const totalDebits = sumCents(input.lines.map((line) => cents(line.debitCents)));
-  const totalCredits = sumCents(input.lines.map((line) => cents(line.creditCents)));
-
-  if (totalDebits !== totalCredits) {
-    throw new ApiError(
-      422,
-      `Entry is unbalanced: debits ${String(totalDebits)}, credits ${String(totalCredits)}`,
-    );
-  }
-
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
 
-    await assertAccountsArePostable(
-      client,
-      orgId,
-      input.lines.map((line) => line.accountId),
-    );
-
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
-      [orgId],
-    );
-    const baseCurrency = orgRows[0]?.base_currency.trim();
-    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-
-    const { rows: entryRows } = await client.query<{ id: string }>(
-      `INSERT INTO journal_entries (org_id, created_by, entry_date, description, source_type, source_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [
-        orgId,
-        createdBy,
-        input.entryDate,
-        input.description,
-        input.sourceType ?? 'manual',
-        input.sourceId ?? null,
-      ],
-    );
-    const entryId = entryRows[0]?.id;
-    if (entryId === undefined) throw new Error('INSERT ... RETURNING produced no row');
-
-    // One multi-row insert via unnest rather than a statement per line.
-    //
-    // Phase 3 posts base-currency entries only: currency_code is the org's base
-    // currency, fx_rate is 1, and the base_* columns equal the native ones. The
-    // columns exist now because they cannot be retrofitted later — Phase 8
-    // builds the engine that makes them differ.
-    await client.query(
-      `INSERT INTO ledger_lines
-         (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
-          currency_code, fx_rate, base_debit_cents, base_credit_cents)
-       SELECT $1, $2, v.account_id, v.debit_cents, v.credit_cents,
-              $6, 1, v.debit_cents, v.credit_cents
-         FROM unnest($3::uuid[], $4::bigint[], $5::bigint[])
-              AS v(account_id, debit_cents, credit_cents)`,
-      [
-        orgId,
-        entryId,
-        input.lines.map((line) => line.accountId),
-        input.lines.map((line) => line.debitCents),
-        input.lines.map((line) => line.creditCents),
-        baseCurrency,
-      ],
-    );
+    const entryId = await createEntryOnClient(client, orgId, createdBy, input);
 
     // COMMIT is where the deferred balance trigger runs, so a failure here is
     // still inside the try and still rolls back cleanly.
@@ -420,12 +437,84 @@ export async function createEntry(
 }
 
 /**
- * The only correction path (guardrails rule 6).
+ * Posts a reversal on a caller-supplied, already-open transaction client. Runs
+ * no BEGIN, no COMMIT and no ROLLBACK — see `createEntryOnClient`.
  *
  * A reversal is a new entry with each line's debit and credit swapped — never a
  * negative amount, which `chk_line_nonzero` and the non-negative CHECKs would
  * reject anyway, and which would misstate the account's turnover even if it did
  * not. The original row is never touched.
+ */
+export async function reverseEntryOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  id: string,
+  entryDate: string | null,
+): Promise<string> {
+  const { rows: originalRows } = await client.query<{
+    id: string;
+    entry_date: string;
+    description: string | null;
+    source_type: string;
+    reverses_entry_id: string | null;
+  }>(
+    `SELECT id, entry_date, description, source_type, reverses_entry_id
+       FROM journal_entries
+      WHERE id = $1 AND org_id = $2`,
+    [id, orgId],
+  );
+
+  const original = originalRows[0];
+  if (original === undefined) throw new ApiError(404, 'Journal entry not found');
+
+  if (original.reverses_entry_id !== null) {
+    throw new ApiError(422, 'A reversing entry cannot itself be reversed');
+  }
+
+  const { rows: existingReversal } = await client.query<{ id: string }>(
+    'SELECT id FROM journal_entries WHERE org_id = $1 AND reverses_entry_id = $2',
+    [orgId, id],
+  );
+  if (existingReversal.length > 0) {
+    throw new ApiError(409, 'Entry has already been reversed');
+  }
+
+  const { rows: newRows } = await client.query<{ id: string }>(
+    `INSERT INTO journal_entries
+       (org_id, created_by, entry_date, description, source_type, reverses_entry_id)
+     VALUES ($1, $2, $3, $4, $5, $6)
+     RETURNING id`,
+    [
+      orgId,
+      createdBy,
+      entryDate ?? original.entry_date,
+      `Reversal of ${original.description ?? id}`,
+      original.source_type,
+      id,
+    ],
+  );
+  const reversalId = newRows[0]?.id;
+  if (reversalId === undefined) throw new Error('INSERT ... RETURNING produced no row');
+
+  // The swap: debit becomes credit, credit becomes debit, in both the native
+  // and the base columns. Amounts stay positive.
+  await client.query(
+    `INSERT INTO ledger_lines
+       (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
+        currency_code, fx_rate, base_debit_cents, base_credit_cents)
+     SELECT org_id, $2, account_id, credit_cents, debit_cents,
+            currency_code, fx_rate, base_credit_cents, base_debit_cents
+       FROM ledger_lines
+      WHERE journal_entry_id = $1 AND org_id = $3`,
+    [id, reversalId, orgId],
+  );
+
+  return reversalId;
+}
+
+/**
+ * The only correction path (guardrails rule 6).
  */
 export async function reverseEntry(
   orgId: string,
@@ -437,63 +526,7 @@ export async function reverseEntry(
   try {
     await client.query('BEGIN');
 
-    const { rows: originalRows } = await client.query<{
-      id: string;
-      entry_date: string;
-      description: string | null;
-      source_type: string;
-      reverses_entry_id: string | null;
-    }>(
-      `SELECT id, entry_date, description, source_type, reverses_entry_id
-         FROM journal_entries
-        WHERE id = $1 AND org_id = $2`,
-      [id, orgId],
-    );
-
-    const original = originalRows[0];
-    if (original === undefined) throw new ApiError(404, 'Journal entry not found');
-
-    if (original.reverses_entry_id !== null) {
-      throw new ApiError(422, 'A reversing entry cannot itself be reversed');
-    }
-
-    const { rows: existingReversal } = await client.query<{ id: string }>(
-      'SELECT id FROM journal_entries WHERE org_id = $1 AND reverses_entry_id = $2',
-      [orgId, id],
-    );
-    if (existingReversal.length > 0) {
-      throw new ApiError(409, 'Entry has already been reversed');
-    }
-
-    const { rows: newRows } = await client.query<{ id: string }>(
-      `INSERT INTO journal_entries
-         (org_id, created_by, entry_date, description, source_type, reverses_entry_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
-       RETURNING id`,
-      [
-        orgId,
-        createdBy,
-        entryDate ?? original.entry_date,
-        `Reversal of ${original.description ?? id}`,
-        original.source_type,
-        id,
-      ],
-    );
-    const reversalId = newRows[0]?.id;
-    if (reversalId === undefined) throw new Error('INSERT ... RETURNING produced no row');
-
-    // The swap: debit becomes credit, credit becomes debit, in both the native
-    // and the base columns. Amounts stay positive.
-    await client.query(
-      `INSERT INTO ledger_lines
-         (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
-          currency_code, fx_rate, base_debit_cents, base_credit_cents)
-       SELECT org_id, $2, account_id, credit_cents, debit_cents,
-              currency_code, fx_rate, base_credit_cents, base_debit_cents
-         FROM ledger_lines
-        WHERE journal_entry_id = $1 AND org_id = $3`,
-      [id, reversalId, orgId],
-    );
+    const reversalId = await reverseEntryOnClient(client, orgId, createdBy, id, entryDate);
 
     await client.query('COMMIT');
     return await getEntryById(orgId, reversalId);

@@ -137,6 +137,23 @@ describe('AccountLedgerPage', () => {
     expect(referenceLink).toHaveAttribute('href', '/app/ledger-core/journals/entry-1');
   });
 
+  it('renders a link back to the chart of accounts', async () => {
+    mockLedgerRoute({
+      status: 200,
+      body: {
+        success: true,
+        ...baseLedger(),
+        count: 1,
+        currentPage: 1,
+        totalPages: 1,
+      },
+    });
+    renderAccountLedgerPage();
+
+    const backLink = await screen.findByRole('link', { name: /back to chart of accounts/i });
+    expect(backLink).toHaveAttribute('href', '/app/ledger-core/accounts');
+  });
+
   it('renders the header-account explanation on a 422', async () => {
     mockLedgerRoute({
       status: 422,

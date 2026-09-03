@@ -111,3 +111,30 @@ export function addCents(a: Cents, b: Cents): Cents {
 export function sumCents(values: readonly Cents[]): Cents {
   return values.reduce(addCents, cents(0));
 }
+
+/**
+ * Scales a money amount by a rational factor, rounding half up, in exact
+ * integer arithmetic. `numerator` and `denominator` are plain integers —
+ * basis points over 10000 for a tax rate, thousandths over 1000 for a
+ * quantity — never a float ratio.
+ *
+ * `BigInt`, not `Math.round(amount * numerator / denominator)`: an invoice
+ * line's `quantityMilli * unitPriceCents` can exceed
+ * `Number.MAX_SAFE_INTEGER` well inside the range the columns permit, and a
+ * float multiplication would round silently before this function ever saw
+ * the value.
+ */
+export function scaleCents(amount: Cents, numerator: number, denominator: number): Cents {
+  if (!Number.isInteger(denominator) || denominator <= 0) {
+    throw new ApiError(400, 'Invalid scaling factor');
+  }
+  if (!Number.isInteger(numerator) || numerator < 0) {
+    throw new ApiError(400, 'Invalid scaling factor');
+  }
+
+  const n = BigInt(numerator);
+  const d = BigInt(denominator);
+  const result = (BigInt(amount) * n + d / 2n) / d;
+
+  return cents(Number(result));
+}

@@ -4,6 +4,7 @@ import { useAuthActions } from '../../context/AuthContext';
 import { updateLedgerSettings, updateOrganization } from '../../services/fetchServices';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import { fiscalYearBounds } from './fiscalYear';
+import SettingsTabs from './SettingsTabs';
 
 /**
  * A flat form over the same fields the onboarding wizard collects.
@@ -67,6 +68,8 @@ export default function SettingsPage() {
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
   const [fiscalYearStartDay, setFiscalYearStartDay] = useState(1);
   const [industry, setIndustry] = useState('');
+  const [taxNumber, setTaxNumber] = useState('');
+  const [businessNumber, setBusinessNumber] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -84,9 +87,11 @@ export default function SettingsPage() {
       setFiscalYearStartMonth(settings.fiscalYearStartMonth);
       setFiscalYearStartDay(settings.fiscalYearStartDay);
       setIndustry(settings.industry ?? '');
+      setTaxNumber(organization?.taxNumber ?? '');
+      setBusinessNumber(organization?.businessNumber ?? '');
       setSeeded(true);
     }
-  }, [ledgerSettings, seeded]);
+  }, [ledgerSettings, seeded, organization]);
 
   if (ledgerSettings.status !== 'ready') {
     return (
@@ -104,7 +109,12 @@ export default function SettingsPage() {
     setError(null);
     setSaved(false);
     try {
-      await updateOrganization({ name, baseCurrency });
+      await updateOrganization({
+        name,
+        baseCurrency,
+        taxNumber: taxNumber.trim() === '' ? null : taxNumber.trim(),
+        businessNumber: businessNumber.trim() === '' ? null : businessNumber.trim(),
+      });
       await refreshNow();
 
       const nextSettings = await updateLedgerSettings({
@@ -127,6 +137,8 @@ export default function SettingsPage() {
       <header>
         <h2 className="text-lg font-semibold m-0">Settings</h2>
       </header>
+
+      <SettingsTabs />
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-[var(--muted)]">Organization name</span>
@@ -182,6 +194,29 @@ export default function SettingsPage() {
           maxLength={80}
           className={inputClass}
         />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[var(--muted)]">Tax registration number</span>
+        <input
+          type="text"
+          value={taxNumber}
+          onChange={(e) => setTaxNumber(e.target.value)}
+          maxLength={64}
+          className={inputClass}
+        />
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[var(--muted)]">Business registration number</span>
+        <input
+          type="text"
+          value={businessNumber}
+          onChange={(e) => setBusinessNumber(e.target.value)}
+          maxLength={64}
+          className={inputClass}
+        />
+        <span className="text-xs text-[var(--muted)]">Also editable from your account settings.</span>
       </label>
 
       <div className="flex gap-3">

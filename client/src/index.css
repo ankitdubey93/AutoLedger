@@ -441,3 +441,15 @@ th {
 .app-topbar .muted {
   margin: 0;
 }
+
+/* ---------------------------------------------------- printing an invoice */
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  body {
+    background: #fff;
+    color: #000;
+  }
+}

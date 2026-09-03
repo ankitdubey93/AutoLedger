@@ -4,6 +4,7 @@ import { ApiRequestError, getAccountLedger, type AccountLedger } from '../../ser
 import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { TYPE_STYLES } from './AccountsPage';
+import BackLink from './BackLink';
 
 /**
  * One postable account's ledger — opening balance, every posted line with a
@@ -91,8 +92,8 @@ export default function AccountLedgerPage() {
   if (notFound) {
     return (
       <section className="flex flex-col gap-3">
+        <BackLink to={`${base}/accounts`} label="Back to chart of accounts" />
         <p className="status status--bad">Account not found.</p>
-        <Link to={`${base}/accounts`}>Back to chart of accounts</Link>
       </section>
     );
   }
@@ -100,11 +101,11 @@ export default function AccountLedgerPage() {
   if (headerAccount !== null) {
     return (
       <section className="flex flex-col gap-3">
+        <BackLink to={`${base}/accounts`} label="Back to chart of accounts" />
         <p className="status status--bad">{headerAccount}</p>
         <p className="muted">
           Header accounts roll up their children; open a postable account to see its ledger.
         </p>
-        <Link to={`${base}/accounts`}>Back to chart of accounts</Link>
       </section>
     );
   }
@@ -127,10 +128,9 @@ export default function AccountLedgerPage() {
 
   return (
     <section className="flex flex-col gap-4">
+      <BackLink to={`${base}/accounts`} label="Back to chart of accounts" />
+
       <header className="flex flex-col gap-1">
-        <Link to={`${base}/accounts`} className="text-sm text-[var(--muted)] no-underline hover:underline">
-          ← Back to chart of accounts
-        </Link>
         <div className="flex items-center gap-2.5 mt-1">
           <h2 className="text-lg font-semibold m-0">
             {ledger.account.code} · {ledger.account.name}

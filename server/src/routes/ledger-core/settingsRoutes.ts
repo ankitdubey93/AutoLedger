@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as settingsController from '../../controllers/ledger-core/settingsController.js';
+import * as invoiceSettingsController from '../../controllers/ledger-core/invoiceSettingsController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
 
@@ -24,5 +25,8 @@ router.post(
 );
 
 router.patch('/', authenticate, requireRole('OWNER', 'ADMIN'), settingsController.update);
+
+router.get('/invoicing', authenticate, invoiceSettingsController.get);
+router.patch('/invoicing', authenticate, requireRole('OWNER', 'ADMIN'), invoiceSettingsController.update);
 
 export default router;

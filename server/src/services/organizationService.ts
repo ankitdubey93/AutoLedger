@@ -19,6 +19,8 @@ interface OrganizationRow {
   name: string;
   slug: string;
   base_currency: string;
+  tax_number: string | null;
+  business_number: string | null;
   created_at: Date;
 }
 
@@ -29,6 +31,8 @@ function toOrganizationSummary(row: OrganizationRow): OrganizationSummary {
     slug: row.slug,
     // CHAR(3) is blank-padded on read in some drivers; trim defensively.
     baseCurrency: row.base_currency.trim(),
+    taxNumber: row.tax_number,
+    businessNumber: row.business_number,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -42,7 +46,7 @@ function toOrganizationSummary(row: OrganizationRow): OrganizationSummary {
  */
 export async function getById(orgId: string): Promise<OrganizationSummary> {
   const { rows } = await pool.query<OrganizationRow>(
-    'SELECT id, name, slug, base_currency, created_at FROM organizations WHERE id = $1',
+    'SELECT id, name, slug, base_currency, tax_number, business_number, created_at FROM organizations WHERE id = $1',
     [orgId],
   );
 
@@ -62,7 +66,12 @@ export async function getById(orgId: string): Promise<OrganizationSummary> {
  */
 export async function updateOrganization(
   orgId: string,
-  input: { name?: string | undefined; baseCurrency?: string | undefined },
+  input: {
+    name?: string | undefined;
+    baseCurrency?: string | undefined;
+    taxNumber?: string | null | undefined;
+    businessNumber?: string | null | undefined;
+  },
   q: Queryable = pool,
 ): Promise<OrganizationSummary> {
   // Column names come from this frozen map, never from the request — rule 4
@@ -70,6 +79,8 @@ export async function updateOrganization(
   const COLUMNS = {
     name: 'name',
     baseCurrency: 'base_currency',
+    taxNumber: 'tax_number',
+    businessNumber: 'business_number',
   } as const;
 
   const assignments: string[] = [];
@@ -87,7 +98,7 @@ export async function updateOrganization(
   const { rows } = await q.query<OrganizationRow>(
     `UPDATE organizations SET ${assignments.join(', ')}
       WHERE id = $1
-      RETURNING id, name, slug, base_currency, created_at`,
+      RETURNING id, name, slug, base_currency, tax_number, business_number, created_at`,
     values,
   );
 

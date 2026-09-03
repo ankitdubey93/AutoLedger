@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8–9
-**Status: Phase 3, Phase 3.5 and Phase 3.6 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), and now a journal register with filters plus a per-account ledger with running balances and chart-wide rollups. Phases 4, 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 3.8 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), and sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry). Phases 4, 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -183,6 +183,43 @@ A half-step, like 3.5. Renumbers nothing; every box below Phase 4 stays exactly 
 **Acceptance ✅ — all verified.** `?from=`/`?to=`/`?accountId=`/`?q=` each narrow the register correctly and `totalCount` always matches the filtered page, asserted with a same-predicate pagination-stability test across 5 same-date entries. An account ledger's running balance continues correctly from page 1 into page 2 rather than restarting (asserted directly). A header account's `GET .../ledger` returns `422`; its `rollupBalanceCents` on `GET .../balances` still sums its whole subtree, and a leaf's rollup equals its own balance. `GET /accounts/balances` is not shadowed by `/:id`. 280 server tests (up from 230), 65 client tests (up from 51).
 
 **What this phase does *not* claim.** No sequential, human-readable entry number (`JE-000123`) — the register shows the first 8 characters of the uuid instead; adding one needs a per-org sequence and a migration. A header account's balance rolls up; its *transaction list* does not — clicking a header still shows no ledger, by design. No CSV/PDF export. No fiscal periods, close/lock, P&L, or balance sheet — those are still entirely Phase 4.
+
+### Phase 3.7 — ledger navigation and chart editing
+
+A third half-step, client-only. **No migration, no new server route, no new dependency.**
+
+- [x] Journal register gains a per-row Actions column (View, Duplicate, Reverse), replacing the date-cell link; Reverse offered only when neither a reversal nor already reversed, mirroring `JournalDetailPage`'s `canReverse` rule
+- [x] Duplicate opens `journals/new?copyFrom=<id>`, seeding the post form once from an existing entry (effect + `seeded` latch, not a live binding) — the substitute for edit, which does not and will not exist
+- [x] Trial balance's account name and the account ledger's Reference cell are now links, closing the navigation loop chart → ledger → entry → account
+- [x] Chart of accounts gains a create form (`NewAccountForm`), reachable from a header button and an empty-chart prompt, posting to the already-existing `POST /ledger-core/accounts`
+
+**Acceptance ✅ — all verified.** 79 client tests (up from 65); server suite unchanged at 280, confirming no server code moved.
+
+**What this phase does *not* claim.** No client-side role gating — every action is shown to every member, and the server's `requireRole` is the only enforcement.
+
+### Phase 3.8 — sales invoicing
+
+A fourth half-step. **No renumbering** — Phase 4 is unaffected and unstarted. Two pieces of scope: the navigation/confirmation gaps left by 3.5–3.7, and LedgerCore's first AR source document.
+
+- [x] `ConfirmDialog` gates reversing a journal entry (from both the register and the detail page), issuing an invoice, and voiding an invoice — a hand-rolled `role="dialog"` component, not `window.confirm`
+- [x] `BackLink` on every drill-down page; a journal line's account **name** also links into its ledger; the chart of accounts' header rows collapse (`aria-expanded`), starting expanded
+- [x] `006_platform_organization_tax_ids.sql` — `organizations.tax_number`/`business_number`, edited via the existing `PATCH /organizations`
+- [x] `007_ledger-core_invoice_settings.sql` — `ledger_invoice_settings`: numbering (prefix/padding/counter), defaults (due days, tax rate, posting accounts), branding/disclosure. No seed row, same "absence means unconfigured" posture as `ledger_settings`
+- [x] `008_ledger-core_customers.sql` — `customers`, retired via `is_active = false`, no DELETE route
+- [x] `009_ledger-core_invoices.sql` — `invoices`/`invoice_lines`; `reject_issued_invoice_mutation()` (a `to_jsonb` row-diff permitting only the `ISSUED -> VOID` transition, touching only `status`/`voided_at`/`void_journal_entry_id`) and `reject_non_draft_invoice_line_mutation()` (absolute once the parent leaves `DRAFT`)
+- [x] `010_ledger-core_invoice_lines_org_index.sql` — a same-phase guardrail-review follow-up adding the `(org_id, invoice_id)` index `invoice_lines` was missing
+- [x] `journalService.createEntryOnClient`/`reverseEntryOnClient` — the existing posting/reversal logic minus its own `BEGIN`/`COMMIT`, taking the caller's transaction client, so `invoiceService` can post a real journal entry inside the *invoice's* own transaction
+- [x] `utils/money.ts` gains `scaleCents` — money × a rational factor in exact `BigInt` arithmetic (basis points for tax, thousandths for quantity), half-up rounding; tax computed per line and summed, never on a pre-summed subtotal
+- [x] `invoiceService.issueInvoice` — allocates the next number from a locked counter row, posts one balanced entry (debit receivable, credit each distinct revenue account, credit tax if any), never writes `journal_entries`/`ledger_lines` directly
+- [x] `invoiceService.voidInvoice` — posts a reversing entry if `ISSUED`; no GL posting at all if still `DRAFT`
+- [x] `/api/v1/ledger-core/customers` (4 routes), `/api/v1/ledger-core/invoices` (7 routes, including `/:id/issue` and `/:id/void`), `/api/v1/ledger-core/settings/invoicing` (2 routes) — full detail in [api.md](api.md)
+- [x] Client: a `Create` menu in the rail; `InvoicesPage`, `NewInvoicePage` (create and edit, one page), `InvoiceDetailPage` (printable, honoring invoice-settings disclosure/branding), `CustomersPage`, `InvoiceSettingsPage`, a shared `SettingsTabs` strip
+- [x] Cross-tenant isolation tests for every new module: `organizations.test.ts`, `invoiceSettings.test.ts`, `customers.test.ts`, `invoices.test.ts`; `invoiceConstraints.test.ts` proves both triggers via raw SQL, bypassing the service entirely
+- [x] Three new study notes ([document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md), [gapless-numbering-and-counters.md](../study/postgresql/gapless-numbering-and-counters.md), [accessible-dialogs-and-focus.md](../study/react/accessible-dialogs-and-focus.md)) plus extensions to [deferred-constraint-triggers.md](../study/postgresql/deferred-constraint-triggers.md) and [branded-types-for-money.md](../study/typescript/branded-types-for-money.md)
+
+**Acceptance ✅ — all verified.** Issuing an invoice allocates a sequential number and posts a balanced entry (`sourceType: 'invoice'`) visible in the journal register; the receivable/revenue/tax split is correct for a mixed-tax-rate fixture; voiding an issued invoice posts a reversal and the trial balance stays balanced; a raw-SQL `UPDATE` on an `ISSUED` invoice's amount, or an `INSERT`/`DELETE` on its lines, raises `0A000`, while the `ISSUED -> VOID` transition succeeds when it touches only the permitted columns. 340 server tests (up from 280), 94 client tests (up from 84).
+
+**What this phase does *not* claim.** No `PAID` status and no payment/cash-receipt document — an issued invoice's receivable never clears except by voiding, and the UI says so. No AR aging, no AR subledger *report* (Phase 4 still owns that), no PDF export, no multi-currency invoices (needs the Phase 8 FX engine), no fiscal-period posting lock, no audit trail.
 
 ### Phase 4 — live statements
 

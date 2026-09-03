@@ -11,6 +11,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import ConfirmDialog from './ConfirmDialog';
 
 /**
  * The journal register — every posted entry, filterable and paginated.
@@ -59,6 +60,7 @@ export default function JournalsPage() {
   const [loaded, setLoaded] = useState(false);
   const [reversingId, setReversingId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [confirmEntry, setConfirmEntry] = useState<JournalEntry | null>(null);
 
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
@@ -282,7 +284,7 @@ export default function JournalsPage() {
                           {entry.reversesEntryId === null && entry.reversedByEntryId === null && (
                             <button
                               type="button"
-                              onClick={() => void handleReverse(entry.id)}
+                              onClick={() => setConfirmEntry(entry)}
                               disabled={reversingId !== null}
                               aria-label="Reverse entry"
                               title="Post the offsetting entry — the only correction path"
@@ -326,6 +328,27 @@ export default function JournalsPage() {
             </div>
           )}
         </>
+      )}
+
+      {confirmEntry !== null && (
+        <ConfirmDialog
+          title="Reverse this entry?"
+          body={
+            <>
+              This posts a new offsetting entry dated {confirmEntry.entryDate}. The original entry
+              is never changed or deleted. This cannot be undone.
+            </>
+          }
+          confirmLabel="Reverse entry"
+          tone="danger"
+          busy={reversingId !== null}
+          onConfirm={() => {
+            const target = confirmEntry;
+            setConfirmEntry(null);
+            void handleReverse(target.id);
+          }}
+          onCancel={() => setConfirmEntry(null)}
+        />
       )}
     </section>
   );

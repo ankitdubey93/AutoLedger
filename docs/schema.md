@@ -33,9 +33,11 @@ Migration filenames tag the app they belong to: `NNN_<app-slug>_<subject>.sql`, 
 `schema_migrations (version PK, filename, checksum, applied_at)` is created by the runner itself, not by a migration file.
 
 **`organizations`** — the tenant boundary
-`id` UUID PK DEFAULT `gen_random_uuid()` · `name` TEXT NOT NULL CHECK non-blank · `slug` TEXT UNIQUE NOT NULL · `base_currency` CHAR(3) NOT NULL DEFAULT `'USD'` CHECK `~ '^[A-Z]{3}$'` · `created_at` · `updated_at`
+`id` UUID PK DEFAULT `gen_random_uuid()` · `name` TEXT NOT NULL CHECK non-blank · `slug` TEXT UNIQUE NOT NULL · `base_currency` CHAR(3) NOT NULL DEFAULT `'USD'` CHECK `~ '^[A-Z]{3}$'` · `tax_number` TEXT nullable (Phase 3.8) · `business_number` TEXT nullable (Phase 3.8) · `created_at` · `updated_at`
 
 The currency CHECK is not decoration: `CHAR(3)` alone accepts `'usd'`, `'123'` and `'   '`.
+
+`tax_number`/`business_number` (migration `006_platform_organization_tax_ids.sql`) are nullable with no format CHECK — identifier formats differ per jurisdiction. Platform fields, edited via `PATCH /organizations`; whether they print on a LedgerCore invoice is `ledger_invoice_settings.show_tax_number`/`show_business_number`, a separate app-owned choice.
 
 **`users`** — global identity, no `org_id`
 `id` UUID PK · `name` TEXT · `email` TEXT NOT NULL · `password` TEXT NOT NULL (bcrypt) · `email_verified` BOOLEAN NOT NULL DEFAULT false · `email_verification_token` TEXT · `email_verification_token_expires` TIMESTAMPTZ · `created_at` · `updated_at`
@@ -144,6 +146,42 @@ Index on `cash_account_id`.
 **`organizationName` and `baseCurrency` are not columns on this table.** Both remain on `organizations` (Phase 1) and are edited through `PATCH /organizations`, a platform route — see [architecture.md](architecture.md#suite-structure)'s platform/app split. `ledger_settings` only owns fields LedgerCore itself is responsible for.
 
 **Not built in this phase:** `fiscal_periods`, period close/lock, and any trigger rejecting a posting into a closed period — all Phase 4, unchanged by this migration. `fiscal_year_start_month`/`_day` here are a *setting* consumed by report queries in application code; no period rows exist anywhere in the schema yet.
+
+---
+
+## Phase 3.8 — Navigation fixes & sales invoicing (LedgerCore) ✅ applied
+
+**`006_platform_organization_tax_ids.sql`** — `organizations` gains `tax_number`/`business_number` (see Phase 1 above). **`007_ledger-core_invoice_settings.sql`**, **`008_ledger-core_customers.sql`**, **`009_ledger-core_invoices.sql`**, **`010_ledger-core_invoice_lines_org_index.sql`** — three new tables plus a follow-up index. A fourth half-step in the 3.5/3.6/3.7 lineage; renumbers nothing, and Phase 4 (live statements, fiscal periods, the AR/AP subledger *report*) remains unstarted.
+
+**`ledger_invoice_settings`** — one row per organization, invoice numbering/defaults/branding
+`org_id` UUID **PRIMARY KEY** FK → `organizations` ON DELETE CASCADE · `number_prefix` TEXT NOT NULL DEFAULT `'INV-'` · `number_padding` SMALLINT NOT NULL DEFAULT 6 CHECK BETWEEN 1 AND 12 · `next_number` INTEGER NOT NULL DEFAULT 1 CHECK `> 0` · `default_due_days` SMALLINT NOT NULL DEFAULT 30 · `default_tax_rate_bp` INTEGER NOT NULL DEFAULT 0 CHECK BETWEEN 0 AND 10000 · `tax_label` TEXT NOT NULL DEFAULT `'Tax'` · `receivable_account_id` / `default_revenue_account_id` / `tax_payable_account_id` UUID (nullable) · `show_tax_number` / `show_business_number` / `show_legal_name` BOOLEAN · `billing_address` / `payment_terms` / `footer_notes` TEXT (nullable) · `accent_color` TEXT NOT NULL DEFAULT `'#2563eb'` CHECK `~ '^#[0-9a-fA-F]{6}$'` · `created_at` · `updated_at`
+
+Same "no seed row, no backfill" posture as `ledger_settings`: absence means "never configured," and `getInvoiceSettings` returns these same defaults with `configured: false` for a missing row. The three account-id columns each carry a **composite** FK to `accounts (org_id, id)` — `fk_invoice_settings_receivable_account`, `_revenue_account`, `_tax_account` — `ON DELETE RESTRICT`, the same reasoning as `ledger_settings.cash_account_id`.
+
+**`customers`** — the parties invoices are issued to, per organization
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `name` TEXT NOT NULL CHECK non-blank · `email` / `phone` / `billing_address` / `tax_number` / `notes` (nullable) · `is_active` BOOLEAN NOT NULL DEFAULT true · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
+Constraint: `ux_customers_org_id_id` — `UNIQUE (org_id, id)`, so `invoices` can carry a composite FK into it. No `DELETE` route — retired via `is_active = false`, matching `accounts`.
+
+**`invoices`** — sales (accounts-receivable) documents
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` **ON DELETE RESTRICT** (matches `journal_entries`: an org with issued invoices can't be deleted) · `customer_id` UUID NOT NULL · `invoice_number` TEXT (nullable while `DRAFT`) · `status` TEXT NOT NULL DEFAULT `'DRAFT'` CHECK IN (`DRAFT`,`ISSUED`,`VOID`) · `issue_date` / `due_date` DATE NOT NULL · `currency_code` CHAR(3) NOT NULL (always the org's base currency) · `customer_name_snapshot` TEXT NOT NULL, `customer_address_snapshot` / `customer_tax_number_snapshot` TEXT (nullable — frozen at write time so a later customer edit never rewrites a posted document) · `notes` / `payment_terms` TEXT (nullable) · `subtotal_cents` / `tax_cents` / `total_cents` BIGINT NOT NULL DEFAULT 0 · `journal_entry_id` / `void_journal_entry_id` UUID (nullable) · `issued_at` / `voided_at` TIMESTAMPTZ (nullable) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
+
+Constraints: `ux_invoices_org_id_id` — `UNIQUE (org_id, id)` · `ux_invoices_org_number` — `UNIQUE (org_id, invoice_number)`, tolerating unlimited `NULL`s (every draft is numberless) · `chk_invoices_total` — `total_cents = subtotal_cents + tax_cents` · `chk_invoices_due_not_before_issue` · `chk_invoices_issued_complete` — an `ISSUED` row must carry a number, a `journal_entry_id`, and `issued_at`. Composite FKs `fk_invoices_customer` → `customers (org_id, id)`, `fk_invoices_journal_entry` / `fk_invoices_void_journal_entry` → `journal_entries (org_id, id)` (needing `journal_entries` to gain its own `ux_journal_entries_org_id_id`, added by this migration), all `ON DELETE RESTRICT`.
+
+**`invoice_lines`**
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `invoice_id` UUID NOT NULL · `line_number` SMALLINT NOT NULL CHECK `> 0` · `description` TEXT NOT NULL CHECK non-blank · `quantity_milli` BIGINT NOT NULL CHECK `> 0` (thousandths of a unit — `2500` means `2.5`, never a float) · `unit_price_cents` BIGINT NOT NULL · `revenue_account_id` UUID NOT NULL · `tax_rate_bp` INTEGER NOT NULL DEFAULT 0 CHECK BETWEEN 0 AND 10000 (basis points, never a float) · `net_cents` / `tax_cents` BIGINT NOT NULL · `created_at`
+Constraint `ux_invoice_lines_invoice_line` — `UNIQUE (invoice_id, line_number)`. `fk_invoice_lines_invoice` → `invoices (org_id, id)` **ON DELETE CASCADE** (a draft's lines go with it); `fk_invoice_lines_revenue_account` → `accounts (org_id, id)` ON DELETE RESTRICT. Index `idx_invoice_lines_org_invoice` on `(org_id, invoice_id)`, added by the follow-up migration `010` — mirrors `ledger_lines`' `idx_ledger_lines_org_account` scope index, a guardrail-review finding from this phase's own review pass.
+
+### Two immutability triggers, one absolute and one with a carve-out
+
+**`reject_issued_invoice_mutation()`** (on `invoices`, `BEFORE UPDATE OR DELETE`) — a `DRAFT` row may be freely edited or deleted (it has posted nothing); once `ISSUED`, only the `ISSUED -> VOID` transition is permitted, and even that transition may change only `status`, `voided_at`, `void_journal_entry_id` — checked with a `to_jsonb(NEW) - '<col>' IS DISTINCT FROM to_jsonb(OLD) - '<col>'` row-diff rather than an enumerated column list, so a future column addition is automatically frozen once issued. Raises `0A000`. See [study/postgresql/deferred-constraint-triggers.md § Partial immutability](../study/postgresql/deferred-constraint-triggers.md#partial-immutability--phase-38s-issued---void-carve-out).
+
+**`reject_non_draft_invoice_line_mutation()`** (on `invoice_lines`, `BEFORE INSERT OR UPDATE OR DELETE`) — absolute, no carve-out: any line mutation is rejected the instant its parent invoice leaves `DRAFT`. A `NULL` parent status (the parent row is mid-`CASCADE`-delete of a `DRAFT` invoice, already authorised) passes through rather than raising.
+
+### The FSM and the CHECK must agree
+
+`server/src/types/ledger-core.ts`'s `INVOICE_TRANSITIONS` (`DRAFT -> [ISSUED, VOID]`, `ISSUED -> [VOID]`, `VOID -> []`) is the one place a status transition is decided in code; the `status` CHECK above lists the identical three values. See [study/architecture/document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md).
+
+**Not built in this phase:** a `PAID` status or any payment/cash-receipt document — an issued invoice's receivable never clears except by voiding. No AR aging, no AR subledger report, no PDF generation, no multi-currency invoices (the FX engine is Phase 8), no fiscal-period lock on the invoice date.
 
 ---
 

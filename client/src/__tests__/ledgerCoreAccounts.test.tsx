@@ -279,6 +279,35 @@ describe('AccountsPage', () => {
     expect(screen.getByLabelText('Parent')).toHaveValue('');
   });
 
+  it('header rows start expanded and collapse on click', async () => {
+    mockAccountsRoutes();
+    const user = userEvent.setup();
+    renderAccountsPage();
+
+    await screen.findAllByText('450.00');
+    const toggle = screen.getByRole('button', { name: 'Collapse 6000 Operating Expenses' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Software & IT Infrastructure')).toBeInTheDocument();
+
+    await user.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Expand 6000 Operating Expenses' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(screen.queryByText('Software & IT Infrastructure')).toBeNull();
+  });
+
+  it('a leaf account renders no toggle', async () => {
+    mockAccountsRoutes();
+    renderAccountsPage();
+
+    await screen.findAllByText('450.00');
+    const leafRow = screen.getByText('Software & IT Infrastructure').closest('li');
+    expect(leafRow).not.toBeNull();
+    expect(leafRow?.querySelector('button[aria-expanded]')).toBeNull();
+  });
+
   it('offers to create the first account when the chart is empty', async () => {
     mockEmptyAccountsRoutes();
     const user = userEvent.setup();

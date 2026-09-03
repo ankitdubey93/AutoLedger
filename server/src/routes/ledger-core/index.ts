@@ -3,6 +3,8 @@ import accountRoutes from './accountRoutes.js';
 import journalRoutes from './journalRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
+import customerRoutes from './customerRoutes.js';
+import invoiceRoutes from './invoiceRoutes.js';
 
 /**
  * LedgerCore's router, mounted at /api/v1/ledger-core by routes/index.ts.
@@ -13,6 +15,8 @@ import settingsRoutes from './settingsRoutes.js';
 const router = Router();
 
 router.use('/accounts', accountRoutes);
+router.use('/customers', customerRoutes);
+router.use('/invoices', invoiceRoutes);
 router.use('/journals', journalRoutes);
 router.use('/reports', reportRoutes);
 router.use('/settings', settingsRoutes);

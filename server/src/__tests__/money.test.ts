@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCents, cents, formatCents, parseCents, sumCents, toCents } from '../utils/money.js';
+import { addCents, cents, formatCents, parseCents, scaleCents, sumCents, toCents } from '../utils/money.js';
 import { ApiError } from '../utils/apiError.js';
 
 /**
@@ -117,5 +117,33 @@ describe('addCents and sumCents', () => {
     // The same figures as floats: 0.1 added ten times is 0.9999999999999999.
     const tenth = toCents(0.1);
     expect(sumCents(Array.from({ length: 10 }, () => tenth))).toBe(100);
+  });
+});
+
+describe('scaleCents', () => {
+  it('applies a basis-point tax rate exactly', () => {
+    expect(scaleCents(cents(10000), 1850, 10000)).toBe(1850);
+  });
+
+  it('rounds half up on a fractional result', () => {
+    // 333 * 1850 / 10000 = 61.605 -> rounds up to 62.
+    expect(scaleCents(cents(333), 1850, 10000)).toBe(62);
+  });
+
+  it('rounds an exact half up', () => {
+    expect(scaleCents(cents(1), 1, 2)).toBe(1);
+  });
+
+  it('throws when the result leaves the safe integer range', () => {
+    expect(() => scaleCents(cents(Number.MAX_SAFE_INTEGER), 2, 1)).toThrow(ApiError);
+  });
+
+  it('rejects a non-positive denominator', () => {
+    expect(() => scaleCents(cents(100), 1, 0)).toThrow(ApiError);
+    expect(() => scaleCents(cents(100), 1, -5)).toThrow(ApiError);
+  });
+
+  it('rejects a negative numerator', () => {
+    expect(() => scaleCents(cents(100), -1, 10)).toThrow(ApiError);
   });
 });

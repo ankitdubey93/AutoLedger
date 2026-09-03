@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -273,7 +273,7 @@ describe('JournalsPage', () => {
     expect(screen.getAllByRole('button', { name: 'Reverse entry' })).toHaveLength(1);
   });
 
-  it('posts a reversal and navigates to the new entry', async () => {
+  it('clicking Reverse opens a confirmation and does not call the API', async () => {
     const entry = baseEntry({ id: 'entry-plain' });
     const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
     mockRegisterWithReverse([entry], reversal);
@@ -282,6 +282,27 @@ describe('JournalsPage', () => {
 
     await screen.findByText('AWS August');
     await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    const reverseCall = fetchMock.mock.calls.find((call) => {
+      const [input, init] = call as [RequestInfo | URL, RequestInit?];
+      const url = typeof input === 'string' ? input : input.toString();
+      return url.includes('/reverse') && init?.method === 'POST';
+    });
+    expect(reverseCall).toBeUndefined();
+  });
+
+  it('confirming the dialog reverses the entry and navigates to the new one', async () => {
+    const entry = baseEntry({ id: 'entry-plain' });
+    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
+    mockRegisterWithReverse([entry], reversal);
+    const user = userEvent.setup();
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Reverse entry' }));
 
     await waitFor(() => {
       const location = screen.getByTestId('location').textContent ?? '';
@@ -293,6 +314,27 @@ describe('JournalsPage', () => {
       return url.includes('/reverse') && init?.method === 'POST';
     });
     expect(reverseCall).toBeDefined();
+  });
+
+  it('cancelling the dialog leaves the entry alone', async () => {
+    const entry = baseEntry({ id: 'entry-plain' });
+    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
+    mockRegisterWithReverse([entry], reversal);
+    const user = userEvent.setup();
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
+    const dialog = screen.getByRole('dialog');
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const reverseCall = fetchMock.mock.calls.find((call) => {
+      const [input, init] = call as [RequestInfo | URL, RequestInit?];
+      const url = typeof input === 'string' ? input : input.toString();
+      return url.includes('/reverse') && init?.method === 'POST';
+    });
+    expect(reverseCall).toBeUndefined();
   });
 
   it('Duplicate links to the post form with the entry id as copyFrom', async () => {

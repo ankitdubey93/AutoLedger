@@ -9,6 +9,8 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import BackLink from './BackLink';
+import ConfirmDialog from './ConfirmDialog';
 
 /**
  * One journal entry, in full: every field, both totals, and every line.
@@ -36,6 +38,7 @@ export default function JournalDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
     if (entryId === undefined) return;
@@ -78,8 +81,8 @@ export default function JournalDetailPage() {
   if (notFound) {
     return (
       <section className="flex flex-col gap-3">
+        <BackLink to={`${base}/journals`} label="Back to journal entries" />
         <p className="status status--bad">Journal entry not found.</p>
-        <Link to={`${base}/journals`}>Back to journal entries</Link>
       </section>
     );
   }
@@ -98,6 +101,8 @@ export default function JournalDetailPage() {
 
   return (
     <section className="flex flex-col gap-6">
+      <BackLink to={`${base}/journals`} label="Back to journal entries" />
+
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold m-0">{entry.description ?? 'Journal entry'}</h2>
@@ -106,7 +111,7 @@ export default function JournalDetailPage() {
         {canReverse && (
           <button
             type="button"
-            onClick={() => void handleReverse()}
+            onClick={() => setConfirming(true)}
             disabled={busy}
             className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] rounded-md cursor-pointer px-3 py-1.5 disabled:opacity-40"
           >
@@ -174,7 +179,14 @@ export default function JournalDetailPage() {
                 <td className="p-3 font-mono text-xs text-[var(--muted)]">
                   <Link to={`${base}/accounts/${line.accountId}`}>{line.accountCode}</Link>
                 </td>
-                <td className="p-3">{line.accountName}</td>
+                <td className="p-3">
+                  <Link
+                    to={`${base}/accounts/${line.accountId}`}
+                    className="text-[var(--text)] no-underline hover:underline"
+                  >
+                    {line.accountName}
+                  </Link>
+                </td>
                 <td className="p-3 text-[var(--muted)]">{line.currencyCode}</td>
                 <td className="p-3 text-right tabular-nums">
                   {line.debitCents > 0 ? formatCents(line.debitCents) : ''}
@@ -196,6 +208,26 @@ export default function JournalDetailPage() {
           </tfoot>
         </table>
       </div>
+
+      {confirming && (
+        <ConfirmDialog
+          title="Reverse this entry?"
+          body={
+            <>
+              This posts a new offsetting entry dated {entry.entryDate}. The original entry is
+              never changed or deleted. This cannot be undone.
+            </>
+          }
+          confirmLabel="Reverse entry"
+          tone="danger"
+          busy={busy}
+          onConfirm={() => {
+            setConfirming(false);
+            void handleReverse();
+          }}
+          onCancel={() => setConfirming(false)}
+        />
+      )}
     </section>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Folder, Landmark, Plus } from 'lucide-react';
+import { ChevronDown, Folder, Landmark, Plus } from 'lucide-react';
 import {
   getAccountBalances,
   listAccountTree,
@@ -52,15 +52,21 @@ function AccountRow({
   depth,
   balances,
   base,
+  collapsed,
+  onToggle,
 }: {
   node: AccountNode;
   depth: number;
   balances: Map<string, AccountBalance> | null;
   base: string;
+  collapsed: ReadonlySet<string>;
+  onToggle: (id: string) => void;
 }) {
   const Icon = node.isPostable ? Landmark : Folder;
   const balance = balances?.get(node.id);
   const figureCents = node.isPostable ? balance?.ownBalanceCents : balance?.rollupBalanceCents;
+  const hasChildren = node.children.length > 0;
+  const isCollapsed = collapsed.has(node.id);
 
   const label = (
     <>
@@ -80,6 +86,19 @@ function AccountRow({
         ].join(' ')}
         style={{ paddingLeft: `${String(depth * 1.5 + 0.75)}rem` }}
       >
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onToggle(node.id)}
+            aria-expanded={!isCollapsed}
+            aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.code} ${node.name}`}
+            className="p-0.5 -ml-1 rounded bg-transparent border-0 cursor-pointer text-[var(--muted)] hover:text-[var(--text)]"
+          >
+            <ChevronDown size={14} aria-hidden="true" className={isCollapsed ? '-rotate-90' : ''} />
+          </button>
+        ) : (
+          <span className="w-[18px] shrink-0" aria-hidden="true" />
+        )}
         <Icon
           size={15}
           aria-hidden="true"
@@ -120,9 +139,18 @@ function AccountRow({
         </span>
       </li>
 
-      {node.children.map((child) => (
-        <AccountRow key={child.id} node={child} depth={depth + 1} balances={balances} base={base} />
-      ))}
+      {!isCollapsed &&
+        node.children.map((child) => (
+          <AccountRow
+            key={child.id}
+            node={child}
+            depth={depth + 1}
+            balances={balances}
+            base={base}
+            collapsed={collapsed}
+            onToggle={onToggle}
+          />
+        ))}
     </>
   );
 }
@@ -136,6 +164,16 @@ export default function AccountsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+
+  function toggleCollapsed(id: string) {
+    setCollapsed((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
 
   useEffect(() => {
     // The `ignore` flag rather than AbortController — see
@@ -234,7 +272,15 @@ export default function AccountsPage() {
       {roots !== null && roots.length > 0 && (
         <ul className="list-none m-0 p-0 rounded-lg border border-[var(--border)] bg-[var(--panel)] divide-y divide-[var(--border)]">
           {roots.map((node) => (
-            <AccountRow key={node.id} node={node} depth={0} balances={balances} base={base} />
+            <AccountRow
+              key={node.id}
+              node={node}
+              depth={0}
+              balances={balances}
+              base={base}
+              collapsed={collapsed}
+              onToggle={toggleCollapsed}
+            />
           ))}
         </ul>
       )}

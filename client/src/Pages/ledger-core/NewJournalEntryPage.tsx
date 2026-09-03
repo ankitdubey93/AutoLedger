@@ -4,6 +4,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { createJournal, getJournal, listAccounts, type Account } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import BackLink from './BackLink';
 
 /**
  * Post a journal entry.
@@ -170,6 +171,8 @@ export default function NewJournalEntryPage() {
 
   return (
     <section className="flex flex-col gap-4">
+      <BackLink to={`${base}/journals`} label="Back to journal entries" />
+
       <form onSubmit={handlePost} className="flex flex-col gap-4">
         <header>
           <h2 className="text-lg font-semibold m-0">

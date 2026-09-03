@@ -10,6 +10,8 @@ export const updateOrganizationSchema = z
   .object({
     name: z.string().trim().min(2).max(120).optional(),
     baseCurrency: z.enum(SUPPORTED_CURRENCIES).optional(),
+    taxNumber: z.string().trim().max(64).nullable().optional(),
+    businessNumber: z.string().trim().max(64).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'No fields to update',

@@ -108,6 +108,8 @@ export interface OrganizationSummary {
   name: string;
   slug: string;
   baseCurrency: string;
+  taxNumber: string | null;
+  businessNumber: string | null;
   createdAt: string;
 }
 
@@ -605,14 +607,262 @@ export async function getLedgerDashboard(
 
 /* ---------------------------------------------------- organizations: update */
 
-/** PATCH /organizations — the organization's name and/or base currency. OWNER/ADMIN only. */
+/** PATCH /organizations — the organization's name, base currency, and tax identifiers. OWNER/ADMIN only. */
 export async function updateOrganization(input: {
   name?: string;
   baseCurrency?: string;
+  taxNumber?: string | null;
+  businessNumber?: string | null;
 }): Promise<OrganizationSummary> {
   const body = await apiFetch<{ success: boolean; organization: OrganizationSummary }>('/organizations', {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
   return body.organization;
+}
+
+/* ------------------------------------------------------ ledger-core: invoicing */
+
+/** Mirrors server/src/types/ledger-core.ts's Customer. */
+export interface Customer {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /ledger-core/customers */
+export function listCustomers(
+  params: { q?: string; includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; customers: Customer[] }> {
+  const query = new URLSearchParams();
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.includeInactive === true) query.set('includeInactive', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/customers${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/customers */
+export function createCustomer(body: {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  notes: string | null;
+}): Promise<{ success: boolean; customer: Customer }> {
+  return apiFetch('/ledger-core/customers', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/customers/:id */
+export function updateCustomer(
+  id: string,
+  body: Partial<{
+    name: string;
+    email: string | null;
+    phone: string | null;
+    billingAddress: string | null;
+    taxNumber: string | null;
+    notes: string | null;
+    isActive: boolean;
+  }>,
+): Promise<{ success: boolean; customer: Customer }> {
+  return apiFetch(`/ledger-core/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's InvoiceLine. */
+export interface InvoiceLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  revenueAccountId: string;
+  revenueAccountCode: string;
+  revenueAccountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
+
+/** Mirrors server/src/types/ledger-core.ts's Invoice. */
+export interface Invoice {
+  id: string;
+  invoiceNumber: string | null;
+  status: InvoiceStatus;
+  customerId: string;
+  customerName: string;
+  issueDate: string;
+  dueDate: string;
+  currencyCode: string;
+  customerNameSnapshot: string;
+  customerAddressSnapshot: string | null;
+  customerTaxNumberSnapshot: string | null;
+  notes: string | null;
+  paymentTerms: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: InvoiceLine[];
+}
+
+export interface InvoiceFilters {
+  page?: number;
+  limit?: number;
+  status?: InvoiceStatus | '';
+  customerId?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+}
+
+/** GET /ledger-core/invoices — paginated, filterable, lines nested. */
+export function listInvoices(
+  params: InvoiceFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  invoices: Invoice[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.customerId !== undefined && params.customerId !== '') query.set('customerId', params.customerId);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/invoices${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/invoices/:id */
+export function getInvoice(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; invoice: Invoice }> {
+  return apiFetch(`/ledger-core/invoices/${id}`, { signal: signal ?? null });
+}
+
+export interface InvoiceLineInput {
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  revenueAccountId: string;
+  taxRateBp: number;
+}
+
+export interface InvoiceInput {
+  customerId: string;
+  issueDate: string;
+  dueDate: string;
+  notes: string | null;
+  paymentTerms: string | null;
+  lines: InvoiceLineInput[];
+}
+
+/** POST /ledger-core/invoices — always drafted, never posted directly. */
+export function createInvoice(body: InvoiceInput): Promise<{ success: boolean; invoice: Invoice }> {
+  return apiFetch('/ledger-core/invoices', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/invoices/:id — a draft only. */
+export function updateInvoice(
+  id: string,
+  body: InvoiceInput,
+): Promise<{ success: boolean; invoice: Invoice }> {
+  return apiFetch(`/ledger-core/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /ledger-core/invoices/:id — a draft only. */
+export async function deleteInvoice(id: string): Promise<void> {
+  await apiFetch(`/ledger-core/invoices/${id}`, { method: 'DELETE' });
+}
+
+/** POST /ledger-core/invoices/:id/issue — allocates a number and posts a balanced journal entry. */
+export function issueInvoice(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; invoice: Invoice }> {
+  return apiFetch(`/ledger-core/invoices/${id}/issue`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/**
+ * POST /ledger-core/invoices/:id/void — the only correction path once issued.
+ * Posts a reversing journal entry; a draft is voided with no GL posting.
+ */
+export function voidInvoice(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; invoice: Invoice }> {
+  return apiFetch(`/ledger-core/invoices/${id}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's InvoiceSettings. */
+export interface InvoiceSettings {
+  numberPrefix: string;
+  numberPadding: number;
+  nextNumber: number;
+  defaultDueDays: number;
+  defaultTaxRateBp: number;
+  taxLabel: string;
+  receivableAccountId: string | null;
+  defaultRevenueAccountId: string | null;
+  taxPayableAccountId: string | null;
+  showTaxNumber: boolean;
+  showBusinessNumber: boolean;
+  showLegalName: boolean;
+  billingAddress: string | null;
+  paymentTerms: string | null;
+  footerNotes: string | null;
+  accentColor: string;
+  configured: boolean;
+}
+
+/** GET /ledger-core/settings/invoicing — defaults returned even before the org has ever saved one. */
+export async function getInvoiceSettings(signal?: AbortSignal): Promise<InvoiceSettings> {
+  const body = await apiFetch<{ success: boolean; invoiceSettings: InvoiceSettings }>(
+    '/ledger-core/settings/invoicing',
+    { signal: signal ?? null },
+  );
+  return body.invoiceSettings;
+}
+
+/** PATCH /ledger-core/settings/invoicing — OWNER/ADMIN only. */
+export async function updateInvoiceSettings(
+  input: Partial<InvoiceSettings>,
+): Promise<InvoiceSettings> {
+  const body = await apiFetch<{ success: boolean; invoiceSettings: InvoiceSettings }>(
+    '/ledger-core/settings/invoicing',
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.invoiceSettings;
 }
