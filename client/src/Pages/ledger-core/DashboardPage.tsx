@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { useOrg } from '../../context/OrgContext';
 import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 import { formatCents } from './money';
 import TrendChart from './TrendChart';
 
@@ -18,6 +19,7 @@ function entryTotalCents(lines: { debitCents: number }[]): number {
 
 export default function DashboardPage() {
   const { organization } = useOrg();
+  const base = useAppBasePath();
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -175,7 +177,7 @@ export default function DashboardPage() {
                 {activity.recentEntries.map((entry) => (
                   <tr key={entry.id} className="border-t border-[var(--border)]">
                     <td className="p-3">
-                      <Link to="../journals" className="text-[var(--text)]">
+                      <Link to={`${base}/journals`} className="text-[var(--text)]">
                         {entry.entryDate}
                       </Link>
                     </td>

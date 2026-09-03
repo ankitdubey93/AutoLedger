@@ -8,6 +8,7 @@ import TrialBalancePage from './TrialBalancePage';
 import ReportsPage from './ReportsPage';
 import SettingsPage from './SettingsPage';
 import OnboardingPage from './OnboardingPage';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
  * LedgerCore's own routes, rendered inside AppShell's outlet.
@@ -21,8 +22,10 @@ import OnboardingPage from './OnboardingPage';
  * gate: a fresh organization is redirected to `onboarding` until it completes
  * the wizard once, and `onboarding` itself redirects back to the dashboard
  * once it has. Every redirect is a `<Navigate>` inside an actual `<Route>`,
- * matching the relative-path pattern the rest of this router already uses
- * (see the old `<Route path="*" element={<Navigate to="" replace />} />`).
+ * and every target is an absolute path from `useAppBasePath()`. Relative
+ * targets were a bug: `to=""` and `to="onboarding"` resolve against the
+ * splat match's full pathname, so the catch-all redirected to itself and the
+ * onboarding gate appended `/onboarding` forever — both infinite loops.
  *
  * `PlatformLayout`'s `key={org.id}-${orgVersion}` remounts this entire
  * subtree on every organization switch — that is load-bearing here, not
@@ -31,6 +34,7 @@ import OnboardingPage from './OnboardingPage';
  */
 
 function AppPages() {
+  const base = useAppBasePath();
   return (
     <div className="grid grid-cols-1 md:grid-cols-[13rem_1fr] gap-6">
       <LedgerCoreSidebar />
@@ -43,7 +47,7 @@ function AppPages() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}
-          <Route path="*" element={<Navigate to="" replace />} />
+          <Route path="*" element={<Navigate to={base} replace />} />
         </Routes>
       </div>
     </div>
@@ -52,6 +56,7 @@ function AppPages() {
 
 function LedgerCoreGate() {
   const settings = useLedgerSettings();
+  const base = useAppBasePath();
 
   if (settings.status === 'loading') {
     return (
@@ -72,9 +77,12 @@ function LedgerCoreGate() {
     <Routes>
       <Route
         path="onboarding"
-        element={onboarded ? <Navigate to=".." replace /> : <OnboardingPage />}
+        element={onboarded ? <Navigate to={base} replace /> : <OnboardingPage />}
       />
-      <Route path="*" element={onboarded ? <AppPages /> : <Navigate to="onboarding" replace />} />
+      <Route
+        path="*"
+        element={onboarded ? <AppPages /> : <Navigate to={`${base}/onboarding`} replace />}
+      />
     </Routes>
   );
 }

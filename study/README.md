@@ -72,7 +72,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [context-effects-and-data-fetching.md](react/context-effects-and-data-fetching.md) | The three-state session union and why it fixes the login flash, StrictMode double-invoke, `AbortController` vs the `ignore` flag (and the CORS-preflight interaction that forced the switch), splitting a context to control re-renders, cache invalidation on org switch via remount keys, React 19 additions |
-| [routing-nested-and-dynamic-segments.md](react/routing-nested-and-dynamic-segments.md) | Nested routes as a tree not a lookup table, layout routes and `<Outlet/>`, dynamic segments vs splats, `useParams` typing gap, `<Navigate>` vs `navigate()`, **gating a route on fetched data rather than only auth state**, the remount-by-`key` cache-invalidation trick |
+| [routing-nested-and-dynamic-segments.md](react/routing-nested-and-dynamic-segments.md) | Nested routes as a tree not a lookup table, layout routes and `<Outlet/>`, dynamic segments vs splats, `useParams` typing gap, `<Navigate>` vs `navigate()`, **gating a route on fetched data rather than only auth state**, the remount-by-`key` cache-invalidation trick, relative-path resolution (pathname vs pathnameBase) and why the sidebar used absolute app-scoped paths |
 | [utility-first-css-tailwind.md](react/utility-first-css-tailwind.md) | **How Tailwind scans for literals (and why dynamic class names emit nothing), v4's CSS-first `@theme` config, cascade layers and why unlayered CSS beat Preflight, the honest trade utilities make** |
 
 ### Security & Auth

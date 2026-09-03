@@ -197,7 +197,8 @@ client/
 │   │   └── OrgContext.tsx          ← active organization + switcher
 │   ├── apps/
 │   │   ├── registry.ts             ← slug → element, for route wiring
-│   │   └── useActiveApp.ts         ← resolves :appSlug against GET /apps
+│   │   ├── useActiveApp.ts         ← resolves :appSlug against GET /apps
+│   │   └── useAppBasePath.ts       ← /app/<slug> prefix for in-app links
 │   ├── Pages/                      ← capital P
 │   │   ├── AppChooserPage.tsx      ← "/", one card per app
 │   │   ├── AccountPage.tsx         ← "/account", suite-level identity/org/session

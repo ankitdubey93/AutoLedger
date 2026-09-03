@@ -9,6 +9,7 @@ import {
 } from '../../services/fetchServices';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import { fiscalYearBounds } from './fiscalYear';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
  * LedgerCore's first-run wizard. Collected once per organization and never
@@ -66,6 +67,7 @@ function todayIso(): string {
 
 export default function OnboardingPage() {
   const navigate = useNavigate();
+  const base = useAppBasePath();
   const { organization } = useOrg();
   const { applySettings } = useLedgerSettings();
 
@@ -127,7 +129,7 @@ export default function OnboardingPage() {
     try {
       const settings = await completeLedgerOnboarding(input);
       applySettings(settings);
-      navigate('..', { replace: true });
+      navigate(base, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not complete onboarding');
       setSubmitting(false);

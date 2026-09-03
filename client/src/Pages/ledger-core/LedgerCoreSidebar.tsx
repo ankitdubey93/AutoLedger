@@ -7,15 +7,20 @@ import {
   Scale,
   Settings as SettingsIcon,
 } from 'lucide-react';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
  * LedgerCore's own navigation — the sidebar that replaces the Phase 3 tab
  * strip. Extends the same `{to, label, icon, end}` + `NavLink` idiom
  * LedgerCoreRoutes.tsx used before this change; only the layout is new.
  *
- * Relative `to` values, same reason as before: this renders inside the
- * platform's `/app/:appSlug` splat route, so a bare `'accounts'` resolves
- * against the current app, never a hardcoded `/app/ledger-core/accounts`.
+ * `NAV.to` is a suffix, not a target: each link is built as an absolute
+ * `${base}/${to}` from `useAppBasePath()`. Relative targets do not work
+ * here — this sidebar renders inside a descendant `<Routes>` under the
+ * platform's `/app/:appSlug` splat, and react-router resolves a relative
+ * `to` against that splat match's full pathname, so `'journals'` clicked
+ * from `/app/ledger-core/accounts` resolves to
+ * `/app/ledger-core/accounts/journals`.
  */
 const NAV = [
   { to: '', label: 'Dashboard', icon: LayoutDashboard, end: true },
@@ -27,12 +32,13 @@ const NAV = [
 ] as const;
 
 export default function LedgerCoreSidebar() {
+  const base = useAppBasePath();
   return (
     <nav className="flex md:flex-col gap-1 overflow-x-auto md:overflow-visible border-b md:border-b-0 md:border-r border-[var(--border)] pb-2 md:pb-0 md:pr-4">
       {NAV.map(({ to, label, icon: Icon, end }) => (
         <NavLink
           key={label}
-          to={to}
+          to={to === '' ? base : `${base}/${to}`}
           end={end}
           className={({ isActive }) =>
             [

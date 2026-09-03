@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
  * The reports index. Trial balance is real and links out; P&L and the
@@ -14,6 +15,7 @@ const PLANNED_REPORTS = [
 ];
 
 export default function ReportsPage() {
+  const base = useAppBasePath();
   return (
     <section className="flex flex-col gap-4">
       <header>
@@ -21,7 +23,7 @@ export default function ReportsPage() {
       </header>
 
       <div className="app-grid">
-        <Link to="../trial-balance" className="card app-card">
+        <Link to={`${base}/trial-balance`} className="card app-card">
           <div className="app-card__head">
             <h3 className="app-card__name">Trial balance</h3>
           </div>

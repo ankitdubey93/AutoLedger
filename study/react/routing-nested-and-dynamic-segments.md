@@ -70,6 +70,45 @@ useEffect(() => { navigate('/login'); }, []);
 
 `replace` (on both forms) swaps the current history entry instead of pushing a new one. Without it, hitting Back after being redirected off a protected route lands you right back on the page that immediately redirects you away again — a broken-feeling loop. `state={{ from: location.pathname }}` is how `LoginPage` knows where to return the user afterward; it's ordinary React Router history state, not a query string, so it doesn't appear in the URL or get bookmarked.
 
+### How a relative `to` is actually resolved
+
+Every relative `to` — on a `<Link>`, a `<NavLink>`, a `<Navigate>`, or `navigate()` — goes through the same function, `resolveTo`, and it does **not** resolve against "the current route." It resolves against a specific pathname computed from the matched route chain, and which pathname that is depends on where in the tree the resolving component sits.
+
+`useResolvedPath` (which every one of those APIs calls internally) does this, read directly from `react-router@7.18.3`'s `chunk-BV7QT456.mjs`:
+
+```js
+function getPathContributingMatches(matches) {
+  return matches.filter(
+    (match, index) => index === 0 || (match.route.path && match.route.path.length > 0)
+  );
+}
+function getResolveToMatches(matches) {
+  let pathMatches = getPathContributingMatches(matches);
+  return pathMatches.map(
+    (match, idx) => idx === pathMatches.length - 1 ? match.pathname : match.pathnameBase
+  );
+}
+```
+
+Two things matter here:
+
+1. **Pathless routes are dropped**, except the root. A layout route with no `path` — `ProtectedRoute`, `PlatformLayout` — contributes nothing to this list. Only routes that actually consumed a URL segment count.
+2. **The last contributing match is special.** Every match *except the last* contributes `match.pathnameBase` — the portion of the URL that route's own `path` matched, with no descendant segments. The **last** one contributes `match.pathname` instead — the full pathname matched by that route, descendants included. For a static `path="accounts"` route those are identical. For a **splat** route (`path="*"`), they are not: `pathnameBase` is the URL *up to* the splat, and `pathname` is the whole thing, splat segment and all.
+
+`resolveTo` then takes `from = routePathnames[last index]`, and walks it up one entry per leading `..` in the `to` string:
+
+```js
+let routePathnameIndex = routePathnames.length - 1;
+if (toPathname.startsWith('..')) {
+  while (toSegments[0] === '..') { toSegments.shift(); routePathnameIndex -= 1; }
+}
+from = routePathnames[routePathnameIndex];
+```
+
+So `..` steps back **one route**, not one URL segment — and the very first `from` it starts from is `pathname`, not `pathnameBase`, whenever the deepest match in the chain is a splat.
+
+This is exactly why `LedgerCoreSidebar`'s links used to append instead of replace. `AppPages`'s page routes (`accounts`, `journals`, …) render inside a `<Routes>` that itself sits under `App.tsx`'s `<Route path="*" element={<ActiveAppRoutes />} />` — a splat. That splat is the deepest path-contributing match at the point the sidebar resolves its links, so `from` is `match.pathname`: the *entire current URL*, not the app's base path. A bare `to="journals"` resolves against that full URL and appends. `to=""` and `to="onboarding"` did the same thing to `<Navigate>`'s target — `to=""` resolved to the current pathname (a no-op that re-triggers the same catch-all forever), and `to="onboarding"` appended `/onboarding` onto whatever deep, already-wrong path the URL had grown to, missing the `onboarding` route and falling through to the catch-all again. Both were infinite redirect loops, not just wrong URLs — `relative="path"` would not have fixed either one, since that prop only skips the `..` walk and leaves `from` unchanged. The fix used here is a `useAppBasePath()` hook that reads `:appSlug` and returns an absolute `/app/<slug>` prefix, so every in-app link and redirect targets an absolute path instead of depending on how deep the resolving component happens to sit in the tree.
+
 ### A third layout depth, and gating a route on data instead of auth
 
 `ProtectedRoute` gates on *auth* state — a `checking` / `authenticated` / `anonymous` union already held in `AuthContext`. Phase 3.5 added a second, structurally identical gate one layer further in: LedgerCore's own routes redirect to an onboarding wizard until a `ledger_settings` row exists for the organization, and redirect *away* from the wizard once it does.
@@ -77,6 +116,7 @@ useEffect(() => { navigate('/login'); }, []);
 ```tsx
 function LedgerCoreGate() {
   const settings = useLedgerSettings(); // 'loading' | 'ready' | 'error'
+  const base = useAppBasePath();
   if (settings.status === 'loading') return <Skeleton />;
   if (settings.status === 'error') return <ErrorMessage />;
 
@@ -84,14 +124,16 @@ function LedgerCoreGate() {
 
   return (
     <Routes>
-      <Route path="onboarding" element={onboarded ? <Navigate to=".." replace /> : <OnboardingPage />} />
-      <Route path="*" element={onboarded ? <AppPages /> : <Navigate to="onboarding" replace />} />
+      <Route path="onboarding" element={onboarded ? <Navigate to={base} replace /> : <OnboardingPage />} />
+      <Route path="*" element={onboarded ? <AppPages /> : <Navigate to={`${base}/onboarding`} replace />} />
     </Routes>
   );
 }
 ```
 
-The mechanism is identical to `ProtectedRoute`'s — a `<Navigate>` as a `<Route>`'s `element`, decided by a discriminated-union render-time state — but the *source* of that state generalizes: it's whatever context or fetch a given subtree needs to gate on, not specifically authentication. The relative `to=".."` in the `onboarding` route is worth noticing: it navigates up exactly one matched segment, back to whatever this `<Routes>`'s own `path="*"` covers, which is the LedgerCore root (`""`) — not an absolute `/app/ledger-core`, and not dependent on knowing the app's slug at all. That's what makes the gate reusable regardless of which app slug it's mounted under.
+The mechanism is identical to `ProtectedRoute`'s — a `<Navigate>` as a `<Route>`'s `element`, decided by a discriminated-union render-time state — but the *source* of that state generalizes: it's whatever context or fetch a given subtree needs to gate on, not specifically authentication.
+
+The `to={base}` and `to={`${base}/onboarding`}` targets are absolute, and that isn't incidental — this component originally used relative targets (`to=".."` and `to="onboarding"`), on the theory that walking up or down one matched segment would reliably land on the LedgerCore root regardless of which app slug it's mounted under. That reasoning holds only if the deepest path-contributing match above this component is a normal segment. It isn't: `LedgerCoreGate` renders under `App.tsx`'s `<Route path="*" element={<ActiveAppRoutes />} />`, a splat, whose `pathname` (not `pathnameBase`) is what a relative `to` resolves against here — see "How a relative `to` is actually resolved" above. `to="onboarding"` appended onto the full current URL instead of the LedgerCore root, and `to=".."`/`to=""` resolved to the current pathname itself, so both redirects could — and, once the URL had drifted past a valid page route, did — loop forever. `useAppBasePath()` sidesteps the whole problem by building the target from the `:appSlug` route param directly rather than from tree position.
 
 This also adds a **third** layout depth to the chrome stack from the previous section: `PlatformLayout` (suite chrome) → `AppShell` (per-app chrome) → now `LedgerCoreGate`'s own `<AppPages>` component, which renders a sidebar plus a further-nested `<Routes>` for the app's individual pages (dashboard, accounts, journals, trial balance, reports, settings). Each layer owns exactly the redirect logic and chrome relevant to its own scope — the platform layer doesn't know LedgerCore has an onboarding concept, and the onboarding gate doesn't know or care what suite chrome wraps it.
 
@@ -122,8 +164,10 @@ React's reconciliation compares elements by type *and* key at each position in t
 - `client/src/components/layout/PlatformLayout.tsx` — the outer layout route; the remount-by-`key` `<main>`
 - `client/src/components/layout/AppShell.tsx` — the inner layout route; resolves `:appSlug` and redirects on `not-found`/`planned` via `<Navigate replace>`
 - `client/src/apps/useActiveApp.ts` — `useParams` usage and the validation against the real registry
+- `client/src/apps/useAppBasePath.ts` — the absolute `/app/<slug>` prefix every in-app link and redirect is built from, and why: a relative `to` resolves against the deepest path-contributing match's full `pathname`, which is the whole current URL once that match is a splat
 - `client/src/components/ProtectedRoute.tsx` — the earliest layout route in the tree, from Phase 1
 - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
+- `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` — every `NavLink` built from `useAppBasePath()` rather than a bare relative suffix
 
 ## Gotchas
 
@@ -132,6 +176,8 @@ React's reconciliation compares elements by type *and* key at each position in t
 - **`useParams` types are a lie the compiler trusts.** The generic argument doesn't validate anything at runtime — a route rendered outside its expected path context, or a typo'd param name, both silently produce `undefined` rather than a type error. Validate against a real source of truth (here, the app registry) before trusting a param as a branded/union type.
 - **Changing a `key` is not free.** It discards all component state and re-runs every mount effect in that subtree — correct here because a full refetch is exactly the desired behavior on an org switch, but the same trick used carelessly elsewhere (e.g. keying a frequently-updating list item on something that changes often) causes visible flicker and lost local state (like an open dropdown or a half-typed form).
 - **`replace` matters more than it looks like it does.** Every redirect in a guard component (`ProtectedRoute`, `AppShell`) uses it; omitting it on just one of them reintroduces a specific back-button loop that's easy to miss in manual testing because it only shows up when you press Back, not on the redirect itself.
+- **`to=""` and `to="."` are not no-ops — they resolve to the current pathname.** A catch-all `<Route path="*" element={<Navigate to="" replace />} />` nested inside a descendant `<Routes>` mounted under a splat is an infinite redirect loop: it navigates to exactly where it already is, which re-matches the same catch-all, which navigates again. This isn't hypothetical — it's what `AppPages`'s catch-all did before the fix, and it hung a Vitest worker until Node ran out of heap (`FATAL ERROR: Ineffective mark-compacts near heap limit`) rather than failing an assertion. A hanging test that OOMs, not a red assertion, is the signature of this specific bug class.
+- **A relative link is only correct as deep as the tree stays shallow.** `to="../journals"` from a dashboard page and `to="journals"` from a sidebar can both be "correct" today purely by accident of how many path-contributing routes sit above them, and both silently start resolving somewhere else the moment a route is added or removed between them and the root. There's no lint rule that catches this — it has to be reasoned about explicitly, or avoided with an absolute path built from a route param.
 
 ## Interview Q&A
 
@@ -155,6 +201,15 @@ A: Same mechanism, different data source. `ProtectedRoute`'s gate is really just
 
 **Q: Tell me about a routing decision you made because of state that needed to survive navigation.**
 A: The two-layout split — `PlatformLayout` outside, `AppShell` inside — exists specifically so that suite-level UI, like the organization switcher in the header, stays mounted across every navigation within the authenticated app, including switching between different portfolio apps. If there were one combined layout, or if each app's routes each rendered their own copy of the header, either the header would remount (and potentially flicker or lose in-progress state, like a dropdown being open) on every app switch, or the header component would need to be duplicated per app. Nesting the routes let one instance of that chrome persist through the whole session, with only the `<Outlet/>` content changing underneath it.
+
+**Q: You have a sidebar whose links append to the URL instead of replacing the page. Walk me through why.**
+A: Every relative `to` resolves via `resolveTo`, which builds a `from` pathname out of the matched route chain — specifically, `getResolveToMatches` takes every route that actually consumed a path segment and, for all but the last one, uses `match.pathnameBase`; for the *last* one it uses `match.pathname` instead. Those two are the same for an ordinary segment route, but for a splat (`path="*"`) they diverge: `pathnameBase` stops before the splat, `pathname` includes everything the splat swallowed. If the sidebar's page routes render inside a `<Routes>` mounted under such a splat, that splat is the deepest contributing match, so `from` becomes the splat's full `pathname` — the entire current URL. A relative `to="journals"` then resolves against that whole URL and appends a segment instead of replacing the last one. It gets worse than a cosmetically wrong URL, too: with `to=""` on a catch-all route, `from` is the current pathname and the target *is* the current pathname, so the redirect fires, re-matches the same catch-all, and fires again — an infinite loop, not a wrong link.
+
+**Q: When does a relative link inside a nested route work, and when does it break?**
+A: It works exactly as long as the deepest path-contributing match above the link is an ordinary, non-splat route — then `pathnameBase` and `pathname` coincide and a relative `to` behaves the way you'd naively expect. It breaks the instant a splat, or one more layer of nested `<Routes>`, sits between the link and the app's logical root, because then the last contributing match's `pathname` includes segments the link's author never accounted for. The dangerous part is that correctness here is a property of the *tree shape at that moment*, not of the link itself — a link that's correct today can start resolving somewhere else after someone adds an unrelated route above it, with no error, type failure, or lint warning to catch it.
+
+**Q: What are the trade-offs of absolute paths built from a route param versus relative links?**
+A: An absolute path needs one extra piece of information — here, a `useAppBasePath()` hook that reads `:appSlug` and returns `/app/<slug>` — and it couples every consumer to knowing the platform's URL shape, even if only through that one hook. What it buys back is that resolution no longer depends on how deep in the route tree the link happens to sit: the target is the same string regardless of whether it's read from a sidebar three layers down or a page two layers up. Relative links need no such coupling and read naturally in isolation, but they're depth-fragile — their meaning is implicitly defined by the surrounding route tree, and that meaning silently changes if the tree changes, which is exactly the bug this project shipped and had to fix.
 
 ## Follow-ups they'll dig into
 
