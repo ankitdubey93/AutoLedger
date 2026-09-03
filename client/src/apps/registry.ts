@@ -4,7 +4,7 @@
  * GET /api/v1/apps (services/fetchServices.ts) so the server stays the single
  * source of truth and nothing here can drift out of sync with it.
  *
- * A slug with `status: 'planned'` (from the API) has no entry here — AppShell
+ * A slug with `status: 'planned'` (from the API) has no entry here — AppFrame
  * redirects those back to the chooser instead of rendering an outlet with
  * nothing to show.
  *

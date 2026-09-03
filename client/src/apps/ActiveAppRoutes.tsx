@@ -9,7 +9,7 @@ import { APP_ELEMENTS } from './registry';
  * `index` routes would have several routes matching the same path, and the
  * first would win regardless of which app the URL actually named.
  *
- * AppShell has already rejected unknown and `planned` slugs by the time this
+ * AppFrame has already rejected unknown and `planned` slugs by the time this
  * renders; the guard here covers the case of an app the API reports as
  * `building` that has no client routes registered yet.
  */

@@ -11,7 +11,7 @@ import OnboardingPage from './OnboardingPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
- * LedgerCore's own routes, rendered inside AppShell's outlet.
+ * LedgerCore's own routes, rendered inside AppFrame's outlet.
  *
  * An app owns its internal routing rather than registering every page in
  * App.tsx: the platform router knows that `/app/ledger-core/*` belongs to
@@ -27,7 +27,7 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * splat match's full pathname, so the catch-all redirected to itself and the
  * onboarding gate appended `/onboarding` forever — both infinite loops.
  *
- * `PlatformLayout`'s `key={org.id}-${orgVersion}` remounts this entire
+ * `AppFrame`'s `key={org.id}-${orgVersion}` remounts this entire
  * subtree on every organization switch — that is load-bearing here, not
  * incidental: it is what makes switching into a not-yet-onboarded
  * organization correctly show the wizard again. Do not "optimise" it away.
@@ -36,9 +36,9 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
 function AppPages() {
   const base = useAppBasePath();
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[13rem_1fr] gap-6">
+    <div className="flex flex-col md:flex-row md:gap-6 px-4 md:px-6">
       <LedgerCoreSidebar />
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1 py-6 max-w-[76rem]">
         <Routes>
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />

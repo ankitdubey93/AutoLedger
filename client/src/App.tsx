@@ -3,7 +3,7 @@ import { AuthProvider } from './context/AuthContext';
 import { OrgProvider } from './context/OrgContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import PlatformLayout from './components/layout/PlatformLayout';
-import AppShell from './components/layout/AppShell';
+import AppFrame from './components/layout/AppFrame';
 import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
 import AppChooserPage from './Pages/AppChooserPage';
@@ -22,10 +22,12 @@ import ActiveAppRoutes from './apps/ActiveAppRoutes';
  * because the active organization is derived from the session rather than
  * stored separately — see context/OrgContext.tsx.
  *
- * Two nested layouts inside ProtectedRoute: PlatformLayout is the suite shell
- * (brand, org switcher, account, sign out); AppShell is the per-app shell,
- * mounted only under /app/:appSlug. The chooser at "/" and /account render
- * directly inside PlatformLayout — they are suite-level, not app-level.
+ * Two sibling shells inside ProtectedRoute, not nested: PlatformLayout is the
+ * suite shell (brand, org switcher, account, sign out), used only by the
+ * chooser at "/" and /account. AppFrame is the per-app shell, mounted at
+ * /app/:appSlug — inside an app, the suite header does not render at all;
+ * AppFrame's own AppTopBar shrinks AutoLedger to a small mark-and-link and
+ * gives the app itself top billing.
  */
 export default function App() {
   return (
@@ -42,18 +44,18 @@ export default function App() {
                 <Route path="/" element={<AppChooserPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/dashboard" element={<Navigate to="/account" replace />} />
+              </Route>
 
-                {/*
-                  One splat child, not one Route per app. The app that owns
-                  :appSlug is resolved at render time and brings its own nested
-                  routes — LedgerCore ships three pages, and generating sibling
-                  `index` routes per slug would make several routes match the
-                  same path with the first winning regardless of the slug.
-                */}
-                <Route path="/app/:appSlug" element={<AppShell />}>
-                  <Route path="*" element={<ActiveAppRoutes />} />
-                  <Route index element={<ActiveAppRoutes />} />
-                </Route>
+              {/*
+                One splat child, not one Route per app. The app that owns
+                :appSlug is resolved at render time and brings its own nested
+                routes — LedgerCore ships three pages, and generating sibling
+                `index` routes per slug would make several routes match the
+                same path with the first winning regardless of the slug.
+              */}
+              <Route path="/app/:appSlug" element={<AppFrame />}>
+                <Route path="*" element={<ActiveAppRoutes />} />
+                <Route index element={<ActiveAppRoutes />} />
               </Route>
             </Route>
 

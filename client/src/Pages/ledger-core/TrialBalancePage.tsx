@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
-import { getTrialBalance, type TrialBalanceRow } from '../../services/fetchServices';
+import { useSearchParams } from 'react-router-dom';
+import { getTrialBalance, type AccountType, type TrialBalanceRow } from '../../services/fetchServices';
 import { formatCents } from './money';
 
 /**
@@ -9,6 +10,12 @@ import { formatCents } from './money';
  * Every figure is aggregated from raw ledger lines on each request. There is no
  * summary table behind this, which is why the number is always current and can
  * never disagree with the entries it came from.
+ *
+ * `?type=` is a client-side filter over rows already fetched — the server
+ * endpoint takes no such parameter and none is added. The footer totals stay
+ * unfiltered even while a type filter is active: they are the proof the
+ * books balance, and a filtered subtotal would not be that proof, so the
+ * label changes instead of the numbers.
  */
 
 interface Report {
@@ -18,11 +25,19 @@ interface Report {
   isBalanced: boolean;
 }
 
+const FILTERABLE_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
+
+function readTypeParam(raw: string | null): AccountType | null {
+  return raw !== null && (FILTERABLE_TYPES as readonly string[]).includes(raw) ? (raw as AccountType) : null;
+}
+
 export default function TrialBalancePage() {
   const [asOf, setAsOf] = useState('');
   const [report, setReport] = useState<Report | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hideEmpty, setHideEmpty] = useState(true);
+  const [params, setParams] = useSearchParams();
+  const activeType = readTypeParam(params.get('type'));
 
   useEffect(() => {
     let ignore = false;
@@ -47,7 +62,9 @@ export default function TrialBalancePage() {
     report === null
       ? []
       : report.rows.filter(
-          (row) => !hideEmpty || row.debitCents !== 0 || row.creditCents !== 0,
+          (row) =>
+            (!hideEmpty || row.debitCents !== 0 || row.creditCents !== 0) &&
+            (activeType === null || row.type === activeType),
         );
 
   return (
@@ -109,6 +126,22 @@ export default function TrialBalancePage() {
             </span>
           </div>
 
+          {activeType !== null && (
+            <div className="flex items-center gap-2 text-sm">
+              <span className="chip">Type: {activeType}</span>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                style={{ marginTop: 0 }}
+                onClick={() => {
+                  setParams({}, { replace: true });
+                }}
+              >
+                Clear filter
+              </button>
+            </div>
+          )}
+
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[34rem]">
               <thead>
@@ -151,7 +184,7 @@ export default function TrialBalancePage() {
               <tfoot>
                 <tr className="border-t-2 border-[var(--border)] font-semibold">
                   <td className="p-3" colSpan={3}>
-                    Totals
+                    {activeType === null ? 'Totals' : 'Totals — all accounts'}
                   </td>
                   <td className="p-3 text-right tabular-nums">
                     {formatCents(report.totalDebitCents)}

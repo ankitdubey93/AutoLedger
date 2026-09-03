@@ -4,6 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 3 — LedgerCore's first real UI: a chart-of-accounts tree, a multi-line journal entry form, a trial balance grid
+**Extended by:** a 2026-09-03 client-only UX revision — the cascade-layer rule below bit a second time, on the new app top bar
 **Verified against:** Tailwind CSS 4.3.3, `@tailwindcss/vite` 4.3.3, Vite 8, React 19
 
 ---
@@ -53,6 +54,28 @@ That is exactly what made adopting Tailwind safe here. The client had 431 lines 
 
 Without layers, adopting Tailwind into an existing stylesheet is a specificity fight resolved with `!important`.
 
+### Unlayered CSS beat the utility again: the `.app-topbar` overrides
+
+The same cascade-layer rule bit a second time in the 2026-09-03 UX revision, on a much smaller scale. The new `AppTopBar` component reused two existing hand-written idioms — the `.btn` class (a submit-style button) and `.muted` (a de-emphasized link) — both defined in the unlayered part of `index.css`:
+
+```css
+.btn { margin-top: 1rem; }   /* unlayered — assumes a button sits below a form field */
+.muted { margin: 0.375rem 0 0; }
+```
+
+Those margins make sense in a vertical form, which is where both classes originated. Inside the top bar's horizontal flex row, they just pushed the button and the email link out of vertical alignment. The obvious-looking fix — add `mt-0` as a Tailwind utility on the button — **does nothing**, for the identical reason Preflight can't break the old pages: `.btn`'s margin rule is unlayered, and unlayered CSS always beats layered CSS, so a Tailwind utility (layered, by construction) cannot override it no matter how specific it looks in the markup.
+
+The correct fix is another unlayered rule, scoped to where the override is actually needed:
+
+```css
+.app-topbar .btn { margin-top: 0; }
+.app-topbar .muted { margin: 0; }
+```
+
+This is unlayered CSS beating unlayered CSS on ordinary specificity (`.app-topbar .btn` outscores `.btn`), which behaves exactly like CSS did before layers existed — the layer mechanism only changes the outcome when a layered and an unlayered rule collide. `!important` was never the right tool here: it would have worked, but it's a one-way ratchet — the next unlayered rule that needs to win over *this* one now needs `!important` too, and the codebase accumulates a specificity arms race instead of a small, scoped, readable override.
+
+The same change also **deleted** a rule that existed only because component boundaries were expressed as a CSS selector instead of a routing fact: `.app-main:has(.app-shell) { max-width: 90rem; }` widened the content column specifically when an app's shell was mounted inside it, detected via `:has()` rather than any explicit signal. Once `AppFrame` stopped rendering inside `.app-main` at all — see the routing note's "Where chrome is mounted is a routing decision, not a CSS one" — the selector could no longer match anything, and removing it was the correct response, not leaving a dead rule for the next reader to puzzle over. `:has()` standing in for "is a particular component mounted here" is a sign the real answer belongs in the component tree, not the stylesheet; this is the same lesson as the cascade-layer fix, from the other direction.
+
 ### The trade the utilities make
 
 Utility-first is not "inline styles with extra steps" — inline styles cannot do hover, focus, media queries, or dark mode, and do not dedupe. What it actually trades:
@@ -95,6 +118,7 @@ Utility-first is not "inline styles with extra steps" — inline styles cannot d
 - **`@apply` is a trap in bulk.** It recreates the naming and dead-rule problems the utilities removed. Extract a component instead.
 - **Arbitrary values need no spaces**: `bg-[var(--panel)]`, not `bg-[var( --panel )]`.
 - **Class order does not matter** — output order is determined by Tailwind, not by the order in the attribute. `p-2 p-4` is not "last wins"; use a conditional.
+- **A Tailwind utility cannot beat an unlayered rule, ever, regardless of how specific the utility looks.** `mt-0` does not override an unlayered `.btn { margin-top: 1rem }`, no matter how the class list is ordered or how many utilities are stacked. The fix is a scoped unlayered override, not `!important` and not more utilities.
 
 ---
 
@@ -111,6 +135,9 @@ A: Cascade layers did it for me, though I checked before relying on it. Everythi
 
 **Q: What's the honest downside?**
 A: The markup gets noisy — a styled table row can carry a dozen classes, and reading it is genuinely harder than reading a semantic class name that says what the thing is. I don't think the usual rebuttal ("it's colocated, you get used to it") fully answers that; it's a real cost you're paying for something else. What you're buying is that naming disappears, dead CSS disappears because deleting a component deletes its styles, and specificity wars disappear because every utility has the same specificity. On a project where I'm the only person writing CSS and the UI is data-dense, that trade is worth it. On a team with a dedicated designer working in CSS, I'd think harder.
+
+**Q: You added `mt-0` to remove a component's top margin and nothing changed. Why?**
+A: Almost certainly a layered-versus-unlayered collision, not a specificity problem in the usual sense. Every Tailwind utility lives inside `@layer utilities`, and CSS cascade layers have a rule most people don't expect: unlayered CSS beats layered CSS unconditionally, regardless of selector specificity or source order. If there's a hand-written, unlayered rule somewhere setting that margin — which is exactly the situation in this codebase, where the pre-Tailwind stylesheet is deliberately unlayered so Preflight can't break it — no utility can win against it, no matter how many you stack or how you order them. The fix is another unlayered rule, scoped to the actual component (`.app-topbar .btn { margin-top: 0 }`), not `!important` and not fighting it with more utilities.
 
 ---
 

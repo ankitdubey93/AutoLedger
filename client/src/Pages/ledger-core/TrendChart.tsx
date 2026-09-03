@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { TrendPoint } from '../../services/fetchServices';
 import { formatCents } from './money';
 
@@ -9,6 +10,11 @@ import { formatCents } from './money';
  * a library would add. The `<table className="visually-hidden">` beside it
  * carries the same numbers for screen readers, matching the pattern
  * `TrialBalancePage`'s `role="status"` banner uses for its own state.
+ *
+ * A transparent hit rect per month drives a hover readout below the chart.
+ * The interaction is hover-only and adds nothing focusable — the `<svg>`
+ * stays `aria-hidden` and the `visually-hidden` table already carries every
+ * value, so a screen-reader user loses nothing.
  */
 
 const VIEW_WIDTH = 320;
@@ -25,9 +31,11 @@ function monthLabel(month: string): string {
 }
 
 export default function TrendChart({ points }: { points: TrendPoint[] }) {
+  const [hovered, setHovered] = useState<number | null>(null);
   const maxCents = Math.max(1, ...points.flatMap((p) => [p.revenueCents, p.expenseCents]));
   const groupWidth = VIEW_WIDTH / Math.max(points.length, 1);
   const barWidth = groupWidth / 2 - 4;
+  const shown = points[hovered ?? points.length - 1];
 
   return (
     <div className="flex flex-col gap-2">
@@ -46,6 +54,7 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
           return (
             <g key={point.month}>
               <rect
+                data-bar
                 x={x + 2}
                 y={CHART_BOTTOM - revenueHeight}
                 width={barWidth}
@@ -54,6 +63,7 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
                 rx={2}
               />
               <rect
+                data-bar
                 x={x + 2 + barWidth + 4}
                 y={CHART_BOTTOM - expenseHeight}
                 width={barWidth}
@@ -70,6 +80,20 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
               >
                 {monthLabel(point.month)}
               </text>
+              <rect
+                data-hit
+                x={x}
+                y={CHART_TOP}
+                width={groupWidth}
+                height={CHART_HEIGHT}
+                fill="transparent"
+                onMouseEnter={() => {
+                  setHovered(index);
+                }}
+                onMouseLeave={() => {
+                  setHovered(null);
+                }}
+              />
             </g>
           );
         })}
@@ -82,6 +106,13 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
           strokeWidth={1}
         />
       </svg>
+
+      {shown !== undefined && (
+        <p className="text-xs text-[var(--muted)] m-0 tabular-nums">
+          {monthLabel(shown.month)} · Revenue {formatCents(shown.revenueCents)} · Expenses{' '}
+          {formatCents(shown.expenseCents)} · Net {formatCents(shown.revenueCents - shown.expenseCents)}
+        </p>
+      )}
 
       <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
         <span className="flex items-center gap-1.5">

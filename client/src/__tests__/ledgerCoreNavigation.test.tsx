@@ -112,6 +112,27 @@ const emptyDashboard = {
   })),
 };
 
+const trialBalanceRows = [
+  {
+    accountId: 'acc-1110',
+    code: '1110',
+    name: 'Operating Cash',
+    type: 'Asset',
+    debitCents: 10_000,
+    creditCents: 0,
+    netBalanceCents: 10_000,
+  },
+  {
+    accountId: 'acc-2110',
+    code: '2110',
+    name: 'Accounts Payable',
+    type: 'Liability',
+    debitCents: 0,
+    creditCents: 5_000,
+    netBalanceCents: 5_000,
+  },
+];
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function mockRoutes(overrides: { settings?: unknown; onboarding?: unknown } = {}) {
@@ -148,10 +169,10 @@ function mockRoutes(overrides: { settings?: unknown; onboarding?: unknown } = {}
           success: true,
           asOf: null,
           isBalanced: true,
-          totalDebitCents: 0,
-          totalCreditCents: 0,
-          count: 0,
-          rows: [],
+          totalDebitCents: 10_000,
+          totalCreditCents: 5_000,
+          count: trialBalanceRows.length,
+          rows: trialBalanceRows,
         }),
       );
     }
@@ -277,5 +298,41 @@ describe('LedgerCore sidebar navigation', () => {
 
     const entryLink = await screen.findByRole('link', { name: '2026-01-10' });
     expect(entryLink).toHaveAttribute('href', '/app/ledger-core/journals');
+  });
+
+  it('the Assets tile links to the trial balance filtered by type', async () => {
+    renderAt('/app/ledger-core', onboarded);
+
+    const tile = await screen.findByRole('link', { name: /assets/i });
+    expect(tile).toHaveAttribute('href', '/app/ledger-core/trial-balance?type=Asset');
+  });
+
+  it('the cash tile links to settings when no cash account is configured', async () => {
+    renderAt('/app/ledger-core', onboarded);
+
+    const tile = await screen.findByRole('link', { name: /cash/i });
+    expect(tile).toHaveAttribute('href', '/app/ledger-core/settings');
+  });
+
+  it('a type filter narrows the trial balance and can be cleared', async () => {
+    renderAt('/app/ledger-core/trial-balance?type=Liability', onboarded);
+    const user = userEvent.setup();
+
+    expect(await screen.findByText('Accounts Payable')).toBeInTheDocument();
+    expect(screen.queryByText('Operating Cash')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /clear filter/i }));
+
+    expect(await screen.findByText('Operating Cash')).toBeInTheDocument();
+    expect(screen.getByText('Accounts Payable')).toBeInTheDocument();
+    expect(pathname()).toBe('/app/ledger-core/trial-balance');
+  });
+
+  it('an unrecognised type parameter shows every row', async () => {
+    renderAt('/app/ledger-core/trial-balance?type=Bogus', onboarded);
+
+    expect(await screen.findByText('Operating Cash')).toBeInTheDocument();
+    expect(screen.getByText('Accounts Payable')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /clear filter/i })).not.toBeInTheDocument();
   });
 });

@@ -53,7 +53,9 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-09-02, after Phase 3.5)
+### Current (verified 2026-09-03, after the LedgerCore shell/dashboard UX revision)
+
+**UX revision (2026-09-03, client-only — no phase renumbering, no migration, see [roadmap.md § Phase 3.5, as delivered](roadmap.md#phase-35-as-delivered)):** `/app/:appSlug` moved from a child route of `PlatformLayout` to a sibling under `ProtectedRoute` in `App.tsx` — inside an app, the suite header does not mount at all. `components/layout/AppShell.tsx` was replaced by two new files: `AppFrame.tsx` (per-app shell: loading/not-found/planned guard, the org-switch remount `key` moved here from `PlatformLayout`, renders `<Outlet/>`) and `AppTopBar.tsx` (a `h-14` bar: a small `AutoLedger` mark-and-link, the app name, then `OrgSwitcher`/org chip/email/sign-out). `PlatformLayout.tsx` now serves only `/` and `/account`. `Pages/ledger-core/LedgerCoreSidebar.tsx` became a grouped, sticky, full-height rail (`Overview`/`Bookkeeping`/`Reporting`/`Configure`) instead of a flat 6-item list; `LedgerCoreRoutes.tsx`'s `AppPages` layout changed from a `grid-cols-[13rem_1fr]` to a flex row matching the rail's own width. New components `Pages/ledger-core/{MetricTile,ProportionBar,EquationBar}.tsx` back the dashboard's four position tiles (now links into `TrialBalancePage`'s new client-side `?type=` filter — no server change), an accounting-equation bar, and revenue/expense proportion bars; `TrendChart.tsx` gained a hover readout via transparent per-month hit rects (`data-hit`, distinct from the value bars' `data-bar`). `index.css` lost `.app-shell`/`.app-shell__header`/`.app-shell__title` and the `.app-main:has(.app-shell)` rule, and gained two `.app-topbar` scoped overrides. Four tests added to `__tests__/ledgerCoreNavigation.test.tsx`; `__tests__/ledgerCoreDashboard.test.tsx` was updated to wrap `DashboardPage` in a `MemoryRouter` (needed once its tiles became `<Link>`s) and to assert `svg rect[data-bar]`/`svg rect[data-hit]` counts instead of a flat `svg rect` count. **`docs/api.md` and `docs/schema.md` are unchanged — the `?type=` filter is client-side over an already-fetched response, not a new server parameter.**
 
 Phase 3.5 added, on the server: `db/migrations/005_ledger-core_settings.sql`, `config/currencies.ts`, `utils/fiscalYear.ts`, `schemas/ledger-core/settingsSchema.ts`, `schemas/organizationSchema.ts`, `services/ledger-core/{settingsService,dashboardService}.ts`, `controllers/ledger-core/settingsController.ts`, `routes/ledger-core/settingsRoutes.ts`, and `__tests__/{fiscalYear,ledger-core/settings,ledger-core/dashboard}.test.ts`. Edited in place: `services/organizationService.ts` (added `updateOrganization`), `controllers/organizationController.ts` and `routes/organizations.ts` (added `PATCH /`), `controllers/ledger-core/reportController.ts` and `routes/ledger-core/reportRoutes.ts` (added `dashboard`), `types/ledger-core.ts` (appended `LedgerSettings`, `DashboardSummary` and their supporting types).
 
@@ -65,7 +67,7 @@ On the client: Tailwind v4 (`vite.config.ts`, `index.css`) and `lucide-react`, `
 
 Phase 2 added, on the server: `config/apps.ts`, `types/apps.ts`, `services/appService.ts`, `controllers/appController.ts`, `routes/apps.ts`, and `__tests__/platform/apps.test.ts`.
 
-On the client: `apps/registry.ts`, `apps/useActiveApp.ts`, `Pages/AppChooserPage.tsx`, `components/layout/AppShell.tsx`, and `__tests__/AppChooserPage.test.tsx`. Two Phase 1 files were renamed rather than added: `components/layout/AppLayout.tsx` → `PlatformLayout.tsx`, and `Pages/DashboardPage.tsx` → `Pages/AccountPage.tsx` (served at `/account` instead of `/`).
+On the client: `apps/registry.ts`, `apps/useActiveApp.ts`, `Pages/AppChooserPage.tsx`, `components/layout/AppShell.tsx`, and `__tests__/AppChooserPage.test.tsx`. Two Phase 1 files were renamed rather than added: `components/layout/AppLayout.tsx` → `PlatformLayout.tsx`, and `Pages/DashboardPage.tsx` → `Pages/AccountPage.tsx` (served at `/account` instead of `/`). **`AppShell.tsx` was itself replaced in the 2026-09-03 UX revision below — see that entry.**
 
 Phase 1 added, on the server: `db/migrate.ts`, `db/reset.ts`, `db/migrations/001_organizations_and_users.sql`, `types/auth.ts`, `types/express.d.ts`, `utils/jwt.ts`, `utils/cookies.ts`, `utils/validate.ts`, `utils/requireUser.ts`, `services/authService.ts`, `services/organizationService.ts`, `middleware/auth.ts`, `middleware/rbac.ts`, `controllers/authController.ts`, `controllers/organizationController.ts`, `routes/auth.ts`, `routes/organizations.ts`, and five test files plus `__tests__/setup/` and `__tests__/helpers/`.
 
@@ -207,8 +209,9 @@ client/
 │   ├── components/
 │   │   ├── ProtectedRoute.tsx
 │   │   └── layout/
-│   │       ├── PlatformLayout.tsx  ← suite chrome: brand, org switcher, account
-│   │       ├── AppShell.tsx        ← per-app chrome, mounted at /app/:appSlug
+│   │       ├── PlatformLayout.tsx  ← suite chrome for "/" and "/account" only
+│   │       ├── AppFrame.tsx        ← per-app shell, mounted at /app/:appSlug
+│   │       ├── AppTopBar.tsx       ← small AutoLedger mark + app name + org/user controls
 │   │       └── OrgSwitcher.tsx
 │   ├── services/fetchServices.ts
 │   └── utils/fetchWithAutoRefresh.ts

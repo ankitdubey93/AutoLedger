@@ -1,4 +1,5 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
@@ -9,7 +10,9 @@ import type { DashboardSummary } from '../services/fetchServices';
  * The LedgerCore dashboard. `DashboardPage` only depends on `OrgContext` (for
  * the organization name) and `fetchServices` directly — not
  * `LedgerSettingsContext` — so it renders under a lighter provider tree than
- * the onboarding gate needs.
+ * the onboarding gate needs. It does need a `MemoryRouter`, though: its
+ * position tiles are now `<Link>`s (`MetricTile`), which read router context
+ * that has no default value.
  */
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -84,11 +87,13 @@ afterEach(() => {
 
 function renderDashboard() {
   return render(
-    <AuthProvider>
-      <OrgProvider>
-        <DashboardPage />
-      </OrgProvider>
-    </AuthProvider>,
+    <MemoryRouter initialEntries={['/app/ledger-core']}>
+      <AuthProvider>
+        <OrgProvider>
+          <DashboardPage />
+        </OrgProvider>
+      </AuthProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -124,7 +129,10 @@ describe('DashboardPage', () => {
     const { container } = renderDashboard();
 
     await screen.findByText(/this fiscal year/i);
-    // Two bars (revenue + expense) per month, six months.
-    expect(container.querySelectorAll('svg rect')).toHaveLength(12);
+    // Two value bars (revenue + expense) per month, six months.
+    // `[data-bar]` excludes the six transparent hover hit areas, which are
+    // interaction surface, not data.
+    expect(container.querySelectorAll('svg rect[data-bar]')).toHaveLength(12);
+    expect(container.querySelectorAll('svg rect[data-hit]')).toHaveLength(6);
   });
 });

@@ -1,16 +1,34 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import {
+  Banknote,
+  CheckCircle2,
+  CreditCard,
+  PiggyBank,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  XCircle,
+} from 'lucide-react';
 import { useOrg } from '../../context/OrgContext';
 import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { formatCents } from './money';
 import TrendChart from './TrendChart';
+import MetricTile from './MetricTile';
+import EquationBar from './EquationBar';
+import ProportionBar from './ProportionBar';
 
 /**
  * LedgerCore's home page. Every figure is aggregated from raw `ledger_lines`
  * on each request — the same "no summary table" rule `TrialBalancePage`
  * states for its own report.
+ *
+ * The four position tiles are links into the trial balance filtered by
+ * account type (`TrialBalancePage`'s `?type=`) — the only real drilldown
+ * destination that exists today. A per-account ledger detail page would be
+ * the ideal target and does not exist; that is a separate future plan, not
+ * Phase 4 either.
  */
 
 function entryTotalCents(lines: { debitCents: number }[]): number {
@@ -20,6 +38,7 @@ function entryTotalCents(lines: { debitCents: number }[]): number {
 export default function DashboardPage() {
   const { organization } = useOrg();
   const base = useAppBasePath();
+  const currency = organization?.baseCurrency ?? '';
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -71,39 +90,56 @@ export default function DashboardPage() {
       )}
 
       <div className="grid">
-        <div className="card">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Assets</p>
-          <p className="text-xl font-semibold m-0 mt-1 tabular-nums">
-            {formatCents(position.assetsCents)}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Liabilities</p>
-          <p className="text-xl font-semibold m-0 mt-1 tabular-nums">
-            {formatCents(position.liabilitiesCents)}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Equity</p>
-          <p className="text-xl font-semibold m-0 mt-1 tabular-nums">
-            {formatCents(position.equityCents)}
-          </p>
-        </div>
-        <div className="card">
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Cash</p>
-          {position.cashCents === null ? (
-            <>
-              <p className="text-xl font-semibold m-0 mt-1">—</p>
-              <p className="text-xs text-[var(--muted)] m-0 mt-1">
-                No cash account configured — set one in Settings.
-              </p>
-            </>
-          ) : (
-            <p className="text-xl font-semibold m-0 mt-1 tabular-nums">
-              {formatCents(position.cashCents)}
-            </p>
-          )}
-        </div>
+        <MetricTile
+          label="Assets"
+          valueCents={position.assetsCents}
+          currency={currency}
+          icon={Wallet}
+          tone="neutral"
+          to={`${base}/trial-balance?type=Asset`}
+          hint={null}
+        />
+        <MetricTile
+          label="Liabilities"
+          valueCents={position.liabilitiesCents}
+          currency={currency}
+          icon={CreditCard}
+          tone="neutral"
+          to={`${base}/trial-balance?type=Liability`}
+          hint={null}
+        />
+        <MetricTile
+          label="Equity"
+          valueCents={position.equityCents}
+          currency={currency}
+          icon={PiggyBank}
+          tone="neutral"
+          to={`${base}/trial-balance?type=Equity`}
+          hint={null}
+        />
+        <MetricTile
+          label="Cash"
+          valueCents={position.cashCents}
+          currency={currency}
+          icon={Banknote}
+          tone="good"
+          to={position.cashCents === null ? `${base}/settings` : `${base}/trial-balance?type=Asset`}
+          hint={
+            position.cashCents === null ? 'No cash account configured — set one in Settings.' : null
+          }
+        />
+      </div>
+
+      <div className="card">
+        <p className="text-sm font-medium m-0 mb-3">Accounting equation</p>
+        <EquationBar
+          assetsCents={position.assetsCents}
+          liabilitiesCents={position.liabilitiesCents}
+          equityCents={position.equityCents}
+          currentEarningsCents={position.currentEarningsCents}
+          currency={currency}
+          holds={position.equationHolds}
+        />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -121,13 +157,27 @@ export default function DashboardPage() {
             <div className="flex justify-between font-medium">
               <dt>Net income</dt>
               <dd
-                className="m-0 tabular-nums"
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end"
                 style={{ color: performance.yearToDate.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
               >
+                {performance.yearToDate.netIncomeCents < 0 ? (
+                  <TrendingDown size={15} aria-hidden="true" />
+                ) : (
+                  <TrendingUp size={15} aria-hidden="true" />
+                )}
                 {formatCents(performance.yearToDate.netIncomeCents)}
               </dd>
             </div>
           </dl>
+          <div className="mt-3">
+            <ProportionBar
+              segments={[
+                { label: 'Revenue', valueCents: performance.yearToDate.revenueCents, color: 'var(--good)' },
+                { label: 'Expenses', valueCents: performance.yearToDate.expenseCents, color: 'var(--bad)' },
+              ]}
+              currency={currency}
+            />
+          </div>
         </div>
         <div className="card">
           <p className="text-sm font-medium m-0 mb-3">This month</p>
@@ -143,13 +193,27 @@ export default function DashboardPage() {
             <div className="flex justify-between font-medium">
               <dt>Net income</dt>
               <dd
-                className="m-0 tabular-nums"
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end"
                 style={{ color: performance.currentMonth.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
               >
+                {performance.currentMonth.netIncomeCents < 0 ? (
+                  <TrendingDown size={15} aria-hidden="true" />
+                ) : (
+                  <TrendingUp size={15} aria-hidden="true" />
+                )}
                 {formatCents(performance.currentMonth.netIncomeCents)}
               </dd>
             </div>
           </dl>
+          <div className="mt-3">
+            <ProportionBar
+              segments={[
+                { label: 'Revenue', valueCents: performance.currentMonth.revenueCents, color: 'var(--good)' },
+                { label: 'Expenses', valueCents: performance.currentMonth.expenseCents, color: 'var(--bad)' },
+              ]}
+              currency={currency}
+            />
+          </div>
         </div>
       </div>
 

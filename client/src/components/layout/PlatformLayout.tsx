@@ -4,9 +4,11 @@ import { useOrg } from '../../context/OrgContext';
 import OrgSwitcher from './OrgSwitcher';
 
 /**
- * Suite-level chrome: shown on every authenticated page, above whichever app
- * (or the app chooser) renders into the outlet below. Per-app chrome — the
- * app's own name and back-to-suite link — is AppShell, one layer further in.
+ * Suite-level chrome: shown only on the app chooser ("/") and the account
+ * page ("/account"). An app under /app/:appSlug is a sibling route, not a
+ * child of this layout — it does not render inside this header at all.
+ * Per-app chrome — a small AutoLedger mark, the app's own name, and the org/
+ * user controls — is AppFrame + AppTopBar, mounted separately.
  */
 export default function PlatformLayout() {
   const auth = useAuth();

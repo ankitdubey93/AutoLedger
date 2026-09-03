@@ -167,6 +167,8 @@ LedgerCore has a front door. A user who registers and picks LedgerCore for the f
 
 **Known gaps, deliberate:** the dashboard's `position` is not the Phase 4 balance sheet — `equationHolds` checks `assets = liabilities + equity + currentEarningsCents` rather than exposing a true balance sheet, because current-period earnings have to be folded in by hand until Phase 4's live statements land. The cash tile is `null` until an organization configures a cash account; nothing infers one by account code. Base currency can only ever be locked, never unlocked — there is no path back to "no postings yet."
 
+**UX revision, 2026-09-03:** the suite header no longer wraps an app; `AppShell` became `AppFrame` + `AppTopBar`, the LedgerCore sidebar became a grouped full-height rail, the dashboard's position figures became links into a client-side `?type=` trial-balance filter, and the trend chart gained a hover readout. **No phase renumbering; Phase 4 remains unstarted.** See [architecture.md § Current](architecture.md#current-verified-2026-09-03-after-the-ledgercore-shelldashboard-ux-revision) for the file-level delta.
+
 ---
 
 ## Phase renumbering — 2026-09-01

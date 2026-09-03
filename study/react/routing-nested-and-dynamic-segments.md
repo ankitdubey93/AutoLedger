@@ -4,7 +4,10 @@
 
 **Category:** React
 **Introduced by:** Phase 2 — the two-level chrome, `PlatformLayout` → `AppShell` → an app's own pages, plus the `/app/:appSlug` dynamic segment
+**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below
 **Verified against:** react-router-dom 7.18.3, React 19.2.8
+
+> **A note on the examples below:** the "Mechanism" walkthrough that follows describes the route tree **as Phase 2 built it** — `AppShell` nested as a *child* of `PlatformLayout`, so the suite header wrapped every app. That nesting relationship no longer holds: the 2026-09-03 revision made the per-app shell (renamed `AppFrame`) a **sibling** of `PlatformLayout`, not a child, precisely so the suite header stops rendering at all inside an app. The splat-resolution mechanics, the `<Navigate>` vs `navigate()` material, and the remount-by-`key` trick are all still accurate and still exercised in this codebase — only the parent/child relationship between the two named components changed. The new section below explains why that specific change had to be a routing change and not a CSS one.
 
 ---
 
@@ -149,6 +152,48 @@ Not routing per se, but load-bearing on the route tree: `PlatformLayout`'s `<mai
 
 React's reconciliation compares elements by type *and* key at each position in the tree. Changing a `key` doesn't update the existing component instance — it tells React this is a **different** element, so the old subtree unmounts (cleanup effects run, all component state is discarded) and a brand-new subtree mounts from scratch. Every page under `<Outlet/>` — the chooser, the account page, any app's pages — refetches cleanly on an org switch, with no code in any of those pages aware that a switch happened. This is deliberate cache invalidation by identity rather than a fetch layer having to know to clear itself; the routing tree's own reconciliation rules do the work.
 
+### Where chrome is mounted is a routing decision, not a CSS one
+
+Phase 2 nested the per-app shell *inside* the suite layout — `<Route element={<PlatformLayout />}>` wrapped `<Route path="/app/:appSlug" element={<AppShell />}>` as a child. That meant the suite header (brand, org switcher, sign out) was structurally guaranteed to render on every authenticated page, including every page inside every app, because `PlatformLayout` was an ancestor of all of them.
+
+The 2026-09-03 UX revision needed the opposite guarantee: inside an app, the suite header should not render **at all** — not be hidden, not be `display: none`'d, not conditionally skip its own JSX. The fix was to stop it from mounting in the first place, by moving `/app/:appSlug` out from under `PlatformLayout` and making it a **sibling** route instead:
+
+```tsx
+<Route element={<ProtectedRoute />}>
+  <Route element={<PlatformLayout />}>
+    <Route path="/" element={<AppChooserPage />} />
+    <Route path="/account" element={<AccountPage />} />
+  </Route>
+
+  {/* Sibling, not child: PlatformLayout is never an ancestor of this route. */}
+  <Route path="/app/:appSlug" element={<AppFrame />}>
+    <Route path="*" element={<ActiveAppRoutes />} />
+  </Route>
+</Route>
+```
+
+The alternative — keep the nesting, and have `PlatformLayout` conditionally render its header based on `useMatch('/app/:appSlug/*')` or similar — was rejected, and the reason is the mechanism itself: a layout route that's an ancestor **always executes**, whether or not its JSX is visually suppressed. `PlatformLayout` would still run its own hooks (`useAuth`, `useOrg`, the org-switch subscription) on every app page even if its returned markup were conditionally empty. That's hidden coupling — a component doing work for a case that visually doesn't need it — and it's exactly the kind of bug this codebase's own bug history warns about (see the relative-path notes above): logic that's *supposed* to be scoped to one part of the tree but is actually reachable from everywhere, because nothing in the route structure enforces the boundary.
+
+Making it a routing decision instead of a rendering one has a consequence worth calling out explicitly: **anything the removed ancestor was doing has to move to whatever replaces it.** `PlatformLayout`'s `<main>` carried a remount `key={organization?.id}-${orgVersion}` (see the section above) that invalidates every page's fetched data on an org switch. Once `AppFrame` is no longer a descendant of `PlatformLayout`, it does not inherit that remount behavior for free — `AppFrame` has to declare the identical key on its own `<main>`. Nothing type-checks this; nothing tests it directly in this codebase. It is exactly the class of behavior a code reviewer has to know to look for when a layout route is restructured — reviewing "does the new tree render the right pixels" catches the visible bug, but reviewing "what did the old ancestor do that the new sibling now has to do itself" catches the invisible one (here: an organization switch silently failing to reset LedgerCore's onboarding-gate state).
+
+### `useSearchParams`: filter state that survives a link, a reload, and the back button
+
+`useSearchParams()` returns a `[URLSearchParams, setSearchParams]` pair, and it is best understood as `useState` whose backing store is `location.search` instead of a component-local variable:
+
+```tsx
+const [params, setParams] = useSearchParams();
+const activeType = params.get('type');     // read
+setParams({ type: 'Asset' }, { replace: true });  // write — pushes or replaces a history entry
+```
+
+Every read comes from parsing the current URL's query string; every write goes through the router's navigation, which by default **pushes** a new history entry (so Back un-filters) — `{ replace: true }` swaps the current entry instead, which is what a "Clear filter" button uses so clearing doesn't add its own Back-button stop.
+
+This project reaches for it on the trial balance's `?type=` filter specifically *because* the dashboard needs to **link into** a filtered view — `MetricTile`'s Assets tile is `<Link to={`${base}/trial-balance?type=Asset`}>`. A `useState`-held filter is unaddressable: nothing outside the component holding that state can express "open this page already filtered to Assets" without either lifting the state up past where it naturally belongs or duplicating the filtering logic at the link's call site. Putting the filter in the URL makes it addressable by construction — any `<Link>`, anywhere, including one the dashboard renders on a completely different page, can set it just by building the right href.
+
+The read side is deliberately defensive rather than trusting: `readTypeParam` in `TrialBalancePage.tsx` whitelists against the five real account types (`Asset`, `Liability`, `Equity`, `Revenue`, `Expense` — CLAUDE.md rule 12) and returns `null` — meaning "no filter" — for anything else, including a value a user typed into the address bar by hand (`?type=Bogus`). This mirrors the same lesson `useParams` teaches elsewhere in this note: a value that arrived through the URL is untrusted input, whether it came from a dynamic segment or a query string, and the type system cannot validate it for you — only a runtime check against a known-good set can.
+
+One more consequence worth naming: this filter changed what "Totals" means without changing the number. The trial balance's footer sums are computed **unfiltered**, even while `?type=Asset` is narrowing which rows the table shows — because the footer's job is proving the books balance, and a total restricted to one account type would not be that proof. Rather than silently show a technically-true-but-misleading subtotal, the label switches to "Totals — all accounts" whenever a filter is active. The URL-driven filter is UI-only; it was never allowed to touch what the number itself means.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -160,14 +205,16 @@ React's reconciliation compares elements by type *and* key at each position in t
 
 ## Where it lives in this codebase
 
-- `client/src/App.tsx` — the full route tree; the `/app/:appSlug` dynamic segment and its comment about where a future `/*` splat lands
-- `client/src/components/layout/PlatformLayout.tsx` — the outer layout route; the remount-by-`key` `<main>`
-- `client/src/components/layout/AppShell.tsx` — the inner layout route; resolves `:appSlug` and redirects on `not-found`/`planned` via `<Navigate replace>`
+- `client/src/App.tsx` — the full route tree; `/app/:appSlug` as a **sibling** of `PlatformLayout` under `ProtectedRoute` (since the 2026-09-03 revision), not a child
+- `client/src/components/layout/PlatformLayout.tsx` — the suite layout route, now scoped to `/` and `/account` only
+- `client/src/components/layout/AppFrame.tsx` — the per-app layout route (renamed from `AppShell.tsx`); resolves `:appSlug`, redirects on `not-found`/`planned` via `<Navigate replace>`, and owns the org-switch remount `key` on its `<main>`
+- `client/src/components/layout/AppTopBar.tsx` — the small `AutoLedger` mark-and-link plus the org/user controls that replaced the suite header inside an app
 - `client/src/apps/useActiveApp.ts` — `useParams` usage and the validation against the real registry
 - `client/src/apps/useAppBasePath.ts` — the absolute `/app/<slug>` prefix every in-app link and redirect is built from, and why: a relative `to` resolves against the deepest path-contributing match's full `pathname`, which is the whole current URL once that match is a splat
 - `client/src/components/ProtectedRoute.tsx` — the earliest layout route in the tree, from Phase 1
 - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
 - `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` — every `NavLink` built from `useAppBasePath()` rather than a bare relative suffix
+- `client/src/Pages/ledger-core/TrialBalancePage.tsx` — `useSearchParams`, `readTypeParam`'s whitelist, and the unfiltered-totals rule
 
 ## Gotchas
 
@@ -178,6 +225,8 @@ React's reconciliation compares elements by type *and* key at each position in t
 - **`replace` matters more than it looks like it does.** Every redirect in a guard component (`ProtectedRoute`, `AppShell`) uses it; omitting it on just one of them reintroduces a specific back-button loop that's easy to miss in manual testing because it only shows up when you press Back, not on the redirect itself.
 - **`to=""` and `to="."` are not no-ops — they resolve to the current pathname.** A catch-all `<Route path="*" element={<Navigate to="" replace />} />` nested inside a descendant `<Routes>` mounted under a splat is an infinite redirect loop: it navigates to exactly where it already is, which re-matches the same catch-all, which navigates again. This isn't hypothetical — it's what `AppPages`'s catch-all did before the fix, and it hung a Vitest worker until Node ran out of heap (`FATAL ERROR: Ineffective mark-compacts near heap limit`) rather than failing an assertion. A hanging test that OOMs, not a red assertion, is the signature of this specific bug class.
 - **A relative link is only correct as deep as the tree stays shallow.** `to="../journals"` from a dashboard page and `to="journals"` from a sidebar can both be "correct" today purely by accident of how many path-contributing routes sit above them, and both silently start resolving somewhere else the moment a route is added or removed between them and the root. There's no lint rule that catches this — it has to be reasoned about explicitly, or avoided with an absolute path built from a route param.
+- **Moving a route out from under a layout route silently drops whatever that ancestor was doing.** `AppFrame`'s org-switch remount `key` had to be copied over by hand when `/app/:appSlug` stopped being a child of `PlatformLayout` — nothing enforces that an equivalent replaces an ancestor's behavior once the ancestor is gone. Audit for this specifically whenever a route moves in the tree, not just whether the new position renders correctly.
+- **A query-string filter is untrusted input, exactly like a route param.** `?type=` on the trial balance whitelists against the known account types rather than casting whatever string shows up; an unrecognised value degrades to "no filter" instead of throwing or trusting it. The same discipline `useParams` needs applies to every value that arrives via the URL, dynamic segment or query string alike.
 
 ## Interview Q&A
 
@@ -210,6 +259,12 @@ A: It works exactly as long as the deepest path-contributing match above the lin
 
 **Q: What are the trade-offs of absolute paths built from a route param versus relative links?**
 A: An absolute path needs one extra piece of information — here, a `useAppBasePath()` hook that reads `:appSlug` and returns `/app/<slug>` — and it couples every consumer to knowing the platform's URL shape, even if only through that one hook. What it buys back is that resolution no longer depends on how deep in the route tree the link happens to sit: the target is the same string regardless of whether it's read from a sidebar three layers down or a page two layers up. Relative links need no such coupling and read naturally in isolation, but they're depth-fragile — their meaning is implicitly defined by the surrounding route tree, and that meaning silently changes if the tree changes, which is exactly the bug this project shipped and had to fix.
+
+**Q: You need to make sure a piece of shared chrome — a header, say — never renders on a subset of pages. Would you conditionally render it, or restructure the routes?**
+A: Restructure the routes, if the ancestor relationship is what's actually causing the chrome to be reachable there. A layout route that's an ancestor of a page always mounts and runs its own hooks for that page, even if you make its returned JSX conditionally empty — so `useMatch`-and-hide still pays the cost of every effect and subscription that layout owns, just with nothing to show for it. I did exactly this on AutoLedger: the suite header used to be an ancestor of every app page, and hiding it conditionally would still run its org-switch subscription on every app route for no visible benefit. Moving the app routes to be a *sibling* of that layout instead of a *child* means the header genuinely never mounts inside an app — not hidden, absent. The trade is that anything the old ancestor was doing for its descendants — in my case, a remount key that invalidated cached data on an org switch — has to be explicitly re-declared on whatever replaces it, because it's no longer inherited for free.
+
+**Q: Why put filter state in the URL instead of `useState`?**
+A: Because the filter needs to be *linkable* from somewhere other than the component that applies it. On AutoLedger's dashboard, a summary tile links directly into a trial-balance report pre-filtered to one account type — `<Link to="/trial-balance?type=Asset">`. If the filter lived in `useState` on the trial balance page, there'd be no way to express "open this page already filtered" from outside that component without lifting state up past its natural owner. `useSearchParams` is really `useState` backed by `location.search` instead of a local variable, so reading it is `params.get('type')` and writing it pushes (or, with `{ replace: true }`, replaces) a history entry — which is also what makes the filter survive a reload and interact correctly with the back button, for free, which local component state never would.
 
 ## Follow-ups they'll dig into
 
