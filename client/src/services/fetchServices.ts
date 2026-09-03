@@ -282,8 +282,13 @@ export interface JournalEntry {
   sourceType: string;
   sourceId: string | null;
   reversesEntryId: string | null;
+  reversedByEntryId: string | null;
   createdBy: string;
+  createdByName: string | null;
+  createdByEmail: string | null;
   createdAt: string;
+  totalDebitCents: number;
+  totalCreditCents: number;
   lines: LedgerLine[];
 }
 
@@ -315,9 +320,82 @@ export function listAccountTree(signal?: AbortSignal): Promise<{
   return apiFetch('/ledger-core/accounts?tree=true', { signal: signal ?? null });
 }
 
-/** GET /ledger-core/journals — paginated, lines nested. */
+/** Mirrors server/src/types/ledger-core.ts's AccountLedgerRow. */
+export interface AccountLedgerRow {
+  lineId: string;
+  entryId: string;
+  entryDate: string;
+  description: string | null;
+  sourceType: string;
+  sourceId: string | null;
+  reversesEntryId: string | null;
+  createdAt: string;
+  debitCents: number;
+  creditCents: number;
+  runningBalanceCents: number;
+  counterparts: string[];
+}
+
+/** Mirrors server/src/types/ledger-core.ts's AccountLedger. */
+export interface AccountLedger {
+  account: { id: string; code: string; name: string; type: AccountType };
+  from: string | null;
+  to: string | null;
+  openingBalanceCents: number;
+  periodDebitCents: number;
+  periodCreditCents: number;
+  closingBalanceCents: number;
+  rows: AccountLedgerRow[];
+  totalCount: number;
+}
+
+/** GET /ledger-core/accounts/:id/ledger — running balances computed server-side. */
+export function getAccountLedger(
+  accountId: string,
+  params: { from?: string; to?: string; page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<
+  { success: boolean; count: number; currentPage: number; totalPages: number } & AccountLedger
+> {
+  const query = new URLSearchParams();
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/accounts/${accountId}/ledger${suffix}`, { signal: signal ?? null });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's AccountBalance. */
+export interface AccountBalance {
+  accountId: string;
+  ownBalanceCents: number;
+  rollupBalanceCents: number;
+}
+
+/** GET /ledger-core/accounts/balances — own and subtree-rollup balance per account. */
+export function getAccountBalances(
+  asOf?: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; asOf: string | null; count: number; balances: AccountBalance[] }> {
+  const suffix = asOf === undefined || asOf === '' ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  return apiFetch(`/ledger-core/accounts/balances${suffix}`, { signal: signal ?? null });
+}
+
+export interface JournalFilters {
+  page?: number;
+  limit?: number;
+  from?: string;
+  to?: string;
+  accountId?: string;
+  sourceType?: string;
+  q?: string;
+}
+
+/** GET /ledger-core/journals — paginated, filterable, lines nested. */
 export function listJournals(
-  params: { page?: number; limit?: number } = {},
+  params: JournalFilters = {},
   signal?: AbortSignal,
 ): Promise<{
   success: boolean;
@@ -328,11 +406,25 @@ export function listJournals(
   entries: JournalEntry[];
 }> {
   const query = new URLSearchParams();
+  // An empty filter box must send no parameter at all, not `?q=`.
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.accountId !== undefined && params.accountId !== '') query.set('accountId', params.accountId);
+  if (params.sourceType !== undefined && params.sourceType !== '') query.set('sourceType', params.sourceType);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/ledger-core/journals${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/journals/:id — one entry with its lines and full detail. */
+export function getJournal(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; entry: JournalEntry }> {
+  return apiFetch(`/ledger-core/journals/${id}`, { signal: signal ?? null });
 }
 
 export interface JournalLineInput {

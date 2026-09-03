@@ -7,7 +7,7 @@ import {
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
-import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../config/constants.js';
+import { optionalIsoDate, optionalText, optionalUuid, readPagination } from '../../utils/queryParam.js';
 
 /**
  * Thin adapters over journalService. Zero SQL (guardrails rule 2).
@@ -16,25 +16,20 @@ import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../config/constants.js';
  * posted entry is immutable and corrections go through `reverse` (rule 6).
  */
 
-/** Clamps pagination input; a caller asking for 10,000 rows gets MAX_PAGE_SIZE. */
-function readPagination(query: unknown): { page: number; limit: number } {
-  const params = query as Record<string, unknown>;
-  const rawPage = Number(params.page ?? DEFAULT_PAGE_SIZE);
-  const rawLimit = Number(params.limit ?? DEFAULT_PAGE_SIZE);
-
-  const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
-  const limit =
-    Number.isInteger(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
-
-  return { page, limit };
-}
-
 /** GET /ledger-core/journals */
 export const list: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const { page, limit } = readPagination(req.query);
 
-  const { entries, totalCount } = await journalService.listEntries(user.orgId, { page, limit });
+  const { entries, totalCount } = await journalService.listEntries(user.orgId, {
+    page,
+    limit,
+    from: optionalIsoDate(req, 'from'),
+    to: optionalIsoDate(req, 'to'),
+    accountId: optionalUuid(req, 'accountId'),
+    sourceType: optionalText(req, 'sourceType', 50),
+    q: optionalText(req, 'q', 200),
+  });
 
   res.json({
     success: true,

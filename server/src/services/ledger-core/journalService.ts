@@ -57,6 +57,9 @@ interface EntryRow {
   source_id: string | null;
   reverses_entry_id: string | null;
   created_by: string;
+  created_by_name: string | null;
+  created_by_email: string | null;
+  reversed_by_entry_id: string | null;
   created_at: Date;
 }
 
@@ -74,8 +77,33 @@ interface LineRow {
   base_credit_cents: string;
 }
 
-const ENTRY_COLUMNS = `id, entry_date, description, source_type, source_id,
-                       reverses_entry_id, created_by, created_at`;
+/**
+ * The base entry read, as a `FROM`-clause fragment rather than a plain column
+ * list — the register needs the posting user's name and whether the entry has
+ * been reversed, both of which live on other rows.
+ *
+ * Both joins are `LEFT`: a missing user must not drop the entry, and most
+ * entries have no reversal. `r` (a possible reversal of `e`) carries
+ * `r.org_id = e.org_id` in its own join condition, not only in the outer
+ * `WHERE` — the same discipline `reportService`'s LEFT JOIN uses, and required
+ * for the same reason: dropping it from the join condition of a LEFT JOIN
+ * would silently turn it into an INNER JOIN and drop every un-reversed entry.
+ * The unique index on `reverses_entry_id` (migration 004) guarantees at most
+ * one match, so this cannot fan the result out. `users` is a platform table,
+ * not another app's table, and `created_by` stays an audit field only — never
+ * an access check (guardrails rules 1 and 16).
+ */
+const ENTRY_SELECT = `SELECT e.id, e.entry_date, e.description, e.source_type, e.source_id,
+                             e.reverses_entry_id, e.created_by, e.created_at,
+                             u.name  AS created_by_name,
+                             u.email AS created_by_email,
+                             r.id    AS reversed_by_entry_id
+                        FROM journal_entries e
+                        LEFT JOIN users u
+                               ON u.id = e.created_by
+                        LEFT JOIN journal_entries r
+                               ON r.reverses_entry_id = e.id
+                              AND r.org_id = e.org_id`;
 
 function toLine(row: LineRow): LedgerLine {
   return {
@@ -95,6 +123,11 @@ function toLine(row: LineRow): LedgerLine {
 }
 
 function toEntry(row: EntryRow, lines: LedgerLine[]): JournalEntry {
+  // Integer addition over values parseCents already validated — never a float,
+  // never Math.round (guardrails rule 3).
+  const totalDebitCents = lines.reduce((sum, line) => sum + line.debitCents, 0);
+  const totalCreditCents = lines.reduce((sum, line) => sum + line.creditCents, 0);
+
   return {
     id: row.id,
     // Already 'YYYY-MM-DD' — a DATE is a calendar date, never an instant, and
@@ -104,8 +137,13 @@ function toEntry(row: EntryRow, lines: LedgerLine[]): JournalEntry {
     sourceType: row.source_type,
     sourceId: row.source_id,
     reversesEntryId: row.reverses_entry_id,
+    reversedByEntryId: row.reversed_by_entry_id,
     createdBy: row.created_by,
+    createdByName: row.created_by_name,
+    createdByEmail: row.created_by_email,
     createdAt: row.created_at.toISOString(),
+    totalDebitCents,
+    totalCreditCents,
     lines,
   };
 }
@@ -144,7 +182,7 @@ async function loadLines(
 
 export async function getEntryById(orgId: string, id: string): Promise<JournalEntry> {
   const { rows } = await pool.query<EntryRow>(
-    `SELECT ${ENTRY_COLUMNS} FROM journal_entries WHERE id = $1 AND org_id = $2`,
+    `${ENTRY_SELECT} WHERE e.id = $1 AND e.org_id = $2`,
     [id, orgId],
   );
 
@@ -156,25 +194,78 @@ export async function getEntryById(orgId: string, id: string): Promise<JournalEn
   return toEntry(row, lines.get(row.id) ?? []);
 }
 
+export interface ListEntriesOptions {
+  page: number;
+  limit: number;
+  /** Inclusive `entry_date` lower bound, 'YYYY-MM-DD'. */
+  from: string | null;
+  /** Inclusive `entry_date` upper bound, 'YYYY-MM-DD'. */
+  to: string | null;
+  /** Only entries touching this account on at least one line. */
+  accountId: string | null;
+  sourceType: string | null;
+  /** Case-insensitive substring match on `description`. */
+  q: string | null;
+}
+
+/**
+ * Builds one shared `WHERE` predicate for both the count and the page query.
+ *
+ * Sharing this between the two is what keeps `totalCount` honest under a
+ * filter — building the count from a different predicate string than the page
+ * is how the two silently disagree. Only `$n` placeholders are ever inserted
+ * into a fragment, never a caller's value (guardrails rule 4).
+ */
+function buildFilters(
+  orgId: string,
+  options: ListEntriesOptions,
+): { where: string; values: unknown[] } {
+  const clauses = ['e.org_id = $1'];
+  const values: unknown[] = [orgId];
+
+  function add(fragment: (placeholder: string) => string, value: unknown): void {
+    values.push(value);
+    clauses.push(fragment(`$${String(values.length)}`));
+  }
+
+  if (options.from !== null) add((p) => `e.entry_date >= ${p}::date`, options.from);
+  if (options.to !== null) add((p) => `e.entry_date <= ${p}::date`, options.to);
+  if (options.sourceType !== null) add((p) => `e.source_type = ${p}`, options.sourceType);
+  if (options.q !== null) add((p) => `e.description ILIKE '%' || ${p} || '%'`, options.q);
+  if (options.accountId !== null)
+    add(
+      (p) => `EXISTS (SELECT 1 FROM ledger_lines l
+                       WHERE l.journal_entry_id = e.id
+                         AND l.org_id = e.org_id
+                         AND l.account_id = ${p}::uuid)`,
+      options.accountId,
+    );
+
+  return { where: clauses.join(' AND '), values };
+}
+
 export async function listEntries(
   orgId: string,
-  options: { page: number; limit: number },
+  options: ListEntriesOptions,
 ): Promise<{ entries: JournalEntry[]; totalCount: number }> {
   const offset = (options.page - 1) * options.limit;
+  const { where, values } = buildFilters(orgId, options);
 
   const { rows: countRows } = await pool.query<{ total: string }>(
-    'SELECT count(*) AS total FROM journal_entries WHERE org_id = $1',
-    [orgId],
+    `SELECT count(*) AS total FROM journal_entries e WHERE ${where}`,
+    values,
   );
   const totalCount = Number(countRows[0]?.total ?? '0');
 
+  // `e.id DESC` is a required tiebreaker, not decoration: two entries sharing
+  // an entry_date and created_at could otherwise swap between pages and be
+  // shown twice or not at all.
   const { rows } = await pool.query<EntryRow>(
-    `SELECT ${ENTRY_COLUMNS}
-       FROM journal_entries
-      WHERE org_id = $1
-      ORDER BY entry_date DESC, created_at DESC
-      LIMIT $2 OFFSET $3`,
-    [orgId, options.limit, offset],
+    `${ENTRY_SELECT}
+      WHERE ${where}
+      ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC
+      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
+    [...values, options.limit, offset],
   );
 
   // Two queries for any number of entries, not one per entry.

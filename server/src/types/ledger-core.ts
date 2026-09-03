@@ -89,8 +89,20 @@ export interface JournalEntry {
   sourceId: string | null;
   /** Set on a reversing entry, pointing at the entry it reverses. */
   reversesEntryId: string | null;
+  /** Set on an original entry once a reversal has been posted against it. The
+   *  inverse of `reversesEntryId`; `null` while the entry stands uncorrected. */
+  reversedByEntryId: string | null;
   createdBy: string;
+  /** Denormalised for display only. `null` if the user row is gone — the
+   *  `created_by` FK is ON DELETE RESTRICT, so in practice it never is. */
+  createdByName: string | null;
+  createdByEmail: string | null;
   createdAt: string;
+  /** Summed in TypeScript from `lines`, in integer cents. Equal by the
+   *  invariant — both are exposed so the register can show one and the
+   *  detail page can prove the pair. */
+  totalDebitCents: number;
+  totalCreditCents: number;
   lines: LedgerLine[];
 }
 
@@ -112,6 +124,54 @@ export interface TrialBalance {
   totalCreditCents: number;
   /** Integer equality. An epsilon here would be guardrails rule 3 violated. */
   isBalanced: boolean;
+}
+
+/* ------------------------------------------------- Phase 3.6 — account ledger */
+
+export interface AccountLedgerRow {
+  lineId: string;
+  entryId: string;
+  entryDate: string;
+  description: string | null;
+  sourceType: string;
+  sourceId: string | null;
+  reversesEntryId: string | null;
+  createdAt: string;
+  /** Raw and non-negative, as stored. Exactly one of the two is > 0. */
+  debitCents: number;
+  creditCents: number;
+  /** Type-aware, cumulative, including `openingBalanceCents`. */
+  runningBalanceCents: number;
+  /** The other accounts on the same entry — the "split", as `"6120 Software & IT Infrastructure"`. */
+  counterparts: string[];
+}
+
+export interface AccountLedger {
+  account: {
+    id: string;
+    code: string;
+    name: string;
+    type: AccountType;
+  };
+  from: string | null;
+  to: string | null;
+  /** Balance strictly before `from`. `0` when `from` is null. Type-aware. */
+  openingBalanceCents: number;
+  /** Raw sums over the rows in the window. */
+  periodDebitCents: number;
+  periodCreditCents: number;
+  /** opening ± the period movement, type-aware. Integer arithmetic only. */
+  closingBalanceCents: number;
+  rows: AccountLedgerRow[];
+  totalCount: number;
+}
+
+export interface AccountBalance {
+  accountId: string;
+  /** This account's own postings only. Type-aware. `0` for a header account. */
+  ownBalanceCents: number;
+  /** This account plus its whole subtree. Equal to `ownBalanceCents` for a leaf. Type-aware. */
+  rollupBalanceCents: number;
 }
 
 /* ---------------------------------------------------------- Phase 3.5 — settings */

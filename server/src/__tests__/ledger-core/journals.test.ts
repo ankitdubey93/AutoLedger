@@ -276,6 +276,179 @@ describe('listing and pagination', () => {
   });
 });
 
+describe('entry detail fields', () => {
+  it('a posted entry carries its author', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    expect(res.body.entry.createdByName).toBe('alice');
+    expect(res.body.entry.createdByEmail).toBe(userA.email);
+  });
+
+  it('totals are the summed lines', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    expect(res.body.entry.totalDebitCents).toBe(45000);
+    expect(res.body.entry.totalCreditCents).toBe(45000);
+  });
+
+  it('an uncorrected entry has no reversal pointer', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    expect(res.body.entry.reversedByEntryId).toBeNull();
+  });
+
+  it('reversing sets the pointer both ways', async () => {
+    const agent = await loginAgent(app, userA);
+    const created = await agent.post(JOURNALS).send(await awsBill(orgA));
+    const originalId: string = created.body.entry.id;
+
+    const reversal = await agent.post(`${JOURNALS}/${originalId}/reverse`).send({});
+
+    const original = await agent.get(`${JOURNALS}/${originalId}`);
+    expect(original.body.entry.reversedByEntryId).toBe(reversal.body.entry.id);
+    expect(reversal.body.entry.reversesEntryId).toBe(originalId);
+  });
+});
+
+describe('register filters', () => {
+  it('?from= excludes earlier entries', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post(JOURNALS).send({
+      entryDate: '2026-07-01',
+      description: 'July entry',
+      lines: [
+        { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
+        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+      ],
+    });
+    await agent.post(JOURNALS).send(await awsBill(orgA)); // dated 2026-08-15
+
+    const res = await agent.get(JOURNALS).query({ from: '2026-08-01' });
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.entries[0].entryDate).toBe('2026-08-15');
+  });
+
+  it('?to= excludes later entries', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post(JOURNALS).send({
+      entryDate: '2026-07-01',
+      description: 'July entry',
+      lines: [
+        { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
+        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+      ],
+    });
+    await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    const res = await agent.get(JOURNALS).query({ to: '2026-07-31' });
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.entries[0].entryDate).toBe('2026-07-01');
+  });
+
+  it('?accountId= returns only entries touching that account', async () => {
+    const agent = await loginAgent(app, userA);
+    const on6120 = await agent.post(JOURNALS).send(await awsBill(orgA));
+    await agent.post(JOURNALS).send({
+      entryDate: '2026-08-16',
+      description: 'Rent',
+      lines: [
+        { accountId: await accountId(orgA, '6110'), debitCents: 2000, creditCents: 0 },
+        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 2000 },
+      ],
+    });
+
+    const target = await accountId(orgA, '6120');
+    const res = await agent.get(JOURNALS).query({ accountId: target });
+
+    expect(res.body.totalCount).toBe(1);
+    expect(res.body.entries[0].id).toBe(on6120.body.entry.id);
+  });
+
+  it('?q= matches description case-insensitively', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post(JOURNALS).send(await awsBill(orgA)); // 'AWS August'
+
+    const res = await agent.get(JOURNALS).query({ q: 'aws' });
+
+    expect(res.body.totalCount).toBe(1);
+  });
+
+  it('?q= with no match returns an empty page', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    const res = await agent.get(JOURNALS).query({ q: 'zzzznomatch' });
+
+    expect(res.body.totalCount).toBe(0);
+    expect(res.body.entries).toHaveLength(0);
+    expect(res.body.totalPages).toBe(1);
+  });
+
+  it('totalCount reflects the filter, not the table', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post(JOURNALS).send({
+      entryDate: '2026-07-01',
+      description: 'July entry',
+      lines: [
+        { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
+        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+      ],
+    });
+    await agent.post(JOURNALS).send(await awsBill(orgA));
+
+    const res = await agent.get(JOURNALS).query({ from: '2026-08-01' });
+    expect(res.body.totalCount).toBe(1);
+  });
+
+  it('?from=15/08/2026 is rejected', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.get(JOURNALS).query({ from: '15/08/2026' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('from must be a date in YYYY-MM-DD format');
+  });
+
+  it('?accountId=not-a-uuid is rejected', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.get(JOURNALS).query({ accountId: 'not-a-uuid' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('accountId must be a UUID');
+  });
+
+  it('pagination is stable across pages', async () => {
+    const agent = await loginAgent(app, userA);
+    const posted = new Set<string>();
+    for (let i = 0; i < 5; i += 1) {
+      const res = await agent.post(JOURNALS).send({
+        entryDate: '2026-08-15',
+        description: `Entry ${String(i)}`,
+        lines: [
+          { accountId: await accountId(orgA, '6120'), debitCents: 100 + i, creditCents: 0 },
+          { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 100 + i },
+        ],
+      });
+      posted.add(res.body.entry.id as string);
+    }
+
+    const seen = new Set<string>();
+    for (const page of [1, 2, 3]) {
+      const res = await agent.get(JOURNALS).query({ limit: 2, page });
+      for (const entry of res.body.entries as { id: string }[]) {
+        seen.add(entry.id);
+      }
+    }
+
+    expect(seen.size).toBe(5);
+    expect(seen).toEqual(posted);
+  });
+});
+
 describe('cross-tenant isolation', () => {
   it("GET /journals/:id with org B's entry under org A's token returns 404", async () => {
     const agentC = await loginAgent(app, userC);
@@ -326,5 +499,31 @@ describe('cross-tenant isolation', () => {
 
     expect(forged.status).toBe(200);
     expect(forged.text).toBe(honest.text);
+  });
+
+  it("filtering by another org's account id leaks nothing", async () => {
+    const agentA = await loginAgent(app, userA);
+    await agentA.post(JOURNALS).send(await awsBill(orgA));
+    const orgAAccountId = await accountId(orgA, '6120');
+
+    const agentC = await loginAgent(app, userC);
+    const res = await agentC.get(JOURNALS).query({ accountId: orgAAccountId });
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(0);
+    expect(res.body.entries).toHaveLength(0);
+  });
+
+  it("a forged orgId query param is ignored, returning only the caller's entries", async () => {
+    const agentC = await loginAgent(app, userC);
+    await agentC.post(JOURNALS).send(await awsBill(orgB));
+
+    const agentA = await loginAgent(app, userA);
+    await agentA.post(JOURNALS).send(await awsBill(orgA));
+
+    const res = await agentA.get(JOURNALS).query({ orgId: orgB });
+
+    expect(res.status).toBe(200);
+    expect(res.body.totalCount).toBe(1);
   });
 });

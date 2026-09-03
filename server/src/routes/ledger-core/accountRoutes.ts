@@ -17,7 +17,11 @@ import { requireRole } from '../../middleware/rbac.js';
 const router = Router();
 
 router.get('/', authenticate, accountController.list);
+// Registered before /:id — otherwise Express would match "balances" as an
+// account id and this route would never run.
+router.get('/balances', authenticate, accountController.balances);
 router.get('/:id', authenticate, accountController.getOne);
+router.get('/:id/ledger', authenticate, accountController.ledger);
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), accountController.create);
 

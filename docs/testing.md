@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 191 server tests + 27 client tests.**
+**Current state: 280 server tests + 65 client tests** (as of Phase 3.6).
 
 Server, in `server/src/__tests__/`:
 

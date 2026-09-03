@@ -1,9 +1,11 @@
 import type { RequestHandler } from 'express';
 import * as accountService from '../../services/ledger-core/accountService.js';
+import * as accountLedgerService from '../../services/ledger-core/accountLedgerService.js';
 import { createAccountSchema, updateAccountSchema } from '../../schemas/ledger-core/accountSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
+import { optionalIsoDate, readPagination } from '../../utils/queryParam.js';
 
 /**
  * Thin adapters over accountService. Zero SQL (guardrails rule 2).
@@ -65,4 +67,33 @@ export const update: RequestHandler = async (req, res) => {
   const input = parseBody(updateAccountSchema, req.body);
   const account = await accountService.updateAccount(user.orgId, id, input);
   res.json({ success: true, account });
+};
+
+/** GET /ledger-core/accounts/balances?asOf=YYYY-MM-DD */
+export const balances: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const asOf = optionalIsoDate(req, 'asOf');
+  const rows = await accountLedgerService.accountBalances(user.orgId, asOf);
+  res.json({ success: true, asOf, count: rows.length, balances: rows });
+};
+
+/** GET /ledger-core/accounts/:id/ledger */
+export const ledger: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const { page, limit } = readPagination(req.query);
+
+  const result = await accountLedgerService.accountLedger(user.orgId, requireParam(req, 'id'), {
+    page,
+    limit,
+    from: optionalIsoDate(req, 'from'),
+    to: optionalIsoDate(req, 'to'),
+  });
+
+  res.json({
+    success: true,
+    ...result,
+    count: result.rows.length,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(result.totalCount / limit)),
+  });
 };

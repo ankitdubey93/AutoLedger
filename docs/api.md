@@ -184,9 +184,13 @@ Full feature spec and the remaining phases: [ledger-core.md](ledger-core.md).
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | any member | The org's chart, ordered by code. `?tree=true` nests by `parentId`; `?includeInactive=true` includes retired accounts |
+| GET | `/balances` | any member | Own and subtree-rollup balance for every account, including headers and inactive accounts. Optional `?asOf=YYYY-MM-DD` |
 | GET | `/:id` | any member | One account |
+| GET | `/:id/ledger` | any member | One postable account's ledger: opening balance, every line with a running balance, period totals, closing balance. `?from=`, `?to=`, `?page=`, `?limit=` |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create an account |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Rename, re-describe, retire, or re-parent |
+
+**`GET /balances`** (Phase 3.6) is registered before `/:id` so `balances` is never matched as an account id. `ownBalanceCents` is `0` for a header account, which has no postings of its own; `rollupBalanceCents` sums the whole subtree and equals `ownBalanceCents` for a leaf. Both are type-aware, matching the trial balance. Inactive accounts are included so a retired child's history stays in its parent's rollup. Failure paths: `400 asOf must be a date in YYYY-MM-DD format`.
 
 Reading the chart is open to any member because a `VIEWER` looking at a report needs to know what the codes mean; changing it is bookkeeping.
 
@@ -198,11 +202,13 @@ Failure paths: `409 Account code already exists` · `422 Parent account not foun
 
 Every new organization is seeded with the [44-account default chart](schema.md#default-chart-of-accounts) — 34 postable leaves and 10 header rollups.
 
+**`GET /:id/ledger`** (Phase 3.6) — the standard "account detail" view. Balances are type-aware, matching the trial balance's `netBalanceCents`: debit-positive for Asset and Expense, credit-positive otherwise. Rows are oldest-first; `runningBalanceCents` is a window function over the full filtered set, so it continues correctly across pages rather than restarting per page. Every figure is aggregated from raw `ledger_lines` on every request — no summary table. Header accounts are refused: `422 Account <code> is a header account and has no ledger of its own`. Other failure paths: `404 Account not found` · `400 <name> must be a date in YYYY-MM-DD format`.
+
 #### Journals — `/api/v1/ledger-core/journals`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | any member | Paginated entries with nested lines |
+| GET | `/` | any member | Paginated, filterable entries with nested lines — the journal register |
 | GET | `/:id` | any member | One entry with its lines |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Post a balanced entry (min 2 lines, debits == credits in integer cents) |
 | POST | `/:id/reverse` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Post the reversing entry for a posted journal |
@@ -211,7 +217,11 @@ Every new organization is seeded with the [44-account default chart](schema.md#d
 
 `sourceType` and `sourceId` are **not accepted from the request body**; a client-posted entry is always `'manual'`. Another app posting into the GL passes them service-to-service, so no caller can forge an entry claiming to have come from AP-Flow.
 
-Failure paths: `400` from the schema (fewer than two lines, a line with both sides set, a fractional amount) · `422 Entry is unbalanced: debits N, credits M` · `422 Account <code> is a header account and cannot be posted to` · `422 Account not found` · `409 Entry has already been reversed` · `422 A reversing entry cannot itself be reversed`.
+**`GET /` query parameters** (Phase 3.6), all optional: `page`, `limit` (caps at 100, same as every other list endpoint) · `from` / `to` — inclusive `entry_date` bounds, `YYYY-MM-DD` · `accountId` — only entries with at least one line on this account · `sourceType` — exact match · `q` — case-insensitive substring match on `description`. `totalCount` and `totalPages` reflect the applied filters, not the whole table.
+
+Every entry also carries `createdByName` / `createdByEmail` (the posting user, denormalised for display), `reversedByEntryId` (set on an original once it has been reversed — the inverse of `reversesEntryId`, `null` while uncorrected), and `totalDebitCents` / `totalCreditCents` (summed from `lines`).
+
+Failure paths: `400` from the schema (fewer than two lines, a line with both sides set, a fractional amount) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`) · `400 accountId must be a UUID` · `422 Entry is unbalanced: debits N, credits M` · `422 Account <code> is a header account and cannot be posted to` · `422 Account not found` · `409 Entry has already been reversed` · `422 A reversing entry cannot itself be reversed`.
 
 #### Reports — `/api/v1/ledger-core/reports`
 

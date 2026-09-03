@@ -171,6 +171,16 @@ LedgerCore has a front door. A user who registers and picks LedgerCore for the f
 
 ---
 
+## Phase 3.6, as delivered
+
+A second half-step, like 3.5. It slots between the delivered Phase 3.5 and the unstarted Phase 4, and changes no phase number anywhere in this document. **No migration** — the journal register, the account ledger, and the chart-wide balance rollup are all served by tables and indexes Phase 3 already built.
+
+**Landed:** `GET /ledger-core/journals` gains server-side filters (`from`/`to`/`accountId`/`sourceType`/`q`) with a shared count/page predicate builder and a stable pagination tiebreaker; each entry now carries the posting user's name/email, a `reversedByEntryId` pointer, and both totals. `GET /ledger-core/accounts/:id/ledger` — a postable account's opening balance, running-balance transaction history (a window function over the full filtered set, correct across pages), period totals, and closing balance; header accounts are refused with `422`. `GET /ledger-core/accounts/balances` — own and subtree-rollup balance per account via a descendant-walking recursive CTE. Client: the former single journal-entry page split into a register, a posting page, and a detail page; a new account-ledger page; balances and ledger links added to the chart of accounts. Full detail and acceptance criteria: [ledger-core.md § Phase 3.6](ledger-core.md#phase-36--journal-register--account-ledger).
+
+**Known gaps, deliberate:** no sequential entry number — the register shows the first 8 characters of the entry's uuid. A header account's balance rolls up but its transaction list does not; there is no rolled-up ledger view for a header. No CSV/PDF export.
+
+---
+
 ## Phase renumbering — 2026-09-01
 
 LedgerCore and AP-Flow were specified in full before Phase 3 started, and both turned out to be roughly three times the scope the table allotted them. Bank reconciliation, the confidence-matching engine, the integrity checker, DB-level balance triggers, sub-account hierarchies, financial webhooks, document storage, and PII redaction as shared infrastructure appeared nowhere in the previous table. Rather than let two phases silently swell, LedgerCore was given a contiguous block (3–9, with shared infrastructure landing where LedgerCore first needs it) and AP-Flow was split in two (10–11). Everything downstream shifted.

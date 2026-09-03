@@ -1,22 +1,22 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, RotateCcw, Trash2 } from 'lucide-react';
-import {
-  createJournal,
-  listAccounts,
-  listJournals,
-  reverseJournal,
-  type Account,
-  type JournalEntry,
-} from '../../services/fetchServices';
+import { useNavigate } from 'react-router-dom';
+import { Plus, Trash2 } from 'lucide-react';
+import { createJournal, listAccounts, type Account } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from './money';
+import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
- * Post a journal entry, and list what has been posted.
+ * Post a journal entry.
  *
  * The balance check here is integer-cent equality, exactly as on the server and
  * in the database trigger — three independent implementations of one rule, none
  * of them using a tolerance. The client's copy exists to disable the button, not
  * to be trusted: the server re-checks, and Postgres re-checks again at COMMIT.
+ *
+ * Split out of the former JournalEntryPage, which mixed posting with the list
+ * of posted entries — that list is now JournalsPage, a register with its own
+ * filters, and this page's only job after a successful post is to hand off to
+ * the new entry's detail page.
  */
 
 interface DraftLine {
@@ -37,35 +37,35 @@ function today(): string {
   return `${String(now.getFullYear())}-${month}-${day}`;
 }
 
-export default function JournalEntryPage() {
+export default function NewJournalEntryPage() {
+  const base = useAppBasePath();
+  const navigate = useNavigate();
+
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [entryDate, setEntryDate] = useState(today);
   const [description, setDescription] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }, { ...EMPTY_LINE }]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let ignore = false;
 
-    Promise.all([listAccounts(), listJournals({ limit: 20 })])
-      .then(([accountRes, journalRes]) => {
+    listAccounts()
+      .then((res) => {
         if (ignore) return;
         // Only postable accounts can receive a line — a header account is
         // rejected by a database trigger, so it should never be offered.
-        setAccounts(accountRes.accounts.filter((a) => a.isPostable));
-        setEntries(journalRes.entries);
+        setAccounts(res.accounts.filter((a) => a.isPostable));
       })
       .catch((err: unknown) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load the ledger');
+        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load accounts');
       });
 
     return () => {
       ignore = true;
     };
-  }, [reloadKey]);
+  }, []);
 
   const totals = useMemo(() => {
     let debits = 0;
@@ -107,7 +107,7 @@ export default function JournalEntryPage() {
     setError(null);
 
     try {
-      await createJournal({
+      const { entry } = await createJournal({
         entryDate,
         description: description.trim() === '' ? null : description.trim(),
         lines: lines.map((line) => ({
@@ -117,25 +117,9 @@ export default function JournalEntryPage() {
         })),
       });
 
-      setDescription('');
-      setLines([{ ...EMPTY_LINE }, { ...EMPTY_LINE }]);
-      setReloadKey((k) => k + 1);
+      navigate(`${base}/journals/${entry.id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not post the entry');
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleReverse(id: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await reverseJournal(id);
-      setReloadKey((k) => k + 1);
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not reverse the entry');
-    } finally {
       setBusy(false);
     }
   }
@@ -144,7 +128,7 @@ export default function JournalEntryPage() {
     'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
   return (
-    <section className="flex flex-col gap-8">
+    <section className="flex flex-col gap-4">
       <form onSubmit={handlePost} className="flex flex-col gap-4">
         <header>
           <h2 className="text-lg font-semibold m-0">Post a journal entry</h2>
@@ -287,69 +271,6 @@ export default function JournalEntryPage() {
 
         {error !== null && <p className="status status--bad">{error}</p>}
       </form>
-
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold m-0">Posted entries</h2>
-        <p className="text-sm text-[var(--muted)] m-0">
-          Append-only. A posted entry is never edited or deleted — a correction is a
-          reversing entry, linked back to the original.
-        </p>
-
-        {entries.length === 0 && <p className="muted">Nothing posted yet.</p>}
-
-        <ul className="list-none m-0 p-0 flex flex-col gap-3">
-          {entries.map((entry) => (
-            <li
-              key={entry.id}
-              className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3"
-            >
-              <div className="flex items-baseline justify-between gap-3 flex-wrap">
-                <div className="flex items-baseline gap-3">
-                  <span className="font-mono text-sm tabular-nums text-[var(--muted)]">
-                    {entry.entryDate}
-                  </span>
-                  <span className="text-sm">{entry.description ?? '—'}</span>
-                  {entry.reversesEntryId !== null && (
-                    <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">
-                      reversal
-                    </span>
-                  )}
-                </div>
-
-                {entry.reversesEntryId === null && (
-                  <button
-                    type="button"
-                    onClick={() => void handleReverse(entry.id)}
-                    disabled={busy}
-                    className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer p-0 disabled:opacity-40"
-                  >
-                    <RotateCcw size={14} /> Reverse
-                  </button>
-                )}
-              </div>
-
-              <table className="w-full border-collapse text-sm">
-                <tbody>
-                  {entry.lines.map((line) => (
-                    <tr key={line.id} className="border-t border-[var(--border)]">
-                      <td className="py-1.5 pr-3 font-mono text-xs text-[var(--muted)] w-12">
-                        {line.accountCode}
-                      </td>
-                      <td className="py-1.5 pr-3">{line.accountName}</td>
-                      <td className="py-1.5 text-right tabular-nums w-28">
-                        {line.debitCents > 0 ? formatCents(line.debitCents) : ''}
-                      </td>
-                      <td className="py-1.5 text-right tabular-nums w-28">
-                        {line.creditCents > 0 ? formatCents(line.creditCents) : ''}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </li>
-          ))}
-        </ul>
-      </section>
     </section>
   );
 }

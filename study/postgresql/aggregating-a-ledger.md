@@ -3,8 +3,8 @@
 > A financial dashboard is not a cache of numbers — it's a handful of `SUM`s over the same table, computed fresh on every request, using SQL's `FILTER` clause to get eight different totals from one pass instead of five separate queries.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`
-**Verified against:** PostgreSQL 16
+**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`. Extended in Phase 3.6 — the journal register's `journalService.listEntries`, which filters the same table by date range, account, source, and description text.
+**Verified against:** PostgreSQL 16.14
 
 ---
 
@@ -101,6 +101,48 @@ Every report in LedgerCore — trial balance, dashboard — computes its numbers
 
 The honest trade-off: this only stays free because the table stays small. A `SUM` with a `FILTER` over a few thousand rows, backed by the indexes on `(org_id, account_id)` and `(org_id, entry_date)`, runs in single-digit milliseconds. At real scale — millions of lines per organization — this exact query would need either a materialized view with an explicit, monitored refresh, or a rollup table maintained transactionally alongside every insert (which reintroduces the drift risk, now paid for deliberately rather than by accident). Nothing here forecloses that path; it just refuses to pay its complexity cost before the data volume that would justify it.
 
+### Composing an optional filter predicate safely
+
+The journal register (`GET /ledger-core/journals`) accepts up to five independent, all-optional filters — `from`, `to`, `accountId`, `sourceType`, `q` — and needs a `totalCount` that agrees with the page it returns. `journalService.buildFilters` builds one `{ where, values }` pair and hands it to **both** the `count(*)` query and the paginated `SELECT`:
+
+```ts
+function buildFilters(orgId: string, options: ListEntriesOptions) {
+  const clauses = ['e.org_id = $1'];
+  const values: unknown[] = [orgId];
+
+  function add(fragment: (placeholder: string) => string, value: unknown): void {
+    values.push(value);
+    clauses.push(fragment(`$${values.length}`));
+  }
+
+  if (options.from !== null) add((p) => `e.entry_date >= ${p}::date`, options.from);
+  // ...
+  return { where: clauses.join(' AND '), values };
+}
+```
+
+Two queries built from two independently-assembled predicate strings is a live bug waiting to happen: the moment one gains a clause the other doesn't, `totalCount` and the returned page silently disagree — a register that says "47 results" while rendering 12, or a `totalPages` that leaves the last page unreachable. Sharing one builder makes that class of bug structurally impossible rather than a discipline to remember.
+
+**Why `EXISTS`, not a `JOIN` plus `DISTINCT`, for "has a line on this account":**
+
+```sql
+-- Chosen: EXISTS
+WHERE e.org_id = $1
+  AND EXISTS (SELECT 1 FROM ledger_lines l
+              WHERE l.journal_entry_id = e.id AND l.org_id = e.org_id AND l.account_id = $2)
+
+-- Rejected: JOIN + DISTINCT
+SELECT DISTINCT e.* FROM journal_entries e
+JOIN ledger_lines l ON l.journal_entry_id = e.id AND l.org_id = e.org_id
+WHERE e.org_id = $1 AND l.account_id = $2
+```
+
+An entry with two lines on the same account (a rare but legal double-entry shape) makes the `JOIN` version return that entry's row twice, which `DISTINCT` then has to de-duplicate — an extra sort/hash step over the whole result. `EXISTS` is a **semi-join**: the planner stops at the first matching line per entry and never materializes a second copy of `e`, so there's nothing to de-duplicate and no `DISTINCT` needed anywhere in the query, including the `count(*)`.
+
+**Why `ILIKE '%' || $n || '%'` and not `ILIKE '%$n%'`:** the second form is not a bug that leaks the search term — it's not parameterized at all. `'%$n%'` inside a single-quoted SQL string literal is just the four characters `$`, `n`, wrapped in `%` wildcards; the driver never substitutes anything into the *middle* of a string literal, only where a bare `$n` placeholder stands alone. Building the wildcard by concatenating three separate SQL string operands — `'%'`, the parameter, `'%'` — keeps the parameter itself a genuine bound value, never text spliced into the query.
+
+**Why `ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC` and not just the first two:** `LIMIT`/`OFFSET` pagination is only stable if the `ORDER BY` produces a total order — every row strictly before every row on the next page, with no ties. `entry_date` and `created_at` (millisecond resolution) can genuinely tie for two entries posted in the same request burst; without a final tiebreaker on a column guaranteed unique (the primary key), Postgres is free to return those tied rows in either order on different executions of the same query, which means a row can appear on two pages, or on neither, as a caller pages through. Any unique column works as the last term — `id` is simply the one every table already has.
+
 ---
 
 ## Why we chose it here
@@ -112,6 +154,9 @@ The honest trade-off: this only stays free because the table stays small. A `SUM
 | **One query per report, `FILTER` per aggregate** | All the numbers computed together must share one `FROM`/`JOIN` shape | **Chosen** |
 | A cached `account_balances` / `dashboard_summary` table, refreshed on write | Reads become trivial lookups | Rejected — a second source of truth that can drift from `ledger_lines`, the exact class of bug this schema is designed to make impossible |
 | Build the 6-month scaffold in TypeScript, then query each month | No SQL gap-filling needed | Rejected — six round trips instead of one, and the "is this month in range" logic ends up duplicated between the app and the database |
+| Two separately-built `WHERE` strings, one for `count(*)`, one for the page | Each query reads slightly simpler in isolation | Rejected — the two are free to drift apart, which shows up as a `totalCount` that disagrees with the rows actually returned |
+| `JOIN ledger_lines` + `DISTINCT` for the account filter | Familiar shape | Rejected — an entry with two lines on the filtered account is returned twice by the join, requiring a de-dup sort `EXISTS` never needs |
+| `OFFSET/LIMIT` with `ORDER BY entry_date DESC, created_at DESC` only | One fewer column in the sort | Rejected — two entries can tie on both columns, and an untied final term is what makes paging past them stable |
 
 ---
 
@@ -119,7 +164,9 @@ The honest trade-off: this only stays free because the table stays small. A `SUM
 
 - `server/src/services/ledger-core/dashboardService.ts` — `loadPosition()` (the nine-`FILTER` scan), `loadTrend()` (the `generate_series` gap-fill), `loadCash()` (a `WITH RECURSIVE` subtree sum, see [recursive-ctes-and-hierarchies.md](recursive-ctes-and-hierarchies.md))
 - `server/src/services/ledger-core/reportService.ts` — `trialBalance()`'s `LEFT JOIN` with the `org_id` predicate correctly placed in the `ON` clause, and its own comment stating the no-summary-table rule
+- `server/src/services/ledger-core/journalService.ts` — `buildFilters()` (the shared predicate builder), `listEntries()` (the count query and the page query, both fed from it), the `EXISTS` account filter, and the `e.id DESC` pagination tiebreaker
 - `server/src/__tests__/ledger-core/dashboard.test.ts` — the trend test asserting all 6 months are present, including the 4 with no postings, and the fiscal-year-windowing test asserting `revenue_ytd` respects a non-January start
+- `server/src/__tests__/ledger-core/journals.test.ts` — `describe('register filters')`, including the `totalCount reflects the filter, not the table` case and the same-date pagination-stability case
 
 ---
 
@@ -130,6 +177,9 @@ The honest trade-off: this only stays free because the table stays small. A `SUM
 - **`generate_series` inclusive of both endpoints.** `generate_series($from, $to, INTERVAL '1 month')` returns a row for `$to` itself, which matters when computing "the last 6 months ending in the current month" — get the start-of-range arithmetic wrong by one and you get 5 or 7 rows, not 6.
 - **`FILTER` conditions still need every scope predicate.** It's easy to remember the account-type filter and forget that a *join* condition upstream (`org_id`) is what's actually protecting tenancy — `FILTER` restricts an aggregate's rows, it doesn't replace the join's own scoping.
 - **This whole approach assumes the table stays cheap to scan.** It is not a permanent architectural guarantee; it's a decision that holds at today's data volume and is explicitly documented as revisitable.
+- **A count query and a page query built from two different predicate strings will eventually disagree.** The fix is structural — one shared builder, called twice — not a discipline to remember on every future filter added.
+- **`LIMIT/OFFSET` needs a total order, not just "mostly sorted."** Any `ORDER BY` that can tie on two rows needs a unique column as its last term, or pagination silently drops or duplicates rows on the tied boundary.
+- **A wildcard built by string concatenation (`'%' || $n || '%'`) is still fully parameterized.** Don't confuse "the SQL text contains `%` characters" with "the value is unparameterized" — the placeholder is still a single bound value, just concatenated with literal wildcard characters at the database, not in application code.
 
 ---
 
@@ -149,6 +199,18 @@ A: You build the shape of the answer first — one row per month, week, or whate
 
 **Q: Why not maintain a summary table so these reports are instant lookups?**
 A: Because it's a second copy of a fact that already lives in `ledger_lines`, and a cache that can drift from its source is the exact bug class this schema is built to eliminate — the same reasoning behind never storing money as `DECIMAL` with an epsilon comparison. At today's data volume, a `SUM` with a `FILTER` over a few thousand rows, backed by the right indexes, runs in single-digit milliseconds, so there's no performance problem to solve yet. If the row count grew by orders of magnitude, the honest next step is a materialized view with an explicit, monitored refresh — not a column updated by hand on every write, which reintroduces the drift risk deliberately rather than by accident.
+
+**Q: You've built a paginated, filterable list endpoint with a `totalCount`. What's the most common way that number ends up wrong, and how do you prevent it structurally?**
+A: The most common cause is that the count query and the page query are built from two independently-maintained `WHERE` clauses — someone adds a filter to one and forgets the other, or the two drift apart over several small edits. The number then reports the whole table (or a different subset) while the rows shown reflect the filters actually applied. The structural fix is to build one predicate — the SQL fragment and its parameter array — once, in one function, and pass that same object to both queries. That makes "the two disagree" a state the code cannot represent, rather than a discipline to remember on every future filter.
+
+**Q: Why use `EXISTS` instead of a `JOIN` when filtering "entries that have a line on this account"?**
+A: `EXISTS` is a semi-join — for each candidate entry, Postgres stops as soon as it finds one matching line and never produces extra rows for additional matches. A plain `JOIN` against `ledger_lines` produces one output row per matching line, so an entry with two lines on the filtered account would appear twice, forcing a `DISTINCT` (and its sort or hash) to collapse the duplicates back down. `EXISTS` needs no `DISTINCT` anywhere in the query, including the `count(*)`, because it can never produce the duplicate in the first place.
+
+**Q: Is `ILIKE '%' || $1 || '%'` vulnerable to SQL injection the way string-interpolating a value into a query is?**
+A: No — `$1` there is still a genuine bound parameter; the driver sends it to Postgres separately from the query text and it's never re-parsed as SQL. The `||` operators are ordinary SQL string concatenation, evaluated *inside* the database, combining the literal `%` characters with whatever value the parameter holds. The unsafe version would be building the whole `LIKE` pattern as a JavaScript template string and substituting that into the query text — `` `ILIKE '%${term}%'` `` — which is exactly the interpolation rule 4 exists to forbid.
+
+**Q: Two rows share the same `entry_date` and the same `created_at` down to the millisecond. What actually happens if your `ORDER BY` doesn't include a unique tiebreaker, and why does it only bite under pagination?**
+A: Without a unique final term, Postgres is free to return those two tied rows in either relative order, and isn't obligated to return the same order on repeated executions of an otherwise-identical query — the standard makes no such guarantee, and the planner may pick a different physical access path run to run. A single unpaginated `SELECT` rarely surfaces this — a human skimming a full result set doesn't usually notice two rows swapped. Under `LIMIT/OFFSET` it becomes visible: if the tied pair straddles a page boundary, one execution's page 1 might include row A and exclude row B, and the next request for page 2 — a fresh query — might reorder them so that B appears on both pages while A appears on neither.
 
 **Q: Tell me about a time a predicate's placement changed a query's meaning, not just its performance.**
 A: Building the 6-month trend for LedgerCore's dashboard. My first draft put the date-window condition on `WHERE` because that's the reflex — filter the rows you want. It worked for months that had postings, but months with zero activity vanished from the output instead of appearing as a zero row, because the `LEFT JOIN` I'd written to guarantee all six months had its intent undone by a `WHERE` clause running after the join and rejecting the `NULL`-filled rows for months with no match. Moving the exact same condition into the join's `ON` clause fixed it with no other change — same predicate, different clause, structurally different query.

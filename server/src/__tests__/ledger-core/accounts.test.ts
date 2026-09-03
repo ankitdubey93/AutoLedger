@@ -339,3 +339,123 @@ describe('cross-tenant isolation', () => {
     expect(Number(rows[0]?.count)).toBe(SEEDED_TOTAL);
   });
 });
+
+describe('account balances', () => {
+  const BALANCES = `${BASE}/balances`;
+
+  interface BalanceRow {
+    accountId: string;
+    ownBalanceCents: number;
+    rollupBalanceCents: number;
+  }
+
+  function balanceFor(body: { balances: BalanceRow[] }, id: string): BalanceRow {
+    const found = body.balances.find((b) => b.accountId === id);
+    if (found === undefined) throw new Error(`no balance row for account ${id}`);
+    return found;
+  }
+
+  /** A $450.00 AWS bill: debit 6120 (Expense), credit 2100 (Liability). */
+  async function awsBill(orgId: string, entryDate = '2026-08-15') {
+    return {
+      entryDate,
+      description: 'AWS August',
+      lines: [
+        { accountId: await accountId(orgId, '6120'), debitCents: 45000, creditCents: 0 },
+        { accountId: await accountId(orgId, '2100'), debitCents: 0, creditCents: 45000 },
+      ],
+    };
+  }
+
+  it('returns a row for every account', async () => {
+    const agent = await loginAgent(app, userA);
+
+    const res = await agent.get(BALANCES);
+
+    expect(res.status).toBe(200);
+    expect(res.body.count).toBe(SEEDED_TOTAL);
+    expect(res.body.balances).toHaveLength(SEEDED_TOTAL);
+  });
+
+  it("a posted leaf carries its own balance, and its header rolls it up to the root", async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post('/api/v1/ledger-core/journals').send(await awsBill(orgA));
+
+    const res = await agent.get(BALANCES);
+
+    const leaf6120 = await accountId(orgA, '6120');
+    const header6000 = await accountId(orgA, '6000');
+    const untouched4000 = await accountId(orgA, '4000');
+
+    expect(balanceFor(res.body, leaf6120).ownBalanceCents).toBe(45000);
+    // A header account posts no lines of its own.
+    expect(balanceFor(res.body, header6000).ownBalanceCents).toBe(0);
+    expect(balanceFor(res.body, header6000).rollupBalanceCents).toBe(45000);
+    // A leaf's rollup equals its own balance.
+    expect(balanceFor(res.body, leaf6120).rollupBalanceCents).toBe(45000);
+    // An untouched branch is zero.
+    expect(balanceFor(res.body, untouched4000).rollupBalanceCents).toBe(0);
+  });
+
+  it('the root rolls the whole branch up, credit-positive for a Liability', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post('/api/v1/ledger-core/journals').send(await awsBill(orgA));
+
+    const res = await agent.get(BALANCES);
+
+    const root2000 = await accountId(orgA, '2000');
+    expect(balanceFor(res.body, root2000).rollupBalanceCents).toBe(45000);
+  });
+
+  it('?asOf= excludes later entries', async () => {
+    const agent = await loginAgent(app, userA);
+    await agent.post('/api/v1/ledger-core/journals').send(await awsBill(orgA, '2026-08-15'));
+
+    const res = await agent.get(BALANCES).query({ asOf: '2026-07-31' });
+
+    const leaf6120 = await accountId(orgA, '6120');
+    expect(balanceFor(res.body, leaf6120).ownBalanceCents).toBe(0);
+  });
+
+  it('?asOf=bad is rejected', async () => {
+    const agent = await loginAgent(app, userA);
+
+    const res = await agent.get(BALANCES).query({ asOf: 'bad' });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('asOf must be a date in YYYY-MM-DD format');
+  });
+
+  it('is not shadowed by the /:id route', async () => {
+    const agent = await loginAgent(app, userA);
+
+    const res = await agent.get(BALANCES);
+
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.balances)).toBe(true);
+  });
+
+  describe('cross-tenant isolation', () => {
+    it("org B's balances are all zero while org A has postings", async () => {
+      const agentA = await loginAgent(app, userA);
+      await agentA.post('/api/v1/ledger-core/journals').send(await awsBill(orgA));
+
+      const agentC = await loginAgent(app, userC);
+      const res = await agentC.get(BALANCES);
+
+      expect(res.body.balances.every((b: BalanceRow) => b.rollupBalanceCents === 0)).toBe(true);
+    });
+
+    it("org A's totals never include org B's postings", async () => {
+      const agentA = await loginAgent(app, userA);
+      await agentA.post('/api/v1/ledger-core/journals').send(await awsBill(orgA));
+
+      const agentC = await loginAgent(app, userC);
+      await agentC.post('/api/v1/ledger-core/journals').send(await awsBill(orgB));
+
+      const resA = await agentA.get(BALANCES);
+      const leaf6120InA = await accountId(orgA, '6120');
+      expect(balanceFor(resA.body, leaf6120InA).ownBalanceCents).toBe(45000);
+    });
+  });
+});

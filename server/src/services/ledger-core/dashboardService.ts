@@ -158,7 +158,15 @@ export async function dashboardSummary(orgId: string, asOf: string | null): Prom
     settings.cashAccountId === null ? Promise.resolve(null) : loadCash(orgId, settings.cashAccountId, on),
     loadIntegrity(orgId),
     loadTrend(orgId, trendFrom, month.startDate),
-    listEntries(orgId, { page: 1, limit: 5 }),
+    listEntries(orgId, {
+      page: 1,
+      limit: 5,
+      from: null,
+      to: null,
+      accountId: null,
+      sourceType: null,
+      q: null,
+    }),
   ]);
 
   const assetsCents = parseCents(position.assets);

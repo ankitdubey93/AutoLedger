@@ -3,7 +3,10 @@ import LedgerCoreSidebar from './LedgerCoreSidebar';
 import { LedgerSettingsProvider, useLedgerSettings } from './LedgerSettingsContext';
 import DashboardPage from './DashboardPage';
 import AccountsPage from './AccountsPage';
-import JournalEntryPage from './JournalEntryPage';
+import AccountLedgerPage from './AccountLedgerPage';
+import JournalsPage from './JournalsPage';
+import NewJournalEntryPage from './NewJournalEntryPage';
+import JournalDetailPage from './JournalDetailPage';
 import TrialBalancePage from './TrialBalancePage';
 import ReportsPage from './ReportsPage';
 import SettingsPage from './SettingsPage';
@@ -42,7 +45,10 @@ function AppPages() {
         <Routes>
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
-          <Route path="journals" element={<JournalEntryPage />} />
+          <Route path="accounts/:accountId" element={<AccountLedgerPage />} />
+          <Route path="journals" element={<JournalsPage />} />
+          <Route path="journals/new" element={<NewJournalEntryPage />} />
+          <Route path="journals/:entryId" element={<JournalDetailPage />} />
           <Route path="trial-balance" element={<TrialBalancePage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="settings" element={<SettingsPage />} />

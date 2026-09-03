@@ -4,7 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 2 — the two-level chrome, `PlatformLayout` → `AppShell` → an app's own pages, plus the `/app/:appSlug` dynamic segment
-**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below
+**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below; Phase 3.6 added a second dynamic segment one level deeper — see "The list / create / detail split" below
 **Verified against:** react-router-dom 7.18.3, React 19.2.8
 
 > **A note on the examples below:** the "Mechanism" walkthrough that follows describes the route tree **as Phase 2 built it** — `AppShell` nested as a *child* of `PlatformLayout`, so the suite header wrapped every app. That nesting relationship no longer holds: the 2026-09-03 revision made the per-app shell (renamed `AppFrame`) a **sibling** of `PlatformLayout`, not a child, precisely so the suite header stops rendering at all inside an app. The splat-resolution mechanics, the `<Navigate>` vs `navigate()` material, and the remount-by-`key` trick are all still accurate and still exercised in this codebase — only the parent/child relationship between the two named components changed. The new section below explains why that specific change had to be a routing change and not a CSS one.
@@ -194,6 +194,22 @@ The read side is deliberately defensive rather than trusting: `readTypeParam` in
 
 One more consequence worth naming: this filter changed what "Totals" means without changing the number. The trial balance's footer sums are computed **unfiltered**, even while `?type=Asset` is narrowing which rows the table shows — because the footer's job is proving the books balance, and a total restricted to one account type would not be that proof. Rather than silently show a technically-true-but-misleading subtotal, the label switches to "Totals — all accounts" whenever a filter is active. The URL-driven filter is UI-only; it was never allowed to touch what the number itself means.
 
+### The list / create / detail split under one splat
+
+Phase 3.6 replaced a single `JournalEntryPage` — a posting form glued to a flat list of everything ever posted — with three routes, nested under the same `journals` path prefix inside `AppPages`'s already-splat-mounted `<Routes>`:
+
+```tsx
+<Route path="journals" element={<JournalsPage />} />
+<Route path="journals/new" element={<NewJournalEntryPage />} />
+<Route path="journals/:entryId" element={<JournalDetailPage />} />
+```
+
+This is the same list/create/detail shape most CRUD UIs converge on, and React Router resolves it the ordinary way for sibling routes: `journals/new` and `journals/:entryId` both match a URL like `/app/ledger-core/journals/new`, but the router scores **static segments above dynamic ones**, so the literal `new` outscores `:entryId` and wins the match regardless of declaration order. Nothing about this needed the two routes to be ordered "new before entryId" in the JSX — that ordering superstition (common in path-matching systems that resolve top-to-bottom, like Express) doesn't apply here, though putting the specific case first still reads better to a human.
+
+`JournalDetailPage` reads its identity the same way `AppFrame` reads `appSlug` — `useParams<{ entryId: string }>()` — and immediately treats the result as possibly `undefined`, for the same reason noted above: the type parameter is unchecked, and the honest type is a partial. It then calls `getJournal(entryId)` and branches on the result: a `404 ApiRequestError` renders "not found" with a link back to the register, any other failure renders a generic error, and success renders the entry. There is no client-side existence check before the fetch — the id is treated as opaque until the server has actually confirmed it, which is also where the tenancy check actually lives (guardrails rule 1): a well-formed uuid for another organization's entry is indistinguishable from a nonexistent one until the 404 comes back.
+
+**Why every link between these three pages is absolute, built from `useAppBasePath()`, and not a relative sibling path:** all three routes render inside `AppPages`'s `<Routes>`, which — per "How a relative `to` is actually resolved" above — sits under `App.tsx`'s top-level splat (`<Route path="*" element={<ActiveAppRoutes />} />`). That splat is the deepest path-contributing match at the point any of these three pages resolves a link, so a relative `to` would resolve against the *entire current URL*, not against `journals`. Concretely: a `<Link to="new">` written from inside `JournalDetailPage` (which is itself mounted at `journals/:entryId`) would resolve against `/app/ledger-core/journals/<uuid>`, producing `/app/ledger-core/journals/<uuid>/new` — a URL with no matching route — rather than the intended `/app/ledger-core/journals/new`. Every navigation these three pages perform — the register's row links, the "New entry" button, the post-submit redirect in `NewJournalEntryPage`, the Reverse button's redirect in `JournalDetailPage`, the "back to journal entries" link on a 404 — is instead built as `` `${base}/journals/...` `` from the same `useAppBasePath()` hook the sidebar and the onboarding gate already use, sidestepping tree position entirely.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -215,6 +231,8 @@ One more consequence worth naming: this filter changed what "Totals" means witho
 - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
 - `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` — every `NavLink` built from `useAppBasePath()` rather than a bare relative suffix
 - `client/src/Pages/ledger-core/TrialBalancePage.tsx` — `useSearchParams`, `readTypeParam`'s whitelist, and the unfiltered-totals rule
+- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the `journals` / `journals/new` / `journals/:entryId` sibling routes (Phase 3.6), added inside the same splat-mounted `<Routes>` as every other LedgerCore page
+- `client/src/Pages/ledger-core/JournalsPage.tsx`, `NewJournalEntryPage.tsx`, `JournalDetailPage.tsx` — the list/create/detail split, `useParams<{ entryId: string }>()`, and every cross-page link built from `useAppBasePath()`
 
 ## Gotchas
 
@@ -227,6 +245,8 @@ One more consequence worth naming: this filter changed what "Totals" means witho
 - **A relative link is only correct as deep as the tree stays shallow.** `to="../journals"` from a dashboard page and `to="journals"` from a sidebar can both be "correct" today purely by accident of how many path-contributing routes sit above them, and both silently start resolving somewhere else the moment a route is added or removed between them and the root. There's no lint rule that catches this — it has to be reasoned about explicitly, or avoided with an absolute path built from a route param.
 - **Moving a route out from under a layout route silently drops whatever that ancestor was doing.** `AppFrame`'s org-switch remount `key` had to be copied over by hand when `/app/:appSlug` stopped being a child of `PlatformLayout` — nothing enforces that an equivalent replaces an ancestor's behavior once the ancestor is gone. Audit for this specifically whenever a route moves in the tree, not just whether the new position renders correctly.
 - **A query-string filter is untrusted input, exactly like a route param.** `?type=` on the trial balance whitelists against the known account types rather than casting whatever string shows up; an unrecognised value degrades to "no filter" instead of throwing or trusting it. The same discipline `useParams` needs applies to every value that arrives via the URL, dynamic segment or query string alike.
+- **A static sibling route beats a dynamic one at the same level, but only because the router scores specificity — it isn't declaration order.** `journals/new` matching before `journals/:entryId` works regardless of which `<Route>` is written first in the JSX; relying on that would be borrowing a mental model (first-match-wins) from a different kind of router.
+- **A page mounted at a dynamic segment (`journals/:entryId`) is just as depth-fragile for relative links as one mounted at a static segment.** The splat that makes relative links dangerous here is two levels up (`App.tsx`'s catch-all), not the `:entryId` segment itself — the dynamic segment is a red herring; what matters for `resolveTo` is only whether a splat sits anywhere above the resolving component in the matched chain.
 
 ## Interview Q&A
 
@@ -265,6 +285,15 @@ A: Restructure the routes, if the ancestor relationship is what's actually causi
 
 **Q: Why put filter state in the URL instead of `useState`?**
 A: Because the filter needs to be *linkable* from somewhere other than the component that applies it. On AutoLedger's dashboard, a summary tile links directly into a trial-balance report pre-filtered to one account type — `<Link to="/trial-balance?type=Asset">`. If the filter lived in `useState` on the trial balance page, there'd be no way to express "open this page already filtered" from outside that component without lifting state up past its natural owner. `useSearchParams` is really `useState` backed by `location.search` instead of a local variable, so reading it is `params.get('type')` and writing it pushes (or, with `{ replace: true }`, replaces) a history entry — which is also what makes the filter survive a reload and interact correctly with the back button, for free, which local component state never would.
+
+**Q: You have `journals/new` and `journals/:entryId` as sibling routes. What stops `/journals/new` from matching the dynamic route and rendering the wrong page?**
+A: React Router scores every candidate match at a given level rather than taking the first one declared, and a static path segment scores higher than a dynamic one — a literal `new` is a more specific match than `:entryId` capturing the string `"new"`. So `/journals/new` always resolves to the static route regardless of which `<Route>` appears first in the JSX. This is different from something like Express's default routing, which matches path patterns in registration order — porting that "put the specific one first, just in case" instinct here isn't wrong exactly, it's just unnecessary once you know the matching is specificity-scored, not sequential.
+
+**Q: `JournalDetailPage` reads `entryId` from the URL and fetches an entry with it. What's the tenancy-relevant reason it doesn't check the id looks valid before fetching?**
+A: Because a client-side format check couldn't tell "malformed" apart from "a well-formed id belonging to another organization" — and conflating those two would leak information about what exists. The only place that distinction is safe to make is the server, which scopes the query by the caller's own `org_id` from their access token and returns an indistinguishable `404` either way (rule 1 in this codebase's guardrails). So the id is treated as opaque on the client: fetch it, and let the server's `404` (versus a `200`) be the only signal about whether it resolved, rather than trying to pre-validate a value the client has no authority to judge.
+
+**Q: A page rendered at `journals/:entryId` wants to link to `journals/new`. Does the dynamic segment in its own route make that link more or less fragile than a link from a page at a plain `journals` route?**
+A: No different — the dynamic segment itself isn't what makes relative resolution fragile; what matters is whether a *splat* sits anywhere above the resolving component in the matched chain, because that's the only thing that makes `pathnameBase` and `pathname` diverge for a contributing match. In this codebase every LedgerCore page, whether mounted at a static or a dynamic segment, sits under the same top-level splat two layers up in `App.tsx`, so they're all equally exposed to the same failure mode, and all of them use the same fix — an absolute path from `useAppBasePath()` — regardless of their own route's shape.
 
 ## Follow-ups they'll dig into
 
