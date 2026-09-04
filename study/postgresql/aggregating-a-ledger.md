@@ -3,8 +3,8 @@
 > A financial dashboard is not a cache of numbers — it's a handful of `SUM`s over the same table, computed fresh on every request, using SQL's `FILTER` clause to get eight different totals from one pass instead of five separate queries.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`. Extended in Phase 3.6 — the journal register's `journalService.listEntries`, which filters the same table by date range, account, source, and description text.
-**Verified against:** PostgreSQL 16.14
+**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`. Extended in Phase 3.6 — the journal register's `journalService.listEntries`, which filters the same table by date range, account, source, and description text. Extended again in Phase 3.9 — `paymentService.allocatedCentsSubquery` (a correlated scalar subquery reused by `invoiceService`/`billService`) and `dashboardService.loadDocumentCounts` (`FILTER` aggregates over a `UNION ALL` of two tables).
+**Verified against:** PostgreSQL 16
 
 ---
 
@@ -141,6 +141,49 @@ An entry with two lines on the same account (a rare but legal double-entry shape
 
 **Why `ILIKE '%' || $n || '%'` and not `ILIKE '%$n%'`:** the second form is not a bug that leaks the search term — it's not parameterized at all. `'%$n%'` inside a single-quoted SQL string literal is just the four characters `$`, `n`, wrapped in `%` wildcards; the driver never substitutes anything into the *middle* of a string literal, only where a bare `$n` placeholder stands alone. Building the wildcard by concatenating three separate SQL string operands — `'%'`, the parameter, `'%'` — keeps the parameter itself a genuine bound value, never text spliced into the query.
 
+### A correlated scalar subquery, chosen over a JOIN + GROUP BY, because the outer query is already 1 row per document
+
+Phase 3.9 needed "how much of this invoice has been paid" available as a column on every invoice/bill read — see [derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) for why it's computed rather than stored. The question here is narrower: given that it's computed, why a correlated subquery and not a join?
+
+```sql
+COALESCE((SELECT SUM(pa.amount_cents)
+            FROM payment_allocations pa
+            JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
+           WHERE pa.org_id = i.org_id
+             AND pa.invoice_id = i.id
+             AND p.status = 'POSTED'), 0)::text AS allocated_cents
+```
+
+`INVOICE_SELECT` (the query this is embedded in) already produces exactly one row per invoice — it joins `customers` and `users`, both to-one relationships from an invoice's perspective. Joining `payment_allocations` directly into that same query would introduce a to-*many* relationship (an invoice can have arbitrarily many allocations), which multiplies every invoice row by its allocation count: a twice-paid invoice becomes two output rows, both carrying duplicated `customer_name`, `created_by_name`, and every other column from the 1:1 side. Fixing that back up needs `GROUP BY` on every non-aggregated column plus wrapping the money column in `SUM`, which is a bigger rewrite than the fact "I need one more number per row" should justify.
+
+A **correlated subquery** — a subquery whose `WHERE` clause references a column from the outer query (`pa.invoice_id = i.id`) — sidesteps the multiplication entirely. Conceptually, Postgres evaluates it once per outer row, each time scoped to just that row's `id`; the result is a single scalar, so it composes as an ordinary output column with no `GROUP BY` needed anywhere in the outer query. In practice, the planner is free to implement this more efficiently than a literal per-row loop — for an equality-correlated subquery like this one, it typically becomes an index lookup per outer row rather than a nested-loop re-scan, provided the right index exists (here, `idx_allocations_invoice`/`idx_allocations_bill`, both on the FK column the correlation filters on).
+
+The trade-off is real and stated plainly, not hidden: this is `O(rows × log(allocations))`, not a single flat scan the way the dashboard's `FILTER` aggregates are. It's the right shape when the outer query's grain must stay 1:1 and the extra value is a single number per row — wrong when you actually want the allocation-level detail (in which case a join is exactly what you want, rows and all, which is what `agingService`'s open-documents CTE does instead).
+
+### `FILTER` aggregates over a `UNION ALL` of two structurally different tables
+
+The dashboard's document-count tile needs six numbers — draft/awaiting-review counts and sums, split across `invoices` and `bills`, two tables with different columns and no shared parent. `loadDocumentCounts` gets all six from one query by first collapsing both tables to a common shape, then filtering:
+
+```sql
+SELECT
+  COUNT(*) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT')::text AS invoice_draft_count,
+  COALESCE(SUM(total_cents) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL'), 0)::text AS bill_review_cents,
+  -- ... four more, same shape
+FROM (
+  SELECT 'INVOICE' AS kind, status, total_cents FROM invoices WHERE org_id = $1
+  UNION ALL
+  SELECT 'BILL'    AS kind, status, total_cents FROM bills    WHERE org_id = $1
+) d
+```
+
+`UNION ALL` (not `UNION`) stacks the two `SELECT`s' rows without a duplicate-elimination pass — appropriate here because an invoice row and a bill row can never be genuine duplicates of each other (different tables, different id spaces), so paying for `UNION`'s implicit `DISTINCT` would buy nothing. The synthetic `kind` column is what makes the six downstream `FILTER` clauses able to tell which table a row came from once both are flattened into one result set — without it, "count DRAFT rows" would conflate draft invoices and draft bills into one number.
+
+**The `org_id = $1` predicate appears in *both* arms of the `UNION ALL`, independently** — not once, hoisted to an outer `WHERE`, because there is no single outer `WHERE` that could reach inside a `UNION ALL`'s member queries. Each `SELECT` is scoped on its own, which means each is individually a candidate for a tenant-data leak if the predicate is ever dropped from just one arm — a one-line omission in the second `SELECT` would let one organization's document counts include another's bills while its invoice counts stayed correctly scoped, a partial leak that's easy to miss in review precisely because half the query still looks right.
+
+**Why not a `JOIN`?** These aren't related tables — an invoice and a bill share no foreign key, no common parent, nothing a `JOIN`'s `ON` clause could meaningfully express. `UNION ALL` is the operator for "these rows belong in the same result set" when the relationship between two sources is "conceptually the same kind of thing" (both are financial documents with a status and a total), not "these rows are associated with each other."
+
+**Why `FILTER` here does more work than in the position query:** the dashboard's earlier nine-`FILTER` query (see above) filters on conditions over columns that already exist per row (`a.type`, `e.entry_date`). Here, `kind` is a column that exists *only because the query manufactured it* in the `UNION ALL`'s projection — `FILTER` isn't just selecting rows by pre-existing properties, it's discriminating between two conceptually different source tables that a single aggregation pass has deliberately flattened together.
+
 **Why `ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC` and not just the first two:** `LIMIT`/`OFFSET` pagination is only stable if the `ORDER BY` produces a total order — every row strictly before every row on the next page, with no ties. `entry_date` and `created_at` (millisecond resolution) can genuinely tie for two entries posted in the same request burst; without a final tiebreaker on a column guaranteed unique (the primary key), Postgres is free to return those tied rows in either order on different executions of the same query, which means a row can appear on two pages, or on neither, as a caller pages through. Any unique column works as the last term — `id` is simply the one every table already has.
 
 ---
@@ -157,6 +200,10 @@ An entry with two lines on the same account (a rare but legal double-entry shape
 | Two separately-built `WHERE` strings, one for `count(*)`, one for the page | Each query reads slightly simpler in isolation | Rejected — the two are free to drift apart, which shows up as a `totalCount` that disagrees with the rows actually returned |
 | `JOIN ledger_lines` + `DISTINCT` for the account filter | Familiar shape | Rejected — an entry with two lines on the filtered account is returned twice by the join, requiring a de-dup sort `EXISTS` never needs |
 | `OFFSET/LIMIT` with `ORDER BY entry_date DESC, created_at DESC` only | One fewer column in the sort | Rejected — two entries can tie on both columns, and an untied final term is what makes paging past them stable |
+| `JOIN payment_allocations` + `GROUP BY` for a document's paid amount | Familiar shape, one query style throughout | Rejected — the outer query is 1:1 per document; a to-many join fans it out and forces every other column into a `GROUP BY` or an aggregate it doesn't need |
+| **Correlated scalar subquery for the paid amount** | `O(rows × log(allocations))`, needs the FK indexed | **Chosen** — composes as an ordinary column, no `GROUP BY` anywhere in the outer query |
+| Two separate queries (invoice counts, bill counts), summed in application code | Simple, no `UNION ALL` | Rejected — two round trips for numbers from what is conceptually one "documents" concept, and the app has to remember to add them correctly |
+| **`FILTER` over `UNION ALL` of `invoices`/`bills`** | Both arms must independently repeat every scope predicate | **Chosen** — one round trip, one scan pass over both tables |
 
 ---
 
@@ -167,6 +214,9 @@ An entry with two lines on the same account (a rare but legal double-entry shape
 - `server/src/services/ledger-core/journalService.ts` — `buildFilters()` (the shared predicate builder), `listEntries()` (the count query and the page query, both fed from it), the `EXISTS` account filter, and the `e.id DESC` pagination tiebreaker
 - `server/src/__tests__/ledger-core/dashboard.test.ts` — the trend test asserting all 6 months are present, including the 4 with no postings, and the fiscal-year-windowing test asserting `revenue_ytd` respects a non-January start
 - `server/src/__tests__/ledger-core/journals.test.ts` — `describe('register filters')`, including the `totalCount reflects the filter, not the table` case and the same-date pagination-stability case
+- `server/src/services/ledger-core/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the correlated scalar subquery shared by `invoiceService`/`billService`/`agingService`
+- `server/src/services/ledger-core/dashboardService.ts` — `loadDocumentCounts()`, the `FILTER`-over-`UNION ALL` query behind the dashboard's draft/awaiting-review tiles
+- `server/src/__tests__/ledger-core/dashboard.test.ts` — `describe('AR/AP blocks')`, including the cross-tenant case proving org B's documents never appear in org A's counts
 
 ---
 
@@ -180,6 +230,9 @@ An entry with two lines on the same account (a rare but legal double-entry shape
 - **A count query and a page query built from two different predicate strings will eventually disagree.** The fix is structural — one shared builder, called twice — not a discipline to remember on every future filter added.
 - **`LIMIT/OFFSET` needs a total order, not just "mostly sorted."** Any `ORDER BY` that can tie on two rows needs a unique column as its last term, or pagination silently drops or duplicates rows on the tied boundary.
 - **A wildcard built by string concatenation (`'%' || $n || '%'`) is still fully parameterized.** Don't confuse "the SQL text contains `%` characters" with "the value is unparameterized" — the placeholder is still a single bound value, just concatenated with literal wildcard characters at the database, not in application code.
+- **A correlated subquery only stays cheap with the right index.** `allocatedCentsSubquery` correlates on `pa.invoice_id = i.id` (or `bill_id`); without `idx_allocations_invoice`/`idx_allocations_bill`, the planner falls back to a sequential scan of `payment_allocations` per outer row — fine at small data volumes, a real cost at large ones.
+- **`UNION ALL`'s member queries each need their own complete scope predicate.** There is no outer `WHERE` that reaches inside a `UNION ALL` — `org_id = $1` has to be repeated, correctly, in every arm. A predicate present in one arm and missing from another is a partial tenant leak that's easy to miss because half the query's output still looks correctly scoped.
+- **`UNION ALL` vs `UNION`: the choice is about semantics, not just performance.** `UNION` would also happen to work here (an invoice row and a bill row can never collide), but reaching for `UNION ALL` by default when duplicates are structurally impossible avoids paying for a de-duplication pass — sort or hash — that could never find anything to remove.
 
 ---
 
@@ -215,6 +268,12 @@ A: Without a unique final term, Postgres is free to return those two tied rows i
 **Q: Tell me about a time a predicate's placement changed a query's meaning, not just its performance.**
 A: Building the 6-month trend for LedgerCore's dashboard. My first draft put the date-window condition on `WHERE` because that's the reflex — filter the rows you want. It worked for months that had postings, but months with zero activity vanished from the output instead of appearing as a zero row, because the `LEFT JOIN` I'd written to guarantee all six months had its intent undone by a `WHERE` clause running after the join and rejecting the `NULL`-filled rows for months with no match. Moving the exact same condition into the join's `ON` clause fixed it with no other change — same predicate, different clause, structurally different query.
 
+**Q: You needed a per-invoice "amount paid" figure — why a correlated subquery instead of joining `payment_allocations` in?**
+A: Because the outer query is already producing exactly one row per invoice — it joins customers and users, both to-one relationships. `payment_allocations` is to-many: an invoice can have several allocations across several payments. Joining that directly in would multiply the invoice row by its allocation count and force a `GROUP BY` over every other selected column just to collapse it back down. A correlated subquery — scoped to the current invoice's id in its own `WHERE` — returns one scalar per outer row instead, so it composes as an ordinary column with no `GROUP BY` needed anywhere. The cost is that it's evaluated per row rather than in one flat scan, which is fine as long as the correlating column is indexed, which it is.
+
+**Q: How did you get draft/review counts from two unrelated tables — invoices and bills — in one query?**
+A: `UNION ALL` first, to stack both tables' relevant columns into one result set with a synthetic `kind` column saying which table each row came from, then `FILTER` clauses on top of that to split the counts and sums back apart by `kind` and `status`. `UNION ALL` rather than `UNION` because an invoice row and a bill row can never be duplicates of each other, so there's nothing for `UNION`'s de-duplication pass to do except cost time. The one thing that has to be gotten right is that the tenant scope predicate — `org_id = $1` — has to be repeated in *both* arms of the `UNION ALL` independently; there's no single outer `WHERE` that reaches inside it, so a predicate present in one arm and missing from the other is a real, easy-to-miss tenant leak.
+
 ---
 
 ## Follow-ups they'll dig into
@@ -231,3 +290,5 @@ A: Building the 6-month trend for LedgerCore's dashboard. My first draft put the
 - [recursive-ctes-and-hierarchies.md](recursive-ctes-and-hierarchies.md) — the other query in this dashboard, and the same "scope every term" discipline applied to a different join shape
 - [deferred-constraint-triggers.md](deferred-constraint-triggers.md) — the invariant these numbers rest on: an aggregate over an always-balanced ledger is exactly why `isBalanced` can be an integer equality check
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md) — why every one of these sums is over `BIGINT` cents, never `DECIMAL`
+- [../architecture/derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) — why the correlated subquery's result is never cached back onto the invoice/bill row
+- [subledger-reconciliation-and-aging.md](subledger-reconciliation-and-aging.md) — the same subquery reused in a report that also cross-checks its total against the general ledger

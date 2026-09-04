@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8–9
-**Status: Phase 3 through Phase 3.8 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), and sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry). Phases 4, 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 3.9 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), and accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL). Phases 4, 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -26,7 +26,7 @@ Computed by aggregation over raw `ledger_lines` on every request. **No pre-calcu
 - **Profit & Loss** — Revenue − Expenses, with gross profit split out via the `5xxx` COGS range.
 - **Balance Sheet** — Assets = Liabilities + Equity, with current-period earnings folded into equity.
 - **Fiscal periods** with close/lock, so a closed month cannot receive a late posting.
-- **AR/AP subledgers** — receivable and payable detail reconciling to their control accounts.
+- ~~**AR/AP subledgers**~~ — delivered early, in Phase 3.9: `GET /reports/ar-aging`/`ap-aging`, receivable/payable detail reconciled to their control accounts.
 
 ### C. Bank reconciliation & confidence matching — Phase 6
 
@@ -219,14 +219,34 @@ A fourth half-step. **No renumbering** — Phase 4 is unaffected and unstarted. 
 
 **Acceptance ✅ — all verified.** Issuing an invoice allocates a sequential number and posts a balanced entry (`sourceType: 'invoice'`) visible in the journal register; the receivable/revenue/tax split is correct for a mixed-tax-rate fixture; voiding an issued invoice posts a reversal and the trial balance stays balanced; a raw-SQL `UPDATE` on an `ISSUED` invoice's amount, or an `INSERT`/`DELETE` on its lines, raises `0A000`, while the `ISSUED -> VOID` transition succeeds when it touches only the permitted columns. 340 server tests (up from 280), 94 client tests (up from 84).
 
-**What this phase does *not* claim.** No `PAID` status and no payment/cash-receipt document — an issued invoice's receivable never clears except by voiding, and the UI says so. No AR aging, no AR subledger *report* (Phase 4 still owns that), no PDF export, no multi-currency invoices (needs the Phase 8 FX engine), no fiscal-period posting lock, no audit trail.
+**What this phase does *not* claim.** No `PAID` status and no payment/cash-receipt document — an issued invoice's receivable never clears except by voiding, and the UI says so. No AR aging, no AR subledger *report* (Phase 4 still owns that), no PDF export, no multi-currency invoices (needs the Phase 8 FX engine), no fiscal-period posting lock, no audit trail. **Payment recording and AR/AP aging landed in Phase 3.9, immediately below.**
+
+### Phase 3.9 — accounts payable & payments
+
+A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This phase pays off the "AR/AP subledgers" line item Phase 4's box below used to own; that box is now ticked here instead.
+
+- [x] `011_ledger-core_vendors.sql` — `vendors`, the AP mirror of `customers` (plus `payment_terms`), retired via `is_active = false`, no DELETE route
+- [x] `012_ledger-core_ap_posting_accounts.sql` — three nullable AP posting-account columns on `ledger_settings` (`payable_account_id`, `tax_input_account_id`, `default_expense_account_id`), each a composite FK to `accounts`
+- [x] `013_ledger-core_bills.sql` — `bills`/`bill_lines`, a **four-state** FSM (`DRAFT`/`AWAITING_APPROVAL`/`POSTED`/`VOID`, plus a recall edge `AWAITING_APPROVAL -> DRAFT`) — entry and approval are separate acts of trust, gated to different roles server-side; `reject_posted_bill_mutation()` and `reject_locked_bill_line_mutation()` mirror invoices' pair, widened to two mutable states
+- [x] `014_ledger-core_payments.sql` — `payments`/`payment_allocations`; a payment is born `POSTED`, never a draft. A **pair** of deferred constraint triggers: `assert_payment_allocations_complete()` (mirrors `journal_entries`' parent-completeness check) and `assert_no_overallocation()` (a genuinely cross-transaction invariant — allocations against one document, summed across every payment ever made against it, must never exceed its total); `reject_allocation_mutation()` makes `payment_allocations` insert-only with no carve-out at all
+- [x] Settlement (`allocatedCents`/`amountDueCents`/`settlementStatus`) is **derived**, not stored — no `PAID` status, no paid-amount column on either `invoices` or `bills`; computed from `payment_allocations` on every read via `paymentService.allocatedCentsSubquery`, filtered to `POSTED` payments, so voiding a payment un-settles its documents with zero additional writes
+- [x] `billService.approveBill`/`voidBill` and `paymentService.createPayment`/`voidPayment` reuse Phase 3.8's `journalService.createEntryOnClient`/`reverseEntryOnClient`; neither service writes `journal_entries`/`ledger_lines` directly
+- [x] `/api/v1/ledger-core/vendors` (4 routes), `/api/v1/ledger-core/bills` (8 routes, `/:id/approve` gated `OWNER`/`ADMIN` only), `/api/v1/ledger-core/payments` (4 routes, no `PATCH`), `GET /reports/ar-aging` / `ap-aging` (5 buckets, per-counterparty rows, `reconciles` against the GL control account) — full detail in [api.md](api.md)
+- [x] `GET /reports/dashboard` gains `receivables`/`payables`: outstanding/overdue totals, draft counts, and (payables only) the bill-approval queue's count/total
+- [x] Client: `VendorsPage`, `BillsPage` (seven tabs mapped onto server `status`/`settlement` params), `NewBillPage`, `BillDetailPage`, `PaymentDialog` (shared by invoice and bill detail pages), `PaymentsPage`; `InvoicesPage`/`InvoiceDetailPage` gain the same settlement UI; `DashboardPage` gains two AR/AP panels with a hand-rolled `BarChart` (separate from `TrendChart`, not a generalization of it)
+- [x] Cross-tenant isolation tests for every new module: `vendors.test.ts`, `bills.test.ts`, `payments.test.ts`, `aging.test.ts`; `billConstraints.test.ts`/`paymentConstraints.test.ts` prove the triggers via raw SQL, including that both deferred triggers fire at `COMMIT` and not at `INSERT`
+- [x] Three new study notes ([derived-vs-stored-state.md](../study/architecture/derived-vs-stored-state.md), [subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md), [hand-rolled-svg-charts.md](../study/react/hand-rolled-svg-charts.md)) plus extensions to [document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md), [deferred-constraint-triggers.md](../study/postgresql/deferred-constraint-triggers.md), and [aggregating-a-ledger.md](../study/postgresql/aggregating-a-ledger.md)
+
+**Acceptance ✅ — all verified.** Approving a bill posts a balanced entry debiting each distinct expense account and crediting payable; an `ACCOUNTANT` attempting `/approve` is rejected with `403` at the route's role gate. Recording a payment posts a balanced entry and immediately reduces the target document's `amountDueCents`; voiding that payment restores it with no second write. A payment inserted with no allocations succeeds at `INSERT` and fails at `COMMIT`; a second payment allocating past a document's remaining balance succeeds at `INSERT` and fails at its own `COMMIT`, with a `SELECT ... FOR UPDATE` row lock (taken in `paymentService`, ahead of either transaction's deferred trigger) closing the race a purely deferred check alone would not. AR and AP aging both reconcile (`reconciles === true`) against their control accounts for a non-trivial fixture. 442 server tests (up from 340), 107 client tests (up from 94).
+
+**What this phase does *not* claim.** No expense-claim/employee-reimbursement document — there is no such thing in AutoLedger; the bill-approval queue is unapproved vendor bills, not employee expenses. No credit notes, no vendor credits, no partial void. No PDF export, no multi-currency invoices or bills (needs Phase 8), no fiscal-period posting lock, no audit trail. Aging/overdue comparisons use UTC calendar dates, ignoring `ledger_settings.timezone`.
 
 ### Phase 4 — live statements
 
 - [ ] `fiscal_periods` with `EXCLUDE USING GIST` against overlap; close/lock transitions via an FSM table
 - [ ] Posting into a closed period rejected by trigger
 - [ ] `GET /reports/profit-and-loss`, `GET /reports/balance-sheet`, both date-ranged
-- [ ] AR/AP subledgers reconciling to their control accounts
+- [x] ~~AR/AP subledgers reconciling to their control accounts~~ — delivered early, in Phase 3.9 (`GET /reports/ar-aging`/`ap-aging`)
 
 **Acceptance:** balance sheet satisfies Assets = Liabilities + Equity for a non-trivial fixture. No summary table exists anywhere in the schema. P&L over the full range plus the balance sheet at its end agree on retained earnings.
 
@@ -260,7 +280,7 @@ A fourth half-step. **No renumbering** — Phase 4 is unaffected and unstarted. 
 
 ## Not built yet
 
-**Phases 4, 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 3.5:
+**Phases 4, 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 3.9:
 
 - **No P&L and no balance sheet.** The trial balance is the only report.
 - **No fiscal periods**, so nothing prevents a posting into a month you consider closed.

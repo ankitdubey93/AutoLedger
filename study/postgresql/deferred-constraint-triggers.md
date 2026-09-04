@@ -3,8 +3,8 @@
 > A CHECK constraint sees one row, so a rule spanning many rows can only be enforced by a trigger — and only a `DEFERRABLE INITIALLY DEFERRED` constraint trigger can wait until `COMMIT`, when the rows finally exist.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3 — `004_ledger-core_journals.sql`, enforcing that every journal entry's debits equal its credits
-**Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
+**Introduced by:** Phase 3 — `004_ledger-core_journals.sql`, enforcing that every journal entry's debits equal its credits; extended Phase 3.9 — `014_ledger-core_payments.sql`, a deferred-trigger *pair* enforcing a parent-completeness rule and a separate cross-table cross-row rule
+**Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.22
 
 ---
 
@@ -105,6 +105,34 @@ This generalizes cleanly: a table needs no special-casing per column to gain "th
 
 `invoices` carries *two* `BEFORE UPDATE` row triggers — `trg_invoices_immutable` (the guard above) and `trg_invoices_updated_at` (the shared `set_updated_at()` helper every mutable table uses). PostgreSQL does not fire same-timing, same-event row triggers in creation order; it fires them in **alphabetical order by trigger name**. `trg_invoices_immutable` sorts before `trg_invoices_updated_at`, so the guard evaluates against `NEW.updated_at` exactly as the calling service set it, before `set_updated_at()` has a chance to touch it. In this specific case the ordering is actually irrelevant to correctness — the row-diff explicitly excludes `updated_at` from its comparison — but the dependency is real in general: two `BEFORE` triggers on the same table can observe different values of `NEW` depending on naming, and relying on a specific order without excluding the field from comparison (or without renaming triggers to force an order) is a latent bug waiting for someone to rename one of them.
 
+### A deferred-trigger pair: parent-completeness and a third-table cross-check
+
+`journal_entries`/`ledger_lines` needed one deferred invariant (debits equal credits). Phase 3.9's `payments`/`payment_allocations` needed **two**, of genuinely different shapes, and seeing them side by side is a good illustration of what the technique generalizes to.
+
+**Trigger 1 — parent-completeness**, structurally identical to `trg_journal_entries_have_lines`: a payment must have at least one allocation, and those allocations must sum to exactly the payment's `amount_cents`.
+
+```sql
+CREATE CONSTRAINT TRIGGER trg_payments_allocations_complete
+  AFTER INSERT OR UPDATE ON payments
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION assert_payment_allocations_complete();
+```
+
+Deferred for the identical reason the balance trigger is: `createPayment` inserts the `payments` row *before* its `payment_allocations` rows can exist (the allocations reference `payment_id`, so the parent has to come first), so an immediate check on `payments` would reject every payment, always, with zero exceptions. Only at `COMMIT`, once both inserts have happened, does "this payment's allocations sum to its amount" become answerable.
+
+**Trigger 2 — a cross-table, cross-row invariant with no parent/child relationship to lean on**: allocations against one document must never exceed that document's total, summed across *every* payment that has ever allocated to it — not just the one being inserted right now.
+
+```sql
+CREATE CONSTRAINT TRIGGER trg_allocations_no_overallocation
+  AFTER INSERT ON payment_allocations
+  DEFERRABLE INITIALLY DEFERRED
+  FOR EACH ROW EXECUTE FUNCTION assert_no_overallocation();
+```
+
+This is a different *kind* of multi-row rule than the balance trigger. The balance trigger's rows all belong to the same journal entry, inserted together, in the same transaction. This trigger's rows can belong to **different payments, inserted in different transactions, possibly minutes apart** — the invariant it protects (`SUM(allocated) <= document.total_cents`) spans the *entire history* of allocations against a document, not just the current transaction's inserts. Deferring still matters here, but for a subtler reason: it lets the trigger re-read the freshest committed state of `payment_allocations` (including this transaction's own just-inserted row) at the moment right before commit, rather than racing a concurrent transaction's own deferred check — though true concurrent-safety here still depends on row locking during the read (see Gotchas).
+
+Both triggers raise with `ERRCODE = 'P0001'` (the default for `RAISE EXCEPTION`) rather than `0A000` — because both are *domain validation failures* ("this payment doesn't add up," "this would overpay the invoice"), the same category `assert_journal_entry_balanced` uses, not *immutability violations*, which is what `0A000` is reserved for elsewhere in this codebase (`reject_payment_mutation`, `reject_mutation`). The two error codes map onto two different HTTP statuses in `paymentService`'s `catch` block: `P0001` becomes a `422`, `0A000` would indicate a `409`-shaped "you can't touch this row at all" problem. Distinguishing them at the SQLSTATE level is what lets the service translate a raw trigger failure into the right client-facing error without parsing message text.
+
 ---
 
 ## Why we chose it here
@@ -130,6 +158,9 @@ The prior build enforced this class of rule in application code alone, and compu
 - `server/src/__tests__/ledger-core/ledgerConstraints.test.ts` — every case goes around the service, straight at the pool, because that is the only way to prove the database is doing the work
 - `server/src/db/migrations/009_ledger-core_invoices.sql` — `reject_issued_invoice_mutation()`, the row-diff `ISSUED -> VOID` carve-out; `reject_non_draft_invoice_line_mutation()`, the absolute (no carve-out) version for `invoice_lines`
 - `server/src/__tests__/ledger-core/invoiceConstraints.test.ts` — the invoice half of the same "bypass the service, hit the pool directly" testing discipline, including a case that asserts the *allowed* `ISSUED -> VOID` update still succeeds
+- `server/src/db/migrations/014_ledger-core_payments.sql` — `assert_payment_allocations_complete()` (parent-completeness pair, mirrors `004`'s `journal_entries`-has-lines trigger), `assert_no_overallocation()` (the cross-table, cross-transaction invariant), `reject_payment_mutation()`/`reject_allocation_mutation()` (immutability, `0A000`)
+- `server/src/services/ledger-core/paymentService.ts` — `createPayment`'s `try/catch` translating `P0001` into `ApiError(422, ...)`, the same pattern `journalService.createEntry` uses
+- `server/src/__tests__/ledger-core/paymentConstraints.test.ts` — proves both deferred triggers fire at `COMMIT` by asserting the `INSERT`s inside the transaction succeed and only the `COMMIT` itself rejects
 
 ---
 
@@ -143,6 +174,8 @@ The prior build enforced this class of rule in application code alone, and compu
 - **Deferral is per row, not per statement.** A 500-line entry runs the aggregate 500 times at commit. Acceptable for journal entries; think again for bulk import.
 - **A deferred trigger cannot stop a `SET CONSTRAINTS ALL IMMEDIATE` session** from changing the timing — but it cannot disable the check, only move it earlier.
 - **`RAISE EXCEPTION` defaults to SQLSTATE `P0001`.** If you want callers to distinguish your errors, pass `USING ERRCODE = ...` — the immutability trigger uses `0A000` (`feature_not_supported`) so it is distinguishable from a balance failure.
+- **A deferred trigger reads committed-plus-in-transaction state, but that read still isn't automatically race-free against a concurrent transaction under the default `READ COMMITTED` isolation.** `assert_no_overallocation` sums `payment_allocations` across every payment, including ones from other, already-committed transactions — but two transactions racing to allocate the last few cents of the same invoice, both starting from the same pre-race total, can both pass their own deferred check and jointly overallocate, unless something forces one to wait for the other. `lockAndValidateTargets` (`paymentService.ts`) takes a `SELECT ... FOR UPDATE` on the target invoice/bill row *before* either transaction's deferred trigger runs, which is what actually closes the race — the trigger is the backstop that makes the invariant a database guarantee, but the row lock is what makes the backstop race-free.
+- **Two deferred triggers on two different tables don't have a defined firing order relative to each other** (unlike two same-timing triggers on the *same* table, which fire alphabetically by name). `trg_payments_allocations_complete` (on `payments`) and `trg_allocations_no_overallocation` (on `payment_allocations`) are independent checks that happen to both defer to `COMMIT`; neither depends on the other's result, which is why their independence doesn't cause a problem here, but it's not a guarantee to lean on if a future invariant genuinely needed one trigger's outcome before another's.
 
 ---
 
@@ -159,6 +192,9 @@ A: Two things. First, the error surfaces at `COMMIT`, not at the `INSERT` — so
 
 **Q: What if a table needs to be immutable *except* for one specific transition — say, an issued invoice that can still be voided?**
 A: I generalized the same `BEFORE UPDATE` trigger technique with a row-diff built from `to_jsonb`. The trigger first checks that the transition is exactly the one allowed one (`OLD.status = 'ISSUED' AND NEW.status = 'VOID'`), then compares `to_jsonb(NEW)` against `to_jsonb(OLD)` with a handful of permitted columns subtracted out of both sides via JSONB's `-` key-deletion operator, using `IS DISTINCT FROM` rather than `<>` so a `NULL` column can't slip past the check. If anything outside the allowlist changed, it raises. The nice property is that it needs no per-column special-casing — a new column added to the table later is automatically covered by the diff and therefore automatically frozen once issued, which is the safe direction to fail in.
+
+**Q: You added a second deferred trigger for payments — how is its invariant different from the balance trigger's?**
+A: The balance trigger's rows all belong to one journal entry, inserted together in one transaction — the invariant is "these rows, right here, right now, sum correctly." The overallocation trigger on `payment_allocations` is checking something that spans a document's *entire history*: every payment ever allocated against an invoice, potentially inserted in separate transactions, possibly minutes or days apart, must never sum past that invoice's total. Deferring is still necessary — the same "the row doesn't fully exist as a set until commit" reasoning — but the invariant itself is a cross-transaction, cross-table constraint, not a same-transaction, same-parent one. That's also why it needs a row lock (`SELECT ... FOR UPDATE` on the target document, taken in application code before the insert) to actually be race-free against a second transaction doing the same thing concurrently — the deferred trigger alone catches the bad final state, but only after two transactions have already both decided to proceed.
 
 **Q: How do you test a database-level guarantee?**
 A: Deliberately bypassing the application. All my constraint tests talk straight to the connection pool and write raw SQL, because a test that posts through the service proves the service is correct, which is the thing I was *already* confident about. The whole claim is that the database holds when the service isn't involved, so the test has to not involve it. I also assert on SQLSTATE rather than message text — `23514` for a CHECK, `0A000` for the immutability trigger — because messages get reworded and error codes are the actual contract.
@@ -180,3 +216,4 @@ A: Deliberately bypassing the application. All my constraint tests talk straight
 - [transactions-isolation-pooling.md](transactions-isolation-pooling.md) — what `COMMIT` is actually doing when the trigger fires
 - [double-entry-as-an-invariant.md](../architecture/double-entry-as-an-invariant.md) — the accounting rule this enforces
 - [branded-types-for-money.md](../typescript/branded-types-for-money.md) — why the comparison is exact integer equality
+- [derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) — what the overallocation trigger is ultimately protecting: a settlement figure computed from these very allocation rows on every read

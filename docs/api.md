@@ -228,11 +228,15 @@ Failure paths: `400` from the schema (fewer than two lines, a line with both sid
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/trial-balance` | any member | Per-account debit/credit totals, type-aware `netBalanceCents`, and `isBalanced`. Optional `?asOf=YYYY-MM-DD` |
-| GET | `/dashboard` | any member | Position, year-to-date and month-to-date performance, a 6-point trend, recent entries, and the integrity check. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/dashboard` | any member | Position, year-to-date and month-to-date performance, a 6-point trend, recent entries, the integrity check, and (Phase 3.9) `receivables`/`payables` AR/AP summaries. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/ar-aging` | any member | Phase 3.9 — accounts-receivable aging: 5 buckets (`CURRENT`/`D1_30`/`D31_60`/`D61_90`/`D90_PLUS`), per-customer rows, and reconciliation against the receivable control account. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/ap-aging` | any member | Phase 3.9 — accounts-payable aging, same shape as `/ar-aging`, per-vendor rows, reconciled against the payable control account. Optional `?asOf=YYYY-MM-DD` |
 
-Aggregated from raw `ledger_lines` on every request over the `base_*` columns. There is no summary table and none will be added. Only postable, active accounts appear. `isBalanced` is integer equality, never an epsilon.
+Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invoices`/`bills`/`payment_allocations`) on every request. There is no summary table and none will be added. Only postable, active accounts appear in the trial balance. `isBalanced` is integer equality, never an epsilon.
 
-`/dashboard` (Phase 3.5) is not the Phase 4 balance sheet — it exposes `currentEarningsCents` (Revenue − Expenses, all time) alongside `assetsCents`/`liabilitiesCents`/`equityCents` and an `equationHolds` flag, because Assets = Liabilities + Equity only holds once current-period earnings are folded in. `position.cashCents` is `null` when no cash account is configured in settings; when configured, it sums the account's whole subtree via a recursive walk. `trend` is always exactly 6 points, oldest first, gap-filled so a month with no postings still appears at zero.
+`/dashboard` (Phase 3.5) is not the Phase 4 balance sheet — it exposes `currentEarningsCents` (Revenue − Expenses, all time) alongside `assetsCents`/`liabilitiesCents`/`equityCents` and an `equationHolds` flag, because Assets = Liabilities + Equity only holds once current-period earnings are folded in. `position.cashCents` is `null` when no cash account is configured in settings; when configured, it sums the account's whole subtree via a recursive walk. `trend` is always exactly 6 points, oldest first, gap-filled so a month with no postings still appears at zero. Phase 3.9 adds `receivables`/`payables`, each carrying `outstandingCents`, `overdueCents`, `draftCount`/`draftCents`, and a 5-bucket aging series identical in shape to `/ar-aging`/`/ap-aging`'s `buckets`; `payables` additionally carries `awaitingReviewCount`/`awaitingReviewCents` — bills entered but not yet approved, **not** an employee expense-claim inbox (AutoLedger has no such document).
+
+`/ar-aging` and `/ap-aging` (Phase 3.9) bucket every open (`ISSUED`/`POSTED`) document's outstanding amount (`total − allocated`, allocated meaning `SUM` of `POSTED` payment allocations) by days past due relative to `asOf`. `controlAccount` names the receivable/payable account each report is checked against (`null` if none is configured and no fallback code exists); `reconciles` is `totalOutstandingCents === controlAccount.balanceCents`, integer equality, `null` when there is no control account to compare against. A `false` value means a document was posted without a matching journal entry, or vice versa — a data-integrity signal, not a UI glitch to hide.
 
 Failure paths: `400 asOf must be a date in YYYY-MM-DD format`.
 
@@ -304,7 +308,68 @@ An invoice is a sales (accounts-receivable) document, always in the organization
 
 Failure paths: `400` from the schema · `400 status must be one of DRAFT, ISSUED, VOID` · `422 An invoice needs at least one line` · `422 Due date cannot be before the issue date` · `422 Customer not found` (also another org's customer) · `422 Revenue account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not a Revenue account` · `409 Only a draft invoice can be edited` / `409 Only a draft invoice can be deleted` · `422 No receivable account is configured. Set one in invoice settings.` / `422 No tax account is configured. Set one in invoice settings.` (issue only) · `409 An invoice that is <status> cannot be issued` · `409 This invoice has already been voided`.
 
-**Not built:** payment recording, a `PAID` status, AR aging, an AR subledger report, PDF generation, multi-currency invoices. See [roadmap.md § Phase 3.8](roadmap.md#phase-38-as-delivered).
+**Not built (as of Phase 3.8):** payment recording, a `PAID` status, AR aging, an AR subledger report, PDF generation, multi-currency invoices. Payment recording, AR aging, and the AR/AP subledger reconciliation **landed in Phase 3.9** — see the Payments and Reports sections. PDF generation and multi-currency invoices remain unbuilt. See [roadmap.md § Phase 3.8](roadmap.md#phase-38-as-delivered).
+
+#### Vendors — `/api/v1/ledger-core/vendors` — Phase 3.9
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The org's vendors, ordered by name. `?q=` filters by name (case-insensitive substring); `?includeInactive=true` includes retired vendors (excluded by default) |
+| GET | `/:id` | any member | One vendor |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a vendor |
+| PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Edit a vendor, including retiring it (`isActive: false`) |
+
+Email is lowercased on write. **There is no DELETE** — a vendor is retired with `isActive: false`, matching `customers`, since a bill may reference one.
+
+Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Vendor not found`.
+
+#### Bills — `/api/v1/ledger-core/bills` — Phase 3.9
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Paginated, filterable bills with nested lines — the bill register |
+| GET | `/:id` | any member | One bill with its lines |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a draft bill (never posted directly) |
+| PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Replace a **draft or in-review** bill's fields and lines wholesale |
+| DELETE | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete a **draft or in-review** bill |
+| POST | `/:id/submit` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Send a draft bill for approval (`DRAFT -> AWAITING_APPROVAL`) |
+| POST | `/:id/approve` | **`OWNER`, `ADMIN` only** | Post a balanced journal entry (`AWAITING_APPROVAL -> POSTED`) |
+| POST | `/:id/void` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Void the bill; posts a reversing entry if it was posted |
+
+A bill is a purchase (accounts-payable) document, always in the organization's **base currency**. Its lifecycle has **four** states, not three like an invoice — `DRAFT -> AWAITING_APPROVAL -> POSTED -> VOID`, plus a recall edge `AWAITING_APPROVAL -> DRAFT` — because entering a bill and approving it for posting are deliberately separate acts of trust: an `ACCOUNTANT` can create and submit a bill but cannot approve it, only `OWNER`/`ADMIN` can. `PATCH`/`DELETE` are legal on `DRAFT` and `AWAITING_APPROVAL` (both pre-posting), refused with `409` by the service and SQLSTATE `0A000` by a database trigger the instant a bill reaches `POSTED`. The only correction path once posted is `POST /:id/void`.
+
+**`POST /`** — `vendorId`, `vendorReference` (the **vendor's own** invoice number, required, unique per `(vendor, reference)` — the duplicate-payment control), `billDate`, `dueDate` (`>= billDate`), `notes`, `paymentTerms`, and `lines` (min 1): each line is `description`, `quantityMilli`, `unitPriceCents`, `expenseAccountId` (a postable `Expense` **or** `Asset` account — a bill may legitimately buy a fixed asset or a prepaid), `taxRateBp`. The server computes all totals — the client may not supply them, a status, or a currency.
+
+**`POST /:id/approve`** — optional `entryDate`. Posts one journal entry (`sourceType: 'bill'`, `sourceId: <bill id>`) debiting each distinct expense account for its net and the tax-input account for the tax total (only if > 0), crediting the payable account for the total, then flips the bill to `POSTED`.
+
+**`POST /:id/void`** — optional `entryDate`. On a `POSTED` bill, posts the reversing entry. On `DRAFT`/`AWAITING_APPROVAL`, no GL posting occurs — nothing was ever posted. Refused with `409` if the bill has any `POSTED` payment allocated to it — void the payment first.
+
+`GET /` query parameters, all optional: `page`, `limit` · `status` (`DRAFT`/`AWAITING_APPROVAL`/`POSTED`/`VOID`) · `vendorId` · `from`/`to` — inclusive `billDate` bounds · `q` — matches vendor reference or the vendor name snapshot · `settlement` (`OUTSTANDING`/`OVERDUE`/`PAID`) — implies `status=POSTED`.
+
+Every bill also carries `allocatedCents`, `amountDueCents`, and `settlementStatus` (`NOT_APPLICABLE`/`UNPAID`/`PARTIALLY_PAID`/`PAID`/`OVERDUE`) — all **derived** on every read from `POSTED` payment allocations, never stored; `0`/`NOT_APPLICABLE` unless the bill is `POSTED`.
+
+Failure paths: `400` from the schema · `400 status must be one of DRAFT, AWAITING_APPROVAL, POSTED, VOID` · `422 A bill needs at least one line` · `422 Due date cannot be before the bill date` · `422 Vendor not found` (also another org's vendor) · `422 Expense account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> must be an Expense or Asset account` · `409 This vendor reference has already been entered for this vendor` · `409 Only a draft or in-review bill can be edited` / `409 Only a draft or in-review bill can be deleted` · `403` approving as anything below `OWNER`/`ADMIN` · `422 No payable account is configured. Set one in settings.` / `422 No tax account is configured. Set one in settings.` (approve only) · `409 A bill that is <status> cannot be approved` · `409 This bill has already been voided` · `409 This document has payments applied. Void the payments first.` (void only).
+
+**Not built:** an expense-claim / employee-reimbursement document (there is none, by design — see [roadmap.md § Phase 3.9](roadmap.md#phase-39-as-delivered)), credit notes, vendor credits, partial void.
+
+#### Payments — `/api/v1/ledger-core/payments` — Phase 3.9
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Paginated, filterable payments (both directions) with nested allocations |
+| GET | `/:id` | any member | One payment with its allocations |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Record a payment — born **posted**; posts a balanced journal entry in the same transaction |
+| POST | `/:id/void` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Void the payment; posts a reversing entry and un-settles the documents it paid |
+
+A payment settles one or more invoices (`direction: 'RECEIVE'`) or one or more bills (`direction: 'PAY'`) — never both directions in one payment, never invoices and bills mixed in one payment's allocations. **There is no draft and no `PATCH`** — a payment is created already posted, matching `journal_entries`; the only correction is `POST /:id/void`.
+
+**`POST /`** — `direction` (`RECEIVE`/`PAY`), `paymentDate`, `amountCents`, `cashAccountId` (a postable `Asset` account), `customerId` (RECEIVE) or `vendorId` (PAY, the other must be `null`), `method`, `reference`, `notes`, `allocations` (min 1, each `{ invoiceId | billId, amountCents }`, exactly one of `invoiceId`/`billId` per allocation), optional `entryDate`. `allocations[].amountCents` must sum to exactly `amountCents`. Posts one journal entry (`sourceType: 'payment'`, `sourceId: <payment id>`): `RECEIVE` debits the cash account and credits the receivable account; `PAY` debits the payable account and credits the cash account.
+
+**`POST /:id/void`** — optional `entryDate`. Posts the reversing entry and flips the payment to `VOID`. The payment's allocation rows are **never modified or deleted** (immutable, insert-only by trigger) — they simply stop counting toward any document's `allocatedCents`, because every settlement read filters on `status = 'POSTED'`. This is what un-settles the paid documents without a second write.
+
+`GET /` query parameters, all optional: `page`, `limit` · `direction` (`RECEIVE`/`PAY`) · `status` (`POSTED`/`VOID`) · `customerId` · `vendorId` · `from`/`to` — inclusive `paymentDate` bounds.
+
+Failure paths: `400` from the schema (including an allocation naming both `invoiceId` and `billId`, or neither) · `400 direction must be RECEIVE or PAY` · `400 status must be POSTED or VOID` · `422 Allocations must sum to the payment amount` · `422 Cash account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not an Asset account` · `422 Customer not found` / `422 Vendor not found` · `422 A RECEIVE payment cannot allocate to a bill` / `422 A PAY payment cannot allocate to an invoice` · `422 That document belongs to a different counterparty` · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 Allocation exceeds the amount still due on this document` · `404 Payment not found` · `409 This payment has already been voided`.
 
 ---
 

@@ -15,6 +15,7 @@ const app = createApp();
 const INVOICES = '/api/v1/ledger-core/invoices';
 const CUSTOMERS = '/api/v1/ledger-core/customers';
 const JOURNALS = '/api/v1/ledger-core/journals';
+const PAYMENTS = '/api/v1/ledger-core/payments';
 
 let userA: SeededUser;
 let userC: SeededUser;
@@ -483,5 +484,46 @@ describe('GET /ledger-core/invoices — filtering and isolation', () => {
 
     expect(res.body.invoices).toHaveLength(0);
     expect(orgB).not.toBe(orgA);
+  });
+});
+
+describe('GET /ledger-core/invoices — ?settlement= filter', () => {
+  it('a fully paid invoice moves from OUTSTANDING to PAID, and never 500s', async () => {
+    const agent = await loginAgent(app, userA);
+    const customerId = await createCustomer(agent);
+    const revenueAccountId = await accountId(orgA, '4100');
+    const cashAccountId = await accountId(orgA, '1110');
+
+    const created = await agent
+      .post(INVOICES)
+      .send(invoicePayload({ customerId, revenueAccountId }));
+    const invoiceId = created.body.invoice.id as string;
+    await agent.post(`${INVOICES}/${invoiceId}/issue`).send({});
+
+    const beforePayment = await agent.get(`${INVOICES}?status=ISSUED&settlement=OUTSTANDING`);
+    expect(beforePayment.status).toBe(200);
+    expect(beforePayment.body.invoices.map((i: { id: string }) => i.id)).toContain(invoiceId);
+
+    await agent.post(PAYMENTS).send({
+      direction: 'RECEIVE',
+      paymentDate: '2026-06-15',
+      amountCents: 29500,
+      cashAccountId,
+      customerId,
+      allocations: [{ invoiceId, billId: null, amountCents: 29500 }],
+    });
+
+    const outstanding = await agent.get(`${INVOICES}?status=ISSUED&settlement=OUTSTANDING`);
+    expect(outstanding.status).toBe(200);
+    expect(outstanding.body.invoices.map((i: { id: string }) => i.id)).not.toContain(invoiceId);
+
+    const overdue = await agent.get(`${INVOICES}?status=ISSUED&settlement=OVERDUE`);
+    expect(overdue.status).toBe(200);
+    expect(overdue.body.invoices.map((i: { id: string }) => i.id)).not.toContain(invoiceId);
+
+    const paid = await agent.get(`${INVOICES}?status=ISSUED&settlement=PAID`);
+    expect(paid.status).toBe(200);
+    expect(paid.body.invoices.map((i: { id: string }) => i.id)).toContain(invoiceId);
+    expect(paid.body.invoices[0].settlementStatus).toBe('PAID');
   });
 });

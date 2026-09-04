@@ -570,6 +570,16 @@ export interface TrendPoint {
   expenseCents: number;
 }
 
+/** Mirrors server/src/types/ledger-core.ts's AgingBucket/AGING_BUCKET_LABELS. */
+export type AgingBucket = 'CURRENT' | 'D1_30' | 'D31_60' | 'D61_90' | 'D90_PLUS';
+
+export interface AgingBucketAmount {
+  bucket: AgingBucket;
+  label: string;
+  amountCents: number;
+  documentCount: number;
+}
+
 /** Mirrors server/src/types/ledger-core.ts's DashboardSummary. */
 export interface DashboardSummary {
   asOf: string;
@@ -589,6 +599,22 @@ export interface DashboardSummary {
   activity: { entryCountYtd: number; recentEntries: JournalEntry[] };
   integrity: { totalDebitCents: number; totalCreditCents: number; isBalanced: boolean };
   trend: TrendPoint[];
+  receivables: {
+    outstandingCents: number;
+    overdueCents: number;
+    draftCount: number;
+    draftCents: number;
+    buckets: AgingBucketAmount[];
+  };
+  payables: {
+    outstandingCents: number;
+    overdueCents: number;
+    draftCount: number;
+    draftCents: number;
+    awaitingReviewCount: number;
+    awaitingReviewCents: number;
+    buckets: AgingBucketAmount[];
+  };
 }
 
 /** GET /ledger-core/reports/dashboard — aggregated from raw lines each call, never cached. */
@@ -694,6 +720,9 @@ export interface InvoiceLine {
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
 
+/** Mirrors server/src/types/ledger-core.ts's SettlementStatus. Derived, never stored. */
+export type SettlementStatus = 'NOT_APPLICABLE' | 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE';
+
 /** Mirrors server/src/types/ledger-core.ts's Invoice. */
 export interface Invoice {
   id: string;
@@ -721,7 +750,12 @@ export interface Invoice {
   createdAt: string;
   updatedAt: string;
   lines: InvoiceLine[];
+  allocatedCents: number;
+  amountDueCents: number;
+  settlementStatus: SettlementStatus;
 }
+
+export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
 
 export interface InvoiceFilters {
   page?: number;
@@ -731,6 +765,7 @@ export interface InvoiceFilters {
   from?: string;
   to?: string;
   q?: string;
+  settlement?: SettlementFilter | '';
 }
 
 /** GET /ledger-core/invoices — paginated, filterable, lines nested. */
@@ -753,6 +788,7 @@ export function listInvoices(
   if (params.from !== undefined && params.from !== '') query.set('from', params.from);
   if (params.to !== undefined && params.to !== '') query.set('to', params.to);
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/ledger-core/invoices${suffix}`, { signal: signal ?? null });
@@ -865,4 +901,390 @@ export async function updateInvoiceSettings(
     { method: 'PATCH', body: JSON.stringify(input) },
   );
   return body.invoiceSettings;
+}
+
+/* ------------------------------------------------------ ledger-core: accounts payable */
+
+/** Mirrors server/src/types/ledger-core.ts's Vendor. */
+export interface Vendor {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  paymentTerms: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /ledger-core/vendors */
+export function listVendors(
+  params: { q?: string; includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; vendors: Vendor[] }> {
+  const query = new URLSearchParams();
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.includeInactive === true) query.set('includeInactive', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/vendors${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/vendors */
+export function createVendor(body: {
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  paymentTerms: string | null;
+  notes: string | null;
+}): Promise<{ success: boolean; vendor: Vendor }> {
+  return apiFetch('/ledger-core/vendors', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/vendors/:id */
+export function updateVendor(
+  id: string,
+  body: Partial<{
+    name: string;
+    email: string | null;
+    phone: string | null;
+    billingAddress: string | null;
+    taxNumber: string | null;
+    paymentTerms: string | null;
+    notes: string | null;
+    isActive: boolean;
+  }>,
+): Promise<{ success: boolean; vendor: Vendor }> {
+  return apiFetch(`/ledger-core/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's BillLine. */
+export interface BillLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  expenseAccountId: string;
+  expenseAccountCode: string;
+  expenseAccountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export type BillStatus = 'DRAFT' | 'AWAITING_APPROVAL' | 'POSTED' | 'VOID';
+
+/** Mirrors server/src/types/ledger-core.ts's Bill. */
+export interface Bill {
+  id: string;
+  vendorReference: string;
+  status: BillStatus;
+  vendorId: string;
+  vendorName: string;
+  billDate: string;
+  dueDate: string;
+  currencyCode: string;
+  vendorNameSnapshot: string;
+  vendorAddressSnapshot: string | null;
+  vendorTaxNumberSnapshot: string | null;
+  notes: string | null;
+  paymentTerms: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  submittedAt: string | null;
+  postedAt: string | null;
+  voidedAt: string | null;
+  approvedBy: string | null;
+  approvedByName: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: BillLine[];
+  allocatedCents: number;
+  amountDueCents: number;
+  settlementStatus: SettlementStatus;
+}
+
+export interface BillFilters {
+  page?: number;
+  limit?: number;
+  status?: BillStatus | '';
+  vendorId?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  settlement?: SettlementFilter | '';
+}
+
+/** GET /ledger-core/bills — paginated, filterable, lines nested. */
+export function listBills(
+  params: BillFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  bills: Bill[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.vendorId !== undefined && params.vendorId !== '') query.set('vendorId', params.vendorId);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/bills${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/bills/:id */
+export function getBill(id: string, signal?: AbortSignal): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch(`/ledger-core/bills/${id}`, { signal: signal ?? null });
+}
+
+export interface BillLineInput {
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  expenseAccountId: string;
+  taxRateBp: number;
+}
+
+export interface BillInput {
+  vendorId: string;
+  vendorReference: string;
+  billDate: string;
+  dueDate: string;
+  notes: string | null;
+  paymentTerms: string | null;
+  lines: BillLineInput[];
+}
+
+/** POST /ledger-core/bills — always drafted, never posted directly. */
+export function createBill(body: BillInput): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch('/ledger-core/bills', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/bills/:id — draft or in-review only. */
+export function updateBill(id: string, body: BillInput): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch(`/ledger-core/bills/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /ledger-core/bills/:id — draft or in-review only. */
+export async function deleteBill(id: string): Promise<void> {
+  await apiFetch(`/ledger-core/bills/${id}`, { method: 'DELETE' });
+}
+
+/** POST /ledger-core/bills/:id/submit — sends a draft for approval. */
+export function submitBill(id: string): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch(`/ledger-core/bills/${id}/submit`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /ledger-core/bills/:id/approve — OWNER/ADMIN only; posts a balanced journal entry. */
+export function approveBill(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch(`/ledger-core/bills/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/**
+ * POST /ledger-core/bills/:id/void — the only correction path once posted.
+ * Posts a reversing journal entry; a draft/in-review bill is voided with no GL posting.
+ */
+export function voidBill(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; bill: Bill }> {
+  return apiFetch(`/ledger-core/bills/${id}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/* ---------------------------------------------------------- ledger-core: payments */
+
+export type PaymentDirection = 'RECEIVE' | 'PAY';
+export type PaymentStatus = 'POSTED' | 'VOID';
+
+/** Mirrors server/src/types/ledger-core.ts's PaymentAllocation. */
+export interface PaymentAllocation {
+  id: string;
+  invoiceId: string | null;
+  billId: string | null;
+  documentReference: string;
+  documentTotalCents: number;
+  amountCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's Payment. */
+export interface Payment {
+  id: string;
+  direction: PaymentDirection;
+  status: PaymentStatus;
+  paymentDate: string;
+  currencyCode: string;
+  amountCents: number;
+  cashAccountId: string;
+  cashAccountCode: string;
+  cashAccountName: string;
+  customerId: string | null;
+  vendorId: string | null;
+  counterpartyName: string;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  journalEntryId: string;
+  voidJournalEntryId: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  allocations: PaymentAllocation[];
+}
+
+export interface PaymentFilters {
+  page?: number;
+  limit?: number;
+  direction?: PaymentDirection | '';
+  status?: PaymentStatus | '';
+  customerId?: string;
+  vendorId?: string;
+  from?: string;
+  to?: string;
+}
+
+/** GET /ledger-core/payments */
+export function listPayments(
+  params: PaymentFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  payments: Payment[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.direction !== undefined && params.direction !== '') query.set('direction', params.direction);
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.customerId !== undefined && params.customerId !== '') query.set('customerId', params.customerId);
+  if (params.vendorId !== undefined && params.vendorId !== '') query.set('vendorId', params.vendorId);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/payments${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/payments/:id */
+export function getPayment(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; payment: Payment }> {
+  return apiFetch(`/ledger-core/payments/${id}`, { signal: signal ?? null });
+}
+
+export interface PaymentAllocationInput {
+  invoiceId: string | null;
+  billId: string | null;
+  amountCents: number;
+}
+
+export interface PaymentInput {
+  direction: PaymentDirection;
+  paymentDate: string;
+  amountCents: number;
+  cashAccountId: string;
+  customerId: string | null;
+  vendorId: string | null;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  allocations: PaymentAllocationInput[];
+  entryDate: string | null;
+}
+
+/** POST /ledger-core/payments — born posted; posts a balanced journal entry in the same transaction. */
+export function createPayment(body: PaymentInput): Promise<{ success: boolean; payment: Payment }> {
+  return apiFetch('/ledger-core/payments', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /ledger-core/payments/:id/void — the only correction path; posts a reversing journal entry. */
+export function voidPayment(
+  id: string,
+  entryDate: string | null = null,
+): Promise<{ success: boolean; payment: Payment }> {
+  return apiFetch(`/ledger-core/payments/${id}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate }),
+  });
+}
+
+/* ------------------------------------------------------- ledger-core: AR/AP aging */
+
+export interface AgingCounterpartyRow {
+  counterpartyId: string;
+  counterpartyName: string;
+  currentCents: number;
+  d1to30Cents: number;
+  d31to60Cents: number;
+  d61to90Cents: number;
+  d90PlusCents: number;
+  totalCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's AgingReport. */
+export interface AgingReport {
+  asOf: string;
+  kind: 'AR' | 'AP';
+  buckets: AgingBucketAmount[];
+  totalOutstandingCents: number;
+  totalOverdueCents: number;
+  controlAccount: { id: string; code: string; name: string; balanceCents: number } | null;
+  reconciles: boolean | null;
+  rows: AgingCounterpartyRow[];
+}
+
+/** GET /ledger-core/reports/ar-aging?asOf=YYYY-MM-DD */
+export async function getArAging(asOf: string | null = null, signal?: AbortSignal): Promise<AgingReport> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  const body = await apiFetch<{ success: boolean } & AgingReport>(
+    `/ledger-core/reports/ar-aging${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+/** GET /ledger-core/reports/ap-aging?asOf=YYYY-MM-DD */
+export async function getApAging(asOf: string | null = null, signal?: AbortSignal): Promise<AgingReport> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  const body = await apiFetch<{ success: boolean } & AgingReport>(
+    `/ledger-core/reports/ap-aging${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
 }

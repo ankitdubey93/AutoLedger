@@ -59,8 +59,34 @@ function baseDashboard(overrides: Partial<DashboardSummary> = {}): DashboardSumm
       revenueCents: 0,
       expenseCents: 0,
     })),
+    receivables: {
+      outstandingCents: 0,
+      overdueCents: 0,
+      draftCount: 0,
+      draftCents: 0,
+      buckets: emptyBuckets(),
+    },
+    payables: {
+      outstandingCents: 0,
+      overdueCents: 0,
+      draftCount: 0,
+      draftCents: 0,
+      awaitingReviewCount: 0,
+      awaitingReviewCents: 0,
+      buckets: emptyBuckets(),
+    },
     ...overrides,
   };
+}
+
+function emptyBuckets(): DashboardSummary['receivables']['buckets'] {
+  return [
+    { bucket: 'CURRENT', label: 'Current', amountCents: 0, documentCount: 0 },
+    { bucket: 'D1_30', label: '1–30 days', amountCents: 0, documentCount: 0 },
+    { bucket: 'D31_60', label: '31–60 days', amountCents: 0, documentCount: 0 },
+    { bucket: 'D61_90', label: '61–90 days', amountCents: 0, documentCount: 0 },
+    { bucket: 'D90_PLUS', label: '90+ days', amountCents: 0, documentCount: 0 },
+  ];
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -134,5 +160,55 @@ describe('DashboardPage', () => {
     // interaction surface, not data.
     expect(container.querySelectorAll('svg rect[data-bar]')).toHaveLength(12);
     expect(container.querySelectorAll('svg rect[data-hit]')).toHaveLength(6);
+  });
+
+  it('renders the AR/AP panels with formatted totals', async () => {
+    mockRoutes(
+      baseDashboard({
+        receivables: {
+          outstandingCents: 150000,
+          overdueCents: 50000,
+          draftCount: 0,
+          draftCents: 0,
+          buckets: emptyBuckets(),
+        },
+        payables: {
+          outstandingCents: 60000,
+          overdueCents: 10000,
+          draftCount: 0,
+          draftCents: 0,
+          awaitingReviewCount: 2,
+          awaitingReviewCents: 12000,
+          buckets: emptyBuckets(),
+        },
+      }),
+    );
+    renderDashboard();
+
+    await screen.findByText('Invoices owed to you');
+    expect(screen.getByText('1500.00')).toBeInTheDocument();
+    expect(screen.getByText('Bills you need to pay')).toBeInTheDocument();
+    expect(screen.getByText('600.00')).toBeInTheDocument();
+    expect(screen.getByText('To review')).toBeInTheDocument();
+    expect(screen.getByText('120.00')).toBeInTheDocument();
+  });
+
+  it('the Overdue figure links into the invoices register filtered to overdue', async () => {
+    mockRoutes(
+      baseDashboard({
+        receivables: {
+          outstandingCents: 50000,
+          overdueCents: 50000,
+          draftCount: 0,
+          draftCents: 0,
+          buckets: emptyBuckets(),
+        },
+      }),
+    );
+    renderDashboard();
+
+    await screen.findByText('Invoices owed to you');
+    const overdueLink = screen.getAllByRole('link', { name: 'Overdue' })[0];
+    expect(overdueLink).toHaveAttribute('href', expect.stringContaining('/invoices?status=ISSUED&settlement=OVERDUE'));
   });
 });

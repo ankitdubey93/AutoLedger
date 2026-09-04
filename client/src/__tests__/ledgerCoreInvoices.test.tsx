@@ -111,6 +111,9 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
         taxCents: 4500,
       },
     ],
+    allocatedCents: 0,
+    amountDueCents: 0,
+    settlementStatus: 'NOT_APPLICABLE',
     ...overrides,
   };
 }
@@ -244,6 +247,11 @@ function mockDetailRoutes(invoice: Invoice) {
     }
     if (url.endsWith(`/ledger-core/invoices/${invoice.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, invoice }));
+    }
+    if (url.includes('/ledger-core/payments')) {
+      return Promise.resolve(
+        jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
+      );
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
   });

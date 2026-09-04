@@ -35,8 +35,10 @@ export default function CreateMenu() {
 
   const items = [
     { label: 'Invoice', to: `${base}/invoices/new` },
+    { label: 'Bill', to: `${base}/bills/new` },
     { label: 'Journal entry', to: `${base}/journals/new` },
     { label: 'Customer', to: `${base}/customers?new=1` },
+    { label: 'Vendor', to: `${base}/vendors?new=1` },
     { label: 'Account', to: `${base}/accounts?new=1` },
   ];
 

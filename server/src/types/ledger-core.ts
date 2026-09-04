@@ -293,6 +293,10 @@ export interface Invoice {
   createdAt: string;
   updatedAt: string;
   lines: InvoiceLine[];
+  /** Derived from POSTED payment allocations — see settlementStatusOf. `0` unless status is ISSUED. */
+  allocatedCents: number;
+  amountDueCents: number;
+  settlementStatus: SettlementStatus;
 }
 
 export interface InvoiceSettings {
@@ -314,6 +318,240 @@ export interface InvoiceSettings {
   accentColor: string;
   /** `false` until the organization has saved invoice settings at least once. */
   configured: boolean;
+}
+
+/* --------------------------------------------------- Phase 3.9 — accounts payable */
+
+export interface Vendor {
+  id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+  paymentTerms: string | null;
+  notes: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export const BILL_STATUSES = ['DRAFT', 'AWAITING_APPROVAL', 'POSTED', 'VOID'] as const;
+export type BillStatus = (typeof BILL_STATUSES)[number];
+
+export function isBillStatus(value: string): value is BillStatus {
+  return (BILL_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The one lifecycle transition table (guardrails rule 10). The `status` CHECK
+ * in migration 013 lists exactly these four values and nothing else — if a
+ * status is ever added, both change in the same migration.
+ *
+ * `AWAITING_APPROVAL -> DRAFT` is the recall edge: a reviewer sends a bill
+ * back for correction. It is deliberate, not an oversight.
+ */
+export const BILL_TRANSITIONS = {
+  DRAFT: ['AWAITING_APPROVAL', 'POSTED', 'VOID'],
+  AWAITING_APPROVAL: ['DRAFT', 'POSTED', 'VOID'],
+  POSTED: ['VOID'],
+  VOID: [],
+} as const satisfies Record<BillStatus, readonly BillStatus[]>;
+
+export function canTransitionBill(from: BillStatus, to: BillStatus): boolean {
+  return (BILL_TRANSITIONS[from] as readonly BillStatus[]).includes(to);
+}
+
+export interface BillLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  /** Thousandths of a unit — 2500 means 2.5. Never a float. */
+  quantityMilli: number;
+  unitPriceCents: number;
+  expenseAccountId: string;
+  expenseAccountCode: string;
+  expenseAccountName: string;
+  /** Basis points — 1850 means 18.5%. */
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export interface Bill {
+  id: string;
+  /** The vendor's own invoice number — required from creation, unlike an invoice's number. */
+  vendorReference: string;
+  status: BillStatus;
+  vendorId: string;
+  vendorName: string;
+  billDate: string;
+  dueDate: string;
+  currencyCode: string;
+  vendorNameSnapshot: string;
+  vendorAddressSnapshot: string | null;
+  vendorTaxNumberSnapshot: string | null;
+  notes: string | null;
+  paymentTerms: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  submittedAt: string | null;
+  postedAt: string | null;
+  voidedAt: string | null;
+  approvedBy: string | null;
+  approvedByName: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: BillLine[];
+  /** Derived from POSTED payment allocations — see settlementStatusOf. `0` unless status is POSTED. */
+  allocatedCents: number;
+  amountDueCents: number;
+  settlementStatus: SettlementStatus;
+}
+
+export const PAYMENT_DIRECTIONS = ['RECEIVE', 'PAY'] as const;
+export type PaymentDirection = (typeof PAYMENT_DIRECTIONS)[number];
+
+export function isPaymentDirection(value: string): value is PaymentDirection {
+  return (PAYMENT_DIRECTIONS as readonly string[]).includes(value);
+}
+
+export const PAYMENT_STATUSES = ['POSTED', 'VOID'] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+export function isPaymentStatus(value: string): value is PaymentStatus {
+  return (PAYMENT_STATUSES as readonly string[]).includes(value);
+}
+
+/** The one lifecycle transition table (guardrails rule 10). A payment is born POSTED — there is no draft. */
+export const PAYMENT_TRANSITIONS = {
+  POSTED: ['VOID'],
+  VOID: [],
+} as const satisfies Record<PaymentStatus, readonly PaymentStatus[]>;
+
+export function canTransitionPayment(from: PaymentStatus, to: PaymentStatus): boolean {
+  return (PAYMENT_TRANSITIONS[from] as readonly PaymentStatus[]).includes(to);
+}
+
+export interface PaymentAllocation {
+  id: string;
+  invoiceId: string | null;
+  billId: string | null;
+  /** The document's own reference — invoice number or vendor reference. */
+  documentReference: string;
+  documentTotalCents: number;
+  amountCents: number;
+}
+
+export interface Payment {
+  id: string;
+  direction: PaymentDirection;
+  status: PaymentStatus;
+  paymentDate: string;
+  currencyCode: string;
+  amountCents: number;
+  cashAccountId: string;
+  cashAccountCode: string;
+  cashAccountName: string;
+  customerId: string | null;
+  vendorId: string | null;
+  counterpartyName: string;
+  method: string | null;
+  reference: string | null;
+  notes: string | null;
+  journalEntryId: string;
+  voidJournalEntryId: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  allocations: PaymentAllocation[];
+}
+
+/**
+ * DERIVED, never stored. There is no settlement column on `invoices` or
+ * `bills` — this is computed from `payment_allocations` on every read, for
+ * the same reason `reportService` and `dashboardService` have no summary
+ * table: a cached balance is a second source of truth that drifts from the
+ * rows that determine it. See study/architecture/derived-vs-stored-state.md.
+ */
+export const SETTLEMENT_STATUSES = ['NOT_APPLICABLE', 'UNPAID', 'PARTIALLY_PAID', 'PAID', 'OVERDUE'] as const;
+export type SettlementStatus = (typeof SETTLEMENT_STATUSES)[number];
+
+/**
+ * Precedence, in this exact order — OVERDUE deliberately outranks
+ * PARTIALLY_PAID, because a part-paid invoice past its due date is still a
+ * collection problem:
+ *   not open           -> NOT_APPLICABLE
+ *   allocated >= total -> PAID
+ *   dueDate < asOf     -> OVERDUE
+ *   allocated > 0      -> PARTIALLY_PAID
+ *   otherwise          -> UNPAID
+ */
+export function settlementStatusOf(args: {
+  isOpen: boolean;
+  totalCents: number;
+  allocatedCents: number;
+  dueDate: string;
+  asOf: string;
+}): SettlementStatus {
+  if (!args.isOpen) return 'NOT_APPLICABLE';
+  if (args.allocatedCents >= args.totalCents) return 'PAID';
+  if (args.dueDate < args.asOf) return 'OVERDUE';
+  if (args.allocatedCents > 0) return 'PARTIALLY_PAID';
+  return 'UNPAID';
+}
+
+export const AGING_BUCKETS = ['CURRENT', 'D1_30', 'D31_60', 'D61_90', 'D90_PLUS'] as const;
+export type AgingBucket = (typeof AGING_BUCKETS)[number];
+
+export const AGING_BUCKET_LABELS = {
+  CURRENT: 'Current',
+  D1_30: '1–30 days',
+  D31_60: '31–60 days',
+  D61_90: '61–90 days',
+  D90_PLUS: '90+ days',
+} as const satisfies Record<AgingBucket, string>;
+
+export interface AgingBucketAmount {
+  bucket: AgingBucket;
+  label: string;
+  amountCents: number;
+  documentCount: number;
+}
+
+export interface AgingCounterpartyRow {
+  counterpartyId: string;
+  counterpartyName: string;
+  currentCents: number;
+  d1to30Cents: number;
+  d31to60Cents: number;
+  d61to90Cents: number;
+  d90PlusCents: number;
+  totalCents: number;
+}
+
+export interface AgingReport {
+  asOf: string;
+  kind: 'AR' | 'AP';
+  /** Exactly 5 entries, in AGING_BUCKETS order — an empty bucket is a zero, never absent. */
+  buckets: AgingBucketAmount[];
+  totalOutstandingCents: number;
+  totalOverdueCents: number;
+  /** `null` when no control account is configured and the fallback code is absent. */
+  controlAccount: { id: string; code: string; name: string; balanceCents: number } | null;
+  /**
+   * The subledger total equals the control account's GL balance. Integer
+   * equality — never a tolerance. `null` when there is no control account.
+   */
+  reconciles: boolean | null;
+  rows: AgingCounterpartyRow[];
 }
 
 export interface DashboardSummary {
@@ -343,4 +581,23 @@ export interface DashboardSummary {
   integrity: { totalDebitCents: number; totalCreditCents: number; isBalanced: boolean };
   /** Exactly 6 points, oldest first — a month with no postings still appears, at zero. */
   trend: TrendPoint[];
+  receivables: {
+    outstandingCents: number;
+    overdueCents: number;
+    /** Invoices still in DRAFT — entered, not yet issued, owed to nobody yet. */
+    draftCount: number;
+    draftCents: number;
+    /** Exactly 5, in AGING_BUCKETS order. */
+    buckets: AgingBucketAmount[];
+  };
+  payables: {
+    outstandingCents: number;
+    overdueCents: number;
+    draftCount: number;
+    draftCents: number;
+    /** Bills in AWAITING_APPROVAL — the "Bills to review" queue (plan D1: not an expense-claim inbox). */
+    awaitingReviewCount: number;
+    awaitingReviewCents: number;
+    buckets: AgingBucketAmount[];
+  };
 }

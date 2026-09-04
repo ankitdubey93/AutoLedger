@@ -13,5 +13,7 @@ const router = Router();
 
 router.get('/trial-balance', authenticate, reportController.trialBalance);
 router.get('/dashboard', authenticate, reportController.dashboard);
+router.get('/ar-aging', authenticate, reportController.arAging);
+router.get('/ap-aging', authenticate, reportController.apAging);
 
 export default router;

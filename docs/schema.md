@@ -181,7 +181,60 @@ Constraint `ux_invoice_lines_invoice_line` — `UNIQUE (invoice_id, line_number)
 
 `server/src/types/ledger-core.ts`'s `INVOICE_TRANSITIONS` (`DRAFT -> [ISSUED, VOID]`, `ISSUED -> [VOID]`, `VOID -> []`) is the one place a status transition is decided in code; the `status` CHECK above lists the identical three values. See [study/architecture/document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md).
 
-**Not built in this phase:** a `PAID` status or any payment/cash-receipt document — an issued invoice's receivable never clears except by voiding. No AR aging, no AR subledger report, no PDF generation, no multi-currency invoices (the FX engine is Phase 8), no fiscal-period lock on the invoice date.
+**Not built in this phase:** a `PAID` status or any payment/cash-receipt document — an issued invoice's receivable never clears except by voiding. No AR aging, no AR subledger report, no PDF generation, no multi-currency invoices (the FX engine is Phase 8), no fiscal-period lock on the invoice date. **Payment recording and AR/AP aging landed in Phase 3.9, immediately below.**
+
+---
+
+## Phase 3.9 — Accounts payable & payments (LedgerCore) ✅ applied
+
+**`011_ledger-core_vendors.sql`**, **`012_ledger-core_ap_posting_accounts.sql`**, **`013_ledger-core_bills.sql`**, **`014_ledger-core_payments.sql`** — four migrations: one new table (`vendors`), three new columns on `ledger_settings`, two new tables (`bills`, `bill_lines`), and two more (`payments`, `payment_allocations`). A fifth half-step in the 3.5/3.6/3.7/3.8 lineage — renumbers nothing. This phase pays off the "AR/AP subledgers" line item the roadmap table assigned to Phase 4; **Phase 4's remaining scope is P&L, balance sheet, and fiscal periods with close/lock — nothing else.**
+
+**`vendors`** — the parties bills are entered against, per organization
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `name` TEXT NOT NULL CHECK non-blank · `email` / `phone` / `billing_address` / `tax_number` / `payment_terms` / `notes` (nullable) · `is_active` BOOLEAN NOT NULL DEFAULT true · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
+Constraint: `ux_vendors_org_id_id` — `UNIQUE (org_id, id)`, so `bills` can carry a composite FK into it. No `DELETE` route — retired via `is_active = false`, matching `customers`.
+
+**`ledger_settings`** gains three nullable columns for AP posting: `payable_account_id`, `tax_input_account_id`, `default_expense_account_id` — each a **composite** FK to `accounts (org_id, id)` `ON DELETE RESTRICT`, same reasoning as `cash_account_id` and `ledger_invoice_settings`' three account columns. All nullable; an existing organization needs no backfill, and bill approval falls back to the default chart's `2100`/`1180` when unset.
+
+**`bills`** — purchase (accounts-payable) documents
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` **ON DELETE RESTRICT** · `vendor_id` UUID NOT NULL · `vendor_reference` TEXT NOT NULL CHECK non-blank (the **vendor's own** invoice number — the duplicate-payment control) · `status` TEXT NOT NULL DEFAULT `'DRAFT'` CHECK IN (`DRAFT`,`AWAITING_APPROVAL`,`POSTED`,`VOID`) · `bill_date` / `due_date` DATE NOT NULL · `currency_code` CHAR(3) NOT NULL · `vendor_name_snapshot` TEXT NOT NULL, `vendor_address_snapshot` / `vendor_tax_number_snapshot` TEXT (nullable, frozen at write time) · `notes` / `payment_terms` TEXT (nullable) · `subtotal_cents` / `tax_cents` / `total_cents` BIGINT NOT NULL DEFAULT 0 · `journal_entry_id` / `void_journal_entry_id` UUID (nullable) · `submitted_at` / `posted_at` / `voided_at` TIMESTAMPTZ (nullable) · `approved_by` FK → `users` ON DELETE RESTRICT (nullable) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
+
+Constraints: `ux_bills_org_id_id` — `UNIQUE (org_id, id)` · `ux_bills_vendor_reference` — `UNIQUE (org_id, vendor_id, vendor_reference)` · `chk_bills_total` · `chk_bills_due_not_before_bill_date` · `chk_bills_posted_complete` — a `POSTED` row must carry a `journal_entry_id`, `posted_at`, and `approved_by`. Composite FKs `fk_bills_vendor` → `vendors (org_id, id)`, `fk_bills_journal_entry` / `fk_bills_void_journal_entry` → `journal_entries (org_id, id)`, all `ON DELETE RESTRICT`.
+
+**`bill_lines`**
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `bill_id` UUID NOT NULL · `line_number` SMALLINT NOT NULL CHECK `> 0` · `description` TEXT NOT NULL CHECK non-blank · `quantity_milli` BIGINT NOT NULL CHECK `> 0` · `unit_price_cents` BIGINT NOT NULL · `expense_account_id` UUID NOT NULL (an `Expense` **or** `Asset` account — a bill may buy a fixed asset or a prepaid, unlike an invoice's revenue-only line) · `tax_rate_bp` INTEGER NOT NULL DEFAULT 0 CHECK BETWEEN 0 AND 10000 · `net_cents` / `tax_cents` BIGINT NOT NULL · `created_at`
+Constraint `ux_bill_lines_bill_line` — `UNIQUE (bill_id, line_number)`. `fk_bill_lines_bill` → `bills (org_id, id)` **ON DELETE CASCADE**; `fk_bill_lines_expense_account` → `accounts (org_id, id)` ON DELETE RESTRICT. Index `idx_bill_lines_org_bill` on `(org_id, bill_id)`.
+
+### A four-state FSM, not three — and two immutability triggers to match
+
+Unlike an invoice, a bill has **four** lifecycle states: `DRAFT -> AWAITING_APPROVAL -> POSTED -> VOID`, plus a recall edge `AWAITING_APPROVAL -> DRAFT`. Entry and approval are deliberately separate acts of trust — `POST /bills/:id/submit` needs `ACCOUNTANT` or above, `POST /bills/:id/approve` needs `OWNER`/`ADMIN` only. See [study/architecture/document-lifecycle-fsm.md § The four-state extension](../study/architecture/document-lifecycle-fsm.md).
+
+**`reject_posted_bill_mutation()`** (on `bills`, `BEFORE UPDATE OR DELETE`) — `DRAFT` and `AWAITING_APPROVAL` rows are freely editable; once `POSTED`, only `POSTED -> VOID` is permitted, and only touching `status`/`voided_at`/`void_journal_entry_id`, via the same `to_jsonb` row-diff technique migration `009` established. Raises `0A000`.
+
+**`reject_locked_bill_line_mutation()`** (on `bill_lines`) — a line may be inserted/changed/removed while its parent is `DRAFT` **or** `AWAITING_APPROVAL`; locked the instant the parent reaches `POSTED`. `NULL` parent status (mid-`CASCADE`) passes through.
+
+**`payments`** — settlement of invoices (RECEIVE) and bills (PAY), born posted
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `direction` TEXT NOT NULL CHECK IN (`RECEIVE`,`PAY`) · `status` TEXT NOT NULL DEFAULT `'POSTED'` CHECK IN (`POSTED`,`VOID`) · `payment_date` DATE NOT NULL · `currency_code` CHAR(3) NOT NULL · `amount_cents` BIGINT NOT NULL CHECK `> 0` · `cash_account_id` UUID NOT NULL · `customer_id` / `vendor_id` UUID (nullable, exactly one set per direction) · `method` / `reference` / `notes` TEXT (nullable) · `journal_entry_id` UUID **NOT NULL** (a payment cannot exist without its posting — there is no draft) · `void_journal_entry_id` UUID (nullable) · `voided_at` TIMESTAMPTZ (nullable) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
+
+Constraints: `ux_payments_org_id_id` · `chk_payments_counterparty` — `RECEIVE` requires `customer_id` set and `vendor_id` null, `PAY` the reverse. Composite FKs `fk_payments_cash_account` → `accounts`, `fk_payments_customer` → `customers`, `fk_payments_vendor` → `vendors`, `fk_payments_journal_entry` / `fk_payments_void_journal_entry` → `journal_entries`, all `ON DELETE RESTRICT`.
+
+**`payment_allocations`** — which documents a payment settles, and by how much; **insert-only, forever**
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `payment_id` UUID NOT NULL · `invoice_id` / `bill_id` UUID (nullable, exactly one set) · `amount_cents` BIGINT NOT NULL CHECK `> 0` · `created_at`
+
+Constraints: `chk_allocation_one_target` · `ux_allocation_payment_invoice` / `ux_allocation_payment_bill` — `UNIQUE (payment_id, invoice_id)` / `UNIQUE (payment_id, bill_id)`, tolerating unlimited `NULL`s. Composite FKs to `payments`, `invoices`, `bills`, all `ON DELETE RESTRICT`.
+
+### Two deferred constraint triggers, plus absolute immutability
+
+**`assert_payment_allocations_complete()`** — `AFTER INSERT OR UPDATE ON payments`, `DEFERRABLE INITIALLY DEFERRED`: a `POSTED` payment must have at least one allocation, summing to exactly its `amount_cents`. Deferred because the payment row is always inserted before its allocations can exist. Skips a `VOID` payment.
+
+**`assert_no_overallocation()`** — `AFTER INSERT ON payment_allocations`, `DEFERRABLE INITIALLY DEFERRED`: allocations against one document, summed across every `POSTED` payment that has ever targeted it (not just the current transaction's), must never exceed that document's total. See [study/postgresql/deferred-constraint-triggers.md § A deferred-trigger pair](../study/postgresql/deferred-constraint-triggers.md).
+
+**`reject_payment_mutation()`** — absolute except `POSTED -> VOID`, same row-diff technique as bills/invoices. **`reject_allocation_mutation()`** — absolute, no carve-out at all: `payment_allocations` rows are never updated or deleted, ever. This is what lets voiding a payment un-settle its documents with zero additional writes — see [study/architecture/derived-vs-stored-state.md](../study/architecture/derived-vs-stored-state.md).
+
+### Settlement is derived, never stored
+
+Neither `invoices` nor `bills` gained a `PAID` status or an `amount_paid_cents` column. `allocatedCents`/`amountDueCents`/`settlementStatus` are computed on every read from `payment_allocations`, filtered to `POSTED` payments — the same no-summary-table discipline `reportService`/`dashboardService` already follow. See [study/architecture/derived-vs-stored-state.md](../study/architecture/derived-vs-stored-state.md).
+
+**Not built in this phase:** an expense-claim/employee-reimbursement document, credit notes, vendor credits, partial void, PDF export, multi-currency payments, fiscal-period posting locks, audit trail. None of these are silently implied by anything above.
 
 ---
 

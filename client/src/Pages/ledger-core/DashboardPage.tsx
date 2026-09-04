@@ -18,6 +18,7 @@ import TrendChart from './TrendChart';
 import MetricTile from './MetricTile';
 import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';
+import BarChart from './BarChart';
 
 /**
  * LedgerCore's home page. Every figure is aggregated from raw `ledger_lines`
@@ -74,7 +75,7 @@ export default function DashboardPage() {
     );
   }
 
-  const { position, performance, activity, integrity, trend, fiscalYear } = dashboard;
+  const { position, performance, activity, integrity, trend, fiscalYear, receivables, payables } = dashboard;
 
   return (
     <section className="flex flex-col gap-6">
@@ -212,6 +213,101 @@ export default function DashboardPage() {
                 { label: 'Expenses', valueCents: performance.currentMonth.expenseCents, color: 'var(--bad)' },
               ]}
               currency={currency}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-1">Invoices owed to you</p>
+          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+            {formatCents(receivables.outstandingCents)}{' '}
+            <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+          </p>
+          <dl className="flex flex-col gap-1 text-sm mt-3">
+            <div className="flex justify-between">
+              <dt className="text-[var(--muted)]">
+                <Link to={`${base}/invoices?status=ISSUED&settlement=OUTSTANDING`}>Awaiting payment</Link>
+              </dt>
+              <dd className="m-0 tabular-nums">
+                {formatCents(receivables.outstandingCents - receivables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--muted)]">
+                <Link to={`${base}/invoices?status=ISSUED&settlement=OVERDUE`}>Overdue</Link>
+              </dt>
+              <dd className="m-0 tabular-nums" style={{ color: receivables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+                {formatCents(receivables.overdueCents)}
+              </dd>
+            </div>
+          </dl>
+          {receivables.draftCount > 0 && (
+            <p className="text-xs text-[var(--muted)] m-0 mt-2">
+              <Link to={`${base}/invoices?status=DRAFT`}>
+                {receivables.draftCount} draft {receivables.draftCount === 1 ? 'invoice' : 'invoices'}
+              </Link>
+            </p>
+          )}
+          <div className="mt-3">
+            <BarChart
+              accessibleTitle="Receivables by age"
+              data={receivables.buckets.map((b, i) => ({
+                label: b.label,
+                amountCents: b.amountCents,
+                emphasis: i > 0,
+              }))}
+            />
+          </div>
+        </div>
+
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-1">Bills you need to pay</p>
+          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+            {formatCents(payables.outstandingCents)}{' '}
+            <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+          </p>
+          <dl className="flex flex-col gap-1 text-sm mt-3">
+            <div className="flex justify-between">
+              <dt className="text-[var(--muted)]">
+                <Link to={`${base}/bills?status=POSTED&settlement=OUTSTANDING`}>Awaiting payment</Link>
+              </dt>
+              <dd className="m-0 tabular-nums">
+                {formatCents(payables.outstandingCents - payables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--muted)]">
+                <Link to={`${base}/bills?status=POSTED&settlement=OVERDUE`}>Overdue</Link>
+              </dt>
+              <dd className="m-0 tabular-nums" style={{ color: payables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+                {formatCents(payables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-[var(--muted)]">
+                <Link to={`${base}/bills?status=AWAITING_APPROVAL`}>To review</Link>
+              </dt>
+              <dd className="m-0 tabular-nums">{formatCents(payables.awaitingReviewCents)}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-[var(--muted)] m-0 mt-2">Bills entered but not yet approved.</p>
+          {payables.draftCount > 0 && (
+            <p className="text-xs text-[var(--muted)] m-0 mt-1">
+              <Link to={`${base}/bills?status=DRAFT`}>
+                {payables.draftCount} draft {payables.draftCount === 1 ? 'bill' : 'bills'}
+              </Link>
+            </p>
+          )}
+          <div className="mt-3">
+            <BarChart
+              accessibleTitle="Payables by age"
+              data={payables.buckets.map((b, i) => ({
+                label: b.label,
+                amountCents: b.amountCents,
+                emphasis: i > 0,
+              }))}
             />
           </div>
         </div>

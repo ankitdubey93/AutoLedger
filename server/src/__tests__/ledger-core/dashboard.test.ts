@@ -16,6 +16,11 @@ const app = createApp();
 const JOURNALS = '/api/v1/ledger-core/journals';
 const DASHBOARD = '/api/v1/ledger-core/reports/dashboard';
 const ONBOARDING = '/api/v1/ledger-core/settings/onboarding';
+const INVOICES = '/api/v1/ledger-core/invoices';
+const BILLS = '/api/v1/ledger-core/bills';
+const PAYMENTS = '/api/v1/ledger-core/payments';
+const CUSTOMERS = '/api/v1/ledger-core/customers';
+const VENDORS = '/api/v1/ledger-core/vendors';
 
 let userA: SeededUser;
 let userB: SeededUser;
@@ -259,5 +264,172 @@ describe('cross-tenant isolation', () => {
     await agentB.post('/api/v1/auth/switch-org').send({ orgId: orgA });
     const inA = await agentB.get(DASHBOARD).query({ asOf: '2026-06-01' });
     expect(inA.body.position.assetsCents).toBe(15000);
+  });
+});
+
+describe('AR/AP blocks', () => {
+  it('a fresh onboarded org has empty receivables and payables', async () => {
+    const agent = await loginAgent(app, userA);
+    await onboard(agent);
+
+    const res = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+
+    expect(res.body.receivables.outstandingCents).toBe(0);
+    expect(res.body.receivables.buckets).toHaveLength(5);
+    expect(res.body.payables.outstandingCents).toBe(0);
+    expect(res.body.payables.awaitingReviewCount).toBe(0);
+  });
+
+  it('an issued invoice due in the future is outstanding and not overdue', async () => {
+    const agent = await loginAgent(app, userA);
+    await onboard(agent);
+    const customerRes = await agent.post(CUSTOMERS).send({ name: 'Northwind Traders' });
+    const customerId = customerRes.body.customer.id as string;
+    const revenueAccountId = await accountId(orgA, '4100');
+
+    const created = await agent.post(INVOICES).send({
+      customerId,
+      issueDate: '2026-06-01',
+      dueDate: '2026-12-31',
+      notes: null,
+      paymentTerms: null,
+      lines: [
+        { description: 'x', quantityMilli: 1000, unitPriceCents: 100000, revenueAccountId, taxRateBp: 0 },
+      ],
+    });
+    await agent.post(`${INVOICES}/${created.body.invoice.id}/issue`).send({});
+
+    const res = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+
+    expect(res.body.receivables.outstandingCents).toBe(100000);
+    expect(res.body.receivables.overdueCents).toBe(0);
+    const current = res.body.receivables.buckets.find((b: { bucket: string }) => b.bucket === 'CURRENT');
+    expect(current.amountCents).toBe(100000);
+  });
+
+  it('an overdue invoice moves the overdue figure', async () => {
+    const agent = await loginAgent(app, userA);
+    await onboard(agent);
+    const customerRes = await agent.post(CUSTOMERS).send({ name: 'Northwind Traders' });
+    const customerId = customerRes.body.customer.id as string;
+    const revenueAccountId = await accountId(orgA, '4100');
+
+    const created = await agent.post(INVOICES).send({
+      customerId,
+      issueDate: '2026-01-01',
+      dueDate: '2026-02-01',
+      notes: null,
+      paymentTerms: null,
+      lines: [
+        { description: 'x', quantityMilli: 1000, unitPriceCents: 100000, revenueAccountId, taxRateBp: 0 },
+      ],
+    });
+    await agent.post(`${INVOICES}/${created.body.invoice.id}/issue`).send({});
+
+    const res = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+
+    expect(res.body.receivables.overdueCents).toBe(100000);
+  });
+
+  it('a draft invoice counts toward draftCount but not outstandingCents', async () => {
+    const agent = await loginAgent(app, userA);
+    await onboard(agent);
+    const customerRes = await agent.post(CUSTOMERS).send({ name: 'Northwind Traders' });
+    const customerId = customerRes.body.customer.id as string;
+    const revenueAccountId = await accountId(orgA, '4100');
+
+    await agent.post(INVOICES).send({
+      customerId,
+      issueDate: '2026-06-01',
+      dueDate: '2026-12-31',
+      notes: null,
+      paymentTerms: null,
+      lines: [
+        { description: 'x', quantityMilli: 1000, unitPriceCents: 5000, revenueAccountId, taxRateBp: 0 },
+      ],
+    });
+
+    const res = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+
+    expect(res.body.receivables.draftCount).toBe(1);
+    expect(res.body.receivables.outstandingCents).toBe(0);
+  });
+
+  it('a bill awaiting approval is not yet owed, but shows in the review queue', async () => {
+    const agent = await loginAgent(app, userA);
+    await onboard(agent);
+    const vendorRes = await agent.post(VENDORS).send({ name: 'Acme Supplies' });
+    const vendorId = vendorRes.body.vendor.id as string;
+    const expenseAccountId = await accountId(orgA, '6130');
+
+    const created = await agent.post(BILLS).send({
+      vendorId,
+      vendorReference: 'VEND-DASH-1',
+      billDate: '2026-06-01',
+      dueDate: '2026-12-31',
+      notes: null,
+      paymentTerms: null,
+      lines: [
+        { description: 'x', quantityMilli: 1000, unitPriceCents: 60000, expenseAccountId, taxRateBp: 0 },
+      ],
+    });
+    const billId = created.body.bill.id as string;
+    await agent.post(`${BILLS}/${billId}/submit`).send({});
+
+    const beforeApproval = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+    expect(beforeApproval.body.payables.awaitingReviewCount).toBe(1);
+    expect(beforeApproval.body.payables.awaitingReviewCents).toBe(60000);
+    expect(beforeApproval.body.payables.outstandingCents).toBe(0);
+
+    await agent.post(`${BILLS}/${billId}/approve`).send({});
+
+    const afterApproval = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
+    expect(afterApproval.body.payables.awaitingReviewCount).toBe(0);
+    expect(afterApproval.body.payables.outstandingCents).toBe(60000);
+
+    const cashAccountId = await accountId(orgA, '1110');
+    await agent.post(PAYMENTS).send({
+      direction: 'PAY',
+      paymentDate: '2026-06-15',
+      amountCents: 60000,
+      cashAccountId,
+      vendorId,
+      allocations: [{ invoiceId: null, billId, amountCents: 60000 }],
+    });
+
+    const afterPayment = await agent.get(DASHBOARD).query({ asOf: '2026-06-15' });
+    expect(afterPayment.body.payables.outstandingCents).toBe(0);
+    expect(afterPayment.body.integrity.isBalanced).toBe(true);
+    expect(afterPayment.body.position.equationHolds).toBe(true);
+  });
+
+  it("never includes another org's invoices or bills", async () => {
+    const agentA = await loginAgent(app, userA);
+    await onboard(agentA);
+    const agentC = await loginAgent(app, userC);
+    await onboard(agentC);
+
+    const customerCRes = await agentC.post(CUSTOMERS).send({ name: 'Bravo Customer' });
+    const revenueAccountCId = await accountId(orgB, '4100');
+    const createdC = await agentC.post(INVOICES).send({
+      customerId: customerCRes.body.customer.id,
+      issueDate: '2026-06-01',
+      dueDate: '2026-12-31',
+      notes: null,
+      paymentTerms: null,
+      lines: [
+        {
+          description: 'x',
+          quantityMilli: 1000,
+          unitPriceCents: 77777,
+          revenueAccountId: revenueAccountCId,
+          taxRateBp: 0,
+        },
+      ],
+    });
+    await agentC.post(`${INVOICES}/${createdC.body.invoice.id}/issue`).send({});
+
+    const res = await agentA.get(DASHBOARD).query({ asOf: '2026-06-01' });
+    expect(res.body.receivables.outstandingCents).toBe(0);
   });
 });

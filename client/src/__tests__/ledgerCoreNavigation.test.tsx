@@ -110,6 +110,34 @@ const emptyDashboard = {
     revenueCents: 0,
     expenseCents: 0,
   })),
+  receivables: {
+    outstandingCents: 0,
+    overdueCents: 0,
+    draftCount: 0,
+    draftCents: 0,
+    buckets: [
+      { bucket: 'CURRENT', label: 'Current', amountCents: 0, documentCount: 0 },
+      { bucket: 'D1_30', label: '1–30 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D31_60', label: '31–60 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D61_90', label: '61–90 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D90_PLUS', label: '90+ days', amountCents: 0, documentCount: 0 },
+    ],
+  },
+  payables: {
+    outstandingCents: 0,
+    overdueCents: 0,
+    draftCount: 0,
+    draftCents: 0,
+    awaitingReviewCount: 0,
+    awaitingReviewCents: 0,
+    buckets: [
+      { bucket: 'CURRENT', label: 'Current', amountCents: 0, documentCount: 0 },
+      { bucket: 'D1_30', label: '1–30 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D31_60', label: '31–60 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D61_90', label: '61–90 days', amountCents: 0, documentCount: 0 },
+      { bucket: 'D90_PLUS', label: '90+ days', amountCents: 0, documentCount: 0 },
+    ],
+  },
 };
 
 const trialBalanceRows = [

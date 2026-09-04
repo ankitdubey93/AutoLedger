@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
-import { listInvoices, type Invoice, type InvoiceStatus } from '../../services/fetchServices';
+import {
+  listInvoices,
+  type Invoice,
+  type InvoiceStatus,
+  type SettlementFilter,
+  type SettlementStatus,
+} from '../../services/fetchServices';
 import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
@@ -10,11 +16,35 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  *
  * Filters live in the URL, the same idiom JournalsPage uses. Correcting an
  * issued invoice means voiding it (from the detail page), never editing it
- * here — Edit is offered only on a DRAFT row.
+ * here — Edit is offered only on a DRAFT row. The tab strip maps directly
+ * onto server-side `status`/`settlement` query params, mirroring BillsPage.
  */
 
 const PAGE_LIMIT = 50;
-const STATUSES: InvoiceStatus[] = ['DRAFT', 'ISSUED', 'VOID'];
+
+interface Tab {
+  key: string;
+  label: string;
+  status: InvoiceStatus | '';
+  settlement: SettlementFilter | '';
+}
+
+const TABS: Tab[] = [
+  { key: 'all', label: 'All', status: '', settlement: '' },
+  { key: 'draft', label: 'Draft', status: 'DRAFT', settlement: '' },
+  { key: 'outstanding', label: 'Awaiting payment', status: 'ISSUED', settlement: 'OUTSTANDING' },
+  { key: 'overdue', label: 'Overdue', status: 'ISSUED', settlement: 'OVERDUE' },
+  { key: 'paid', label: 'Paid', status: 'ISSUED', settlement: 'PAID' },
+  { key: 'void', label: 'Void', status: 'VOID', settlement: '' },
+];
+
+function settlementLabel(status: SettlementStatus): string | null {
+  if (status === 'OVERDUE') return 'Overdue';
+  if (status === 'PARTIALLY_PAID') return 'Partially paid';
+  if (status === 'PAID') return 'Paid';
+  if (status === 'UNPAID') return 'Unpaid';
+  return null;
+}
 
 function statusPill(status: InvoiceStatus) {
   if (status === 'DRAFT') {
@@ -43,19 +73,22 @@ export default function InvoicesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const status = params.get('status') ?? '';
+  const status = (params.get('status') ?? '') as InvoiceStatus | '';
+  const settlement = (params.get('settlement') ?? '') as SettlementFilter | '';
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const q = params.get('q') ?? '';
   const page = Number(params.get('page') ?? '1');
-  const anyFilterSet = status !== '' || from !== '' || to !== '' || q !== '';
+  const anyFilterSet = status !== '' || settlement !== '' || from !== '' || to !== '' || q !== '';
+  const activeTab = TABS.find((t) => t.status === status && t.settlement === settlement)?.key ?? 'all';
 
   useEffect(() => {
     let ignore = false;
     setError(null);
 
     const filters: Parameters<typeof listInvoices>[0] = { page, limit: PAGE_LIMIT };
-    if (status !== '') filters.status = status as InvoiceStatus;
+    if (status !== '') filters.status = status;
+    if (settlement !== '') filters.settlement = settlement;
     if (from !== '') filters.from = from;
     if (to !== '') filters.to = to;
     if (q !== '') filters.q = q;
@@ -69,13 +102,29 @@ export default function InvoicesPage() {
         setLoaded(true);
       })
       .catch((err: unknown) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load invoices');
+        if (ignore) return;
+        setError(err instanceof Error ? err.message : 'Could not load invoices');
+        // Never leave a previous filter's results on screen under a failed one —
+        // that reads as "this invoice is in both tabs" instead of "this tab failed".
+        setInvoices([]);
+        setTotalCount(0);
+        setLoaded(true);
       });
 
     return () => {
       ignore = true;
     };
-  }, [status, from, to, q, page]);
+  }, [status, settlement, from, to, q, page]);
+
+  function selectTab(tab: Tab) {
+    const next = new URLSearchParams(params);
+    if (tab.status === '') next.delete('status');
+    else next.set('status', tab.status);
+    if (tab.settlement === '') next.delete('settlement');
+    else next.set('settlement', tab.settlement);
+    next.delete('page');
+    setParams(next);
+  }
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -117,22 +166,26 @@ export default function InvoicesPage() {
         </Link>
       </header>
 
-      <div className="flex flex-wrap items-end gap-3">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Status</span>
-          <select
-            value={status}
-            onChange={(e) => setFilter('status', e.target.value)}
-            className={inputClass}
+      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Invoice status">
+        {TABS.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => selectTab(tab)}
+            aria-current={activeTab === tab.key ? 'page' : undefined}
+            className={[
+              'px-3 py-2 text-sm border-0 border-b-2 bg-transparent cursor-pointer -mb-px',
+              activeTab === tab.key
+                ? 'border-[var(--text)] text-[var(--text)] font-medium'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]',
+            ].join(' ')}
           >
-            <option value="">All statuses</option>
-            {STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </label>
+            {tab.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">From</span>
           <input
@@ -195,6 +248,7 @@ export default function InvoicesPage() {
                     <th className="p-3 font-medium">Customer</th>
                     <th className="p-3 font-medium">Status</th>
                     <th className="p-3 font-medium text-right">Total</th>
+                    <th className="p-3 font-medium text-right">Due</th>
                     <th className="p-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
@@ -209,8 +263,20 @@ export default function InvoicesPage() {
                       <td className="p-3 tabular-nums whitespace-nowrap">{invoice.issueDate}</td>
                       <td className="p-3 tabular-nums whitespace-nowrap">{invoice.dueDate}</td>
                       <td className="p-3">{invoice.customerNameSnapshot}</td>
-                      <td className="p-3">{statusPill(invoice.status)}</td>
+                      <td className="p-3">
+                        <div className="flex flex-col gap-1">
+                          {statusPill(invoice.status)}
+                          {settlementLabel(invoice.settlementStatus) !== null && (
+                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
+                              {settlementLabel(invoice.settlementStatus)}
+                            </span>
+                          )}
+                        </div>
+                      </td>
                       <td className="p-3 text-right tabular-nums">{formatCents(invoice.totalCents)}</td>
+                      <td className="p-3 text-right tabular-nums">
+                        {invoice.status === 'ISSUED' ? formatCents(invoice.amountDueCents) : '—'}
+                      </td>
                       <td className="p-3">
                         <div className="flex items-center justify-end gap-2">
                           <Link

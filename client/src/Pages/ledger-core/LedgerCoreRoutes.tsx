@@ -16,6 +16,11 @@ import NewInvoicePage from './NewInvoicePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
 import CustomersPage from './CustomersPage';
 import InvoiceSettingsPage from './InvoiceSettingsPage';
+import VendorsPage from './VendorsPage';
+import BillsPage from './BillsPage';
+import NewBillPage from './NewBillPage';
+import BillDetailPage from './BillDetailPage';
+import PaymentsPage from './PaymentsPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -61,6 +66,12 @@ function AppPages() {
           <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
           <Route path="invoices/:invoiceId/edit" element={<NewInvoicePage />} />
           <Route path="customers" element={<CustomersPage />} />
+          <Route path="vendors" element={<VendorsPage />} />
+          <Route path="bills" element={<BillsPage />} />
+          <Route path="bills/new" element={<NewBillPage />} />
+          <Route path="bills/:billId" element={<BillDetailPage />} />
+          <Route path="bills/:billId/edit" element={<NewBillPage />} />
+          <Route path="payments" element={<PaymentsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}

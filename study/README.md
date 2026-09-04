@@ -45,12 +45,13 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 |---|---|
 | [transactions-isolation-pooling.md](postgresql/transactions-isolation-pooling.md) | Session-per-connection, why `pool.query` escapes a transaction, MVCC, all four isolation levels, lost update, `FOR UPDATE`, deadlocks, `BIGINT`-as-string, **aborted-transaction state, `ON CONFLICT DO NOTHING` vs `SAVEPOINT`, `DELETE … RETURNING` as an atomic claim** |
 | [migrations-and-schema-evolution.md](postgresql/migrations-and-schema-evolution.md) | Transactional DDL and why MySQL can't, what actually proves idempotency, where `IF NOT EXISTS` doesn't exist, checksums as edit-detection, session vs transaction advisory locks, expand/contract, `ALTER TABLE` lock levels, `CREATE INDEX CONCURRENTLY` |
-| [deferred-constraint-triggers.md](postgresql/deferred-constraint-triggers.md) | **Why a CHECK can't span rows, the four trigger timings, `DEFERRABLE INITIALLY DEFERRED` firing at COMMIT, the unassigned-`NEW`-on-DELETE trap, the zero-line hole, testing a DB guarantee by bypassing the service, partial immutability via a `to_jsonb` row-diff for one allowed transition, and same-timing trigger firing order (alphabetical by name)** |
+| [deferred-constraint-triggers.md](postgresql/deferred-constraint-triggers.md) | **Why a CHECK can't span rows, the four trigger timings, `DEFERRABLE INITIALLY DEFERRED` firing at COMMIT, the unassigned-`NEW`-on-DELETE trap, the zero-line hole, testing a DB guarantee by bypassing the service, partial immutability via a `to_jsonb` row-diff for one allowed transition, same-timing trigger firing order (alphabetical by name), and a deferred-trigger pair — parent-completeness plus a cross-table, cross-transaction no-overallocation check that needs a row lock, not just deferral, to be race-free** |
 | [gapless-numbering-and-counters.md](postgresql/gapless-numbering-and-counters.md) | **Why a `SEQUENCE` and `MAX(n)+1` both fail for a human-facing document number, a counter row locked by a plain `UPDATE`'s implicit row lock, allocating inside the document's own transaction so a rollback un-burns the number, `ON CONFLICT DO NOTHING` as a lazy row seed, and what "gapless" actually means for an auditor** |
 | [recursive-ctes-and-hierarchies.md](postgresql/recursive-ctes-and-hierarchies.md) | `WITH RECURSIVE` as fixed-point iteration over a working table, `UNION` vs `UNION ALL` on cyclic data, cycle detection with a path array, scoping every term, adjacency list vs closure table vs nested set vs `ltree`, **and walking a tree downward for a subtree rollup — the `(id, id)` self-pair anchor, transitive closure, and why the read side can skip its own cycle guard given a write-side guarantee** |
-| [aggregating-a-ledger.md](postgresql/aggregating-a-ledger.md) | `FILTER` vs `CASE` inside an aggregate, one scan vs N round trips, `generate_series` as a gap-filling scaffold, why a `LEFT JOIN`'s scope predicate must sit in `ON` not `WHERE`, why no summary table, **composing one shared filter predicate for a count query and its page query, `EXISTS` vs `JOIN`+`DISTINCT`, parameterized `ILIKE` wildcards, and why `LIMIT/OFFSET` needs a unique `ORDER BY` tiebreaker** |
+| [aggregating-a-ledger.md](postgresql/aggregating-a-ledger.md) | `FILTER` vs `CASE` inside an aggregate, one scan vs N round trips, `generate_series` as a gap-filling scaffold, why a `LEFT JOIN`'s scope predicate must sit in `ON` not `WHERE`, why no summary table, composing one shared filter predicate for a count query and its page query, `EXISTS` vs `JOIN`+`DISTINCT`, parameterized `ILIKE` wildcards, why `LIMIT/OFFSET` needs a unique `ORDER BY` tiebreaker, **a correlated scalar subquery vs `JOIN`+`GROUP BY` when the outer query must stay 1:1, and `FILTER` aggregates over a `UNION ALL` of two unrelated tables — including why the tenant-scope predicate must be repeated in every arm** |
 | [composite-foreign-keys-for-tenancy.md](postgresql/composite-foreign-keys-for-tenancy.md) | Composite FKs enforcing "same tenant" at the schema level, the required composite `UNIQUE` target, `MATCH SIMPLE` vs `MATCH FULL`, the `ON DELETE SET NULL` trap on a composite key |
 | [window-functions-and-running-totals.md](postgresql/window-functions-and-running-totals.md) | **`OVER (ORDER BY ...)` in SQL's logical order of operations and why that lets a running balance survive pagination, `ROWS` vs the default `RANGE` frame and the tied-peer-rows bug, why the frame still needs a unique `ORDER BY` tiebreaker, rejected: app-code accumulation, a correlated subquery per row, a stored running-balance column** |
+| [subledger-reconciliation-and-aging.md](postgresql/subledger-reconciliation-and-aging.md) | **Date-bucketing with a parameterized `CASE` ladder vs `age()`/`width_bucket()`, gap-filling a fixed bucket enum with a `VALUES`-list `LEFT JOIN`, and reconciling a subledger total against its GL control account as an integer-equality assertion — why the two are computed independently and what a mismatch actually means** |
 
 ### Architecture
 
@@ -61,7 +62,8 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [api-versioning.md](architecture/api-versioning.md) | How Express rewrites `req.url`/`baseUrl` on mount, path vs header vs media-type versioning, what actually counts as a breaking change, Express 5 path syntax |
 | [modular-monolith-app-namespacing.md](architecture/modular-monolith-app-namespacing.md) | One deploy vs many, why the app slug is a routing convention and not a security boundary, table-naming as the data-layer half of the same convention, monorepo/microservices rejected and why, the app↔GL integration point |
 | [double-entry-as-an-invariant.md](architecture/double-entry-as-an-invariant.md) | **Double-entry as a checksum on financial data, append-only ledgers vs mutable counters and the lost-update class they eliminate, reversing entries over mutation, derived vs stored state, where this sits relative to event sourcing** |
-| [document-lifecycle-fsm.md](architecture/document-lifecycle-fsm.md) | **One transition table (`as const satisfies Record<Status, ...>`) mirrored by a `status` CHECK constraint, why scattered `if (status === 'X')` checks rot, draft-mutable vs posted-immutable states, correction as reversal not edit, and a `to_jsonb` row-diff trigger for a single allowed post-issue transition** |
+| [document-lifecycle-fsm.md](architecture/document-lifecycle-fsm.md) | **One transition table (`as const satisfies Record<Status, ...>`) mirrored by a `status` CHECK constraint, why scattered `if (status === 'X')` checks rot, draft-mutable vs posted-immutable states, correction as reversal not edit, a `to_jsonb` row-diff trigger for a single allowed post-issue transition, and a four-state FSM with a backward recall edge (`AWAITING_APPROVAL -> DRAFT`) plus role-gated approval as a segregation-of-duties control independent of the FSM itself** |
+| [derived-vs-stored-state.md](architecture/derived-vs-stored-state.md) | **Why settlement (how much of an invoice/bill is paid) is a correlated-subquery read, never a stored column — voiding a payment un-settles for free because immutable allocation rows simply stop counting; the precedence rules in `settlementStatusOf`; and reconciling a derived subledger total against the GL as a cross-check, not just a display value** |
 
 ### Tooling
 
@@ -78,6 +80,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [routing-nested-and-dynamic-segments.md](react/routing-nested-and-dynamic-segments.md) | Nested routes as a tree not a lookup table, layout routes and `<Outlet/>`, dynamic segments vs splats, `useParams` typing gap, `<Navigate>` vs `navigate()`, gating a route on fetched data rather than only auth state, the remount-by-`key` cache-invalidation trick, relative-path resolution (pathname vs pathnameBase) and why the sidebar used absolute app-scoped paths, why removing chrome from a subtree is a routing change (making a route a sibling, not a child) rather than a conditional render, what an ancestor's behavior loses when a route moves out from under it, `useSearchParams` as URL-backed, linkable filter state, the list/create/detail sibling-route split, static-beats-dynamic specificity scoring, why a dynamic segment isn't itself what makes relative links fragile, **and a query parameter as a one-shot seed vs a live binding — the `?copyFrom=` pre-fill's effect-plus-latch pattern, why two components must share one `canReverse` rule, and the lossless cents round-trip that seeding relies on** |
 | [utility-first-css-tailwind.md](react/utility-first-css-tailwind.md) | How Tailwind scans for literals (and why dynamic class names emit nothing), v4's CSS-first `@theme` config, cascade layers and why unlayered CSS beat Preflight, the honest trade utilities make, **why no Tailwind utility can ever override an unlayered rule and the scoped-unlayered-rule fix, and retiring a `:has()` selector once the component boundary it detected became an explicit routing fact instead** |
 | [accessible-dialogs-and-focus.md](react/accessible-dialogs-and-focus.md) | **Why `window.confirm` is untestable in jsdom and blocks the event loop, `role="dialog"` + `aria-modal` + `aria-labelledby`, focus-on-mount, Escape and `target === currentTarget` outside-click dismissal, native `<dialog>` vs a fully-controlled component, and disambiguating same-labelled buttons with `within()` in tests** |
+| [hand-rolled-svg-charts.md](react/hand-rolled-svg-charts.md) | **`viewBox` and SVG's inverted Y axis, linear scaling without a library (and the `Math.max(1, ...)` divide-by-zero guard), zero-value bars as "gap-filled, never a gap," the `role="img"` + `<title>` + `visually-hidden` shadow-table accessibility baseline, and hover-only interaction that's accessible-safe because the same data exists another way** |
 
 ### Security & Auth
 
@@ -139,12 +142,13 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Index types: B-tree, GIN, GiST, partial, covering | 3+ | ✅ |
 | `EXPLAIN ANALYZE` and reading a query plan | 3+ | ◐ |
 | Constraints: CHECK, UNIQUE, EXCLUDE, deferrable | 1, 3 | ✅ |
-| **Deferred constraint triggers: enforcing a multi-row invariant at `COMMIT`** | 3 (balance check), 3.8 (invoice partial immutability) | ✅ |
+| **Deferred constraint triggers: enforcing a multi-row invariant at `COMMIT`** | 3 (balance check), 3.8 (invoice partial immutability), 3.9 (payment allocation completeness + cross-transaction overallocation) | ✅ |
 | Gapless(-ish) numbering: counter row + row lock vs `SEQUENCE` | 3.8 (invoice numbering) | ✅ |
+| **Subledger reconciliation: derived document totals vs a GL control account balance** | 3.9 (AR/AP aging) | ✅ |
 | Triggers & `updated_at`; CDC audit snapshots | 5 | ⬜ |
 | Passing request context to a trigger (`SET LOCAL` + `current_setting`) | 5 (audit actor + IP) | ⬜ |
 | `WITH RECURSIVE` CTEs + cycle detection | 3 (chart-of-accounts hierarchy), 3.6 (subtree balance rollups) | ✅ |
-| Aggregate `FILTER` clauses, `generate_series` gap-filling | 3.5 (LedgerCore dashboard) | ✅ |
+| Aggregate `FILTER` clauses, `generate_series` gap-filling | 3.5 (LedgerCore dashboard), 3.9 (`FILTER` over `UNION ALL`, correlated subqueries) | ✅ |
 | Composite foreign keys for cross-table tenancy checks | 3.5 (LedgerCore settings) | ✅ |
 | Window functions (running balances, ledger reports) | 3.6 (LedgerCore account ledger) | ✅ |
 | `EXCLUDE USING GIST` + `btree_gist` for date ranges | 4 (non-overlapping fiscal periods) | ⬜ |
@@ -170,6 +174,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | React 19 specifics (`use`, Actions, compiler) | 1 | ✅ |
 | Error boundaries & suspense | 3+ | ◐ |
 | Accessible confirmation dialogs: ARIA roles, focus, dismissal | 3.8 (reverse/issue/void confirmations) | ✅ |
+| Hand-rolled SVG charts: scaling, gap-filling, `role="img"`/shadow-table accessibility | 3.5 (trend chart), 3.9 (AR/AP aging bar chart) | ✅ |
 
 ### Architecture & patterns
 
@@ -180,7 +185,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Double-entry bookkeeping as an invariant system | 3 | ✅ |
 | Append-only ledgers vs mutable counters | 3 | ✅ |
 | Event sourcing vs CRUD — and where we sit | 3 | ✅ |
-| Finite state machines for document lifecycle | 3.8 (invoices) | ✅ |
+| Finite state machines for document lifecycle | 3.8 (invoices), 3.9 (bills — four states, a recall edge, role-gated approval) | ✅ |
 | Idempotency keys for financial mutations | 9+ | ⬜ |
 | **Enforcing an invariant in the DB vs the application — and why both** | 3 | ✅ |
 | Edit distance (Levenshtein DP) & confidence scoring | 6 (bank reconciliation) | ⬜ |
@@ -191,7 +196,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Layered architecture: controller / service / data | 0 | ✅ |
 | Full request lifecycle across all five layers | 0 | ✅ |
 | Immutability & reversing entries over mutation | 3 | ✅ |
-| Derived state vs stored state (trade-offs) | 3–4 | ✅ |
+| Derived state vs stored state (trade-offs) | 3–4, 3.9 (settlement derived from `payment_allocations`, never stored) | ✅ |
 | FIFO / weighted-average-cost valuation algorithms | dropped (was Inventory) | ⬜ |
 | 3-way matching (PO / receipt / invoice) | 11 (AP-Flow) | ⬜ |
 | Recursive tree resolution & cycle detection | 3 (chart of accounts; was MRP/BOM) | ✅ |

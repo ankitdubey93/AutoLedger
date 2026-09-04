@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import * as reportService from '../../services/ledger-core/reportService.js';
 import * as dashboardService from '../../services/ledger-core/dashboardService.js';
+import * as agingService from '../../services/ledger-core/agingService.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { optionalIsoDate } from '../../utils/queryParam.js';
 
@@ -31,4 +32,22 @@ export const dashboard: RequestHandler = async (req, res) => {
 
   const summary = await dashboardService.dashboardSummary(user.orgId, asOf);
   res.json({ success: true, ...summary });
+};
+
+/** GET /ledger-core/reports/ar-aging?asOf=YYYY-MM-DD */
+export const arAging: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const asOf = optionalIsoDate(req, 'asOf');
+
+  const report = await agingService.arAging(user.orgId, asOf);
+  res.json({ success: true, ...report });
+};
+
+/** GET /ledger-core/reports/ap-aging?asOf=YYYY-MM-DD */
+export const apAging: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const asOf = optionalIsoDate(req, 'asOf');
+
+  const report = await agingService.apAging(user.orgId, asOf);
+  res.json({ success: true, ...report });
 };

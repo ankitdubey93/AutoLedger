@@ -3,6 +3,7 @@ import { parseCents } from '../../utils/money.js';
 import { fiscalYearBounds, monthBounds, monthsBackStart } from '../../utils/fiscalYear.js';
 import { getSettings } from './settingsService.js';
 import { listEntries } from './journalService.js';
+import { arAging, apAging } from './agingService.js';
 import type { DashboardSummary, TrendPoint } from '../../types/ledger-core.js';
 
 /**
@@ -146,6 +147,42 @@ async function loadTrend(orgId: string, trendFrom: string, monthStart: string): 
   }));
 }
 
+interface DocumentCountsRow {
+  invoice_draft_count: string;
+  invoice_draft_cents: string;
+  bill_draft_count: string;
+  bill_draft_cents: string;
+  bill_review_count: string;
+  bill_review_cents: string;
+}
+
+/**
+ * Draft/in-review counts and sums for invoices and bills, in one round trip
+ * via `FILTER`-clause aggregates over a `UNION ALL` of the two tables — the
+ * same idiom `loadPosition` already uses. `org_id = $1` appears in BOTH arms
+ * of the `UNION ALL`; omitting it from either is a tenant leak.
+ */
+async function loadDocumentCounts(orgId: string): Promise<DocumentCountsRow> {
+  const { rows } = await pool.query<DocumentCountsRow>(
+    `SELECT
+       COUNT(*) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT')::text AS invoice_draft_count,
+       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT'), 0)::text AS invoice_draft_cents,
+       COUNT(*) FILTER (WHERE kind = 'BILL' AND status = 'DRAFT')::text AS bill_draft_count,
+       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'BILL' AND status = 'DRAFT'), 0)::text AS bill_draft_cents,
+       COUNT(*) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL')::text AS bill_review_count,
+       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL'), 0)::text AS bill_review_cents
+     FROM (
+       SELECT 'INVOICE' AS kind, status, total_cents FROM invoices WHERE org_id = $1
+       UNION ALL
+       SELECT 'BILL'    AS kind, status, total_cents FROM bills    WHERE org_id = $1
+     ) d`,
+    [orgId],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new Error('document counts aggregate produced no row');
+  return row;
+}
+
 export async function dashboardSummary(orgId: string, asOf: string | null): Promise<DashboardSummary> {
   const settings = await getSettings(orgId);
   const on = asOf ?? new Date().toISOString().slice(0, 10);
@@ -153,21 +190,25 @@ export async function dashboardSummary(orgId: string, asOf: string | null): Prom
   const month = monthBounds(on);
   const trendFrom = monthsBackStart(on, 6);
 
-  const [position, cashCents, integrity, trend, { entries: recentEntries }] = await Promise.all([
-    loadPosition(orgId, fy.startDate, month.startDate, on),
-    settings.cashAccountId === null ? Promise.resolve(null) : loadCash(orgId, settings.cashAccountId, on),
-    loadIntegrity(orgId),
-    loadTrend(orgId, trendFrom, month.startDate),
-    listEntries(orgId, {
-      page: 1,
-      limit: 5,
-      from: null,
-      to: null,
-      accountId: null,
-      sourceType: null,
-      q: null,
-    }),
-  ]);
+  const [position, cashCents, integrity, trend, { entries: recentEntries }, receivablesAging, payablesAging, documentCounts] =
+    await Promise.all([
+      loadPosition(orgId, fy.startDate, month.startDate, on),
+      settings.cashAccountId === null ? Promise.resolve(null) : loadCash(orgId, settings.cashAccountId, on),
+      loadIntegrity(orgId),
+      loadTrend(orgId, trendFrom, month.startDate),
+      listEntries(orgId, {
+        page: 1,
+        limit: 5,
+        from: null,
+        to: null,
+        accountId: null,
+        sourceType: null,
+        q: null,
+      }),
+      arAging(orgId, on),
+      apAging(orgId, on),
+      loadDocumentCounts(orgId),
+    ]);
 
   const assetsCents = parseCents(position.assets);
   const liabilitiesCents = parseCents(position.liabilities);
@@ -216,5 +257,21 @@ export async function dashboardSummary(orgId: string, asOf: string | null): Prom
       isBalanced: totalDebitCents === totalCreditCents,
     },
     trend,
+    receivables: {
+      outstandingCents: receivablesAging.totalOutstandingCents,
+      overdueCents: receivablesAging.totalOverdueCents,
+      draftCount: Number(documentCounts.invoice_draft_count),
+      draftCents: parseCents(documentCounts.invoice_draft_cents),
+      buckets: receivablesAging.buckets,
+    },
+    payables: {
+      outstandingCents: payablesAging.totalOutstandingCents,
+      overdueCents: payablesAging.totalOverdueCents,
+      draftCount: Number(documentCounts.bill_draft_count),
+      draftCents: parseCents(documentCounts.bill_draft_cents),
+      awaitingReviewCount: Number(documentCounts.bill_review_count),
+      awaitingReviewCents: parseCents(documentCounts.bill_review_cents),
+      buckets: payablesAging.buckets,
+    },
   };
 }

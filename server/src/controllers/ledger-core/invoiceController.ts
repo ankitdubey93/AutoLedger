@@ -32,6 +32,18 @@ function optionalStatus(req: Request): InvoiceStatus | null {
   return raw;
 }
 
+const SETTLEMENT_FILTERS = ['OUTSTANDING', 'OVERDUE', 'PAID'] as const;
+type SettlementFilter = (typeof SETTLEMENT_FILTERS)[number];
+
+function optionalSettlement(req: Request): SettlementFilter | null {
+  const raw = optionalText(req, 'settlement', 20);
+  if (raw === null) return null;
+  if (!(SETTLEMENT_FILTERS as readonly string[]).includes(raw)) {
+    throw new ApiError(400, 'settlement must be one of OUTSTANDING, OVERDUE, PAID');
+  }
+  return raw as SettlementFilter;
+}
+
 /** GET /ledger-core/invoices */
 export const list: RequestHandler = async (req, res) => {
   const user = requireUser(req);
@@ -45,6 +57,7 @@ export const list: RequestHandler = async (req, res) => {
     from: optionalIsoDate(req, 'from'),
     to: optionalIsoDate(req, 'to'),
     q: optionalText(req, 'q', 200),
+    settlement: optionalSettlement(req),
   });
 
   res.json({

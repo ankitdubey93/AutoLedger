@@ -4,9 +4,11 @@ import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import * as journalService from './journalService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
+import { allocatedCentsSubquery } from './paymentService.js';
 import {
   canTransitionInvoice,
   isInvoiceStatus,
+  settlementStatusOf,
   type Invoice,
   type InvoiceLine,
   type InvoiceStatus,
@@ -48,6 +50,10 @@ function pgErrorMessage(err: unknown): string {
   return 'Database rejected the invoice';
 }
 
+function today(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
 export interface InvoiceLineInput {
   description: string;
   quantityMilli: number;
@@ -75,6 +81,8 @@ export interface ListInvoicesOptions {
   from: string | null;
   to: string | null;
   q: string | null;
+  /** `null` for no filter. OUTSTANDING/OVERDUE/PAID all imply status = ISSUED. */
+  settlement: 'OUTSTANDING' | 'OVERDUE' | 'PAID' | null;
 }
 
 // ---------------------------------------------------------------- row mapping
@@ -104,6 +112,7 @@ interface InvoiceRow {
   created_by_name: string | null;
   created_at: Date;
   updated_at: Date;
+  allocated_cents: string;
 }
 
 interface InvoiceLineRow {
@@ -127,7 +136,8 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.customer_tax_number_snapshot, i.notes, i.payment_terms,
                                 i.subtotal_cents, i.tax_cents, i.total_cents,
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
-                                i.created_by, u.name AS created_by_name, i.created_at, i.updated_at
+                                i.created_by, u.name AS created_by_name, i.created_at, i.updated_at,
+                                ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
                            LEFT JOIN users u ON u.id = i.created_by`;
@@ -152,6 +162,19 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
   if (!isInvoiceStatus(row.status)) {
     throw new Error(`Unknown invoice status "${row.status}" on invoice ${row.id}`);
   }
+
+  const isOpen = row.status === 'ISSUED';
+  const totalCents = parseCents(row.total_cents);
+  const allocatedCents = isOpen ? parseCents(row.allocated_cents) : 0;
+  const amountDueCents = isOpen ? totalCents - allocatedCents : 0;
+  const settlementStatus = settlementStatusOf({
+    isOpen,
+    totalCents,
+    allocatedCents,
+    dueDate: row.due_date,
+    asOf: today(),
+  });
+
   return {
     id: row.id,
     invoiceNumber: row.invoice_number,
@@ -168,7 +191,7 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     paymentTerms: row.payment_terms,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
-    totalCents: parseCents(row.total_cents),
+    totalCents,
     journalEntryId: row.journal_entry_id,
     voidJournalEntryId: row.void_journal_entry_id,
     issuedAt: row.issued_at === null ? null : row.issued_at.toISOString(),
@@ -178,6 +201,9 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     lines,
+    allocatedCents,
+    amountDueCents,
+    settlementStatus,
   };
 }
 
@@ -246,6 +272,18 @@ function buildFilters(
   if (options.customerId !== null) add((p) => `i.customer_id = ${p}::uuid`, options.customerId);
   if (options.from !== null) add((p) => `i.issue_date >= ${p}::date`, options.from);
   if (options.to !== null) add((p) => `i.issue_date <= ${p}::date`, options.to);
+  // `alias` and `column` below are our own constants, never request input (rule 4).
+  if (options.settlement === 'OUTSTANDING') {
+    clauses.push(`i.status = 'ISSUED' AND i.total_cents > ${allocatedCentsSubquery('i', 'invoice_id')}::bigint`);
+  } else if (options.settlement === 'OVERDUE') {
+    add(
+      (p) =>
+        `i.status = 'ISSUED' AND i.total_cents > ${allocatedCentsSubquery('i', 'invoice_id')}::bigint AND i.due_date < ${p}::date`,
+      today(),
+    );
+  } else if (options.settlement === 'PAID') {
+    clauses.push(`i.status = 'ISSUED' AND i.total_cents <= ${allocatedCentsSubquery('i', 'invoice_id')}::bigint`);
+  }
   if (options.q !== null)
     add(
       (p) =>
@@ -753,6 +791,19 @@ export async function voidInvoice(
     }
     if (!canTransitionInvoice(row.status, 'VOID')) {
       throw new ApiError(409, 'This invoice has already been voided');
+    }
+
+    if (row.status === 'ISSUED') {
+      const { rows: allocatedRows } = await client.query<{ allocated: string }>(
+        `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS allocated
+           FROM payment_allocations pa
+           JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
+          WHERE pa.org_id = $1 AND pa.invoice_id = $2 AND p.status = 'POSTED'`,
+        [orgId, id],
+      );
+      if (parseCents(allocatedRows[0]?.allocated ?? '0') > 0) {
+        throw new ApiError(409, 'This document has payments applied. Void the payments first.');
+      }
     }
 
     if (row.status === 'ISSUED') {

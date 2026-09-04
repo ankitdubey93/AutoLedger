@@ -1,10 +1,13 @@
 import { NavLink } from 'react-router-dom';
 import {
+  Banknote,
   BookOpen,
+  Building2,
   FileBarChart,
   FileText,
   LayoutDashboard,
   ListTree,
+  ReceiptText,
   Scale,
   Settings as SettingsIcon,
   Users,
@@ -45,6 +48,14 @@ const NAV_GROUPS = [
     items: [
       { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
       { to: 'customers', label: 'Customers', icon: Users, end: false },
+      { to: 'payments', label: 'Payments', icon: Banknote, end: false },
+    ],
+  },
+  {
+    heading: 'Purchases',
+    items: [
+      { to: 'bills', label: 'Bills', icon: ReceiptText, end: false },
+      { to: 'vendors', label: 'Vendors', icon: Building2, end: false },
     ],
   },
   {

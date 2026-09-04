@@ -6,9 +6,11 @@ import {
   getInvoice,
   getInvoiceSettings,
   issueInvoice,
+  listPayments,
   voidInvoice,
   type Invoice,
   type InvoiceSettings,
+  type Payment,
 } from '../../services/fetchServices';
 import { formatCents, formatQuantity, formatRate } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
@@ -16,6 +18,7 @@ import { useOrg } from '../../context/OrgContext';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
 import ConfirmDialog from './ConfirmDialog';
+import PaymentDialog from './PaymentDialog';
 
 /**
  * One invoice, in full — its own printable document, honouring the
@@ -42,10 +45,13 @@ export default function InvoiceDetailPage() {
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings | null>(null);
+  const [payments, setPayments] = useState<Payment[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'issue' | 'void' | null>(null);
+  const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     if (invoiceId === undefined) return;
@@ -59,6 +65,13 @@ export default function InvoiceDetailPage() {
         if (ignore) return;
         setInvoice(invoiceRes.invoice);
         setInvoiceSettings(settingsRes);
+        return listPayments({ customerId: invoiceRes.invoice.customerId, direction: 'RECEIVE' });
+      })
+      .then((paymentsRes) => {
+        if (ignore || paymentsRes === undefined) return;
+        setPayments(
+          paymentsRes.payments.filter((p) => p.allocations.some((a) => a.invoiceId === invoiceId)),
+        );
       })
       .catch((err: unknown) => {
         if (ignore) return;
@@ -72,7 +85,7 @@ export default function InvoiceDetailPage() {
     return () => {
       ignore = true;
     };
-  }, [invoiceId]);
+  }, [invoiceId, reloadToken]);
 
   async function handleIssue() {
     if (invoice === null) return;
@@ -152,6 +165,16 @@ export default function InvoiceDetailPage() {
               Issue
             </button>
           )}
+          {invoice.status === 'ISSUED' && invoice.amountDueCents > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowPaymentDialog(true)}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+            >
+              Record payment
+            </button>
+          )}
           {(invoice.status === 'DRAFT' || invoice.status === 'ISSUED') && (
             <button
               type="button"
@@ -173,12 +196,6 @@ export default function InvoiceDetailPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-
-      {invoice.status === 'ISSUED' && (
-        <p className="no-print text-sm text-[var(--muted)] m-0">
-          Recording payment against an invoice is not built yet.
-        </p>
-      )}
 
       <div
         className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-6 flex flex-col gap-6"
@@ -271,6 +288,18 @@ export default function InvoiceDetailPage() {
             <span>Total</span>
             <span className="tabular-nums">{formatCents(invoice.totalCents)}</span>
           </div>
+          {invoice.status === 'ISSUED' && (
+            <>
+              <div className="flex justify-between w-full">
+                <span className="text-[var(--muted)]">Paid</span>
+                <span className="tabular-nums">{formatCents(invoice.allocatedCents)}</span>
+              </div>
+              <div className="flex justify-between w-full font-semibold">
+                <span>Amount due</span>
+                <span className="tabular-nums">{formatCents(invoice.amountDueCents)}</span>
+              </div>
+            </>
+          )}
         </div>
 
         {invoice.paymentTerms !== null && (
@@ -307,6 +336,36 @@ export default function InvoiceDetailPage() {
         )}
       </dl>
 
+      {payments.length > 0 && (
+        <div className="no-print flex flex-col gap-2">
+          <h3 className="text-sm font-semibold m-0">Payments</h3>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[30rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-2 font-medium">Date</th>
+                  <th className="p-2 font-medium">Status</th>
+                  <th className="p-2 font-medium text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payments.map((payment) => (
+                  <tr key={payment.id} className="border-t border-[var(--border)]">
+                    <td className="p-2 tabular-nums">{payment.paymentDate}</td>
+                    <td className="p-2">{payment.status === 'VOID' ? 'Void' : 'Posted'}</td>
+                    <td className="p-2 text-right tabular-nums">
+                      {formatCents(
+                        payment.allocations.find((a) => a.invoiceId === invoice.id)?.amountCents ?? 0,
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {confirmAction === 'issue' && (
         <ConfirmDialog
           title="Issue this invoice?"
@@ -333,6 +392,20 @@ export default function InvoiceDetailPage() {
             void handleVoid();
           }}
           onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {showPaymentDialog && (
+        <PaymentDialog
+          direction="RECEIVE"
+          counterpartyId={invoice.customerId}
+          counterpartyName={invoice.customerNameSnapshot}
+          documentId={invoice.id}
+          amountDueCents={invoice.amountDueCents}
+          onClose={() => setShowPaymentDialog(false)}
+          onRecorded={() => {
+            setShowPaymentDialog(false);
+            setReloadToken((t) => t + 1);
+          }}
         />
       )}
     </section>
