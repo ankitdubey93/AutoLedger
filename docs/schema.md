@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001`–`018`.** Platform identity/tenancy, LedgerCore's GL core (accounts, journals, the balance/immutability triggers), settings, invoicing (customers, invoices), accounts payable (vendors, bills, payments), Phase 4's fiscal periods with the closed-period posting guard, and Phase 5's shared `audit_logs` CDC trail all exist. The **Phase 6+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001`–`019`.** Platform identity/tenancy, LedgerCore's GL core (accounts, journals, the balance/immutability triggers), settings, invoicing (customers, invoices), accounts payable (vendors, bills, payments), Phase 4's fiscal periods with the closed-period posting guard, Phase 5's shared `audit_logs` CDC trail, and Phase 6's bank reconciliation (statement imports, bank transactions, scored match suggestions) all exist. The **Phase 8+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -280,13 +280,36 @@ Constraint: `chk_audit_logs_payload` — INSERT has `old_row IS NULL`/`new_row I
 
 ---
 
-## Phase 6+ — target tables
+## Phase 6 — bank reconciliation (LedgerCore) — applied
+
+One migration. `019_ledger-core_bank_reconciliation.sql` adds three tables and attaches audit capture to two of them.
+
+**`bank_statement_imports`** — one row per uploaded CSV:
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `account_id` UUID NOT NULL, composite FK → `accounts (org_id, id)` ON DELETE RESTRICT · `file_name` TEXT NOT NULL CHECK non-blank, <= 200 · `date_format` TEXT NOT NULL CHECK IN (`ISO`,`DMY`,`MDY`) · `delimiter` TEXT NOT NULL CHECK length = 1 · `row_count` / `imported_count` / `duplicate_count` INTEGER NOT NULL DEFAULT 0, each CHECK >= 0, plus `chk_bank_imports_counts` — `imported_count + duplicate_count <= row_count` · `earliest_date` / `latest_date` DATE (nullable) · `closing_balance_cents` BIGINT (nullable, signed) / `closing_balance_on` DATE (nullable) — `chk_bank_imports_closing_pair` requires both or neither · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` / `updated_at`.
+
+**`bank_transactions`** — one row per parsed statement line:
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `import_id` UUID NOT NULL, composite FK → `bank_statement_imports (org_id, id)` ON DELETE RESTRICT · `account_id` UUID NOT NULL, composite FK → `accounts (org_id, id)` ON DELETE RESTRICT · `txn_date` DATE NOT NULL · `description` TEXT NOT NULL CHECK <= 500 · `external_reference` TEXT (nullable, <= 100) · `currency_code` CHAR(3) NOT NULL · `amount_cents` BIGINT NOT NULL CHECK <> 0 — **signed**: positive is money in, negative is money out, unlike a `ledger_lines` row which always has exactly one side populated · `dedupe_hash` CHAR(64) NOT NULL · `status` TEXT NOT NULL DEFAULT `'UNMATCHED'` CHECK IN (`UNMATCHED`,`MATCHED`,`IGNORED`) · `matched_payment_id` UUID (nullable), composite FK → `payments (org_id, id)` ON DELETE RESTRICT · `matched_at` TIMESTAMPTZ (nullable) · `matched_by` FK → `users` ON DELETE RESTRICT (nullable) · `created_at` / `updated_at`.
+
+Constraints: `ux_bank_transactions_org_id_id` — `UNIQUE (org_id, id)`, the standard composite-FK-target convention · **`ux_bank_transactions_dedupe`** — `UNIQUE (org_id, dedupe_hash)`, what makes re-importing the same statement idempotent (the hash folds in an occurrence ordinal so two genuinely identical lines in one file both survive — see [study/postgresql/idempotent-ingestion-and-dedupe-hashes.md](../study/postgresql/idempotent-ingestion-and-dedupe-hashes.md)) · `chk_bank_txn_matched_fields` — the "posted-complete" idiom again: `matched_payment_id`/`matched_at`/`matched_by` are all set when `status = 'MATCHED'` and all `NULL` otherwise.
+
+**`bank_match_suggestions`** — up to 5 scored candidates per unmatched line, deleted and regenerated wholesale on every rescore:
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE **CASCADE** (the one FK in this table pair that cascades, since a suggestion is disposable derived data, not a record of fact) · `bank_transaction_id` UUID NOT NULL, composite FK → `bank_transactions (org_id, id)` ON DELETE CASCADE · `target_type` TEXT NOT NULL CHECK IN (`invoice`,`bill`) · `invoice_id` / `bill_id` UUID (nullable), composite FKs → `invoices`/`bills (org_id, id)` ON DELETE RESTRICT, `chk_bank_suggestion_one_target` requiring exactly one set, matching `target_type` · `score` INTEGER NOT NULL CHECK BETWEEN 0 AND 100 · `score_breakdown` JSONB NOT NULL — `{ amount, date, counterparty }`, each `{ points, maxPoints, reason }`, so a score is explainable rather than a magic number · `created_at`.
+
+**Immutability.** `bank_transactions` gets the same `to_jsonb` row-diff carve-out treatment as `payments` (migration 014): `reject_bank_transaction_mutation()` permits changing only `status`/`matched_payment_id`/`matched_at`/`matched_by`, raises `0A000` on any other column change or on `DELETE` — a bank line is a record of fact from a downloaded statement, never edited or removed. `bank_statement_imports` and `bank_match_suggestions` carry no immutability trigger; an import's counts are updated once, in the same transaction that inserts its lines, and suggestions are deliberately disposable.
+
+**The FSM.** `BANK_TRANSACTION_TRANSITIONS`: `UNMATCHED -> MATCHED | IGNORED`, `MATCHED -> UNMATCHED`, `IGNORED -> UNMATCHED`. The first FSM in this schema where a non-terminal reverse edge (`MATCHED -> UNMATCHED`) carries a GL side effect — voiding the payment the match posted — rather than touching only its own row. See [study/architecture/document-lifecycle-fsm.md § A reversible state whose reverse edge carries a GL side effect](../study/architecture/document-lifecycle-fsm.md).
+
+**Audit.** `bank_statement_imports` and `bank_transactions` both get `audit_row_change('ledger-core')`. **`bank_match_suggestions` is deliberately not audited** — the same reasoning migration 018 gives for `schema_migrations`: it is derived data, deleted and regenerated wholesale on every rescore, so auditing it would write up to five rows per rescore with no compliance value.
+
+**`GET /reports/bank-reconciliation`** — compares the named account's posted GL balance against the sum of every imported, non-`IGNORED` line for the same account, both computed independently and compared by integer equality. Unlike `/ar-aging`/`/ap-aging`'s `reconciles`, a `false` here is a **completeness** claim about the imported statement history, not a **correctness** claim about the books. See [study/postgresql/subledger-reconciliation-and-aging.md § Bank reconciliation](../study/postgresql/subledger-reconciliation-and-aging.md).
+
+**Not built in this phase:** a bank line settling more than one document (or several lines settling one document) in a single match — matching is always one line to at most one document; bank feeds/OFX/QIF/MT940 (CSV only); multi-currency statements; posting a journal entry directly from an unmatched line for fees/interest (`IGNORE` covers that case for now).
+
+---
+
+## Phase 8+ — target tables
 
 Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible and so Phase 3 can seed forward-compatible accounts rather than leaving later phases a backfill.
-
-**`bank_transactions`** (Phase 6) — `id` · `org_id` · `statement_import_id` · `posted_on` DATE · `amount_cents` BIGINT (signed — a bank line is directional, unlike a ledger line) · `currency_code` · `counterparty` TEXT · `memo` TEXT · `external_ref` TEXT · `status` TEXT CHECK IN (`unmatched`,`suggested`,`reconciled`,`ignored`) · `dedupe_hash` TEXT with `UNIQUE (org_id, dedupe_hash)` so re-importing the same statement is idempotent.
-
-**`reconciliation_matches`** (Phase 6) — `id` · `org_id` · `bank_transaction_id` · `journal_entry_id` · `score` SMALLINT CHECK between 0 and 100 · `score_breakdown` JSONB (the amount/date/name components, so a score is explainable rather than a magic number) · `decided_by` · `decided_at` · `status` TEXT CHECK IN (`suggested`,`accepted`,`rejected`).
 
 **`fx_rates`** (Phase 8) — `id` · `base_code` CHAR(3) · `quote_code` CHAR(3) · `rate_date` DATE · `rate` NUMERIC(18,8) · `source` TEXT. `UNIQUE (base_code, quote_code, rate_date)`. **No `org_id`** — an exchange rate is a fact about the world, not tenant data; this is one of the two tables that legitimately has no tenant scope (`users` is the other). Lookup is "the latest rate on or before this date", never an exact-date match, because rate feeds have gaps on weekends and holidays.
 

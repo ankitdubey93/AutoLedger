@@ -103,3 +103,14 @@ export const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
  * value.
  */
 export const AUTH_RATE_LIMIT_MAX = env.isTest ? 1000 : 10;
+
+// ------------------------------------------------- bank reconciliation (6)
+
+/**
+ * A CSV statement arrives as a JSON string field, not a multipart upload —
+ * file storage is Phase 10's problem, not this one. `JSON_BODY_LIMIT` is
+ * '1mb'; this caps the CSV text itself well under that so JSON string
+ * escaping (quotes, newlines) never pushes the whole request over the body
+ * limit.
+ */
+export const MAX_CSV_CHARS = 900_000;

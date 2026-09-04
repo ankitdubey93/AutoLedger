@@ -460,137 +460,153 @@ async function resolveControlAccount(
   return { id };
 }
 
-export async function createPayment(
+/**
+ * Creates a payment on the caller's transaction. Returns the new payment's
+ * id. Does not COMMIT — the caller's COMMIT is where both deferred
+ * constraint triggers fire (allocations-complete and no-overallocation).
+ * Mirrors journalService.createEntryOnClient's split: the *OnClient
+ * function does the work, the public function owns the transaction.
+ */
+export async function createPaymentOnClient(
+  client: PoolClient,
   orgId: string,
   createdBy: string,
   input: CreatePaymentInput,
-): Promise<Payment> {
+): Promise<string> {
   const allocatedTotal = sumCents(input.allocations.map((a) => cents(a.amountCents)));
   if (allocatedTotal !== input.amountCents) {
     throw new ApiError(422, 'Allocations must sum to the payment amount');
   }
 
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const currencyCode = orgRows[0]?.base_currency.trim();
+  if (currencyCode === undefined) throw new ApiError(404, 'Organization not found');
+
+  const { rows: cashRows } = await client.query<{
+    id: string;
+    code: string;
+    is_postable: boolean;
+    type: string;
+  }>('SELECT id, code, is_postable, type FROM accounts WHERE id = $1 AND org_id = $2', [
+    input.cashAccountId,
+    orgId,
+  ]);
+  const cashAccount = cashRows[0];
+  if (cashAccount === undefined) throw new ApiError(422, 'Cash account not found');
+  if (!cashAccount.is_postable) {
+    throw new ApiError(422, `Account ${cashAccount.code} is a header account and cannot be posted to`);
+  }
+  if (cashAccount.type !== 'Asset') {
+    throw new ApiError(422, `Account ${cashAccount.code} is not an Asset account`);
+  }
+
+  let counterpartyId: string;
+  let counterpartyName: string;
+  if (input.direction === 'RECEIVE') {
+    if (input.customerId === null) throw new ApiError(422, 'Customer not found');
+    const { rows } = await client.query<{ name: string }>(
+      'SELECT name FROM customers WHERE id = $1 AND org_id = $2 AND is_active = true',
+      [input.customerId, orgId],
+    );
+    const customer = rows[0];
+    if (customer === undefined) throw new ApiError(422, 'Customer not found');
+    counterpartyId = input.customerId;
+    counterpartyName = customer.name;
+  } else {
+    if (input.vendorId === null) throw new ApiError(422, 'Vendor not found');
+    const { rows } = await client.query<{ name: string }>(
+      'SELECT name FROM vendors WHERE id = $1 AND org_id = $2 AND is_active = true',
+      [input.vendorId, orgId],
+    );
+    const vendor = rows[0];
+    if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
+    counterpartyId = input.vendorId;
+    counterpartyName = vendor.name;
+  }
+
+  await lockAndValidateTargets(client, orgId, input.direction, counterpartyId, input.allocations);
+
+  const controlAccount = await resolveControlAccount(client, orgId, input.direction);
+
+  const glLines =
+    input.direction === 'RECEIVE'
+      ? [
+          { accountId: input.cashAccountId, debitCents: input.amountCents, creditCents: 0 },
+          { accountId: controlAccount.id, debitCents: 0, creditCents: input.amountCents },
+        ]
+      : [
+          { accountId: controlAccount.id, debitCents: input.amountCents, creditCents: 0 },
+          { accountId: input.cashAccountId, debitCents: 0, creditCents: input.amountCents },
+        ];
+
+  // The payment id is needed before the journal entry (as sourceId) and
+  // the journal entry id is needed before the payment row (journal_entry_id
+  // is NOT NULL) — generating the id up front breaks that cycle. It is used
+  // for both the entry's sourceId and this row's own primary key.
+  const { rows: idRows } = await client.query<{ id: string }>('SELECT gen_random_uuid() AS id');
+  const paymentId = idRows[0]?.id;
+  if (paymentId === undefined) throw new Error('gen_random_uuid() produced no row');
+
+  const journalEntryId = await journalService.createEntryOnClient(client, orgId, createdBy, {
+    entryDate: input.entryDate ?? input.paymentDate,
+    description: `${input.direction === 'RECEIVE' ? 'Receipt' : 'Payment'} — ${counterpartyName}`,
+    sourceType: 'payment',
+    sourceId: paymentId,
+    lines: glLines,
+  });
+
+  await client.query(
+    `INSERT INTO payments
+       (id, org_id, direction, payment_date, currency_code, amount_cents, cash_account_id,
+        customer_id, vendor_id, method, reference, notes, journal_entry_id, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+    [
+      paymentId,
+      orgId,
+      input.direction,
+      input.paymentDate,
+      currencyCode,
+      input.amountCents,
+      input.cashAccountId,
+      input.direction === 'RECEIVE' ? counterpartyId : null,
+      input.direction === 'PAY' ? counterpartyId : null,
+      input.method,
+      input.reference,
+      input.notes,
+      journalEntryId,
+      createdBy,
+    ],
+  );
+
+  await client.query(
+    `INSERT INTO payment_allocations (org_id, payment_id, invoice_id, bill_id, amount_cents)
+     SELECT $1, $2, v.invoice_id, v.bill_id, v.amount_cents
+       FROM unnest($3::uuid[], $4::uuid[], $5::bigint[])
+            AS v(invoice_id, bill_id, amount_cents)`,
+    [
+      orgId,
+      paymentId,
+      input.allocations.map((a) => a.invoiceId),
+      input.allocations.map((a) => a.billId),
+      input.allocations.map((a) => a.amountCents),
+    ],
+  );
+
+  return paymentId;
+}
+
+export async function createPayment(
+  orgId: string,
+  createdBy: string,
+  input: CreatePaymentInput,
+): Promise<Payment> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
-
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
-      [orgId],
-    );
-    const currencyCode = orgRows[0]?.base_currency.trim();
-    if (currencyCode === undefined) throw new ApiError(404, 'Organization not found');
-
-    const { rows: cashRows } = await client.query<{
-      id: string;
-      code: string;
-      is_postable: boolean;
-      type: string;
-    }>('SELECT id, code, is_postable, type FROM accounts WHERE id = $1 AND org_id = $2', [
-      input.cashAccountId,
-      orgId,
-    ]);
-    const cashAccount = cashRows[0];
-    if (cashAccount === undefined) throw new ApiError(422, 'Cash account not found');
-    if (!cashAccount.is_postable) {
-      throw new ApiError(422, `Account ${cashAccount.code} is a header account and cannot be posted to`);
-    }
-    if (cashAccount.type !== 'Asset') {
-      throw new ApiError(422, `Account ${cashAccount.code} is not an Asset account`);
-    }
-
-    let counterpartyId: string;
-    let counterpartyName: string;
-    if (input.direction === 'RECEIVE') {
-      if (input.customerId === null) throw new ApiError(422, 'Customer not found');
-      const { rows } = await client.query<{ name: string }>(
-        'SELECT name FROM customers WHERE id = $1 AND org_id = $2 AND is_active = true',
-        [input.customerId, orgId],
-      );
-      const customer = rows[0];
-      if (customer === undefined) throw new ApiError(422, 'Customer not found');
-      counterpartyId = input.customerId;
-      counterpartyName = customer.name;
-    } else {
-      if (input.vendorId === null) throw new ApiError(422, 'Vendor not found');
-      const { rows } = await client.query<{ name: string }>(
-        'SELECT name FROM vendors WHERE id = $1 AND org_id = $2 AND is_active = true',
-        [input.vendorId, orgId],
-      );
-      const vendor = rows[0];
-      if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
-      counterpartyId = input.vendorId;
-      counterpartyName = vendor.name;
-    }
-
-    await lockAndValidateTargets(client, orgId, input.direction, counterpartyId, input.allocations);
-
-    const controlAccount = await resolveControlAccount(client, orgId, input.direction);
-
-    const glLines =
-      input.direction === 'RECEIVE'
-        ? [
-            { accountId: input.cashAccountId, debitCents: input.amountCents, creditCents: 0 },
-            { accountId: controlAccount.id, debitCents: 0, creditCents: input.amountCents },
-          ]
-        : [
-            { accountId: controlAccount.id, debitCents: input.amountCents, creditCents: 0 },
-            { accountId: input.cashAccountId, debitCents: 0, creditCents: input.amountCents },
-          ];
-
-    // The payment id is needed before the journal entry (as sourceId) and
-    // the journal entry id is needed before the payment row (journal_entry_id
-    // is NOT NULL) — generating the id up front breaks that cycle. It is used
-    // for both the entry's sourceId and this row's own primary key.
-    const { rows: idRows } = await client.query<{ id: string }>('SELECT gen_random_uuid() AS id');
-    const paymentId = idRows[0]?.id;
-    if (paymentId === undefined) throw new Error('gen_random_uuid() produced no row');
-
-    const journalEntryId = await journalService.createEntryOnClient(client, orgId, createdBy, {
-      entryDate: input.entryDate ?? input.paymentDate,
-      description: `${input.direction === 'RECEIVE' ? 'Receipt' : 'Payment'} — ${counterpartyName}`,
-      sourceType: 'payment',
-      sourceId: paymentId,
-      lines: glLines,
-    });
-
-    await client.query(
-      `INSERT INTO payments
-         (id, org_id, direction, payment_date, currency_code, amount_cents, cash_account_id,
-          customer_id, vendor_id, method, reference, notes, journal_entry_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-      [
-        paymentId,
-        orgId,
-        input.direction,
-        input.paymentDate,
-        currencyCode,
-        input.amountCents,
-        input.cashAccountId,
-        input.direction === 'RECEIVE' ? counterpartyId : null,
-        input.direction === 'PAY' ? counterpartyId : null,
-        input.method,
-        input.reference,
-        input.notes,
-        journalEntryId,
-        createdBy,
-      ],
-    );
-
-    await client.query(
-      `INSERT INTO payment_allocations (org_id, payment_id, invoice_id, bill_id, amount_cents)
-       SELECT $1, $2, v.invoice_id, v.bill_id, v.amount_cents
-         FROM unnest($3::uuid[], $4::uuid[], $5::bigint[])
-              AS v(invoice_id, bill_id, amount_cents)`,
-      [
-        orgId,
-        paymentId,
-        input.allocations.map((a) => a.invoiceId),
-        input.allocations.map((a) => a.billId),
-        input.allocations.map((a) => a.amountCents),
-      ],
-    );
-
+    const paymentId = await createPaymentOnClient(client, orgId, createdBy, input);
     // COMMIT is where both deferred constraint triggers run — the payment's
     // allocations-complete check and the no-overallocation check.
     await client.query('COMMIT');
@@ -607,6 +623,50 @@ export async function createPayment(
   }
 }
 
+/**
+ * Voids a payment on the caller's transaction, posting the reversal. Throws
+ * ApiError(409, 'This payment has already been voided') if it is not
+ * POSTED. Does not COMMIT.
+ */
+export async function voidPaymentOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  id: string,
+  entryDate: string | null,
+): Promise<void> {
+  const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string }>(
+    'SELECT id, status, journal_entry_id FROM payments WHERE id = $1 AND org_id = $2 FOR UPDATE',
+    [id, orgId],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new ApiError(404, 'Payment not found');
+  if (!isPaymentStatus(row.status)) {
+    throw new Error(`Unknown payment status "${row.status}" on payment ${id}`);
+  }
+  if (!canTransitionPayment(row.status, 'VOID')) {
+    throw new ApiError(409, 'This payment has already been voided');
+  }
+
+  const reversalId = await journalService.reverseEntryOnClient(
+    client,
+    orgId,
+    userId,
+    row.journal_entry_id,
+    entryDate,
+  );
+
+  // Allocations are not touched — they are immutable (trg_allocations_immutable)
+  // and stop counting toward settlement because every settlement query
+  // filters p.status = 'POSTED'. This is what un-settles the payment's
+  // documents for free.
+  await client.query(
+    `UPDATE payments SET status = 'VOID', voided_at = now(), void_journal_entry_id = $1
+      WHERE id = $2 AND org_id = $3`,
+    [reversalId, id, orgId],
+  );
+}
+
 export async function voidPayment(
   orgId: string,
   userId: string,
@@ -616,38 +676,7 @@ export async function voidPayment(
   const client = await pool.connect();
   try {
     await beginTransaction(client);
-
-    const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string }>(
-      'SELECT id, status, journal_entry_id FROM payments WHERE id = $1 AND org_id = $2 FOR UPDATE',
-      [id, orgId],
-    );
-    const row = rows[0];
-    if (row === undefined) throw new ApiError(404, 'Payment not found');
-    if (!isPaymentStatus(row.status)) {
-      throw new Error(`Unknown payment status "${row.status}" on payment ${id}`);
-    }
-    if (!canTransitionPayment(row.status, 'VOID')) {
-      throw new ApiError(409, 'This payment has already been voided');
-    }
-
-    const reversalId = await journalService.reverseEntryOnClient(
-      client,
-      orgId,
-      userId,
-      row.journal_entry_id,
-      entryDate,
-    );
-
-    // Allocations are not touched — they are immutable (trg_allocations_immutable)
-    // and stop counting toward settlement because every settlement query
-    // filters p.status = 'POSTED'. This is what un-settles the payment's
-    // documents for free.
-    await client.query(
-      `UPDATE payments SET status = 'VOID', voided_at = now(), void_journal_entry_id = $1
-        WHERE id = $2 AND org_id = $3`,
-      [reversalId, id, orgId],
-    );
-
+    await voidPaymentOnClient(client, orgId, userId, id, entryDate);
     await client.query('COMMIT');
     return await getPaymentById(orgId, id);
   } catch (err) {

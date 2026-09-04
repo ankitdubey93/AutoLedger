@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import accountRoutes from './accountRoutes.js';
+import bankImportRoutes from './bankImportRoutes.js';
+import bankTransactionRoutes from './bankTransactionRoutes.js';
 import billRoutes from './billRoutes.js';
 import journalRoutes from './journalRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
@@ -19,6 +21,8 @@ import vendorRoutes from './vendorRoutes.js';
 const router = Router();
 
 router.use('/accounts', accountRoutes);
+router.use('/bank-imports', bankImportRoutes);
+router.use('/bank-transactions', bankTransactionRoutes);
 router.use('/bills', billRoutes);
 router.use('/customers', customerRoutes);
 router.use('/fiscal-periods', fiscalPeriodRoutes);

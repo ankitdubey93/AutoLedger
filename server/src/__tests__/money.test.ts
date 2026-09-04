@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { addCents, cents, formatCents, parseCents, scaleCents, sumCents, toCents } from '../utils/money.js';
+import {
+  addCents,
+  cents,
+  formatCents,
+  parseCents,
+  parseMoneyText,
+  scaleCents,
+  sumCents,
+  toCents,
+} from '../utils/money.js';
 import { ApiError } from '../utils/apiError.js';
 
 /**
@@ -146,4 +155,39 @@ describe('scaleCents', () => {
   it('rejects a negative numerator', () => {
     expect(() => scaleCents(cents(100), -1, 10)).toThrow(ApiError);
   });
+});
+
+describe('parseMoneyText', () => {
+  const okCases: Array<[string, number]> = [
+    ['1234.56', 123456],
+    ['1,234.56', 123456],
+    ['1.234,56', 123456],
+    ['1 234,56', 123456],
+    ['£1,234.56', 123456],
+    ['1234.56 GBP', 123456],
+    ['(1,234.56)', -123456],
+    ['-1234.56', -123456],
+    ['1234.56 CR', 123456],
+    ['1234.56 DR', -123456],
+    ['1,234', 123400],
+    ['1,23', 123],
+    ['0.5', 50],
+    ['', 0],
+    ['-', 0],
+    ['n/a', 0],
+  ];
+
+  for (const [input, expected] of okCases) {
+    it(`parses "${input}" as ${String(expected)} cents`, () => {
+      expect(parseMoneyText(input)).toBe(expected);
+    });
+  }
+
+  const rejectCases = ['1234.567', 'twelve', '1.2.3'];
+
+  for (const input of rejectCases) {
+    it(`rejects "${input}"`, () => {
+      expect(() => parseMoneyText(input)).toThrow(ApiError);
+    });
+  }
 });

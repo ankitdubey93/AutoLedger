@@ -220,7 +220,7 @@ Failure paths: `400 operation must be one of INSERT, UPDATE, DELETE` · `403` fo
 
 ---
 
-### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅
+### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅, Phase 6 ✅
 
 Full feature spec and the remaining phases: [ledger-core.md](ledger-core.md).
 
@@ -278,6 +278,7 @@ Failure paths: `400` from the schema (fewer than two lines, a line with both sid
 | GET | `/dashboard` | any member | Position, year-to-date and month-to-date performance, a 6-point trend, recent entries, the integrity check, and (Phase 3.9) `receivables`/`payables` AR/AP summaries. Optional `?asOf=YYYY-MM-DD` |
 | GET | `/ar-aging` | any member | Phase 3.9 — accounts-receivable aging: 5 buckets (`CURRENT`/`D1_30`/`D31_60`/`D61_90`/`D90_PLUS`), per-customer rows, and reconciliation against the receivable control account. Optional `?asOf=YYYY-MM-DD` |
 | GET | `/ap-aging` | any member | Phase 3.9 — accounts-payable aging, same shape as `/ar-aging`, per-vendor rows, reconciled against the payable control account. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/bank-reconciliation` | any member | Phase 6 — reconciles one bank account's GL balance against its imported statement lines. **Required** `?accountId=<uuid>`; optional `?asOf=YYYY-MM-DD` (defaults to today) |
 
 Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invoices`/`bills`/`payment_allocations`) on every request. There is no summary table and none will be added. Only postable, active accounts appear in the trial balance. `isBalanced` is integer equality, never an epsilon.
 
@@ -288,6 +289,8 @@ Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invo
 `/dashboard` (Phase 3.5) is not the Phase 4 balance sheet — it exposes `currentEarningsCents` (Revenue − Expenses, all time) alongside `assetsCents`/`liabilitiesCents`/`equityCents` and an `equationHolds` flag, because Assets = Liabilities + Equity only holds once current-period earnings are folded in. `position.cashCents` is `null` when no cash account is configured in settings; when configured, it sums the account's whole subtree via a recursive walk. `trend` is always exactly 6 points, oldest first, gap-filled so a month with no postings still appears at zero. Phase 3.9 adds `receivables`/`payables`, each carrying `outstandingCents`, `overdueCents`, `draftCount`/`draftCents`, and a 5-bucket aging series identical in shape to `/ar-aging`/`/ap-aging`'s `buckets`; `payables` additionally carries `awaitingReviewCount`/`awaitingReviewCents` — bills entered but not yet approved, **not** an employee expense-claim inbox (AutoLedger has no such document).
 
 `/ar-aging` and `/ap-aging` (Phase 3.9) bucket every open (`ISSUED`/`POSTED`) document's outstanding amount (`total − allocated`, allocated meaning `SUM` of `POSTED` payment allocations) by days past due relative to `asOf`. `controlAccount` names the receivable/payable account each report is checked against (`null` if none is configured and no fallback code exists); `reconciles` is `totalOutstandingCents === controlAccount.balanceCents`, integer equality, `null` when there is no control account to compare against. A `false` value means a document was posted without a matching journal entry, or vice versa — a data-integrity signal, not a UI glitch to hide.
+
+**`/bank-reconciliation`** (Phase 6) compares the named account's posted GL balance (`SUM(base_debit_cents − base_credit_cents)` up to `asOf`) against the sum of every imported, non-`IGNORED` bank line for the same account and date range. `reconciles = differenceCents === 0`, integer equality — but unlike `/ar-aging`/`/ap-aging`, a `false` here is a **completeness** claim about the imported statement history, not a **correctness** claim about the books: the GL and the statement describe two genuinely different sources (this system's own postings vs. a CSV a human chose to upload), so the far more common cause of disagreement is a month that was never imported, not a bug. See [study/postgresql/subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md). Also returns `matchedCount`/`matchedCents`, `unmatchedCount`/`unmatchedCents`, `ignoredCount`, and — when the most recent import for the account carried one — `statedClosingBalanceCents`/`statedClosingBalanceOn`/`statedClosingDifferenceCents`. Failure paths: `400 accountId is required` · `404 Account not found`.
 
 Failure paths: `400 asOf must be a date in YYYY-MM-DD format` · `400 from/to must be a date in YYYY-MM-DD format` · `422 from must not be after to` (`/profit-and-loss` only).
 
@@ -441,23 +444,53 @@ A payment settles one or more invoices (`direction: 'RECEIVE'`) or one or more b
 
 Failure paths: `400` from the schema (including an allocation naming both `invoiceId` and `billId`, or neither) · `400 direction must be RECEIVE or PAY` · `400 status must be POSTED or VOID` · `422 Allocations must sum to the payment amount` · `422 Cash account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not an Asset account` · `422 Customer not found` / `422 Vendor not found` · `422 A RECEIVE payment cannot allocate to a bill` / `422 A PAY payment cannot allocate to an invoice` · `422 That document belongs to a different counterparty` · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 Allocation exceeds the amount still due on this document` · `404 Payment not found` · `409 This payment has already been voided`.
 
+#### Bank statement imports — `/api/v1/ledger-core/bank-imports` — Phase 6
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The org's imports, newest first. Optional `?accountId=` |
+| GET | `/:id` | any member | One import's summary |
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Import a bank statement CSV |
+
+**The CSV arrives as a JSON string field, not a multipart upload** — `content` is the raw file text, capped by `MAX_CSV_CHARS` (900,000 characters) well under the 1MB JSON body limit; file storage is Phase 10's concern, not this one. **`POST /`** body: `accountId` (a postable `Asset` account), `fileName`, `content`, `dateFormat` (`ISO`/`DMY`/`MDY`, default `ISO`), optional `columnMap` (`{ date, description, amount | (debit + credit), reference }` — omit to auto-detect columns by header synonym), optional `closingBalanceCents`/`closingBalanceOn` (must be supplied together). Returns `201` with `{ import, importedCount, duplicateCount, suggestedCount, autoMatchableCount }`.
+
+**Idempotent by content-addressed hash.** Each row's `dedupe_hash` folds in the org, account, date, amount, normalized description, reference, and an occurrence ordinal (so two genuinely identical lines in one file both survive), enforced by `UNIQUE (org_id, dedupe_hash)`. Re-importing the same statement returns `201` again with `importedCount: 0` and `duplicateCount` equal to the row count — the same set of rows, never doubled. See [study/postgresql/idempotent-ingestion-and-dedupe-hashes.md](../study/postgresql/idempotent-ingestion-and-dedupe-hashes.md).
+
+**The whole file fails together.** Any unparseable date or amount rejects the entire import with `422`, naming up to the first three offending rows by number (header counted) — nothing is written. On success, every newly-inserted line is immediately scored against open invoices (positive amounts) or bills (negative amounts) within a ±30 days window; see the bank-transactions section below.
+
+Failure paths: `400` from the schema · `422 Bank account not found` (also another org's account) · `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not an Asset account` · `422 The file is empty` / `422 Malformed CSV: ...` (from the CSV parser) · `422 Could not find a date/description column in the file` / `422 Could not find an amount column, or a debit/credit pair, in the file` · `422 Column "<name>" is not in the file` (explicit `columnMap` only) · `422 Import failed: N row(s) could not be parsed (...)` · `422 The file contains no transaction rows` · `409 That statement is already being imported` · `404 Bank statement import not found`.
+
+#### Bank transactions — `/api/v1/ledger-core/bank-transactions` — Phase 6
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Paginated, filterable bank lines with their scored suggestions |
+| GET | `/:id` | any member | One bank line with its suggestions |
+| POST | `/:id/rescore` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete and regenerate one **unmatched** line's suggestions |
+| POST | `/:id/match` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Accept a suggestion (or name a document explicitly) and post a payment |
+| POST | `/:id/unmatch` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Void the payment the match created, returning the line to `UNMATCHED` |
+| POST | `/:id/ignore` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Mark a line as not needing reconciliation (e.g. a bank fee) |
+| POST | `/:id/unignore` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Return an ignored line to `UNMATCHED` and regenerate its suggestions |
+
+**There is no `PATCH` and no `DELETE`.** A bank line's match state changes only through the five verbs above; correcting a match voids the payment it posted rather than editing the line (rule 6). Every mutation requires `ACCOUNTANT` or above, matching `/payments`, since matching and unmatching each post or void a real journal entry.
+
+Each `BankTransaction` carries `amountCents` **signed** — positive is money in, negative is money out — and up to 5 `suggestions`, each with a `score` (0–100), a `scoreBreakdown` (`{ amount, date, counterparty }`, each `{ points, maxPoints, reason }`, e.g. `"exact match"` / `"0 day(s) apart"` / `"reference found in memo"`), and `autoMatchable` (`score >= 85`). See [study/architecture/fuzzy-matching-and-confidence-scoring.md](../study/architecture/fuzzy-matching-and-confidence-scoring.md).
+
+`GET /` query parameters, all optional: `page`, `limit` · `accountId` · `importId` · `status` (`UNMATCHED`/`MATCHED`/`IGNORED`) · `from`/`to` — inclusive `txnDate` bounds · `q` — matches description or reference · `minScore` (0–100) — only lines carrying a suggestion at or above this score.
+
+**`POST /:id/match`** body: exactly one of `suggestionId`, `invoiceId`, `billId`. A positive (deposit) line only matches an invoice; a negative (withdrawal) line only matches a bill. Locks the target document, validates its status (`ISSUED`/`POSTED`) and remaining amount due, then posts a payment through the same `paymentService` path `POST /payments` uses — never a direct write to `journal_entries`/`ledger_lines`. **A bank line settles at most one document, in full or in part — never a batch of several documents in one line.**
+
+**`POST /:id/unmatch`** takes no body. Voids the linked payment (if still `POSTED`) via a reversing journal entry, clears the match, and regenerates suggestions for the line.
+
+Failure paths: `400 status must be UNMATCHED, MATCHED or IGNORED` · `400 minScore must be a whole number between 0 and 100` · `400` from the schema (`match` naming zero or two of `suggestionId`/`invoiceId`/`billId`) · `404 Bank transaction not found` · `404 Suggestion not found` · `422 A deposit can only be matched to an invoice` / `422 A withdrawal can only be matched to a bill` · `422 Invoice not found` / `422 Bill not found` (also another org's) · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 That document is already settled` · `422 The bank line exceeds the amount still due on that document` · `422 Only an unmatched bank line can be rescored` · `422 The fiscal period covering <date> is closed/locked; ...` (from the underlying payment post) · `409 This bank line is already matched` / `409 This bank line is ignored — un-ignore it first` · `409 This bank line is not matched` · `409 This bank line is matched — unmatch it first`.
+
 ---
 
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
 
-Phase 3 and Phase 4's routes are **built** and documented in the section above. Still to come:
-
-#### Reconciliation — `/api/v1/ledger-core/reconciliation` — Phase 6
-
-| Method | Path | Description |
-|---|---|---|
-| POST | `/imports` | Upload a bank statement CSV. Idempotent by `dedupe_hash` |
-| GET | `/transactions` | Bank lines, filterable by `status` |
-| GET | `/transactions/:id/suggestions` | Scored candidate matches with their `score_breakdown` |
-| POST | `/matches` | Accept a match and reconcile |
-| POST | `/matches/:id/reject` | Reject a suggestion, returning the line to the queue |
+Phase 3, Phase 4, and Phase 6's routes are **built** and documented in the section above. Still to come:
 
 #### FX and QuickBooks — Phases 8–9
 

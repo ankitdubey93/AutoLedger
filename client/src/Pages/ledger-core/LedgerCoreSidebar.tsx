@@ -6,12 +6,15 @@ import {
   CalendarCheck,
   FileBarChart,
   FileText,
+  GitCompareArrows,
   History,
+  Landmark,
   LayoutDashboard,
   ListTree,
   ReceiptText,
   Scale,
   Settings as SettingsIcon,
+  Upload,
   Users,
 } from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
@@ -58,6 +61,14 @@ const NAV_GROUPS = [
     items: [
       { to: 'bills', label: 'Bills', icon: ReceiptText, end: false },
       { to: 'vendors', label: 'Vendors', icon: Building2, end: false },
+    ],
+  },
+  {
+    heading: 'Banking',
+    items: [
+      { to: 'bank', label: 'Bank Lines', icon: Landmark, end: true },
+      { to: 'bank/import', label: 'Import Statement', icon: Upload, end: false },
+      { to: 'bank/reconciliation', label: 'Reconciliation', icon: GitCompareArrows, end: false },
     ],
   },
   {

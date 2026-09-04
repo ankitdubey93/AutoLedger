@@ -5,6 +5,7 @@ import { fiscalYearBounds } from '../../utils/fiscalYear.js';
 import {
   isAccountType,
   type BalanceSheet,
+  type BankReconciliationReport,
   type ProfitAndLoss,
   type StatementRow,
   type StatementSection,
@@ -363,5 +364,105 @@ export async function balanceSheet(orgId: string, asOf: string | null): Promise<
     totalLiabilitiesAndEquityCents,
     // Integer equality, never an epsilon (guardrails rule 3).
     balances: assetsSection.totalCents === totalLiabilitiesAndEquityCents,
+  };
+}
+
+// ---------------------------------------------- Phase 6 — bank reconciliation
+
+/**
+ * Reconciles one bank account's GL balance against its imported statement
+ * lines, both computed independently and compared by integer equality —
+ * the same discipline agingService's `reconciles` flag follows.
+ *
+ * `reconciles` is a completeness claim, not a correctness one: it is true
+ * only when every GL movement on the cash account also arrived as an
+ * imported bank line, and vice versa. An organization that has imported one
+ * month of statements against a year of GL activity will correctly see
+ * `false` here — that is not a bug, it means the import is incomplete, not
+ * that the books are wrong.
+ */
+export async function bankReconciliation(
+  orgId: string,
+  accountId: string,
+  asOf: string,
+): Promise<BankReconciliationReport> {
+  const { rows: accountRows } = await pool.query<{ code: string; name: string }>(
+    'SELECT code, name FROM accounts WHERE id = $1 AND org_id = $2',
+    [accountId, orgId],
+  );
+  const account = accountRows[0];
+  if (account === undefined) throw new ApiError(404, 'Account not found');
+
+  const { rows: glRows } = await pool.query<{ balance: string }>(
+    `SELECT COALESCE(SUM(l.base_debit_cents - l.base_credit_cents), 0)::text AS balance
+       FROM ledger_lines l
+       JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+      WHERE l.org_id = $1 AND l.account_id = $2 AND e.entry_date <= $3::date`,
+    [orgId, accountId, asOf],
+  );
+  const glBalanceCents = parseCents(glRows[0]?.balance ?? '0');
+
+  const { rows: statementRows } = await pool.query<{
+    statement_balance: string;
+    matched_count: string;
+    matched_cents: string;
+    unmatched_count: string;
+    unmatched_cents: string;
+    ignored_count: string;
+  }>(
+    `SELECT
+       COALESCE(SUM(amount_cents) FILTER (WHERE status <> 'IGNORED'), 0)::text AS statement_balance,
+       COUNT(*) FILTER (WHERE status = 'MATCHED')::text AS matched_count,
+       COALESCE(SUM(amount_cents) FILTER (WHERE status = 'MATCHED'), 0)::text AS matched_cents,
+       COUNT(*) FILTER (WHERE status = 'UNMATCHED')::text AS unmatched_count,
+       COALESCE(SUM(amount_cents) FILTER (WHERE status = 'UNMATCHED'), 0)::text AS unmatched_cents,
+       COUNT(*) FILTER (WHERE status = 'IGNORED')::text AS ignored_count
+     FROM bank_transactions
+    WHERE org_id = $1 AND account_id = $2 AND txn_date <= $3::date`,
+    [orgId, accountId, asOf],
+  );
+  const sr = statementRows[0];
+  const statementBalanceCents = parseCents(sr?.statement_balance ?? '0');
+
+  const { rows: closingRows } = await pool.query<{
+    closing_balance_cents: string | null;
+    closing_balance_on: string | null;
+  }>(
+    `SELECT closing_balance_cents, closing_balance_on
+       FROM bank_statement_imports
+      WHERE org_id = $1 AND account_id = $2
+        AND closing_balance_cents IS NOT NULL AND closing_balance_on <= $3::date
+      ORDER BY closing_balance_on DESC
+      LIMIT 1`,
+    [orgId, accountId, asOf],
+  );
+  const closing = closingRows[0];
+  const statedClosingBalanceCents =
+    closing?.closing_balance_cents === undefined || closing.closing_balance_cents === null
+      ? null
+      : parseCents(closing.closing_balance_cents);
+  const statedClosingBalanceOn = closing?.closing_balance_on ?? null;
+
+  const differenceCents = glBalanceCents - statementBalanceCents;
+
+  return {
+    accountId,
+    accountCode: account.code,
+    accountName: account.name,
+    asOf,
+    glBalanceCents,
+    statementBalanceCents,
+    differenceCents,
+    // Integer equality, never an epsilon (guardrails rule 3).
+    reconciles: differenceCents === 0,
+    matchedCount: Number(sr?.matched_count ?? '0'),
+    matchedCents: parseCents(sr?.matched_cents ?? '0'),
+    unmatchedCount: Number(sr?.unmatched_count ?? '0'),
+    unmatchedCents: parseCents(sr?.unmatched_cents ?? '0'),
+    ignoredCount: Number(sr?.ignored_count ?? '0'),
+    statedClosingBalanceCents,
+    statedClosingBalanceOn,
+    statedClosingDifferenceCents:
+      statedClosingBalanceCents === null ? null : statementBalanceCents - statedClosingBalanceCents,
   };
 }

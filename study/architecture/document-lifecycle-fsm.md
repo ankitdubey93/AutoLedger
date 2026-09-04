@@ -121,6 +121,22 @@ This is the first FSM in the codebase where a state's *entire reason for existin
 
 The two-step climb (`OPEN -> CLOSED -> LOCKED`, never `OPEN -> LOCKED` directly) also encodes a real-world control: a period must be closed — reviewed, reconciled, deliberately shut to new postings — before it can be locked at all. `canTransitionFiscalPeriod('OPEN', 'LOCKED')` returns `false`, so "lock this period" is only ever offered to a period someone already decided was ready to close, never as a single click from a still-open month.
 
+### A reversible state whose reverse edge carries a GL side effect
+
+`BankTransactionStatus` (Phase 6) is a third shape, distinct from both `VOID`'s "terminal because the correction already happened" and `LOCKED`'s "terminal by promise":
+
+```ts
+export const BANK_TRANSACTION_TRANSITIONS = {
+  UNMATCHED: ['MATCHED', 'IGNORED'],
+  MATCHED:   ['UNMATCHED'],
+  IGNORED:   ['UNMATCHED'],
+} as const satisfies Record<BankTransactionStatus, readonly BankTransactionStatus[]>;
+```
+
+`MATCHED` is **not** terminal — it has an outbound edge straight back to `UNMATCHED` — but that reverse edge is not free the way `CLOSED -> OPEN` is for a fiscal period. Reopening a fiscal period touches nothing outside `fiscal_periods` itself; the period's own row is the entire blast radius. Unmatching a bank line does the opposite: `bankMatchService.unmatchTransaction` reads the line's `matched_payment_id`, and if that payment is still `POSTED`, calls `paymentService.voidPaymentOnClient` — which itself posts a reversing journal entry through `journalService.reverseEntryOnClient` — *before* it ever updates `bank_transactions.status` back to `UNMATCHED`. The FSM transition table only answers "is `MATCHED -> UNMATCHED` a legal status change"; it says nothing about the fact that walking that edge means voiding a real, previously-posted general-ledger entry as a consequence. That consequence lives in the service, one layer below the table, the same way every status write in this codebase pairs a `canTransitionX` check with whatever domain-specific work the transition actually implies (issuing an invoice checks the FSM *and* posts a balanced entry; voiding one checks the FSM *and* posts a reversing one).
+
+This is also the one FSM in the codebase where the transition table alone is *not sufficient* to gate every operation that reaches a given target state. `IGNORED -> UNMATCHED` and `MATCHED -> UNMATCHED` are both legal by the table — both land on `UNMATCHED` — but they are reached through two different API verbs (`/unignore` and `/unmatch` respectively) that mean different things and should not be interchangeable at the route level: un-ignoring a line that was never matched has no GL side effect at all, while unmatching one does. `unmatchTransaction` therefore layers an *additional*, narrower check (`row.status !== 'MATCHED'`) on top of the generic `canTransitionBankTransaction` call rather than in place of it — the shared table still runs first as the single source of truth for bare legality, and the endpoint-specific restriction sits above it, never replacing it. A table that only ever gates "is X a legal successor of Y" cannot, on its own, express "and only when reached via this specific verb" — that distinction has to live in the service that knows which verb is calling.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -144,6 +160,10 @@ The two-step climb (`OPEN -> CLOSED -> LOCKED`, never `OPEN -> LOCKED` directly)
 - `server/src/db/migrations/015_ledger-core_fiscal_periods.sql` — the three-value `status` CHECK, plus `chk_fiscal_periods_locked_complete` requiring `locked_by`/`locked_at` whenever `status = 'LOCKED'` (the same "posted-complete" CHECK idiom `chk_bills_posted_complete` uses)
 - `server/src/services/ledger-core/fiscalPeriodService.ts` — `transition()`, the one function backing `closePeriod`/`reopenPeriod`/`lockPeriod`, all three routed through `canTransitionFiscalPeriod`
 - `server/src/__tests__/ledger-core/fiscalPeriods.test.ts` — asserts `LOCKED -> OPEN` (reopen) is rejected with `409`, the direct proof the terminal state has no path back
+- `server/src/types/ledger-core.ts` — `BANK_TRANSACTION_STATUSES`, `BankTransactionStatus`, `isBankTransactionStatus`, `BANK_TRANSACTION_TRANSITIONS`, `canTransitionBankTransaction` — the first FSM with a non-terminal reverse edge (`MATCHED -> UNMATCHED`) that carries a GL side effect (voiding a payment) rather than touching only its own row
+- `server/src/db/migrations/019_ledger-core_bank_reconciliation.sql` — the three-value `status` CHECK, `chk_bank_txn_matched_fields` requiring `matched_payment_id`/`matched_at`/`matched_by` exactly when `status = 'MATCHED'`
+- `server/src/services/ledger-core/bankMatchService.ts` — `matchTransaction`/`unmatchTransaction`/`setIgnored`, each calling `canTransitionBankTransaction` before writing; `unmatchTransaction` layers an additional `row.status !== 'MATCHED'` check on top of the table so `/unmatch` and `/unignore` — two different verbs that both land on `UNMATCHED` by the table alone — stay distinct at the route level
+- `server/src/__tests__/ledger-core/bankMatching.test.ts` — `'unmatching voids the payment and restores the amount due'` (the GL-side-effect proof), `'matching an already-matched line is 409'`, `'unmatching an unmatched line is 409'`
 
 ## Gotchas
 
@@ -184,6 +204,12 @@ A: No, and the difference matters. `VOID` is terminal because the correction has
 
 **Q: Why does locking require going through `CLOSED` first instead of allowing `OPEN -> LOCKED` directly?**
 A: Because closing and locking answer different questions. Closing says "stop new postings here, this period looks done" — a routine, reversible bookkeeping act that might get undone if something was missed. Locking says "this is now permanently final" and should only be offered to a period someone already decided was ready to close. Requiring the intermediate state means the FSM itself enforces that review happened before permanence — `canTransitionFiscalPeriod('OPEN', 'LOCKED')` returning `false` isn't a missing feature, it's the control.
+
+**Q: A bank line's `MATCHED -> UNMATCHED` edge is legal — so is unmatching just a status flip, the way reopening a fiscal period is?**
+A: No, and that's the important difference between the two. Reopening a fiscal period only ever touches the `fiscal_periods` row itself — its blast radius is one table. Unmatching a bank line reverses a real posting: the service reads the line's linked payment, and if that payment is still `POSTED`, voids it — which itself posts a reversing journal entry — *before* it flips the bank line's own status back to `UNMATCHED`. The transition table only says the edge is legal; it says nothing about the fact that walking it triggers a cascading GL correction. That's deliberate — the table's job is bare legality, and the side effect belongs one layer down, in the service, the same way issuing an invoice both passes its FSM check *and* posts a balanced entry as two separate concerns.
+
+**Q: `IGNORED -> UNMATCHED` and `MATCHED -> UNMATCHED` are both legal by the same transition table. How do you keep "un-ignore" and "unmatch" from being interchangeable, given the table alone can't tell them apart?**
+A: The table genuinely can't express that distinction — it only knows "is X a legal successor of Y," not "and only via this specific verb." So `unmatchTransaction` still calls the shared `canTransitionBankTransaction` check first, as the single source of truth for whether `UNMATCHED` is even a legal target at all, but then layers an *additional*, narrower condition on top — the source status must specifically be `MATCHED`, not merely "anything that can reach `UNMATCHED`." That extra check lives in the service, not the table, because it's a property of the endpoint (which verb is being called), not a property of the state graph itself.
 
 ## Follow-ups they'll dig into
 

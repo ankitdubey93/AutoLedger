@@ -1488,3 +1488,248 @@ export function getAuditLogDetail(
 ): Promise<{ success: boolean; log: AuditLogDetail }> {
   return apiFetch(`/audit-logs/${id}`, { signal: signal ?? null });
 }
+
+// ------------------------------------------------- Phase 6 — bank reconciliation
+
+export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
+export type DateFormat = 'ISO' | 'DMY' | 'MDY';
+
+/** Mirrors server/src/types/ledger-core.ts's BankStatementImport. */
+export interface BankStatementImport {
+  id: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  fileName: string;
+  dateFormat: string;
+  delimiter: string;
+  rowCount: number;
+  importedCount: number;
+  duplicateCount: number;
+  earliestDate: string | null;
+  latestDate: string | null;
+  closingBalanceCents: number | null;
+  closingBalanceOn: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface ScoreComponent {
+  points: number;
+  maxPoints: number;
+  reason: string;
+}
+
+export interface ScoreBreakdown {
+  amount: ScoreComponent;
+  date: ScoreComponent;
+  counterparty: ScoreComponent;
+  total: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's BankMatchSuggestion. */
+export interface BankMatchSuggestion {
+  id: string;
+  targetType: 'invoice' | 'bill';
+  invoiceId: string | null;
+  billId: string | null;
+  documentReference: string;
+  documentDate: string;
+  counterpartyName: string;
+  documentTotalCents: number;
+  documentAmountDueCents: number;
+  score: number;
+  scoreBreakdown: ScoreBreakdown;
+  autoMatchable: boolean;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's BankTransaction. */
+export interface BankTransaction {
+  id: string;
+  importId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  txnDate: string;
+  description: string;
+  externalReference: string | null;
+  currencyCode: string;
+  /** Signed: > 0 money in, < 0 money out. */
+  amountCents: number;
+  status: BankTransactionStatus;
+  matchedPaymentId: string | null;
+  matchedAt: string | null;
+  matchedBy: string | null;
+  matchedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  suggestions: BankMatchSuggestion[];
+}
+
+export interface BankReconciliationReport {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  asOf: string;
+  glBalanceCents: number;
+  statementBalanceCents: number;
+  differenceCents: number;
+  reconciles: boolean;
+  matchedCount: number;
+  matchedCents: number;
+  unmatchedCount: number;
+  unmatchedCents: number;
+  ignoredCount: number;
+  statedClosingBalanceCents: number | null;
+  statedClosingBalanceOn: string | null;
+  statedClosingDifferenceCents: number | null;
+}
+
+export interface ImportStatementColumnMap {
+  date: string;
+  description: string;
+  amount: string | null;
+  debit: string | null;
+  credit: string | null;
+  reference: string | null;
+}
+
+export interface ImportStatementInput {
+  accountId: string;
+  fileName: string;
+  content: string;
+  dateFormat: DateFormat;
+  columnMap: ImportStatementColumnMap | null;
+  closingBalanceCents: number | null;
+  closingBalanceOn: string | null;
+}
+
+/** POST /ledger-core/bank-imports — the CSV text goes in the JSON body, never a multipart upload. */
+export function importBankStatement(body: ImportStatementInput): Promise<{
+  success: boolean;
+  import: BankStatementImport;
+  importedCount: number;
+  duplicateCount: number;
+  suggestedCount: number;
+  autoMatchableCount: number;
+}> {
+  return apiFetch('/ledger-core/bank-imports', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** GET /ledger-core/bank-imports */
+export function listBankImports(
+  params: { page?: number; limit?: number; accountId?: string } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  imports: BankStatementImport[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.accountId !== undefined && params.accountId !== '') query.set('accountId', params.accountId);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/bank-imports${suffix}`, { signal: signal ?? null });
+}
+
+export interface BankTransactionFilters {
+  page?: number;
+  limit?: number;
+  accountId?: string;
+  importId?: string;
+  status?: BankTransactionStatus | '';
+  from?: string;
+  to?: string;
+  q?: string;
+  minScore?: number;
+}
+
+/** GET /ledger-core/bank-transactions */
+export function listBankTransactions(
+  params: BankTransactionFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  transactions: BankTransaction[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.accountId !== undefined && params.accountId !== '') query.set('accountId', params.accountId);
+  if (params.importId !== undefined && params.importId !== '') query.set('importId', params.importId);
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.minScore !== undefined) query.set('minScore', String(params.minScore));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ledger-core/bank-transactions${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/bank-transactions/:id */
+export function getBankTransaction(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/bank-transactions/:id/rescore */
+export function rescoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/rescore`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export interface MatchBankTransactionInput {
+  suggestionId: string | null;
+  invoiceId: string | null;
+  billId: string | null;
+}
+
+/** POST /ledger-core/bank-transactions/:id/match */
+export function matchBankTransaction(
+  id: string,
+  body: MatchBankTransactionInput,
+): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/match`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /ledger-core/bank-transactions/:id/unmatch — voids the payment the match created. */
+export function unmatchBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/unmatch`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /ledger-core/bank-transactions/:id/ignore */
+export function ignoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/ignore`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /ledger-core/bank-transactions/:id/unignore */
+export function unignoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/unignore`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/**
+ * GET /ledger-core/reports/bank-reconciliation — `reconciles` is a
+ * completeness claim (every GL cash movement also arrived as an imported
+ * bank line, and vice versa), not a correctness one.
+ */
+export function getBankReconciliation(
+  accountId: string,
+  asOf: string | null,
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & BankReconciliationReport> {
+  const query = new URLSearchParams({ accountId });
+  if (asOf !== null) query.set('asOf', asOf);
+  return apiFetch(`/ledger-core/reports/bank-reconciliation?${query.toString()}`, { signal: signal ?? null });
+}

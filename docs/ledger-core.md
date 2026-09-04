@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8–9
-**Status: Phase 3 through Phase 4 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), and now live financial statements — fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table. Phases 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 6 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), live financial statements (fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table), and now bank reconciliation — CSV statement import idempotent by dedupe hash, a hand-written 40/30/30 confidence-matching engine, an approval queue, and a reconciliation report against the GL. Phases 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -252,15 +252,15 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 **What this phase does *not* claim.** No year-end closing journal entry — retained earnings on the balance sheet is derived (`SUM(revenue) − SUM(expense)` before the fiscal year start) and stays derived forever unless a closing-entry feature is added; an organization that manually posts its own closing entry into `3200` will see that year's earnings counted twice. Fiscal periods are monthly only — `period_number` is capped at 12 by CHECK, so quarterly or 4-4-5 calendars aren't representable. No per-period P&L drilldown, no PDF export, no audit trail (Phase 5, delivered since). Every date comparison here — period boundaries, `asOf`, `from`/`to` — uses UTC calendar dates, ignoring `ledger_settings.timezone`, the same limitation every other date-bounded report in this codebase already has.
 
-### Phase 6 — bank reconciliation
+### Phase 6 — bank reconciliation ✅ shipped
 
-- [ ] CSV parser surviving quoted commas, embedded newlines, BOM, and mixed date formats
-- [ ] Idempotent re-import via `dedupe_hash`
-- [ ] `utils/levenshtein.ts` — rolling-array DP, unit-tested against known distances
-- [ ] Scoring engine with stored `score_breakdown`
-- [ ] Approval queue UI; one-click accept above 85
+- [x] CSV parser surviving quoted commas, embedded newlines, BOM, and mixed date formats
+- [x] Idempotent re-import via `dedupe_hash`
+- [x] `utils/levenshtein.ts` — rolling-array DP, unit-tested against known distances
+- [x] Scoring engine with stored `score_breakdown`
+- [x] Approval queue UI; one-click accept above 85
 
-**Acceptance:** the same statement imported twice yields one set of rows. A known-good fixture of 100 bank lines scores with no false auto-reconcile above the threshold.
+**Acceptance ✅ — both verified.** The same statement imported twice yields one set of rows (`bankImports.test.ts`, named test). A known-good fixture of 100 bank lines scores with no false auto-reconcile above the threshold (`bankMatching.test.ts`, a deterministic 40-true-match/30-near-miss/30-noise fixture). See [Phase 6, as delivered](roadmap.md#phase-6-as-delivered) in the roadmap for full detail.
 
 ### Phase 8 — FX engine
 
@@ -282,10 +282,11 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ## Not built yet
 
-**Phases 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 5:
+**Phases 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 6:
 
 - **No FX conversion.** The columns are there; every line is base currency at rate 1.
-- **No bank reconciliation, no QuickBooks sync.**
+- **No QuickBooks sync.**
 - **Audit trail and `verify:integrity` are both shipped** — see the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net), no longer a target description. This closes the compliance gap every earlier phase note in this file flagged.
+- **Bank reconciliation is shipped** (Phase 6) — CSV import, the 40/30/30 confidence engine, the approval queue, and the reconciliation report all exist. Not built within it: a bank line settling more than one document (or several lines settling one) in a single match, bank feeds/OFX/QIF/MT940 beyond CSV, multi-currency statements, and posting a journal entry directly from an unmatched line for fees/interest (`IGNORE` covers that case for now).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

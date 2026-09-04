@@ -698,3 +698,115 @@ export interface BalanceSheet {
   /** Integer equality, never an epsilon (guardrails rule 3). */
   balances: boolean;
 }
+
+// ---------------------------------------------- Phase 6 — bank reconciliation
+
+export const BANK_TRANSACTION_STATUSES = ['UNMATCHED', 'MATCHED', 'IGNORED'] as const;
+export type BankTransactionStatus = (typeof BANK_TRANSACTION_STATUSES)[number];
+
+export function isBankTransactionStatus(value: string): value is BankTransactionStatus {
+  return (BANK_TRANSACTION_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The one lifecycle transition table for a bank line (guardrails rule 10).
+ * Unlike VOID on an invoice or LOCKED on a period, MATCHED is NOT terminal —
+ * it is reversible, and the reverse edge has a GL side effect: unmatching
+ * voids the payment the match posted.
+ */
+export const BANK_TRANSACTION_TRANSITIONS = {
+  UNMATCHED: ['MATCHED', 'IGNORED'],
+  MATCHED: ['UNMATCHED'],
+  IGNORED: ['UNMATCHED'],
+} as const satisfies Record<BankTransactionStatus, readonly BankTransactionStatus[]>;
+
+export function canTransitionBankTransaction(
+  from: BankTransactionStatus,
+  to: BankTransactionStatus,
+): boolean {
+  return (BANK_TRANSACTION_TRANSITIONS[from] as readonly BankTransactionStatus[]).includes(to);
+}
+
+export interface BankStatementImport {
+  id: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  fileName: string;
+  dateFormat: string;
+  delimiter: string;
+  rowCount: number;
+  importedCount: number;
+  duplicateCount: number;
+  earliestDate: string | null;
+  latestDate: string | null;
+  closingBalanceCents: number | null;
+  closingBalanceOn: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface BankMatchSuggestion {
+  id: string;
+  targetType: 'invoice' | 'bill';
+  invoiceId: string | null;
+  billId: string | null;
+  /** invoice_number or vendor_reference. */
+  documentReference: string;
+  documentDate: string;
+  counterpartyName: string;
+  documentTotalCents: number;
+  documentAmountDueCents: number;
+  score: number;
+  /** Shape mirrors utils/matchScore.ts's ScoreBreakdown exactly. */
+  scoreBreakdown: unknown;
+  /** score >= AUTO_MATCH_THRESHOLD — the one-click-accept flag. */
+  autoMatchable: boolean;
+}
+
+export interface BankTransaction {
+  id: string;
+  importId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  txnDate: string;
+  description: string;
+  externalReference: string | null;
+  currencyCode: string;
+  /** Signed: > 0 money in, < 0 money out. */
+  amountCents: number;
+  status: BankTransactionStatus;
+  matchedPaymentId: string | null;
+  matchedAt: string | null;
+  matchedBy: string | null;
+  matchedByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Empty for a MATCHED or IGNORED line. Ordered score DESC. */
+  suggestions: BankMatchSuggestion[];
+}
+
+export interface BankReconciliationReport {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  asOf: string;
+  /** Debits minus credits on the GL cash account up to asOf. */
+  glBalanceCents: number;
+  /** Sum of every imported bank line for this account up to asOf. */
+  statementBalanceCents: number;
+  differenceCents: number;
+  /** Integer equality, never an epsilon (guardrails rule 3). */
+  reconciles: boolean;
+  matchedCount: number;
+  matchedCents: number;
+  unmatchedCount: number;
+  unmatchedCents: number;
+  ignoredCount: number;
+  /** From the latest import carrying one, on or before asOf. Null when none does. */
+  statedClosingBalanceCents: number | null;
+  statedClosingBalanceOn: string | null;
+  statedClosingDifferenceCents: number | null;
+}

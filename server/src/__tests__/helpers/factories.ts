@@ -28,6 +28,7 @@ export async function resetTables(): Promise<void> {
     `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
               vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods,
+              bank_statement_imports, bank_transactions, bank_match_suggestions,
               audit_logs
      RESTART IDENTITY CASCADE`,
   );

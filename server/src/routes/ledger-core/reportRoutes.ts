@@ -17,5 +17,6 @@ router.get('/balance-sheet', authenticate, reportController.balanceSheet);
 router.get('/dashboard', authenticate, reportController.dashboard);
 router.get('/ar-aging', authenticate, reportController.arAging);
 router.get('/ap-aging', authenticate, reportController.apAging);
+router.get('/bank-reconciliation', authenticate, reportController.bankReconciliation);
 
 export default router;

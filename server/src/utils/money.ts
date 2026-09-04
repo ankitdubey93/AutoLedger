@@ -138,3 +138,113 @@ export function scaleCents(amount: Cents, numerator: number, denominator: number
 
   return cents(Number(result));
 }
+
+/**
+ * Parses money from untrusted text (a bank CSV export) into integer cents,
+ * without ever producing an intermediate float. See toCents's comment on
+ * why `1.005 * 100` is `100.49999999999999` — the same reasoning against a
+ * float rules out `Number(text) * 100` or `parseFloat` here too.
+ *
+ * Separator ambiguity ("1,234.56" vs "1.234,56") is resolved by treating
+ * whichever of `.`/`,` occurs last as the decimal point when both are
+ * present. When only a comma appears, it counts as a decimal point iff it
+ * occurs exactly once and is followed by exactly one or two digits — a
+ * comma is overwhelmingly a thousands separator in English-language bank
+ * exports, so anything else strips every comma. A lone dot is judged the
+ * opposite way round: it is always presumed a decimal point (the common
+ * case), so it is never reinterpreted as a thousands separator — a single
+ * dot followed by anything but one or two digits (a third fraction digit,
+ * or none at all) is left as-is and rejected by the final validation
+ * pattern below rather than silently guessed at.
+ */
+export function parseMoneyText(raw: string): Cents {
+  let text = raw.trim();
+  // Strip currency symbols and spaces used as thousands separators.
+  text = text.replace(/[$£€₹¥'\s]/g, '');
+
+  if (text === '' || text === '-' || text === '—' || text.toLowerCase() === 'n/a') {
+    return cents(0);
+  }
+
+  let negative = false;
+
+  // Accounting-style negative: wrapped in parentheses.
+  const parenMatch = /^\((.*)\)$/.exec(text);
+  if (parenMatch) {
+    negative = true;
+    text = parenMatch[1] ?? '';
+  }
+
+  if (text.startsWith('-')) {
+    negative = true;
+    text = text.slice(1);
+  }
+
+  // CR/DR suffix.
+  const crMatch = /CR$/i.exec(text);
+  const drMatch = /DR$/i.exec(text);
+  if (crMatch) {
+    text = text.slice(0, -2);
+  } else if (drMatch) {
+    negative = true;
+    text = text.slice(0, -2);
+  }
+
+  // A trailing 3-letter currency code, e.g. "1234.56 GBP" (already stripped
+  // of the space above, so this is now "1234.56GBP").
+  text = text.replace(/[A-Za-z]{3}$/, '');
+
+  if (text === '') {
+    return cents(0);
+  }
+
+  const hasDot = text.includes('.');
+  const hasComma = text.includes(',');
+
+  let normalized: string;
+  if (hasDot && hasComma) {
+    const lastDot = text.lastIndexOf('.');
+    const lastComma = text.lastIndexOf(',');
+    if (lastDot > lastComma) {
+      // '.' is the decimal separator; every ',' is a thousands separator.
+      normalized = text.replace(/,/g, '');
+    } else {
+      // ',' is the decimal separator; every '.' is a thousands separator.
+      normalized = text.replace(/\./g, '').replace(',', '.');
+    }
+  } else if (hasComma) {
+    const commaCount = (text.match(/,/g) ?? []).length;
+    const afterLastComma = text.slice(text.lastIndexOf(',') + 1);
+    const isDecimal = commaCount === 1 && /^\d{1,2}$/.test(afterLastComma);
+    normalized = isDecimal ? text.replace(',', '.') : text.replace(/,/g, '');
+  } else if (hasDot) {
+    const dotCount = (text.match(/\./g) ?? []).length;
+    if (dotCount === 1) {
+      // A single dot is always presumed decimal — left unchanged either
+      // way, so a bad fraction (3+ digits, or none) fails validation below
+      // rather than being silently reinterpreted as thousands grouping.
+      normalized = text;
+    } else {
+      // Multiple dots: only a properly thousands-grouped integer (each
+      // group after the first exactly 3 digits, e.g. "1.234.567") is
+      // reinterpreted. Anything else — including a malformed run like
+      // "1.2.3" — is left as-is, and the final validation pattern below
+      // rejects it outright because it still contains more than one dot.
+      const isThousandsGrouped = /^\d{1,3}(\.\d{3})+$/.test(text);
+      normalized = isThousandsGrouped ? text.replace(/\./g, '') : text;
+    }
+  } else {
+    normalized = text;
+  }
+
+  if (!/^\d+(\.\d{1,2})?$/.test(normalized)) {
+    throw new ApiError(400, `Unparseable amount "${raw}"`);
+  }
+
+  const [integerPart, fractionPart] = normalized.split('.');
+  const fractionPadded = (fractionPart ?? '').padEnd(2, '0');
+  const magnitude = BigInt(integerPart ?? '0') * 100n + BigInt(fractionPadded === '' ? '0' : fractionPadded);
+  const signed = negative ? -magnitude : magnitude;
+
+  return cents(Number(signed));
+}

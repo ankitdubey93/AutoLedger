@@ -3,7 +3,8 @@ import * as reportService from '../../services/ledger-core/reportService.js';
 import * as dashboardService from '../../services/ledger-core/dashboardService.js';
 import * as agingService from '../../services/ledger-core/agingService.js';
 import { requireUser } from '../../utils/requireUser.js';
-import { optionalIsoDate } from '../../utils/queryParam.js';
+import { optionalIsoDate, optionalUuid } from '../../utils/queryParam.js';
+import { ApiError } from '../../utils/apiError.js';
 
 /** Thin adapters over reportService. Zero SQL (guardrails rule 2). */
 
@@ -68,5 +69,16 @@ export const apAging: RequestHandler = async (req, res) => {
   const asOf = optionalIsoDate(req, 'asOf');
 
   const report = await agingService.apAging(user.orgId, asOf);
+  res.json({ success: true, ...report });
+};
+
+/** GET /ledger-core/reports/bank-reconciliation?accountId=<uuid>&asOf=YYYY-MM-DD */
+export const bankReconciliation: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const accountId = optionalUuid(req, 'accountId');
+  if (accountId === null) throw new ApiError(400, 'accountId is required');
+  const asOf = optionalIsoDate(req, 'asOf') ?? new Date().toISOString().slice(0, 10);
+
+  const report = await reportService.bankReconciliation(user.orgId, accountId, asOf);
   res.json({ success: true, ...report });
 };

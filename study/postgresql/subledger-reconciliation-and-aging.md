@@ -65,6 +65,25 @@ This is the actual point of an aging report in real accounting practice, not a n
 
 It might look simpler to *define* AR as "whatever the receivable account's ledger balance says" and skip the per-invoice bucketing entirely. That throws away exactly the information an aging report exists to provide: the ledger balance is one number, with no way to say which of it is 15 days overdue versus 95. The subledger (documents) carries the *detail* — which customer, which invoice, which due date — and the control account carries the *total*. Reconciliation is meaningful precisely because the two are computed from different data with different grain, and agreeing anyway is the evidence that both are correct.
 
+### Bank reconciliation: the same integer-equality pattern, a different meaning when it fails
+
+Phase 6's `reportService.bankReconciliation` reuses the exact same shape — two independently computed totals, compared by integer equality, with a `reconciles: boolean` flag — but against a genuinely different pair of sources, and that difference changes what a `false` result actually tells you.
+
+```sql
+-- The GL side: the cash account's own posted balance.
+SELECT COALESCE(SUM(l.base_debit_cents - l.base_credit_cents), 0)::text AS balance
+  FROM ledger_lines l
+  JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+ WHERE l.org_id = $1 AND l.account_id = $2 AND e.entry_date <= $3::date
+
+-- The statement side: every imported bank line for the same account, not IGNORED.
+SELECT COALESCE(SUM(amount_cents) FILTER (WHERE status <> 'IGNORED'), 0)::text AS statement_balance
+  FROM bank_transactions
+ WHERE org_id = $1 AND account_id = $2 AND txn_date <= $3::date
+```
+
+AR aging's two sides — the subledger and the control account — are both derived from data the organization's *own* system produced end-to-end; a mismatch between them is unambiguous evidence of an internal bug, because both sides describe the same underlying reality by construction. Bank reconciliation's two sides describe two genuinely *different* realities that merely ought to agree: the GL side is everything this system believes was posted to the cash account, and the statement side is everything a **CSV file someone chose to upload** says the bank actually did. `reconciles = differenceCents === 0` is still integer equality with no epsilon, but a `false` here does not, on its own, mean either side is wrong — the far more common cause is simply that the statement import is incomplete (a month was never uploaded, or a transaction the bank shows hasn't been imported yet). AR aging's `reconciles` is a **correctness** claim about this system's own internal consistency; bank reconciliation's `reconciles` is a **completeness** claim about whether the statement history is fully caught up — the same boolean, the same comparison mechanics, a different question depending on whether both inputs originate inside the same system or one of them is an external document a human has to keep feeding in.
+
 ---
 
 ## Why we chose it here
@@ -85,7 +104,8 @@ It might look simpler to *define* AR as "whatever the receivable account's ledge
 - `server/src/services/ledger-core/agingService.ts` — `buildOpenDocsCte`, `loadBuckets`, `loadCounterpartyRows`, `resolveControlAccount`, `loadControlAccountBalance`
 - `server/src/types/ledger-core.ts` — `AGING_BUCKETS`, `AGING_BUCKET_LABELS`, `AgingReport`
 - `server/src/__tests__/ledger-core/aging.test.ts` — the bucket-boundary tests (15/51/86/far-past days overdue land in the right bucket) and the `reconciles === true` assertions for both AR and AP
-- `server/src/services/ledger-core/reportService.ts` — `trialBalance`, the sibling report this one borrows its debit-normal/credit-normal convention and its "no summary table" discipline from
+- `server/src/services/ledger-core/reportService.ts` — `trialBalance`, the sibling report this one borrows its debit-normal/credit-normal convention and its "no summary table" discipline from; `bankReconciliation` (Phase 6), the completeness-flavored sibling of this file's correctness-flavored `reconciles`
+- `server/src/__tests__/ledger-core/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
 
 ---
 
@@ -109,6 +129,9 @@ A: I compute the total outstanding AR two completely different ways. One: sum ev
 
 **Q: Why integer equality and not "close enough"?**
 A: Because the amounts are integer cents throughout this codebase, never floats — there's no rounding noise that would need a tolerance to absorb. If the two numbers differ by even one cent, that's not floating-point error, it's a real data problem: a document without a matching posting, or a posting without a matching document. An epsilon comparison would paper over exactly the bug this check exists to catch.
+
+**Q: Bank reconciliation uses the exact same "two totals, integer equality" pattern as AR aging. If `reconciles` comes back `false` for a bank account, does that mean the same kind of bug as it would for AR aging?**
+A: No, and that distinction matters a lot in practice. AR aging's two sides — the subledger and the receivable control account — are both produced entirely by this system; if they disagree, it's an internal bug, full stop, because both numbers describe the same underlying reality by construction (issuing an invoice posts to both at once, in the same transaction). Bank reconciliation's two sides describe genuinely different realities: the GL side is what this system believes it posted to the cash account, and the statement side is whatever a CSV file someone chose to upload says the bank actually did. A `false` there is far more often "the statement for this month hasn't been imported yet" than "something is broken" — it's a completeness signal about the *import*, not a correctness signal about the *books*. Same boolean, same comparison, different question, because one check compares two internally-generated numbers and the other compares an internal number against an external, human-fed one.
 
 **Q: How did you gap-fill empty aging buckets?**
 A: A `LEFT JOIN` from a literal five-row `VALUES` list of the bucket names against the aggregated document data, `GROUP BY` the bucket name from the `VALUES` side. Any bucket with no matching documents still produces a row, with `COALESCE(SUM(...), 0)` turning the `NULL` from the join into an explicit zero. It's the same shape `dashboardService` uses with `generate_series` to gap-fill empty months in the trend chart — the general rule is "the report's shape shouldn't depend on which slices of it happen to have data."
