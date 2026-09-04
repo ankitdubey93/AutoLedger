@@ -1,6 +1,7 @@
 import bcrypt from 'bcrypt';
 import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
+import { beginTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { slugify } from '../utils/validate.js';
 import { seedDefaultChart } from './ledger-core/accountService.js';
@@ -253,7 +254,7 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     // First statement in the transaction, deliberately. A unique violation
     // aborts the whole block, so there is nothing to preserve when it fires —
@@ -328,7 +329,7 @@ export async function login(email: string, password: string): Promise<IssuedSess
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     // LOWER(email) on both sides, matching the ux_users_email_lower index.
     // The prior build matched exactly here and case-insensitively on register,
@@ -388,7 +389,7 @@ export async function rotateRefreshToken(token: string): Promise<IssuedSession> 
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ user_id: string; org_id: string | null; expires_at: Date }>(
       'DELETE FROM refresh_tokens WHERE token_hash = $1 RETURNING user_id, org_id, expires_at',
@@ -447,7 +448,7 @@ export async function switchOrg(
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const role = await findMembershipRole(client, userId, targetOrgId);
     if (role === null) {

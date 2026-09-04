@@ -1,4 +1,5 @@
 import { pool } from '../../db/connect.js';
+import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
 import { updateOrganization } from '../organizationService.js';
@@ -127,7 +128,7 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
   const client = await pool.connect();
 
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     // ledger_lines.currency_code is stamped at write time and those rows are
     // immutable by trigger (0A000) — a retroactive base-currency change would
@@ -225,9 +226,11 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
   try {
-    const { rows } = await pool.query<{ org_id: string }>(
-      `UPDATE ledger_settings SET ${assignments.join(', ')} WHERE org_id = $1 RETURNING org_id`,
-      values,
+    const { rows } = await withTransaction((client) =>
+      client.query<{ org_id: string }>(
+        `UPDATE ledger_settings SET ${assignments.join(', ')} WHERE org_id = $1 RETURNING org_id`,
+        values,
+      ),
     );
 
     // Zero rows means there was no settings row to update — the wizard was

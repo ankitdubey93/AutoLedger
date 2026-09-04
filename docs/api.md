@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -172,6 +172,51 @@ The active organization comes **only** from the verified access token. `orgId` i
 Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. This is a static list today, not a per-org entitlement — every organization sees the same seven apps. See [roadmap.md](roadmap.md#app-map).
 
 ---
+
+### Audit trail — `/api/v1/audit-logs` — Phase 5
+
+Platform-level, not namespaced under any app slug — the trail spans every app, and `appSlug` on each row carries the namespace instead (guardrails rule 16). Rows are written only by database triggers (migrations 017/018); there is no `POST`, `PATCH`, `PUT` or `DELETE` on this resource, and there never will be.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | `OWNER`, `ADMIN` | The org's audit trail, newest first, without row images |
+| GET | `/:id` | `OWNER`, `ADMIN` | One entry, including `oldRow`/`newRow` |
+
+Deliberately narrower than every other read endpoint in this codebase (`/reports`, `/fiscal-periods` are open to any member): the trail records who did what, including an `ACCOUNTANT`'s own actions, so it is a control surface rather than a report.
+
+`GET /` query parameters, all optional: `page`, `limit` (caps at 100, same as every other list endpoint) · `appSlug` (`platform` or an app slug from `config/apps.ts`) · `tableName` (exact match) · `rowId` (UUID) · `operation` (`INSERT`/`UPDATE`/`DELETE`) · `actorUserId` (UUID) · `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD`.
+
+```json
+{
+  "success": true,
+  "count": 20,
+  "totalCount": 143,
+  "currentPage": 1,
+  "totalPages": 8,
+  "logs": [
+    {
+      "id": "412",
+      "txid": "918273",
+      "appSlug": "ledger-core",
+      "tableName": "invoices",
+      "rowId": "b6b6...",
+      "operation": "UPDATE",
+      "changedKeys": ["status", "updated_at"],
+      "actorUserId": "a1a1...",
+      "actorName": "Alice",
+      "actorEmail": "alice@example.com",
+      "clientIp": "203.0.113.7",
+      "createdAt": "2026-09-04T10:00:00.000Z"
+    }
+  ]
+}
+```
+
+`GET /:id` adds `oldRow`/`newRow` — full JSONB snapshots of the row before and after, `null` on the side that doesn't apply (`oldRow` for an INSERT, `newRow` for a DELETE). `id` is a `BIGINT` identity, not a UUID; a non-numeric `:id` and a UUID from another organization both return `404`, never `400` or `403` — a `403` would confirm the id exists elsewhere (guardrails rule 1).
+
+Failure paths: `400 operation must be one of INSERT, UPDATE, DELETE` · `403` for any role other than `OWNER`/`ADMIN` · `404 Audit log entry not found`.
+
+`npm run verify:integrity` (not an HTTP route — a CLI script) independently re-derives three ledger-wide invariants — total debits equal total credits, every entry balances individually, no orphaned ledger line — and exits non-zero if any fails. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md).
 
 ---
 

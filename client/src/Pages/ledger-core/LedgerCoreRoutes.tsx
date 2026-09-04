@@ -24,6 +24,7 @@ import BillsPage from './BillsPage';
 import NewBillPage from './NewBillPage';
 import BillDetailPage from './BillDetailPage';
 import PaymentsPage from './PaymentsPage';
+import AuditLogPage from './AuditLogPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -77,6 +78,7 @@ function AppPages() {
           <Route path="bills/:billId" element={<BillDetailPage />} />
           <Route path="bills/:billId/edit" element={<NewBillPage />} />
           <Route path="payments" element={<PaymentsPage />} />
+          <Route path="audit" element={<AuditLogPage />} />
           <Route path="fiscal-periods" element={<FiscalPeriodsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />

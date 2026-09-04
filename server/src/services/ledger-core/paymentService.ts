@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
 import * as journalService from './journalService.js';
@@ -471,7 +472,7 @@ export async function createPayment(
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
       'SELECT base_currency FROM organizations WHERE id = $1',
@@ -614,7 +615,7 @@ export async function voidPayment(
 ): Promise<Payment> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string }>(
       'SELECT id, status, journal_entry_id FROM payments WHERE id = $1 AND org_id = $2 FOR UPDATE',

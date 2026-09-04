@@ -1,4 +1,5 @@
 import { pool } from '../../db/connect.js';
+import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import type { Customer } from '../../types/ledger-core.js';
 
@@ -103,20 +104,22 @@ export async function createCustomer(
   createdBy: string,
   input: CreateCustomerInput,
 ): Promise<Customer> {
-  const { rows } = await pool.query<CustomerRow>(
-    `INSERT INTO customers (org_id, created_by, name, email, phone, billing_address, tax_number, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-     RETURNING ${CUSTOMER_COLUMNS}`,
-    [
-      orgId,
-      createdBy,
-      input.name,
-      input.email === null ? null : input.email.toLowerCase(),
-      input.phone,
-      input.billingAddress,
-      input.taxNumber,
-      input.notes,
-    ],
+  const { rows } = await withTransaction((client) =>
+    client.query<CustomerRow>(
+      `INSERT INTO customers (org_id, created_by, name, email, phone, billing_address, tax_number, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING ${CUSTOMER_COLUMNS}`,
+      [
+        orgId,
+        createdBy,
+        input.name,
+        input.email === null ? null : input.email.toLowerCase(),
+        input.phone,
+        input.billingAddress,
+        input.taxNumber,
+        input.notes,
+      ],
+    ),
   );
 
   const row = rows[0];
@@ -154,11 +157,13 @@ export async function updateCustomer(
 
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-  const { rows } = await pool.query<CustomerRow>(
-    `UPDATE customers SET ${assignments.join(', ')}
-      WHERE id = $1 AND org_id = $2
-      RETURNING ${CUSTOMER_COLUMNS}`,
-    values,
+  const { rows } = await withTransaction((client) =>
+    client.query<CustomerRow>(
+      `UPDATE customers SET ${assignments.join(', ')}
+        WHERE id = $1 AND org_id = $2
+        RETURNING ${CUSTOMER_COLUMNS}`,
+      values,
+    ),
   );
 
   const row = rows[0];

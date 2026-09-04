@@ -19,13 +19,16 @@ import type { Role } from '../../types/auth.js';
  * from, and it survives a future FK changing to RESTRICT.
  *
  * TRUNCATE does **not** fire row-level triggers, so LedgerCore's immutability
- * trigger on posted rows does not block a reset between tests.
+ * trigger on posted rows does not block a reset between tests. `audit_logs`
+ * is append-only by trigger too (Phase 5), but the same exemption applies —
+ * TRUNCATE clears it and RESTART IDENTITY puts its BIGINT id back to 1.
  */
 export async function resetTables(): Promise<void> {
   await pool.query(
     `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
-              vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods
+              vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods,
+              audit_logs
      RESTART IDENTITY CASCADE`,
   );
 }

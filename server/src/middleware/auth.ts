@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import { ACCESS_COOKIE_NAME } from '../config/constants.js';
 import { verifyAccessToken } from '../utils/jwt.js';
 import { ApiError } from '../utils/apiError.js';
+import { getRequestContext } from '../utils/requestContext.js';
 
 /**
  * Resolves the caller and their active organization from the access token.
@@ -31,6 +32,18 @@ export const authenticate: RequestHandler = (req, _res, next) => {
 
   try {
     req.user = verifyAccessToken(token);
+
+    // Fills in the identity on the already-open request context (see
+    // middleware/requestContext.ts) so Phase 5's audit trail can attribute
+    // any database write this request goes on to make. This is a copy of
+    // the token's claims, never a second source of truth — org_id still
+    // comes only from the verified token itself (guardrails rule 1).
+    const context = getRequestContext();
+    if (context !== undefined) {
+      context.userId = req.user.id;
+      context.orgId = req.user.orgId;
+    }
+
     next();
   } catch (err) {
     // verifyAccessToken throws ApiError(401) already; pass anything else along

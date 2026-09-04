@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
+import { withTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { isRole, type OrganizationMember, type OrganizationSummary } from '../types/auth.js';
 
@@ -95,12 +96,19 @@ export async function updateOrganization(
 
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-  const { rows } = await q.query<OrganizationRow>(
-    `UPDATE organizations SET ${assignments.join(', ')}
+  const sql = `UPDATE organizations SET ${assignments.join(', ')}
       WHERE id = $1
-      RETURNING id, name, slug, base_currency, tax_number, business_number, created_at`,
-    values,
-  );
+      RETURNING id, name, slug, base_currency, tax_number, business_number, created_at`;
+
+  // `q === pool` means no caller has already opened a transaction, so this
+  // write opens its own (Phase 5 — every write needs a transaction for the
+  // audit context to attach to). A caller that passed its own `client`
+  // (settingsService's onboarding transaction) already has one; wrapping it
+  // again would try to BEGIN a transaction that is already open.
+  const { rows } =
+    q === pool
+      ? await withTransaction((client) => client.query<OrganizationRow>(sql, values))
+      : await q.query<OrganizationRow>(sql, values);
 
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Organization not found');

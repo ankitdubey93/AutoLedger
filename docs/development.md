@@ -56,6 +56,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm start` | Runs the built `dist/index.js` |
 | `npm run migrate` | Applies pending migrations |
 | `npm run db:reset` | **Destructive.** Drops schema `public` and re-runs every migration. Refuses when `NODE_ENV=production` |
+| `npm run verify:integrity` | Phase 5 — standalone check that total debits equal total credits, every journal entry balances, and no ledger line is orphaned, across the whole database. Prints one line per check and exits non-zero on any failure — the script to run in front of an auditor |
 | `npm test` | Vitest, single run |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage over `services/`, `utils/` and `middleware/` |
@@ -190,6 +191,8 @@ Added in Phase 3:
 | `express-rate-limit` | server | Throttling `/auth/login` and `/auth/register`. Scheduled for this phase since Phase 1, where it was deferred deliberately rather than overlooked |
 | `tailwindcss` 4 + `@tailwindcss/vite` | client | LedgerCore is the first app with dense UI — a trial-balance grid, a multi-line entry form. v4 configures in CSS (`@import "tailwindcss"`), so there is no `tailwind.config.js`. The existing `index.css` keeps the auth and chooser pages working; new pages are Tailwind-first |
 | `lucide-react` | client | Icon set. Tree-shakes per icon, so unused ones do not ship |
+
+Nothing new in Phase 4 or Phase 5. Phase 5's request-context propagation uses `node:async_hooks`' `AsyncLocalStorage`, part of the Node runtime — no dependency to add.
 
 Approved for later phases, add only when the app that needs it is being built:
 

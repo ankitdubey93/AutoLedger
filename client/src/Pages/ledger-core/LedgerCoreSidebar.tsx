@@ -6,6 +6,7 @@ import {
   CalendarCheck,
   FileBarChart,
   FileText,
+  History,
   LayoutDashboard,
   ListTree,
   ReceiptText,
@@ -71,6 +72,7 @@ const NAV_GROUPS = [
     items: [
       { to: 'fiscal-periods', label: 'Fiscal Periods', icon: CalendarCheck, end: false },
       { to: 'settings', label: 'Settings', icon: SettingsIcon, end: false },
+      { to: 'audit', label: 'Audit Trail', icon: History, end: false },
     ],
   },
 ] as const;

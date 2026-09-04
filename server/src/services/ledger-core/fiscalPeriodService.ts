@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalPeriodRanges, fiscalYearBounds } from '../../utils/fiscalYear.js';
 import {
@@ -114,7 +115,7 @@ export async function generatePeriods(
 ): Promise<{ fiscalYearLabel: string; created: boolean; periods: FiscalPeriod[] }> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: settingsRows } = await client.query<{
       fiscal_year_start_month: number | null;
@@ -192,7 +193,7 @@ async function transition(
 ): Promise<FiscalPeriod> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ status: FiscalPeriodStatus }>(
       'SELECT status FROM fiscal_periods WHERE org_id = $1 AND id = $2 FOR UPDATE',

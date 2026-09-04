@@ -1,4 +1,5 @@
 import { pool } from '../../db/connect.js';
+import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import type { Vendor } from '../../types/ledger-core.js';
 
@@ -109,21 +110,23 @@ export async function createVendor(
   createdBy: string,
   input: CreateVendorInput,
 ): Promise<Vendor> {
-  const { rows } = await pool.query<VendorRow>(
-    `INSERT INTO vendors (org_id, created_by, name, email, phone, billing_address, tax_number, payment_terms, notes)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-     RETURNING ${VENDOR_COLUMNS}`,
-    [
-      orgId,
-      createdBy,
-      input.name,
-      input.email === null ? null : input.email.toLowerCase(),
-      input.phone,
-      input.billingAddress,
-      input.taxNumber,
-      input.paymentTerms,
-      input.notes,
-    ],
+  const { rows } = await withTransaction((client) =>
+    client.query<VendorRow>(
+      `INSERT INTO vendors (org_id, created_by, name, email, phone, billing_address, tax_number, payment_terms, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING ${VENDOR_COLUMNS}`,
+      [
+        orgId,
+        createdBy,
+        input.name,
+        input.email === null ? null : input.email.toLowerCase(),
+        input.phone,
+        input.billingAddress,
+        input.taxNumber,
+        input.paymentTerms,
+        input.notes,
+      ],
+    ),
   );
 
   const row = rows[0];
@@ -162,11 +165,13 @@ export async function updateVendor(
 
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-  const { rows } = await pool.query<VendorRow>(
-    `UPDATE vendors SET ${assignments.join(', ')}
-      WHERE id = $1 AND org_id = $2
-      RETURNING ${VENDOR_COLUMNS}`,
-    values,
+  const { rows } = await withTransaction((client) =>
+    client.query<VendorRow>(
+      `UPDATE vendors SET ${assignments.join(', ')}
+        WHERE id = $1 AND org_id = $2
+        RETURNING ${VENDOR_COLUMNS}`,
+      values,
+    ),
   );
 
   const row = rows[0];

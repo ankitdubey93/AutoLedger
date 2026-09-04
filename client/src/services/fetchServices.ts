@@ -1418,3 +1418,73 @@ export function reopenFiscalPeriod(id: string): Promise<{ success: boolean; peri
 export function lockFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
   return apiFetch(`/ledger-core/fiscal-periods/${id}/lock`, { method: 'POST', body: JSON.stringify({}) });
 }
+
+/* --------------------------------------------------------- audit trail (Phase 5) */
+
+export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE';
+
+/** One row of the trail, without its before/after images — the list view's shape. */
+export interface AuditLogEntry {
+  id: string;
+  txid: string;
+  appSlug: string;
+  tableName: string;
+  rowId: string | null;
+  operation: AuditOperation;
+  changedKeys: string[] | null;
+  actorUserId: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  clientIp: string | null;
+  createdAt: string;
+}
+
+/** One entry, plus the full before/after row images — the detail view's shape. */
+export interface AuditLogDetail extends AuditLogEntry {
+  oldRow: Record<string, unknown> | null;
+  newRow: Record<string, unknown> | null;
+}
+
+export interface AuditLogFilters {
+  page?: number;
+  limit?: number;
+  appSlug?: string;
+  tableName?: string;
+  operation?: AuditOperation;
+}
+
+/**
+ * GET /audit-logs — platform-level, not under /ledger-core: the trail spans
+ * every app (guardrails rule 16). OWNER/ADMIN only; a 403 is expected from
+ * every other role and is handled by the page, not hidden by this function.
+ */
+export function getAuditLogs(
+  params: AuditLogFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  logs: AuditLogEntry[];
+}> {
+  const query = new URLSearchParams();
+  // An empty filter box must send no parameter at all, not `?appSlug=`.
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.appSlug !== undefined && params.appSlug !== '') query.set('appSlug', params.appSlug);
+  if (params.tableName !== undefined && params.tableName !== '') query.set('tableName', params.tableName);
+  if (params.operation !== undefined) query.set('operation', params.operation);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/audit-logs${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /audit-logs/:id — the full before/after row images for one entry. */
+export function getAuditLogDetail(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; log: AuditLogDetail }> {
+  return apiFetch(`/audit-logs/${id}`, { signal: signal ?? null });
+}

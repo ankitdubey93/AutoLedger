@@ -58,13 +58,13 @@ Computed by aggregation over raw `ledger_lines` on every request. **No pre-calcu
 
 ## The showcase items
 
-### 1. Audit trail & internal controls — the CFO safety net
+### 1. Audit trail & internal controls — the CFO safety net — ✅ shipped, Phase 5
 
-An append-only history stamping actor, timestamp, system source, and client IP on every financial write. The shared CDC trail is [Phase 5](roadmap.md); LedgerCore is its first consumer.
+An append-only history stamping actor, timestamp, system source, and client IP on every financial write. The shared CDC trail is [Phase 5, as delivered](roadmap.md#phase-5-as-delivered); LedgerCore was its first consumer.
 
-The mechanism worth explaining in an interview: **a Postgres trigger cannot see `req`.** It knows the row and the transaction, not who made the HTTP call. The actor reaches it through `SET LOCAL app.current_user_id = $1` and `SET LOCAL app.client_ip = $2` issued inside the same transaction, read back by the trigger with `current_setting('app.current_user_id', true)`. `SET LOCAL` scopes the value to the transaction, so a pooled connection handed to the next request carries nothing over.
+The mechanism worth explaining in an interview: **a Postgres trigger cannot see `req`.** It knows the row and the transaction, not who made the HTTP call. The actor reaches it through `set_config('app.current_user_id', $1, true)` and `set_config('app.client_ip', $2, true)` issued inside the same transaction (the function form, not `SET LOCAL` directly — only the function form accepts a bind parameter), read back by the trigger with `current_setting('app.current_user_id', true)`. The `true`/`is_local` flag scopes the value to the transaction, so a pooled connection handed to the next request carries nothing over. See [study/postgresql/audit-triggers-and-session-variables.md](../study/postgresql/audit-triggers-and-session-variables.md).
 
-Alongside it, `npm run verify:integrity` — a standalone checker asserting total debits equal total credits across the entire database, that every entry balances individually, and that no line is orphaned. It is the script you run in front of an auditor, and it must be capable of failing.
+Alongside it, `npm run verify:integrity` — a standalone checker asserting total debits equal total credits across the entire database, that every entry balances individually, and that no line is orphaned. It is the script you run in front of an auditor, and `server/src/__tests__/integrity.test.ts` proves it is capable of failing. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md).
 
 ### 2. Multi-tenant chart of accounts
 
@@ -219,7 +219,7 @@ A fourth half-step. **No renumbering** — Phase 4 is unaffected and unstarted. 
 
 **Acceptance ✅ — all verified.** Issuing an invoice allocates a sequential number and posts a balanced entry (`sourceType: 'invoice'`) visible in the journal register; the receivable/revenue/tax split is correct for a mixed-tax-rate fixture; voiding an issued invoice posts a reversal and the trial balance stays balanced; a raw-SQL `UPDATE` on an `ISSUED` invoice's amount, or an `INSERT`/`DELETE` on its lines, raises `0A000`, while the `ISSUED -> VOID` transition succeeds when it touches only the permitted columns. 340 server tests (up from 280), 94 client tests (up from 84).
 
-**What this phase does *not* claim.** No `PAID` status and no payment/cash-receipt document — an issued invoice's receivable never clears except by voiding, and the UI says so. No AR aging, no AR subledger *report* (Phase 4 still owns that), no PDF export, no multi-currency invoices (needs the Phase 8 FX engine), no fiscal-period posting lock, no audit trail. **Payment recording and AR/AP aging landed in Phase 3.9, immediately below.**
+**What this phase does *not* claim.** No `PAID` status and no payment/cash-receipt document — an issued invoice's receivable never clears except by voiding, and the UI says so. No AR aging, no AR subledger *report* (Phase 4 still owns that), no PDF export, no multi-currency invoices (needs the Phase 8 FX engine), no fiscal-period posting lock, no audit trail (Phase 5, delivered since). **Payment recording and AR/AP aging landed in Phase 3.9, immediately below.**
 
 ### Phase 3.9 — accounts payable & payments
 
@@ -239,7 +239,7 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 **Acceptance ✅ — all verified.** Approving a bill posts a balanced entry debiting each distinct expense account and crediting payable; an `ACCOUNTANT` attempting `/approve` is rejected with `403` at the route's role gate. Recording a payment posts a balanced entry and immediately reduces the target document's `amountDueCents`; voiding that payment restores it with no second write. A payment inserted with no allocations succeeds at `INSERT` and fails at `COMMIT`; a second payment allocating past a document's remaining balance succeeds at `INSERT` and fails at its own `COMMIT`, with a `SELECT ... FOR UPDATE` row lock (taken in `paymentService`, ahead of either transaction's deferred trigger) closing the race a purely deferred check alone would not. AR and AP aging both reconcile (`reconciles === true`) against their control accounts for a non-trivial fixture. 442 server tests (up from 340), 107 client tests (up from 94).
 
-**What this phase does *not* claim.** No expense-claim/employee-reimbursement document — there is no such thing in AutoLedger; the bill-approval queue is unapproved vendor bills, not employee expenses. No credit notes, no vendor credits, no partial void. No PDF export, no multi-currency invoices or bills (needs Phase 8), no fiscal-period posting lock, no audit trail. Aging/overdue comparisons use UTC calendar dates, ignoring `ledger_settings.timezone`.
+**What this phase does *not* claim.** No expense-claim/employee-reimbursement document — there is no such thing in AutoLedger; the bill-approval queue is unapproved vendor bills, not employee expenses. No credit notes, no vendor credits, no partial void. No PDF export, no multi-currency invoices or bills (needs Phase 8), no fiscal-period posting lock, no audit trail (Phase 5, delivered since). Aging/overdue comparisons use UTC calendar dates, ignoring `ledger_settings.timezone`.
 
 ### Phase 4 — live statements
 
@@ -250,7 +250,7 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 **Acceptance ✅ — all verified.** The balance sheet satisfies Assets = Liabilities + Equity by integer equality for a fixture touching all three sections; `information_schema` confirms no summary table exists anywhere in the schema. P&L over a fiscal year and the balance sheet at that year's end agree: `netIncomeCents === equity.currentEarningsCents`. Two overlapping fiscal periods in one organization are rejected at `INSERT` with `23P01`; the identical overlap across two different organizations is permitted. A posting dated inside a `CLOSED` or `LOCKED` period is rejected with `422` through every path that reaches the GL — manual journals, reversals, invoice issuance — and independently by migration 016's trigger when the service is bypassed entirely with raw SQL. Locking a period that hasn't been closed is refused; reopening a `LOCKED` period is refused — the lock has no way out. 490 server tests (up from 442), 120 client tests (up from 107).
 
-**What this phase does *not* claim.** No year-end closing journal entry — retained earnings on the balance sheet is derived (`SUM(revenue) − SUM(expense)` before the fiscal year start) and stays derived forever unless a closing-entry feature is added; an organization that manually posts its own closing entry into `3200` will see that year's earnings counted twice. Fiscal periods are monthly only — `period_number` is capped at 12 by CHECK, so quarterly or 4-4-5 calendars aren't representable. No per-period P&L drilldown, no PDF export, no audit trail (Phase 5 still owns that). Every date comparison here — period boundaries, `asOf`, `from`/`to` — uses UTC calendar dates, ignoring `ledger_settings.timezone`, the same limitation every other date-bounded report in this codebase already has.
+**What this phase does *not* claim.** No year-end closing journal entry — retained earnings on the balance sheet is derived (`SUM(revenue) − SUM(expense)` before the fiscal year start) and stays derived forever unless a closing-entry feature is added; an organization that manually posts its own closing entry into `3200` will see that year's earnings counted twice. Fiscal periods are monthly only — `period_number` is capped at 12 by CHECK, so quarterly or 4-4-5 calendars aren't representable. No per-period P&L drilldown, no PDF export, no audit trail (Phase 5, delivered since). Every date comparison here — period boundaries, `asOf`, `from`/`to` — uses UTC calendar dates, ignoring `ledger_settings.timezone`, the same limitation every other date-bounded report in this codebase already has.
 
 ### Phase 6 — bank reconciliation
 
@@ -282,11 +282,10 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ## Not built yet
 
-**Phases 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 4:
+**Phases 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 5:
 
 - **No FX conversion.** The columns are there; every line is base currency at rate 1.
 - **No bank reconciliation, no QuickBooks sync.**
-- **No audit trail.** `created_by` and `created_at` are stamped on every entry, but the CDC trail with actor and IP is Phase 5 — **no compliance claim is valid until it lands**, and the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net) describes a target, not a shipped feature.
-- **No `verify:integrity` script** yet; the equivalent assertions currently live only in the test suite.
+- **Audit trail and `verify:integrity` are both shipped** — see the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net), no longer a target description. This closes the compliance gap every earlier phase note in this file flagged.
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

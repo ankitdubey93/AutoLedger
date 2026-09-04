@@ -3,6 +3,7 @@ import healthRoutes from './health.js';
 import authRoutes from './auth.js';
 import organizationRoutes from './organizations.js';
 import appRoutes from './apps.js';
+import auditRoutes from './auditLogs.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 
 /**
@@ -26,6 +27,10 @@ apiRouter.use('/organizations', organizationRoutes);
 
 // Phase 2 — the app registry.
 apiRouter.use('/apps', appRoutes);
+
+// Phase 5 — the shared CDC audit trail. Platform-level: it spans every app,
+// and `app_slug` on the row carries the namespace (guardrails rule 16).
+apiRouter.use('/audit-logs', auditRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

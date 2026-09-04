@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import * as journalService from './journalService.js';
@@ -448,7 +449,7 @@ export async function createBill(
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
       'SELECT base_currency FROM organizations WHERE id = $1',
@@ -531,7 +532,7 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: statusRows } = await client.query<{ status: string }>(
       'SELECT status FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE',
@@ -607,11 +608,13 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
 }
 
 export async function deleteBill(orgId: string, id: string): Promise<void> {
-  const { rows } = await pool.query<{ id: string }>(
-    `DELETE FROM bills
-      WHERE id = $1 AND org_id = $2 AND status IN ('DRAFT', 'AWAITING_APPROVAL')
-      RETURNING id`,
-    [id, orgId],
+  const { rows } = await withTransaction((client) =>
+    client.query<{ id: string }>(
+      `DELETE FROM bills
+        WHERE id = $1 AND org_id = $2 AND status IN ('DRAFT', 'AWAITING_APPROVAL')
+        RETURNING id`,
+      [id, orgId],
+    ),
   );
 
   if (rows[0] !== undefined) return;
@@ -628,7 +631,7 @@ export async function deleteBill(orgId: string, id: string): Promise<void> {
 export async function submitBill(orgId: string, id: string): Promise<Bill> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ status: string }>(
       'SELECT status FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE',
@@ -716,7 +719,7 @@ export async function approveBill(
 ): Promise<Bill> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: billRows } = await client.query<{
       id: string;
@@ -828,7 +831,7 @@ export async function voidBill(
 ): Promise<Bill> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string | null }>(
       'SELECT id, status, journal_entry_id FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE',

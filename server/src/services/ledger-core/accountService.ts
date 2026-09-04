@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import {
   isAccountType,
@@ -172,20 +173,22 @@ export async function createAccount(
   }
 
   try {
-    const { rows } = await pool.query<AccountRow>(
-      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-       RETURNING ${ACCOUNT_COLUMNS}`,
-      [
-        orgId,
-        input.code,
-        input.name,
-        input.type,
-        input.parentId,
-        input.isPostable,
-        input.description,
-        createdBy,
-      ],
+    const { rows } = await withTransaction((client) =>
+      client.query<AccountRow>(
+        `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING ${ACCOUNT_COLUMNS}`,
+        [
+          orgId,
+          input.code,
+          input.name,
+          input.type,
+          input.parentId,
+          input.isPostable,
+          input.description,
+          createdBy,
+        ],
+      ),
     );
 
     const row = rows[0];
@@ -277,11 +280,13 @@ export async function updateAccount(
 
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-  const { rows } = await pool.query<AccountRow>(
-    `UPDATE accounts SET ${assignments.join(', ')}
-      WHERE id = $1 AND org_id = $2
-      RETURNING ${ACCOUNT_COLUMNS}`,
-    values,
+  const { rows } = await withTransaction((client) =>
+    client.query<AccountRow>(
+      `UPDATE accounts SET ${assignments.join(', ')}
+        WHERE id = $1 AND org_id = $2
+        RETURNING ${ACCOUNT_COLUMNS}`,
+      values,
+    ),
   );
 
   const row = rows[0];

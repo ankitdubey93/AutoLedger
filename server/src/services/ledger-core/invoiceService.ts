@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import * as journalService from './journalService.js';
@@ -436,7 +437,7 @@ export async function createInvoice(
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
       'SELECT base_currency FROM organizations WHERE id = $1',
@@ -519,7 +520,7 @@ export async function updateInvoice(
 
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: statusRows } = await client.query<{ status: string }>(
       'SELECT status FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE',
@@ -594,9 +595,11 @@ export async function updateInvoice(
 }
 
 export async function deleteInvoice(orgId: string, id: string): Promise<void> {
-  const { rows } = await pool.query<{ id: string }>(
-    `DELETE FROM invoices WHERE id = $1 AND org_id = $2 AND status = 'DRAFT' RETURNING id`,
-    [id, orgId],
+  const { rows } = await withTransaction((client) =>
+    client.query<{ id: string }>(
+      `DELETE FROM invoices WHERE id = $1 AND org_id = $2 AND status = 'DRAFT' RETURNING id`,
+      [id, orgId],
+    ),
   );
 
   if (rows[0] !== undefined) return;
@@ -662,7 +665,7 @@ export async function issueInvoice(
 ): Promise<Invoice> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows: invoiceRows } = await client.query<{
       id: string;
@@ -778,7 +781,7 @@ export async function voidInvoice(
 ): Promise<Invoice> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string | null }>(
       'SELECT id, status, journal_entry_id FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE',

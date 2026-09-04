@@ -30,6 +30,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [event-loop-and-blocking.md](node-express/event-loop-and-blocking.md) | Loop phases, microtask queues, `nextTick` vs `setImmediate`, libuv thread pool, why network I/O doesn't use it, `bcryptjs` blocking the main thread |
 | [express-middleware-and-async-errors.md](node-express/express-middleware-and-async-errors.md) | Router layer stack, `next()` closure, arity-based error-middleware detection, the Express 4 async-throw trap and how Express 5 closes it, path-to-regexp v8 breakage, middleware ordering |
 | [graceful-shutdown-and-process-lifecycle.md](node-express/graceful-shutdown-and-process-lifecycle.md) | Signal dispositions and exit code 143, `server.close()` vs `closeIdleConnections()`, drain ordering, unref'd watchdog timers, PID 1, why npm swallows signals |
+| [async-local-storage-request-context.md](node-express/async-local-storage-request-context.md) | **`AsyncLocalStorage` as implicit per-request state across `await` boundaries via Node's async resource graph, why concurrent requests don't collide, why the context object has to be mutable given middleware ordering, and what a background job loses when it crosses a process boundary** |
 
 ### TypeScript
 
@@ -53,6 +54,8 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [window-functions-and-running-totals.md](postgresql/window-functions-and-running-totals.md) | **`OVER (ORDER BY ...)` in SQL's logical order of operations and why that lets a running balance survive pagination, `ROWS` vs the default `RANGE` frame and the tied-peer-rows bug, why the frame still needs a unique `ORDER BY` tiebreaker, rejected: app-code accumulation, a correlated subquery per row, a stored running-balance column** |
 | [subledger-reconciliation-and-aging.md](postgresql/subledger-reconciliation-and-aging.md) | **Date-bucketing with a parameterized `CASE` ladder vs `age()`/`width_bucket()`, gap-filling a fixed bucket enum with a `VALUES`-list `LEFT JOIN`, and reconciling a subledger total against its GL control account as an integer-equality assertion — why the two are computed independently and what a mismatch actually means** |
 | [exclusion-constraints-and-gist.md](postgresql/exclusion-constraints-and-gist.md) | **`EXCLUDE` as `UNIQUE` generalized to any operator, why GIST (not B-tree) supports range-overlap `&&`, `btree_gist` for mixing scalar equality into a GIST index, `daterange` bounds-inclusivity (`'[]'` vs `'[)'`), the `23P01` exclusion-violation code, and why this closes a check-then-write race a service-level pre-check cannot** |
+| [audit-triggers-and-session-variables.md](postgresql/audit-triggers-and-session-variables.md) | **`to_jsonb(NEW)`/`to_jsonb(OLD)` generic row snapshots, deriving a changed-key diff with `jsonb_each` + `IS DISTINCT FROM`, `TG_ARGV` for parameterizing one trigger function across many tables, `set_config(..., is_local := true)` vs `SET LOCAL` and why only the function form is parameterizable, and why this trigger must be `AFTER` where the period-lock guard is `BEFORE`** |
+| [integrity-checking-a-ledger.md](postgresql/integrity-checking-a-ledger.md) | **`HAVING` vs `WHERE` for filtering on an aggregate, `LEFT JOIN`/`IS NULL` anti-joins vs the `NOT IN` NULL trap, exact `BigInt` equality over any epsilon, and the one file in this codebase deliberately exempted from tenant scoping — with the reasoning written down** |
 
 ### Architecture
 
@@ -65,6 +68,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [double-entry-as-an-invariant.md](architecture/double-entry-as-an-invariant.md) | **Double-entry as a checksum on financial data, append-only ledgers vs mutable counters and the lost-update class they eliminate, reversing entries over mutation, derived vs stored state, where this sits relative to event sourcing** |
 | [document-lifecycle-fsm.md](architecture/document-lifecycle-fsm.md) | **One transition table (`as const satisfies Record<Status, ...>`) mirrored by a `status` CHECK constraint, why scattered `if (status === 'X')` checks rot, draft-mutable vs posted-immutable states, correction as reversal not edit, a `to_jsonb` row-diff trigger for a single allowed post-issue transition, a four-state FSM with a backward recall edge (`AWAITING_APPROVAL -> DRAFT`) plus role-gated approval as a segregation-of-duties control independent of the FSM itself, and a genuinely terminal state (`LOCKED`) with no outbound edge at all — why it differs from `VOID`'s empty edge list, and why locking must pass through `CLOSED` first** |
 | [derived-vs-stored-state.md](architecture/derived-vs-stored-state.md) | **Why settlement (how much of an invoice/bill is paid) is a correlated-subquery read, never a stored column — voiding a payment un-settles for free because immutable allocation rows simply stop counting; the precedence rules in `settlementStatusOf`; and reconciling a derived subledger total against the GL as a cross-check, not just a display value** |
+| [append-only-audit-trails.md](architecture/append-only-audit-trails.md) | **CDC vs application-level activity logs, why the audit table is the one place FKs are deliberately omitted, an integer identity key over a UUID for arrival-order, `txid` as the grouping key for one multi-table transaction, and what "immutable" honestly does and doesn't prove against a privileged actor** |
 
 ### Tooling
 
@@ -114,7 +118,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Streams & backpressure | 10 (AP-Flow document uploads), 15 (BoardDeck `.pptx`) | ◐ |
 | `worker_threads` vs child processes vs queue consumers | 7 | ◐ |
 | Graceful shutdown, connection draining, `SIGTERM` | 0 | ✅ |
-| `AsyncLocalStorage` for request context | 5 (audit actor) | ⬜ |
+| `AsyncLocalStorage` for request context | 5 (audit actor) | ✅ |
 | BullMQ: queues, workers, retries, DLQ, idempotent jobs | 7 | ⬜ |
 | Cron scheduling & idempotent batch jobs | 15 (BoardDeck close automation) | ⬜ |
 | Multipart uploads: MIME sniffing, size caps, path traversal | 10 (AP-Flow) | ⬜ |
@@ -146,8 +150,8 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | **Deferred constraint triggers: enforcing a multi-row invariant at `COMMIT`** | 3 (balance check), 3.8 (invoice partial immutability), 3.9 (payment allocation completeness + cross-transaction overallocation) | ✅ |
 | Gapless(-ish) numbering: counter row + row lock vs `SEQUENCE` | 3.8 (invoice numbering) | ✅ |
 | **Subledger reconciliation: derived document totals vs a GL control account balance** | 3.9 (AR/AP aging) | ✅ |
-| Triggers & `updated_at`; CDC audit snapshots | 5 | ⬜ |
-| Passing request context to a trigger (`SET LOCAL` + `current_setting`) | 5 (audit actor + IP) | ⬜ |
+| Triggers & `updated_at`; CDC audit snapshots | 5 | ✅ |
+| Passing request context to a trigger (`SET LOCAL` + `current_setting`) | 5 (audit actor + IP) | ✅ |
 | `WITH RECURSIVE` CTEs + cycle detection | 3 (chart-of-accounts hierarchy), 3.6 (subtree balance rollups) | ✅ |
 | Aggregate `FILTER` clauses, `generate_series` gap-filling | 3.5 (LedgerCore dashboard), 3.9 (`FILTER` over `UNION ALL`, correlated subqueries), 4 (P&L/balance sheet prior/current-year split) | ✅ |
 | Composite foreign keys for cross-table tenancy checks | 3.5 (LedgerCore settings) | ✅ |

@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
 import { assertPeriodOpenOnClient } from './fiscalPeriodService.js';
@@ -421,7 +422,7 @@ export async function createEntry(
 ): Promise<JournalEntry> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const entryId = await createEntryOnClient(client, orgId, createdBy, input);
 
@@ -538,7 +539,7 @@ export async function reverseEntry(
 ): Promise<JournalEntry> {
   const client = await pool.connect();
   try {
-    await client.query('BEGIN');
+    await beginTransaction(client);
 
     const reversalId = await reverseEntryOnClient(client, orgId, createdBy, id, entryDate);
 

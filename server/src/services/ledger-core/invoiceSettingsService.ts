@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import type { InvoiceSettings } from '../../types/ledger-core.js';
 
@@ -175,11 +176,13 @@ export async function updateInvoiceSettings(
   const placeholders = insertValues.map((_, i) => `$${String(i + 2)}`);
 
   try {
-    await pool.query(
-      `INSERT INTO ledger_invoice_settings (org_id, ${columns.join(', ')})
-       VALUES ($1, ${placeholders.join(', ')})
-       ON CONFLICT (org_id) DO UPDATE SET ${updateAssignments.join(', ')}`,
-      [orgId, ...insertValues],
+    await withTransaction((client) =>
+      client.query(
+        `INSERT INTO ledger_invoice_settings (org_id, ${columns.join(', ')})
+         VALUES ($1, ${placeholders.join(', ')})
+         ON CONFLICT (org_id) DO UPDATE SET ${updateAssignments.join(', ')}`,
+        [orgId, ...insertValues],
+      ),
     );
   } catch (err) {
     const constraint = pgConstraint(err);

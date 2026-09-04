@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001`–`016`.** Platform identity/tenancy, LedgerCore's GL core (accounts, journals, the balance/immutability triggers), settings, invoicing (customers, invoices), accounts payable (vendors, bills, payments), and Phase 4's fiscal periods with the closed-period posting guard all exist. The **Phase 5+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001`–`018`.** Platform identity/tenancy, LedgerCore's GL core (accounts, journals, the balance/immutability triggers), settings, invoicing (customers, invoices), accounts payable (vendors, bills, payments), Phase 4's fiscal periods with the closed-period posting guard, and Phase 5's shared `audit_logs` CDC trail all exist. The **Phase 6+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -257,11 +257,32 @@ Constraints: `ux_fiscal_periods_org_id_id` — `UNIQUE (org_id, id)`, the same c
 
 ---
 
-## Phase 5+ — target tables
+## Phase 5 — shared CDC audit trail — applied
+
+Two migrations, platform-level (no app-slug tag in the filename). `017` adds the table; `018` attaches capture to every audited table.
+
+**`017_platform_audit_logs.sql`** — `audit_logs`:
+`id` `BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY` — a plain sequence, not a UUID like every other table; a log's defining property is arrival order, which a UUID carries none of · `txid` `BIGINT NOT NULL DEFAULT (pg_current_xact_id()::text::bigint)` — groups every row one transaction wrote, since `created_at` alone can't (it's transaction-start time, shared by every row in the same transaction) · `org_id` UUID, **no `REFERENCES`** · `app_slug` TEXT NOT NULL CHECK non-blank · `table_name` TEXT NOT NULL · `row_id` UUID, **no `REFERENCES`** · `operation` TEXT NOT NULL CHECK IN (`INSERT`,`UPDATE`,`DELETE`) · `old_row` / `new_row` JSONB · `changed_keys` TEXT[] (UPDATE only) · `actor_user_id` UUID, **no `REFERENCES`** · `client_ip` TEXT CHECK length <= 45 · `created_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`.
+
+`org_id`, `row_id`, and `actor_user_id` are the one deliberate exception to "every `*_id` gets a `REFERENCES`" (guardrails rule 8) anywhere in this schema: an audit row has to outlive the organization, row, and user it describes, and `row_id` is polymorphic across sixteen tables with no single valid FK target regardless. The reasoning is written directly into the migration's header comment, not left implicit.
+
+Constraint: `chk_audit_logs_payload` — INSERT has `old_row IS NULL`/`new_row IS NOT NULL`, UPDATE has both, DELETE has `old_row IS NOT NULL`/`new_row IS NULL`. Indexes: `(org_id, created_at DESC, id DESC)`, `(org_id, table_name, row_id)`, `(org_id, actor_user_id)`, `(org_id, app_slug)`, `(txid)`.
+
+`audit_row_change()` — the generic capture trigger function, `to_jsonb(NEW)`/`to_jsonb(OLD)` for the row snapshot, a `jsonb_each` + `IS DISTINCT FROM` diff for `changed_keys`, and the actor/IP read via `current_setting('app.current_user_id'/'app.client_ip', true)` — published by `db/transaction.ts`'s `applyAuditContext()` with `set_config(..., is_local := true)` right after every `BEGIN`. See [study/postgresql/audit-triggers-and-session-variables.md](../study/postgresql/audit-triggers-and-session-variables.md).
+
+`reject_audit_log_mutation()` — the same `0A000` immutability treatment as `journal_entries` (migration 004), attached `BEFORE UPDATE OR DELETE` on `audit_logs` itself.
+
+**`018_platform_audit_triggers.sql`** — attaches `audit_row_change()` as an `AFTER INSERT OR UPDATE OR DELETE` trigger to 16 tables: `organizations`, `organization_members` (slug `platform`); `accounts`, `journal_entries`, `ledger_lines`, `ledger_settings`, `ledger_invoice_settings`, `customers`, `vendors`, `invoices`, `invoice_lines`, `bills`, `bill_lines`, `payments`, `payment_allocations`, `fiscal_periods` (slug `ledger-core`). Deliberately **not** audited: `users`/`refresh_tokens` (would copy a password hash or session credential into a table nobody may delete rows from) and `schema_migrations` (the runner's own bookkeeping).
+
+**`npm run verify:integrity`** (`server/src/db/integrity.ts` + `server/src/scripts/verifyIntegrity.ts`) — a standalone script, not a migration or a route, asserting three invariants across the whole database: total debits equal total credits, every entry balances individually, no ledger line is orphaned or claims the wrong `org_id`. Its three queries are the one place in the codebase deliberately exempted from the "every query is `org_id`-scoped" rule, documented as such and structurally isolated in `src/db/` so no request-serving code can import it. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md).
+
+**Not built in this phase:** retention or partitioning on `audit_logs` — it grows without bound (a write amplification cost stated explicitly: registering an organization writes ~46 audit rows via the default-chart seed, a 20-line journal entry writes 21). No hash-chaining or other tamper-evidence beyond the immutability trigger, which a table-owner-privileged actor can still bypass by disabling it first — the trail is a strong guarantee against application-level tampering, not an absolute one. No continuous/scheduled integrity check — `verify:integrity` is run on demand until Phase 7's background jobs land.
+
+---
+
+## Phase 6+ — target tables
 
 Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible and so Phase 3 can seed forward-compatible accounts rather than leaving later phases a backfill.
-
-**`audit_logs`** (Phase 5) — `id` · `org_id` · `table_name` · `row_id` · `operation` TEXT CHECK IN (`INSERT`,`UPDATE`,`DELETE`) · `old_row` JSONB · `new_row` JSONB · `actor_user_id` · `client_ip` INET · `occurred_at`. Written by a generic trigger function attached to every financial table. Append-only, same `reject_mutation()` treatment.
 
 **`bank_transactions`** (Phase 6) — `id` · `org_id` · `statement_import_id` · `posted_on` DATE · `amount_cents` BIGINT (signed — a bank line is directional, unlike a ledger line) · `currency_code` · `counterparty` TEXT · `memo` TEXT · `external_ref` TEXT · `status` TEXT CHECK IN (`unmatched`,`suggested`,`reconciled`,`ignored`) · `dedupe_hash` TEXT with `UNIQUE (org_id, dedupe_hash)` so re-importing the same statement is idempotent.
 

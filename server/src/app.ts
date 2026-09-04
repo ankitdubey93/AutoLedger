@@ -3,6 +3,7 @@ import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import apiRouter from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
+import { attachRequestContext } from './middleware/requestContext.js';
 import { env } from './config/env.js';
 import { API_BASE_PATH, JSON_BODY_LIMIT } from './config/constants.js';
 
@@ -16,6 +17,11 @@ export function createApp(): Express {
 
   // Removes the default `X-Powered-By: Express` header — free version disclosure.
   app.disable('x-powered-by');
+
+  // Opens the AsyncLocalStorage context Phase 5's audit trail reads the actor
+  // and IP from — first, before anything else, so even a 404 or a CORS
+  // rejection is still a request with a context waiting for it.
+  app.use(attachRequestContext);
 
   // `credentials: true` is required for the httpOnly refresh cookie in Phase 1,
   // and it forbids a wildcard origin, so FRONTEND_URL is mandatory.
