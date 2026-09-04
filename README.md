@@ -14,18 +14,20 @@ A suite of seven portfolio applications sharing one multi-tenant platform: Postg
 
 Double-entry accounting is the suite's system of record: LedgerCore is the General Ledger every other app posts into, rather than each app keeping its own private notion of money. All amounts are integer `BIGINT` cents; all business data is scoped to an `organization`.
 
-## Status — Phase 3 complete (LedgerCore GL core)
+## Status — Phase 4 complete (LedgerCore GL completion)
 
-Auth, tenancy, the app registry, and **LedgerCore's general ledger** work. The other six apps are `'planned'` — visible on the chooser, no routes behind them.
+Auth, tenancy, the app registry, and **LedgerCore's general ledger through live financial statements** work. The other six apps are `'planned'` — visible on the chooser, no routes behind them.
 
 | Built | Not built |
 |---|---|
-| Express + TypeScript server, strict compiler config | P&L, balance sheet, fiscal periods (Phase 4) |
-| Migrations, auth, tenancy, RBAC, org switching (Phase 1) | Background jobs — Redis runs but nothing connects to it (Phase 7) |
-| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | Bank reconciliation, multi-currency FX, QuickBooks sync (Phases 6, 8, 9) |
-| **LedgerCore (Phase 3): chart of accounts, journal entries, reversing entries, trial balance — with the balance invariant and immutability enforced by database triggers** | The audit trail — no compliance claim is valid yet (Phase 5) |
-| React + Vite client: login/register, app chooser, account page, LedgerCore's three pages | AP-Flow's OCR pipeline and the other five apps (Phases 10–16) |
-| Vitest, 191 server tests + 27 client tests | |
+| Express + TypeScript server, strict compiler config | Background jobs — Redis runs but nothing connects to it (Phase 7) |
+| Migrations, auth, tenancy, RBAC, org switching (Phase 1) | Bank reconciliation, multi-currency FX, QuickBooks sync (Phases 6, 8, 9) |
+| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | The audit trail — no compliance claim is valid yet (Phase 5) |
+| **LedgerCore (Phase 3): chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers** | AP-Flow's OCR pipeline and the other five apps (Phases 10–16) |
+| Onboarding, settings, dashboard, journal register, account ledgers, sales invoicing, accounts payable with settlement (Phases 3.5–3.9) | |
+| **LedgerCore (Phase 4): fiscal periods with a close/lock lifecycle and a database-enforced posting guard, P&L, and the balance sheet — both computed live, no summary table** | |
+| React + Vite client: login/register, app chooser, account page, LedgerCore's full page set | |
+| Vitest, 490 server tests + 120 client tests | |
 
 Nothing under `docs/` describes working code unless this table says so — it is target-state design. See [docs/roadmap.md](docs/roadmap.md).
 

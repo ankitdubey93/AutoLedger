@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { assertPeriodOpenOnClient } from './fiscalPeriodService.js';
 import type { JournalEntry, LedgerLine } from '../../types/ledger-core.js';
 
 /**
@@ -340,6 +341,13 @@ export async function createEntryOnClient(
     );
   }
 
+  // A closed period refuses new postings. Checked here so every caller —
+  // invoiceService, billService, paymentService and the journals route —
+  // gets one readable 422 instead of a raw trigger exception, and checked
+  // again by 016's trigger so the service being correct is not the reason
+  // a closed month stays closed.
+  await assertPeriodOpenOnClient(client, orgId, input.entryDate);
+
   await assertAccountsArePostable(
     client,
     orgId,
@@ -479,6 +487,12 @@ export async function reverseEntryOnClient(
   if (existingReversal.length > 0) {
     throw new ApiError(409, 'Entry has already been reversed');
   }
+
+  // This function writes journal_entries/ledger_lines directly rather than
+  // delegating to createEntryOnClient, so its own period guard is needed too
+  // — otherwise a reversal dated in a closed period would fall through to
+  // 016's trigger with a less specific message instead of this one.
+  await assertPeriodOpenOnClient(client, orgId, entryDate ?? original.entry_date);
 
   const { rows: newRows } = await client.query<{ id: string }>(
     `INSERT INTO journal_entries

@@ -601,3 +601,100 @@ export interface DashboardSummary {
     buckets: AgingBucketAmount[];
   };
 }
+
+// ---------------------------------------------------------------- fiscal periods
+
+export const FISCAL_PERIOD_STATUSES = ['OPEN', 'CLOSED', 'LOCKED'] as const;
+export type FiscalPeriodStatus = (typeof FISCAL_PERIOD_STATUSES)[number];
+
+/**
+ * The one place a period's lifecycle is written down (guardrails rule 10).
+ *
+ * CLOSED is reversible — a month closed too early is reopened, and that is
+ * a normal bookkeeping event. LOCKED is terminal and has no outbound edge:
+ * it is the statement "these books are final", and a lock that can be
+ * lifted is not that statement. Correcting a locked period is impossible by
+ * construction; the correction belongs in a later open period as a
+ * reversing entry, which is what an auditor expects to see.
+ */
+export const FISCAL_PERIOD_TRANSITIONS = {
+  OPEN: ['CLOSED'],
+  CLOSED: ['OPEN', 'LOCKED'],
+  LOCKED: [],
+} as const satisfies Record<FiscalPeriodStatus, readonly FiscalPeriodStatus[]>;
+
+export function canTransitionFiscalPeriod(from: FiscalPeriodStatus, to: FiscalPeriodStatus): boolean {
+  return (FISCAL_PERIOD_TRANSITIONS[from] as readonly FiscalPeriodStatus[]).includes(to);
+}
+
+export interface FiscalPeriod {
+  id: string;
+  fiscalYearLabel: string;
+  periodNumber: number;
+  startsOn: string; // 'YYYY-MM-DD'
+  endsOn: string; // 'YYYY-MM-DD'
+  status: FiscalPeriodStatus;
+  closedBy: string | null;
+  closedByName: string | null;
+  closedAt: string | null; // ISO timestamp
+  lockedBy: string | null;
+  lockedByName: string | null;
+  lockedAt: string | null; // ISO timestamp
+  /** Journal entries whose entry_date falls inside this period. */
+  entryCount: number;
+  createdAt: string;
+}
+
+// -------------------------------------------------- Phase 4 — live statements
+
+/** One postable account's contribution to a statement, as a positive
+ *  figure in that account's normal direction. */
+export interface StatementRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  amountCents: number;
+}
+
+export interface StatementSection {
+  rows: StatementRow[];
+  totalCents: number;
+}
+
+export interface ProfitAndLoss {
+  from: string; // 'YYYY-MM-DD'
+  to: string; // 'YYYY-MM-DD'
+  revenue: StatementSection;
+  costOfSales: StatementSection;
+  grossProfitCents: number;
+  operatingExpenses: StatementSection;
+  netIncomeCents: number;
+}
+
+export interface BalanceSheetEquity extends StatementSection {
+  /**
+   * Net income from every entry dated before the current fiscal year's
+   * start — DERIVED on every read, never stored. LedgerCore posts no
+   * year-end closing entry, so there is no journal that moves prior-year
+   * profit into account 3200; the balance sheet computes it instead.
+   */
+  retainedEarningsCents: number;
+  /** Net income for the current fiscal year up to `asOf`. Equals the P&L's
+   *  netIncomeCents over [fiscalYearStart, asOf]. */
+  currentEarningsCents: number;
+}
+
+export interface BalanceSheet {
+  asOf: string; // 'YYYY-MM-DD'
+  fiscalYearStartDate: string; // 'YYYY-MM-DD' — the retained/current split point
+  assets: StatementSection;
+  liabilities: StatementSection;
+  /** totalCents here includes retainedEarningsCents and currentEarningsCents
+   *  on top of the posted equity account rows — a consumer must not add
+   *  either again on top of totalCents. */
+  equity: BalanceSheetEquity;
+  totalLiabilitiesAndEquityCents: number;
+  /** Integer equality, never an epsilon (guardrails rule 3). */
+  balances: boolean;
+}

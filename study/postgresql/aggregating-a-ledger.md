@@ -3,7 +3,7 @@
 > A financial dashboard is not a cache of numbers — it's a handful of `SUM`s over the same table, computed fresh on every request, using SQL's `FILTER` clause to get eight different totals from one pass instead of five separate queries.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`. Extended in Phase 3.6 — the journal register's `journalService.listEntries`, which filters the same table by date range, account, source, and description text. Extended again in Phase 3.9 — `paymentService.allocatedCentsSubquery` (a correlated scalar subquery reused by `invoiceService`/`billService`) and `dashboardService.loadDocumentCounts` (`FILTER` aggregates over a `UNION ALL` of two tables).
+**Introduced by:** Phase 3.5 — LedgerCore's dashboard (`dashboardService.dashboardSummary`), which needed position, year-to-date, and month-to-date totals plus a 6-month trend, all from `ledger_lines`. Extended in Phase 3.6 — the journal register's `journalService.listEntries`, which filters the same table by date range, account, source, and description text. Extended again in Phase 3.9 — `paymentService.allocatedCentsSubquery` (a correlated scalar subquery reused by `invoiceService`/`billService`) and `dashboardService.loadDocumentCounts` (`FILTER` aggregates over a `UNION ALL` of two tables). Extended again in Phase 4 — `reportService.profitAndLoss`/`balanceSheet`, live financial statements with derived retained earnings.
 **Verified against:** PostgreSQL 16
 
 ---
@@ -184,6 +184,40 @@ FROM (
 
 **Why `FILTER` here does more work than in the position query:** the dashboard's earlier nine-`FILTER` query (see above) filters on conditions over columns that already exist per row (`a.type`, `e.entry_date`). Here, `kind` is a column that exists *only because the query manufactured it* in the `UNION ALL`'s projection — `FILTER` isn't just selecting rows by pre-existing properties, it's discriminating between two conceptually different source tables that a single aggregation pass has deliberately flattened together.
 
+### Deriving a P&L and a balance sheet from raw lines — sign convention, and splitting one scan into two windows
+
+`reportService.trialBalance` reports every postable account's raw `debitCents`/`creditCents` and lets the caller decide what they mean. `profitAndLoss` and `balanceSheet` can't stay that neutral — "Revenue − Expenses" and "Assets = Liabilities + Equity" are only true once each account's balance is expressed on its own *normal side*:
+
+```ts
+// Asset, Expense: a debit increases the balance.
+amountCents = debitCents - creditCents;
+
+// Liability, Equity, Revenue: a credit increases the balance.
+amountCents = creditCents - debitCents;
+```
+
+Reporting a raw `debitCents - creditCents` for a Revenue account would show a healthy sales month as a large negative number — technically the correct sign for a credit-normal account read the asset way, but exactly backwards from what "revenue" means to a reader. The five-line `if (row.type === 'Revenue') ... else ...` branch in `profitAndLoss` (and the equivalent one in `balanceSheet`) exists entirely to make that flip once, in one place, rather than asking every consumer of the raw columns to remember which of the five account types they're looking at.
+
+**Why `INNER JOIN`, not `trialBalance`'s `LEFT JOIN`:** the trial balance's `LEFT JOIN` exists so a *never-used* account still appears at zero — that's the whole point of a trial balance, proving the full chart nets to zero. A P&L or balance sheet is asking a narrower question — "what happened in this account during this window" — and an account with zero activity contributes a zero-value row that's pure noise, not rigor. `profitAndLoss`/`balanceSheet` both `JOIN` (inner) `ledger_lines`/`journal_entries` onto `accounts`, so only accounts with at least one matching line survive the join at all; there's no `l.id IS NULL` guard to write because there's no unmatched-row case to guard against.
+
+**Splitting revenue and expense into a prior-year/current-year pair with `FILTER`, not two queries:** `balanceSheet` needs both a cumulative "retained earnings" figure (every prior fiscal year's net income, all at once) and the current fiscal year's net income up to `asOf` — the same underlying rows, split by which side of one date they fall on. One query gets both halves from a single scan:
+
+```sql
+SELECT
+  COALESCE(SUM(CASE WHEN a.type = 'Revenue' THEN l.base_credit_cents - l.base_debit_cents ELSE 0 END)
+           FILTER (WHERE e.entry_date < $3::date), 0)::text AS revenue_prior,
+  -- expense_prior, revenue_current, expense_current: same shape, flipped condition
+  ...
+  FROM ledger_lines l
+  JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+  JOIN accounts a        ON a.id = l.account_id       AND a.org_id = l.org_id
+ WHERE l.org_id = $1 AND a.type IN ('Revenue', 'Expense') AND e.entry_date <= $2::date
+```
+
+This nests two independent decisions inside one aggregate: the `CASE` picks *which account type* a row contributes to (Revenue rows count positively toward one number, Expense rows toward another — an ordinary value-level branch, unlike `FILTER`'s row-level one), and the `FILTER` on the same aggregate call picks *which time window* the row falls into. Four numbers, one pass over the join, rather than two separate queries with a `< $3` and a `>= $3` condition each — the same reasoning `dashboardService`'s nine-`FILTER` position query already established, applied to a 2×2 grid (type × window) instead of a flat list of independent totals.
+
+**Retained earnings is computed, never read from account `3200`.** LedgerCore posts no year-end closing journal entry — there is no automated process that debits every revenue/expense account to zero and credits the difference into Retained Earnings, the way a real closing entry would. So `3200`'s balance (if anything was ever posted to it directly) and the balance sheet's `retainedEarningsCents` are two different numbers answering the same question by two different means: one is whatever was manually posted, the other is `SUM(revenue) - SUM(expense)` over every entry before the current fiscal year, computed fresh on every request — the same no-summary-table discipline the trial balance and dashboard already follow, just applied to a number that in a system with a real closing process would otherwise live in a stored account balance. The trade-off is stated plainly in the code: an organization that *does* post its own closing entry into `3200` will see that year's earnings counted twice — once as a posted equity row, once folded into the derived figure — because the schema has no way to tell "a manual entry that happens to look like a closing entry" from any other equity posting.
+
 **Why `ORDER BY e.entry_date DESC, e.created_at DESC, e.id DESC` and not just the first two:** `LIMIT`/`OFFSET` pagination is only stable if the `ORDER BY` produces a total order — every row strictly before every row on the next page, with no ties. `entry_date` and `created_at` (millisecond resolution) can genuinely tie for two entries posted in the same request burst; without a final tiebreaker on a column guaranteed unique (the primary key), Postgres is free to return those tied rows in either order on different executions of the same query, which means a row can appear on two pages, or on neither, as a caller pages through. Any unique column works as the last term — `id` is simply the one every table already has.
 
 ---
@@ -204,6 +238,9 @@ FROM (
 | **Correlated scalar subquery for the paid amount** | `O(rows × log(allocations))`, needs the FK indexed | **Chosen** — composes as an ordinary column, no `GROUP BY` anywhere in the outer query |
 | Two separate queries (invoice counts, bill counts), summed in application code | Simple, no `UNION ALL` | Rejected — two round trips for numbers from what is conceptually one "documents" concept, and the app has to remember to add them correctly |
 | **`FILTER` over `UNION ALL` of `invoices`/`bills`** | Both arms must independently repeat every scope predicate | **Chosen** — one round trip, one scan pass over both tables |
+| A stored `retained_earnings` column, updated by a year-end closing job | Balance sheet reads become trivial | Rejected — no closing-entry feature exists to keep it correct, and a stored figure with no write path that maintains it is worse than no figure at all |
+| Two queries for the prior/current earnings split (`< $3` and `>= $3` separately) | Each query reads simpler alone | Rejected — same rows scanned twice for numbers that one `FILTER`-per-window pass already produces together |
+| `trialBalance`'s `LEFT JOIN` reused for P&L/balance sheet | One join shape everywhere | Rejected — a P&L/balance sheet's question ("what had activity") is answered by which accounts the `INNER JOIN` keeps; the trial balance's question ("does the full chart net to zero") needs the `LEFT JOIN`'s unmatched rows instead |
 
 ---
 
@@ -217,6 +254,8 @@ FROM (
 - `server/src/services/ledger-core/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the correlated scalar subquery shared by `invoiceService`/`billService`/`agingService`
 - `server/src/services/ledger-core/dashboardService.ts` — `loadDocumentCounts()`, the `FILTER`-over-`UNION ALL` query behind the dashboard's draft/awaiting-review tiles
 - `server/src/__tests__/ledger-core/dashboard.test.ts` — `describe('AR/AP blocks')`, including the cross-tenant case proving org B's documents never appear in org A's counts
+- `server/src/services/ledger-core/reportService.ts` — `profitAndLoss()` (the type-aware sign flip, the 5xxx-prefix COGS split, the `INNER JOIN`) and `balanceSheet()` (the same sign flip for Asset/Liability/Equity, plus the prior/current earnings `FILTER` pair)
+- `server/src/__tests__/ledger-core/statements.test.ts` — the fixture proving `Assets = Liabilities + Equity` by integer equality, the `information_schema` assertion that no summary table exists, and the cross-check that P&L net income for a fiscal year equals the balance sheet's current-period earnings at that year's end
 
 ---
 
@@ -233,6 +272,9 @@ FROM (
 - **A correlated subquery only stays cheap with the right index.** `allocatedCentsSubquery` correlates on `pa.invoice_id = i.id` (or `bill_id`); without `idx_allocations_invoice`/`idx_allocations_bill`, the planner falls back to a sequential scan of `payment_allocations` per outer row — fine at small data volumes, a real cost at large ones.
 - **`UNION ALL`'s member queries each need their own complete scope predicate.** There is no outer `WHERE` that reaches inside a `UNION ALL` — `org_id = $1` has to be repeated, correctly, in every arm. A predicate present in one arm and missing from another is a partial tenant leak that's easy to miss because half the query's output still looks correctly scoped.
 - **`UNION ALL` vs `UNION`: the choice is about semantics, not just performance.** `UNION` would also happen to work here (an invoice row and a bill row can never collide), but reaching for `UNION ALL` by default when duplicates are structurally impossible avoids paying for a de-duplication pass — sort or hash — that could never find anything to remove.
+- **A raw `debitCents - creditCents` is only meaningful for Asset/Expense accounts.** Reporting it unflipped for a Revenue, Liability, or Equity account shows a healthy balance as a large negative number — correct arithmetic, wrong sign for the account's normal side. Every statement query needs the type-aware branch, not just the trial balance.
+- **Retained earnings computed from `SUM(revenue) - SUM(expense)` and a manually-posted closing entry into the retained-earnings account are two answers to the same question that will disagree the moment both exist.** There's no way for the schema to distinguish "an ordinary equity posting" from "a hand-rolled closing entry," so an organization that posts its own closing entry sees that year's earnings counted twice on the balance sheet.
+- **`INNER JOIN` vs `LEFT JOIN` is a decision about what the report claims, not a performance knob.** Switching a trial balance's `LEFT JOIN` to `INNER JOIN` would silently drop every account with zero activity from a report whose entire point is proving the *full* chart nets to zero.
 
 ---
 
@@ -274,6 +316,18 @@ A: Because the outer query is already producing exactly one row per invoice — 
 **Q: How did you get draft/review counts from two unrelated tables — invoices and bills — in one query?**
 A: `UNION ALL` first, to stack both tables' relevant columns into one result set with a synthetic `kind` column saying which table each row came from, then `FILTER` clauses on top of that to split the counts and sums back apart by `kind` and `status`. `UNION ALL` rather than `UNION` because an invoice row and a bill row can never be duplicates of each other, so there's nothing for `UNION`'s de-duplication pass to do except cost time. The one thing that has to be gotten right is that the tenant scope predicate — `org_id = $1` — has to be repeated in *both* arms of the `UNION ALL` independently; there's no single outer `WHERE` that reaches inside it, so a predicate present in one arm and missing from the other is a real, easy-to-miss tenant leak.
 
+**Q: Your trial balance reports raw debits and credits; your P&L and balance sheet report a single signed `amountCents` per account. Why the difference?**
+A: A trial balance's entire job is to be a neutral proof that the ledger balances — it reports exactly what's posted, debit and credit columns side by side, so a reader can verify `SUM(debits) = SUM(credits)` without any interpretation layered on. A P&L or balance sheet is making a specific accounting claim — "revenue is up," "assets exceed liabilities" — and that claim only reads correctly once each account's balance is expressed on its own normal side: `debit - credit` for Asset/Expense, `credit - debit` for Liability/Equity/Revenue. Skip that flip and a strong revenue month reports as a large negative number, technically consistent but meaningless to anyone reading it as "how much did we earn."
+
+**Q: Why does the P&L use an `INNER JOIN` when the trial balance next to it uses a `LEFT JOIN`?**
+A: They're answering different questions. The trial balance has to list every postable account, including ones with zero activity, because proving the *whole chart* nets to zero is the point — a `LEFT JOIN` keeps unmatched accounts at zero for exactly that reason. A P&L is asking "what had activity in this window," and an account with no lines contributes nothing meaningful to that answer — an `INNER JOIN` just doesn't produce a row for it, which is correct here rather than an oversight.
+
+**Q: How do you get "earnings before this fiscal year" and "earnings this fiscal year" without running two separate queries?**
+A: One query, two independent decisions layered on the same aggregate call. A `CASE` inside the `SUM` picks which account type (Revenue vs. Expense) a row contributes to — an ordinary value-level branch. A `FILTER (WHERE e.entry_date < $3)` on that same `SUM` picks which time window the row falls into, without touching which rows are visible to the *other* three sums in the same query. Four numbers — revenue-prior, expense-prior, revenue-current, expense-current — come out of one scan of the join, instead of running essentially the same query twice with the date comparison flipped.
+
+**Q: Where does your balance sheet's "retained earnings" figure actually come from?**
+A: It's computed on every request, never stored — `SUM(revenue) - SUM(expense)` over every journal entry dated before the current fiscal year's start, using the org's configured fiscal-year boundary. There's no year-end closing entry anywhere in the system that would move that figure into an actual equity account, so a stored `retained_earnings` column would have no process keeping it correct. Computing it fresh means it's automatically consistent with whatever's actually posted, at the cost that if an organization ever manually posts something that looks like a closing entry into the retained-earnings account, that year's profit gets counted twice — once as a posted row, once folded into the derived figure. That's a stated, known gap, not a hidden one.
+
 ---
 
 ## Follow-ups they'll dig into
@@ -292,3 +346,4 @@ A: `UNION ALL` first, to stack both tables' relevant columns into one result set
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md) — why every one of these sums is over `BIGINT` cents, never `DECIMAL`
 - [../architecture/derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) — why the correlated subquery's result is never cached back onto the invoice/bill row
 - [subledger-reconciliation-and-aging.md](subledger-reconciliation-and-aging.md) — the same subquery reused in a report that also cross-checks its total against the general ledger
+- [exclusion-constraints-and-gist.md](exclusion-constraints-and-gist.md) — fiscal periods, the other half of Phase 4, and why "no posting into a closed period" is a database trigger rather than another aggregate query

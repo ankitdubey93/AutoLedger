@@ -89,3 +89,32 @@ export function monthsBackStart(on: string, count: number): string {
   const { year, month } = parseIsoDate(on);
   return toIsoDate(new Date(Date.UTC(year, month - 1 - (count - 1), 1)));
 }
+
+export interface FiscalPeriodRange {
+  periodNumber: number; // 1-12
+  startsOn: string; // 'YYYY-MM-DD'
+  endsOn: string; // 'YYYY-MM-DD'
+}
+
+/**
+ * The twelve monthly periods of the fiscal year containing `on`.
+ *
+ * Period 1 starts on the fiscal year's start date; period k starts on the
+ * same day-of-month `k - 1` months later; each period ends the day before
+ * the next one starts, and period 12 ends on the fiscal year's end date.
+ * `fiscal_year_start_day` is capped at 28 by the settings schema, so "the
+ * same day next month" always exists and no month-length reasoning is needed.
+ */
+export function fiscalPeriodRanges(startMonth: number, startDay: number, on: string): FiscalPeriodRange[] {
+  const { startDate, endDate } = fiscalYearBounds(startMonth, startDay, on);
+  const { year: fyStartYear } = parseIsoDate(startDate);
+
+  const ranges: FiscalPeriodRange[] = [];
+  for (let k = 0; k < 12; k++) {
+    const startsOn = toIsoDate(new Date(Date.UTC(fyStartYear, startMonth - 1 + k, startDay)));
+    const endsOn =
+      k === 11 ? endDate : toIsoDate(new Date(Date.UTC(fyStartYear, startMonth - 1 + k + 1, startDay) - 86_400_000));
+    ranges.push({ periodNumber: k + 1, startsOn, endsOn });
+  }
+  return ranges;
+}

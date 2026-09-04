@@ -2,16 +2,27 @@ import { Link } from 'react-router-dom';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
- * The reports index. Trial balance is real and links out; P&L and the
- * balance sheet are Phase 4 and are shown disabled rather than as links to a
- * stub — being honest about what does not exist yet is the point of this
- * page (CLAUDE.md's "keeping docs honest"). Mirrors AppChooserPage's
- * `app-card--disabled` + `aria-disabled` idiom for a planned app.
+ * The reports index. All three reports are live as of Phase 4 — trial
+ * balance, profit & loss, and the balance sheet — each aggregated from raw
+ * ledger_lines on every request, with no summary table behind any of them.
  */
 
-const PLANNED_REPORTS = [
-  { name: 'Profit & loss', description: 'Revenue − Expenses, with gross profit split via the 5xxx range.' },
-  { name: 'Balance sheet', description: 'Assets = Liabilities + Equity, as at a chosen date.' },
+const REPORTS = [
+  {
+    name: 'Trial balance',
+    description: 'Per-account debit and credit totals, proving the books balance.',
+    path: 'trial-balance',
+  },
+  {
+    name: 'Profit & loss',
+    description: 'Revenue − Expenses, with gross profit split out via the 5xxx range.',
+    path: 'reports/profit-and-loss',
+  },
+  {
+    name: 'Balance sheet',
+    description: 'Assets = Liabilities + Equity, as at a chosen date.',
+    path: 'reports/balance-sheet',
+  },
 ];
 
 export default function ReportsPage() {
@@ -23,21 +34,13 @@ export default function ReportsPage() {
       </header>
 
       <div className="app-grid">
-        <Link to={`${base}/trial-balance`} className="card app-card">
-          <div className="app-card__head">
-            <h3 className="app-card__name">Trial balance</h3>
-          </div>
-          <p className="muted">Per-account debit and credit totals, proving the books balance.</p>
-        </Link>
-
-        {PLANNED_REPORTS.map((report) => (
-          <div key={report.name} className="card app-card app-card--disabled" aria-disabled="true">
+        {REPORTS.map((report) => (
+          <Link key={report.name} to={`${base}/${report.path}`} className="card app-card">
             <div className="app-card__head">
               <h3 className="app-card__name">{report.name}</h3>
-              <span className="chip chip--muted">Phase 4</span>
             </div>
             <p className="muted">{report.description}</p>
-          </div>
+          </Link>
         ))}
       </div>
     </section>

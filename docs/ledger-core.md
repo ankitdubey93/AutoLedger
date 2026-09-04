@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8–9
-**Status: Phase 3 through Phase 3.9 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), and accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL). Phases 4, 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 4 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), and now live financial statements — fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table. Phases 6, 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -243,12 +243,14 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ### Phase 4 — live statements
 
-- [ ] `fiscal_periods` with `EXCLUDE USING GIST` against overlap; close/lock transitions via an FSM table
-- [ ] Posting into a closed period rejected by trigger
-- [ ] `GET /reports/profit-and-loss`, `GET /reports/balance-sheet`, both date-ranged
+- [x] `fiscal_periods` with `EXCLUDE USING GIST` against overlap; close/lock transitions via an FSM table
+- [x] Posting into a closed period rejected by trigger
+- [x] `GET /reports/profit-and-loss`, `GET /reports/balance-sheet`, both date-ranged
 - [x] ~~AR/AP subledgers reconciling to their control accounts~~ — delivered early, in Phase 3.9 (`GET /reports/ar-aging`/`ap-aging`)
 
-**Acceptance:** balance sheet satisfies Assets = Liabilities + Equity for a non-trivial fixture. No summary table exists anywhere in the schema. P&L over the full range plus the balance sheet at its end agree on retained earnings.
+**Acceptance ✅ — all verified.** The balance sheet satisfies Assets = Liabilities + Equity by integer equality for a fixture touching all three sections; `information_schema` confirms no summary table exists anywhere in the schema. P&L over a fiscal year and the balance sheet at that year's end agree: `netIncomeCents === equity.currentEarningsCents`. Two overlapping fiscal periods in one organization are rejected at `INSERT` with `23P01`; the identical overlap across two different organizations is permitted. A posting dated inside a `CLOSED` or `LOCKED` period is rejected with `422` through every path that reaches the GL — manual journals, reversals, invoice issuance — and independently by migration 016's trigger when the service is bypassed entirely with raw SQL. Locking a period that hasn't been closed is refused; reopening a `LOCKED` period is refused — the lock has no way out. 490 server tests (up from 442), 120 client tests (up from 107).
+
+**What this phase does *not* claim.** No year-end closing journal entry — retained earnings on the balance sheet is derived (`SUM(revenue) − SUM(expense)` before the fiscal year start) and stays derived forever unless a closing-entry feature is added; an organization that manually posts its own closing entry into `3200` will see that year's earnings counted twice. Fiscal periods are monthly only — `period_number` is capped at 12 by CHECK, so quarterly or 4-4-5 calendars aren't representable. No per-period P&L drilldown, no PDF export, no audit trail (Phase 5 still owns that). Every date comparison here — period boundaries, `asOf`, `from`/`to` — uses UTC calendar dates, ignoring `ledger_settings.timezone`, the same limitation every other date-bounded report in this codebase already has.
 
 ### Phase 6 — bank reconciliation
 
@@ -280,10 +282,8 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ## Not built yet
 
-**Phases 4, 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 3.9:
+**Phases 6, 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 4:
 
-- **No P&L and no balance sheet.** The trial balance is the only report.
-- **No fiscal periods**, so nothing prevents a posting into a month you consider closed.
 - **No FX conversion.** The columns are there; every line is base currency at rate 1.
 - **No bank reconciliation, no QuickBooks sync.**
 - **No audit trail.** `created_by` and `created_at` are stamped on every entry, but the CDC trail with actor and IP is Phase 5 — **no compliance claim is valid until it lands**, and the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net) describes a target, not a shipped feature.

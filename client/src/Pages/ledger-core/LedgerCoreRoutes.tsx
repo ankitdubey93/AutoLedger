@@ -9,6 +9,9 @@ import NewJournalEntryPage from './NewJournalEntryPage';
 import JournalDetailPage from './JournalDetailPage';
 import TrialBalancePage from './TrialBalancePage';
 import ReportsPage from './ReportsPage';
+import ProfitAndLossPage from './ProfitAndLossPage';
+import BalanceSheetPage from './BalanceSheetPage';
+import FiscalPeriodsPage from './FiscalPeriodsPage';
 import SettingsPage from './SettingsPage';
 import OnboardingPage from './OnboardingPage';
 import InvoicesPage from './InvoicesPage';
@@ -61,6 +64,8 @@ function AppPages() {
           <Route path="journals/:entryId" element={<JournalDetailPage />} />
           <Route path="trial-balance" element={<TrialBalancePage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="reports/profit-and-loss" element={<ProfitAndLossPage />} />
+          <Route path="reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="invoices/new" element={<NewInvoicePage />} />
           <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
@@ -72,6 +77,7 @@ function AppPages() {
           <Route path="bills/:billId" element={<BillDetailPage />} />
           <Route path="bills/:billId/edit" element={<NewBillPage />} />
           <Route path="payments" element={<PaymentsPage />} />
+          <Route path="fiscal-periods" element={<FiscalPeriodsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}

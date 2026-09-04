@@ -25,7 +25,7 @@ export async function resetTables(): Promise<void> {
   await pool.query(
     `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
-              vendors, bills, bill_lines, payments, payment_allocations
+              vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods
      RESTART IDENTITY CASCADE`,
   );
 }

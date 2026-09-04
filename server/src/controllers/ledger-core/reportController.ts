@@ -25,6 +25,25 @@ export const trialBalance: RequestHandler = async (req, res) => {
   });
 };
 
+/** GET /ledger-core/reports/profit-and-loss?from=YYYY-MM-DD&to=YYYY-MM-DD */
+export const profitAndLoss: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const from = optionalIsoDate(req, 'from');
+  const to = optionalIsoDate(req, 'to');
+
+  const report = await reportService.profitAndLoss(user.orgId, from, to);
+  res.json({ success: true, ...report });
+};
+
+/** GET /ledger-core/reports/balance-sheet?asOf=YYYY-MM-DD */
+export const balanceSheet: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const asOf = optionalIsoDate(req, 'asOf');
+
+  const report = await reportService.balanceSheet(user.orgId, asOf);
+  res.json({ success: true, ...report });
+};
+
 /** GET /ledger-core/reports/dashboard?asOf=YYYY-MM-DD */
 export const dashboard: RequestHandler = async (req, res) => {
   const user = requireUser(req);

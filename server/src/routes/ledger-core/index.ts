@@ -6,6 +6,7 @@ import paymentRoutes from './paymentRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
 import customerRoutes from './customerRoutes.js';
+import fiscalPeriodRoutes from './fiscalPeriodRoutes.js';
 import invoiceRoutes from './invoiceRoutes.js';
 import vendorRoutes from './vendorRoutes.js';
 
@@ -20,6 +21,7 @@ const router = Router();
 router.use('/accounts', accountRoutes);
 router.use('/bills', billRoutes);
 router.use('/customers', customerRoutes);
+router.use('/fiscal-periods', fiscalPeriodRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/journals', journalRoutes);
 router.use('/payments', paymentRoutes);

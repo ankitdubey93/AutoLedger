@@ -228,17 +228,23 @@ Failure paths: `400` from the schema (fewer than two lines, a line with both sid
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/trial-balance` | any member | Per-account debit/credit totals, type-aware `netBalanceCents`, and `isBalanced`. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/profit-and-loss` | any member | Phase 4 — Revenue − Expenses over `?from=&to=` (both optional, defaulting to the current fiscal year to date), gross profit split via the `5xxx` range |
+| GET | `/balance-sheet` | any member | Phase 4 — Assets = Liabilities + Equity as at `?asOf=` (optional, defaults to today), with `equity.retainedEarningsCents`/`equity.currentEarningsCents` derived on every read |
 | GET | `/dashboard` | any member | Position, year-to-date and month-to-date performance, a 6-point trend, recent entries, the integrity check, and (Phase 3.9) `receivables`/`payables` AR/AP summaries. Optional `?asOf=YYYY-MM-DD` |
 | GET | `/ar-aging` | any member | Phase 3.9 — accounts-receivable aging: 5 buckets (`CURRENT`/`D1_30`/`D31_60`/`D61_90`/`D90_PLUS`), per-customer rows, and reconciliation against the receivable control account. Optional `?asOf=YYYY-MM-DD` |
 | GET | `/ap-aging` | any member | Phase 3.9 — accounts-payable aging, same shape as `/ar-aging`, per-vendor rows, reconciled against the payable control account. Optional `?asOf=YYYY-MM-DD` |
 
 Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invoices`/`bills`/`payment_allocations`) on every request. There is no summary table and none will be added. Only postable, active accounts appear in the trial balance. `isBalanced` is integer equality, never an epsilon.
 
+**`/profit-and-loss`** returns `{ from, to, revenue, costOfSales, grossProfitCents, operatingExpenses, netIncomeCents }`, each of `revenue`/`costOfSales`/`operatingExpenses` a `{ rows, totalCents }` section. Only accounts with activity in the window appear (an `INNER JOIN`, unlike the trial balance's `LEFT JOIN`, which lists every account including zero-activity ones). COGS is the `5xxx` code range — not a sixth account type. `422 from must not be after to`.
+
+**`/balance-sheet`** returns `{ asOf, fiscalYearStartDate, assets, liabilities, equity, totalLiabilitiesAndEquityCents, balances }`. `equity` extends the `{ rows, totalCents }` shape with `retainedEarningsCents` (every prior fiscal year's net income) and `currentEarningsCents` (this fiscal year's, up to `asOf`) — both **derived on every read**, never stored, because LedgerCore posts no year-end closing entry. `equity.totalCents` already includes both derived figures on top of the posted equity rows. `balances` is `assets.totalCents === totalLiabilitiesAndEquityCents`, integer equality.
+
 `/dashboard` (Phase 3.5) is not the Phase 4 balance sheet — it exposes `currentEarningsCents` (Revenue − Expenses, all time) alongside `assetsCents`/`liabilitiesCents`/`equityCents` and an `equationHolds` flag, because Assets = Liabilities + Equity only holds once current-period earnings are folded in. `position.cashCents` is `null` when no cash account is configured in settings; when configured, it sums the account's whole subtree via a recursive walk. `trend` is always exactly 6 points, oldest first, gap-filled so a month with no postings still appears at zero. Phase 3.9 adds `receivables`/`payables`, each carrying `outstandingCents`, `overdueCents`, `draftCount`/`draftCents`, and a 5-bucket aging series identical in shape to `/ar-aging`/`/ap-aging`'s `buckets`; `payables` additionally carries `awaitingReviewCount`/`awaitingReviewCents` — bills entered but not yet approved, **not** an employee expense-claim inbox (AutoLedger has no such document).
 
 `/ar-aging` and `/ap-aging` (Phase 3.9) bucket every open (`ISSUED`/`POSTED`) document's outstanding amount (`total − allocated`, allocated meaning `SUM` of `POSTED` payment allocations) by days past due relative to `asOf`. `controlAccount` names the receivable/payable account each report is checked against (`null` if none is configured and no fallback code exists); `reconciles` is `totalOutstandingCents === controlAccount.balanceCents`, integer equality, `null` when there is no control account to compare against. A `false` value means a document was posted without a matching journal entry, or vice versa — a data-integrity signal, not a UI glitch to hide.
 
-Failure paths: `400 asOf must be a date in YYYY-MM-DD format`.
+Failure paths: `400 asOf must be a date in YYYY-MM-DD format` · `400 from/to must be a date in YYYY-MM-DD format` · `422 from must not be after to` (`/profit-and-loss` only).
 
 #### Settings — `/api/v1/ledger-core/settings` — Phase 3.5
 
@@ -256,7 +262,26 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 
 Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
 
-Deliberately **not** built here: `fiscal_periods`, period close/lock, and any posting guard tied to a closed period — all Phase 4. This module only stores a fiscal-year *setting*; it creates no period rows.
+This module only stores a fiscal-year *setting*; period rows themselves — `fiscal_periods`, close/lock, and the posting guard — are a separate module, `/api/v1/ledger-core/fiscal-periods` (Phase 4, below).
+
+#### Fiscal periods — `/api/v1/ledger-core/fiscal-periods` — Phase 4
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The org's periods, optionally filtered by `?fiscalYear=` / `?status=` |
+| GET | `/:id` | any member | One period, with `closedByName`/`lockedByName` and `entryCount` (journal entries dated inside it) |
+| POST | `/generate` | `OWNER`, `ADMIN` | Generate the 12 monthly periods for the fiscal year containing `containingDate`. Idempotent — a second call for the same fiscal year creates nothing and returns `200` instead of `201` |
+| POST | `/:id/close` | `OWNER`, `ADMIN` | `OPEN -> CLOSED`. New postings dated inside the period are rejected from this point on |
+| POST | `/:id/reopen` | `OWNER`, `ADMIN` | `CLOSED -> OPEN`, clearing the close stamp. Refused on a `LOCKED` period — locking is terminal |
+| POST | `/:id/lock` | `OWNER` only | `CLOSED -> LOCKED`. Irreversible — there is no route back from `LOCKED` to any other state |
+
+`GET /` query parameters, both optional: `fiscalYear` (exact match on `fiscalYearLabel`, e.g. `FY 2026`) · `status` (`OPEN`/`CLOSED`/`LOCKED`).
+
+The close/lock lifecycle is a three-state FSM (`OPEN -> CLOSED -> LOCKED`, plus `CLOSED -> OPEN`) — `LOCKED` has no outbound transition at all, so locking must pass through `CLOSED` first and can never be undone. See [study/architecture/document-lifecycle-fsm.md § A genuinely terminal state](../study/architecture/document-lifecycle-fsm.md). A date covered by no period at all is treated as open — an organization that has never generated periods keeps posting freely.
+
+Posting a journal entry (manual, or via invoice issuance, bill approval, or a payment) dated inside a `CLOSED` or `LOCKED` period is rejected with `422` by `journalService`, and independently by a database trigger (migration 016) that fires regardless of what wrote the row. See [study/postgresql/exclusion-constraints-and-gist.md](../study/postgresql/exclusion-constraints-and-gist.md) for the `EXCLUDE USING GIST` constraint that makes two overlapping periods in one organization physically impossible.
+
+Failure paths: `400 status must be one of OPEN, CLOSED, LOCKED` · `404 Fiscal period not found` · `409 Complete LedgerCore onboarding before generating fiscal periods` · `409 A fiscal period already overlaps this fiscal year` · `409 Cannot close/reopen/lock a <status> period` (the FSM rejection, naming the actual blocking state) · `422 The fiscal period covering <date> is closed/locked; reopen it or post to an open period` (from any endpoint that posts a journal entry).
 
 #### Invoice settings — `/api/v1/ledger-core/settings/invoicing` — Phase 3.8
 
@@ -377,22 +402,7 @@ Failure paths: `400` from the schema (including an allocation naming both `invoi
 
 ### LedgerCore — remaining phases
 
-Phase 3's routes are **built** and documented in the section above. Still to come:
-
-#### Fiscal periods — `/api/v1/ledger-core/periods` — Phase 4
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/` | The org's periods and their status |
-| POST | `/:id/close` | Close a period; later postings into it are rejected |
-| POST | `/:id/reopen` | Reopen a closed period. `OWNER` only; refused once `locked` |
-
-#### Reports — Phase 4 additions
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/reports/profit-and-loss` | Revenue − Expenses over `?from=&to=`, gross profit split via the `5xxx` range |
-| GET | `/reports/balance-sheet` | Assets = Liabilities + Equity as at `?asOf=` |
+Phase 3 and Phase 4's routes are **built** and documented in the section above. Still to come:
 
 #### Reconciliation — `/api/v1/ledger-core/reconciliation` — Phase 6
 

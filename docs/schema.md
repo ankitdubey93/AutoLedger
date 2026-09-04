@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001`–`005`.** `organizations`, `users`, `organization_members`, `refresh_tokens`, `accounts`, `journal_entries`, `ledger_lines` and `ledger_settings` all exist, with the balance, immutability and `updated_at` triggers live. The **Phase 4+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
+**Applied: `001`–`016`.** Platform identity/tenancy, LedgerCore's GL core (accounts, journals, the balance/immutability triggers), settings, invoicing (customers, invoices), accounts payable (vendors, bills, payments), and Phase 4's fiscal periods with the closed-period posting guard all exist. The **Phase 5+** section further down is still target state and is marked as such. Keep this file verified against `server/src/db/migrations/`.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -238,11 +238,28 @@ Neither `invoices` nor `bills` gained a `PAID` status or an `amount_paid_cents` 
 
 ---
 
-## Phase 4+ — target tables
+## Phase 4 — live statements & fiscal periods (LedgerCore) — applied
+
+Two migrations. `015` adds the schema; `016` adds the enforcement.
+
+**`015_ledger-core_fiscal_periods.sql`** — `CREATE EXTENSION IF NOT EXISTS btree_gist` (the project's first extension), then `fiscal_periods`:
+`id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `fiscal_year_label` TEXT NOT NULL CHECK non-blank · `period_number` SMALLINT NOT NULL CHECK BETWEEN 1 AND 12 · `starts_on` / `ends_on` DATE NOT NULL · `status` TEXT NOT NULL DEFAULT `'OPEN'` CHECK IN (`OPEN`,`CLOSED`,`LOCKED`) — **uppercase**, matching every other status enum in this schema, not the lowercase forecast this section used to carry · `closed_by` / `locked_by` FK → `users` ON DELETE RESTRICT (nullable) · `closed_at` / `locked_at` TIMESTAMPTZ (nullable) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`.
+
+Constraints: `ux_fiscal_periods_org_id_id` — `UNIQUE (org_id, id)`, the same composite-FK-target convention every LedgerCore table follows · `chk_fiscal_periods_range` — `ends_on >= starts_on` · `chk_fiscal_periods_closed_complete` / `chk_fiscal_periods_locked_complete` — the same "posted-complete" CHECK idiom as `chk_bills_posted_complete`, requiring the stamp columns whenever the status claims them · **`ex_fiscal_periods_no_overlap`** — `EXCLUDE USING GIST (org_id WITH =, daterange(starts_on, ends_on, '[]') WITH &&)`, making two overlapping periods in one organization physically impossible to insert, independent of what wrote the row. See [study/postgresql/exclusion-constraints-and-gist.md](../study/postgresql/exclusion-constraints-and-gist.md).
+
+**`016_ledger-core_period_posting_guard.sql`** — `assert_period_open()`, a plain `BEFORE INSERT` trigger (not deferred — this depends on one row and one lookup) on both `journal_entries` and `ledger_lines`. A date covered by no period is open; a date covered by a `CLOSED` or `LOCKED` period raises `P0001`. This is the database half of the guard `journalService.createEntryOnClient`/`reverseEntryOnClient` also check in the service, the same two-layer doctrine as migration 004's balance trigger.
+
+**The FSM.** `FISCAL_PERIOD_TRANSITIONS`: `OPEN -> CLOSED`, `CLOSED -> OPEN | LOCKED`, `LOCKED -> ` (nothing). `LOCKED` is the first genuinely terminal state in the codebase's FSMs — see [study/architecture/document-lifecycle-fsm.md § A genuinely terminal state](../study/architecture/document-lifecycle-fsm.md).
+
+**`GET /reports/profit-and-loss`** and **`GET /reports/balance-sheet`** — both computed from `ledger_lines` on every request, no summary table, same discipline as `trialBalance`. The balance sheet's `retainedEarningsCents`/`currentEarningsCents` are **derived**, not read from account `3200` — LedgerCore posts no year-end closing entry. See [study/postgresql/aggregating-a-ledger.md § Deriving a P&L and a balance sheet from raw lines](../study/postgresql/aggregating-a-ledger.md).
+
+**Not built in this phase:** no year-end closing journal entry (retained earnings stays derived, forever, unless one is added later); a manually-posted closing entry into `3200` double-counts that year's earnings, a stated and accepted gap; quarterly or 4-4-5 fiscal calendars (`period_number` is capped at 12 monthly periods); a per-period P&L drilldown; audit trail.
+
+---
+
+## Phase 5+ — target tables
 
 Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible and so Phase 3 can seed forward-compatible accounts rather than leaving later phases a backfill.
-
-**`fiscal_periods`** (Phase 4) — `id` · `org_id` · `starts_on` DATE · `ends_on` DATE · `status` TEXT CHECK IN (`open`,`closed`,`locked`) · `closed_by` · `closed_at`. `EXCLUDE USING GIST` on `(org_id WITH =, daterange(starts_on, ends_on) WITH &&)` so overlapping periods are physically impossible — requires `btree_gist`. A posting into a closed period is rejected by trigger.
 
 **`audit_logs`** (Phase 5) — `id` · `org_id` · `table_name` · `row_id` · `operation` TEXT CHECK IN (`INSERT`,`UPDATE`,`DELETE`) · `old_row` JSONB · `new_row` JSONB · `actor_user_id` · `client_ip` INET · `occurred_at`. Written by a generic trigger function attached to every financial table. Append-only, same `reject_mutation()` treatment.
 

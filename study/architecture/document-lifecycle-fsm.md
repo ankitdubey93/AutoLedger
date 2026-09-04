@@ -3,7 +3,7 @@
 > A status column is not a free-text field — it is a finite state machine, and the moment two files decide independently whether `DRAFT -> ISSUED` is legal, the two answers eventually disagree.
 
 **Category:** Architecture
-**Introduced by:** Phase 3.8 — `invoices.status`, the first lifecycle status in AutoLedger with more than two states; extended Phase 3.9 — `bills.status`, the first four-state document FSM with a recall edge
+**Introduced by:** Phase 3.8 — `invoices.status`, the first lifecycle status in AutoLedger with more than two states; extended Phase 3.9 — `bills.status`, the first four-state document FSM with a recall edge; extended Phase 4 — `fiscal_periods.status`, the first FSM with a genuinely terminal state
 **Verified against:** TypeScript 7.0 (`as const satisfies`), PostgreSQL 16
 
 ---
@@ -103,6 +103,24 @@ Two things are new here relative to the invoice FSM:
 
 The CHECK constraint and the transition table stay in lockstep the same way the invoice pair does — migration 013's `status CHECK (status IN ('DRAFT', 'AWAITING_APPROVAL', 'POSTED', 'VOID'))` lists exactly `BILL_TRANSITIONS`'s four keys, and `billConstraints.test.ts` proves the database side independently of the service, mirroring `invoiceConstraints.test.ts`'s approach.
 
+### A genuinely terminal state: `LOCKED` has no outbound edge at all
+
+Every FSM above eventually reaches `VOID`, and `VOID: []` looks the same shape as `LOCKED: []` on `FiscalPeriodStatus`:
+
+```ts
+export const FISCAL_PERIOD_TRANSITIONS = {
+  OPEN:   ['CLOSED'],
+  CLOSED: ['OPEN', 'LOCKED'],
+  LOCKED: [],
+} as const satisfies Record<FiscalPeriodStatus, readonly FiscalPeriodStatus[]>;
+```
+
+but the two empty arrays mean something different. `VOID` is terminal because *voiding is itself the correction* — an invoice or bill in `VOID` has already had its reversing entry posted, so there is nothing left to walk backward *to*; the object's job in the ledger is finished. `LOCKED` is terminal for the opposite reason: nothing has happened to the period except a promise. Closing a period (`OPEN -> CLOSED`) is reversible on purpose — a bookkeeper closes January a day early, realizes a late invoice needs to land inside it, and reopens it, no different in kind from any other draft correction. Locking (`CLOSED -> LOCKED`) is the FSM's way of saying "this promise is now permanent" — an auditor-facing guarantee that January's books will never again change, which is only true if there genuinely is no edge back out. A `LOCKED -> CLOSED` edge, even one gated behind a stricter role, would make every "these books are locked" claim conditional on nobody with the right permission changing their mind later — which is not a stronger lock, it's a slower-to-reach `CLOSED`.
+
+This is the first FSM in the codebase where a state's *entire reason for existing* is to have zero outbound edges — `VOID`'s emptiness is incidental to what voiding means; `LOCKED`'s emptiness *is* what locking means. Correcting a locked period is impossible by construction: the fix is a reversing entry in a later, still-open period, which is exactly the same "correction, never mutation" discipline rule 6 applies everywhere else — just with the additional twist that here, there isn't even a route that could attempt the disallowed edge, because the migration's CHECK constraint on `status` and the transition table both stop at three values with no path back from the third.
+
+The two-step climb (`OPEN -> CLOSED -> LOCKED`, never `OPEN -> LOCKED` directly) also encodes a real-world control: a period must be closed — reviewed, reconciled, deliberately shut to new postings — before it can be locked at all. `canTransitionFiscalPeriod('OPEN', 'LOCKED')` returns `false`, so "lock this period" is only ever offered to a period someone already decided was ready to close, never as a single click from a still-open month.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -122,6 +140,10 @@ The CHECK constraint and the transition table stay in lockstep the same way the 
 - `server/src/db/migrations/013_ledger-core_bills.sql` — the four-value `status` CHECK, `reject_posted_bill_mutation()` (the `POSTED -> VOID` row-diff carve-out), `reject_locked_bill_line_mutation()` (lines editable in both `DRAFT` and `AWAITING_APPROVAL`)
 - `server/src/routes/ledger-core/billRoutes.ts` — `requireRole('OWNER', 'ADMIN', 'ACCOUNTANT')` on submit, `requireRole('OWNER', 'ADMIN')` on approve — the segregation-of-duties gate, kept separate from the FSM itself
 - `server/src/__tests__/ledger-core/billConstraints.test.ts` — the bill half of the raw-SQL trigger proof, including the `AWAITING_APPROVAL`-editable case
+- `server/src/types/ledger-core.ts` — `FISCAL_PERIOD_STATUSES`, `FiscalPeriodStatus`, `FISCAL_PERIOD_TRANSITIONS`, `canTransitionFiscalPeriod` — the first FSM with a state whose entire purpose is having no outbound edge
+- `server/src/db/migrations/015_ledger-core_fiscal_periods.sql` — the three-value `status` CHECK, plus `chk_fiscal_periods_locked_complete` requiring `locked_by`/`locked_at` whenever `status = 'LOCKED'` (the same "posted-complete" CHECK idiom `chk_bills_posted_complete` uses)
+- `server/src/services/ledger-core/fiscalPeriodService.ts` — `transition()`, the one function backing `closePeriod`/`reopenPeriod`/`lockPeriod`, all three routed through `canTransitionFiscalPeriod`
+- `server/src/__tests__/ledger-core/fiscalPeriods.test.ts` — asserts `LOCKED -> OPEN` (reopen) is rejected with `409`, the direct proof the terminal state has no path back
 
 ## Gotchas
 
@@ -131,6 +153,8 @@ The CHECK constraint and the transition table stay in lockstep the same way the 
 - `DELETE` and `UPDATE` share one trigger function here (`FOR EACH ROW`, both operations), branching on `TG_OP`. `NEW` is unassigned on `DELETE` — the same trap `study/postgresql/deferred-constraint-triggers.md` documents for the balance trigger — so the function checks `TG_OP = 'DELETE'` before touching `NEW` at all.
 - The recall edge (`AWAITING_APPROVAL -> DRAFT`) is legal in the FSM but has no dedicated route or button yet — `updateBill` reaching that state is a side effect of it being mutable in both directions, not a named "reject" action. A reviewer today rejects a bill by editing it back to something wrong on purpose, or by voiding it; a real "Send back for correction" feature would still just call the existing PATCH, since the FSM already permits it.
 - A role gate on a route is not part of the FSM and cannot be recovered from `BILL_TRANSITIONS` alone — the transition table says `DRAFT -> AWAITING_APPROVAL -> POSTED` is a legal *path*, but nothing in `types/ledger-core.ts` says who may walk which edge. Reading only the FSM would miss that approval is deliberately harder to reach than submission.
+- `VOID: []` and `LOCKED: []` look identical in the transition table but mean different things — one is terminal because the correction already happened (a reversing entry was posted), the other is terminal because the whole point of the state is to promise nothing will happen again. Reading the shape of the table alone won't tell you which; you need the domain context.
+- `canTransitionFiscalPeriod('OPEN', 'LOCKED')` is `false` by design — locking requires passing through `CLOSED` first. A UI that tries to offer a "Lock" action directly from an `OPEN` period's page will get a `409` from every attempt, not a working shortcut.
 
 ## Interview Q&A
 
@@ -155,6 +179,12 @@ A: Because entering a bill and approving it for posting are two different acts o
 **Q: Doesn't the FSM already tell you who can approve a bill?**
 A: No, and that's a distinction worth being precise about. `BILL_TRANSITIONS` answers "is `AWAITING_APPROVAL -> POSTED` a legal edge in the graph" — a state-machine question. `requireRole('OWNER', 'ADMIN')` on the `/approve` route answers "is *this specific caller* allowed to walk that edge" — an authorization question. They're independent by design: the FSM is role-agnostic on purpose, because the graph shape (which states, which edges) doesn't change based on who's asking, while the authorization rule very much does. Conflating the two would mean the FSM couldn't be read on its own to understand the document's lifecycle.
 
+**Q: Fiscal periods have a `LOCKED` state with no way out, same as `VOID` on invoices and bills. Are those the same kind of terminal state?**
+A: No, and the difference matters. `VOID` is terminal because the correction has already happened — voiding an invoice posts the reversing entry right then, so there's nothing left to walk back to; the document's job is done. `LOCKED` is terminal for the opposite reason: nothing irreversible happens *at* the lock itself, it's a promise about the future — "no entry will ever post into this period again, and it will never reopen." If `LOCKED` had an edge back to `CLOSED`, even behind a stricter role check, the promise would only ever be conditionally true, which isn't a lock at all, just a slower `CLOSED`. Two empty arrays in the transition table, two different reasons for being empty.
+
+**Q: Why does locking require going through `CLOSED` first instead of allowing `OPEN -> LOCKED` directly?**
+A: Because closing and locking answer different questions. Closing says "stop new postings here, this period looks done" — a routine, reversible bookkeeping act that might get undone if something was missed. Locking says "this is now permanently final" and should only be offered to a period someone already decided was ready to close. Requiring the intermediate state means the FSM itself enforces that review happened before permanence — `canTransitionFiscalPeriod('OPEN', 'LOCKED')` returning `false` isn't a missing feature, it's the control.
+
 ## Follow-ups they'll dig into
 
 - What if two requests try to issue the same invoice concurrently? (Answered by the `SELECT ... FOR UPDATE` row lock in `issueInvoice` before the transition check — the second request blocks until the first commits, then sees `ISSUED` and gets the FSM's `409`.)
@@ -167,3 +197,4 @@ A: No, and that's a distinction worth being precise about. `BILL_TRANSITIONS` an
 - [typescript/const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md) — the `as const` / `satisfies` mechanics this note builds on
 - [architecture/double-entry-as-an-invariant.md](../architecture/double-entry-as-an-invariant.md) — another "central rule enforced twice" case study
 - [architecture/derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) — why "paid" is not a fifth bill/invoice status, and how settlement stays a genuinely separate axis from approval
+- [postgresql/exclusion-constraints-and-gist.md](../postgresql/exclusion-constraints-and-gist.md) — fiscal periods' other Phase 4 invariant, that no two periods in one organization may overlap, enforced by a constraint rather than an FSM because it spans rows, not states

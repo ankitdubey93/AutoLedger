@@ -12,6 +12,8 @@ import { authenticate } from '../../middleware/auth.js';
 const router = Router();
 
 router.get('/trial-balance', authenticate, reportController.trialBalance);
+router.get('/profit-and-loss', authenticate, reportController.profitAndLoss);
+router.get('/balance-sheet', authenticate, reportController.balanceSheet);
 router.get('/dashboard', authenticate, reportController.dashboard);
 router.get('/ar-aging', authenticate, reportController.arAging);
 router.get('/ap-aging', authenticate, reportController.apAging);

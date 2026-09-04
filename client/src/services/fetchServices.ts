@@ -1288,3 +1288,133 @@ export async function getApAging(asOf: string | null = null, signal?: AbortSigna
   const { success, ...report } = body;
   return report;
 }
+
+/* ---------------------------------------------------- ledger-core: Phase 4 statements */
+
+export interface StatementRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
+  amountCents: number;
+}
+
+export interface StatementSection {
+  rows: StatementRow[];
+  totalCents: number;
+}
+
+export interface ProfitAndLoss {
+  from: string;
+  to: string;
+  revenue: StatementSection;
+  costOfSales: StatementSection;
+  grossProfitCents: number;
+  operatingExpenses: StatementSection;
+  netIncomeCents: number;
+}
+
+/** GET /ledger-core/reports/profit-and-loss?from=YYYY-MM-DD&to=YYYY-MM-DD */
+export async function getProfitAndLoss(
+  from: string | null = null,
+  to: string | null = null,
+  signal?: AbortSignal,
+): Promise<ProfitAndLoss> {
+  const params = new URLSearchParams();
+  if (from !== null) params.set('from', from);
+  if (to !== null) params.set('to', to);
+  const suffix = params.size === 0 ? '' : `?${params.toString()}`;
+  const body = await apiFetch<{ success: boolean } & ProfitAndLoss>(
+    `/ledger-core/reports/profit-and-loss${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+export interface BalanceSheetEquity extends StatementSection {
+  retainedEarningsCents: number;
+  currentEarningsCents: number;
+}
+
+export interface BalanceSheet {
+  asOf: string;
+  fiscalYearStartDate: string;
+  assets: StatementSection;
+  liabilities: StatementSection;
+  equity: BalanceSheetEquity;
+  totalLiabilitiesAndEquityCents: number;
+  balances: boolean;
+}
+
+/** GET /ledger-core/reports/balance-sheet?asOf=YYYY-MM-DD */
+export async function getBalanceSheet(
+  asOf: string | null = null,
+  signal?: AbortSignal,
+): Promise<BalanceSheet> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  const body = await apiFetch<{ success: boolean } & BalanceSheet>(
+    `/ledger-core/reports/balance-sheet${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+export const FISCAL_PERIOD_STATUSES = ['OPEN', 'CLOSED', 'LOCKED'] as const;
+export type FiscalPeriodStatus = (typeof FISCAL_PERIOD_STATUSES)[number];
+
+export interface FiscalPeriod {
+  id: string;
+  fiscalYearLabel: string;
+  periodNumber: number;
+  startsOn: string;
+  endsOn: string;
+  status: FiscalPeriodStatus;
+  closedBy: string | null;
+  closedByName: string | null;
+  closedAt: string | null;
+  lockedBy: string | null;
+  lockedByName: string | null;
+  lockedAt: string | null;
+  entryCount: number;
+  createdAt: string;
+}
+
+/** GET /ledger-core/fiscal-periods?fiscalYear=&status= */
+export function getFiscalPeriods(
+  status?: FiscalPeriodStatus,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; periods: FiscalPeriod[] }> {
+  const suffix = status === undefined ? '' : `?status=${encodeURIComponent(status)}`;
+  return apiFetch(`/ledger-core/fiscal-periods${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/fiscal-periods/generate */
+export function generateFiscalPeriods(containingDate: string): Promise<{
+  success: boolean;
+  fiscalYearLabel: string;
+  created: boolean;
+  count: number;
+  periods: FiscalPeriod[];
+}> {
+  return apiFetch('/ledger-core/fiscal-periods/generate', {
+    method: 'POST',
+    body: JSON.stringify({ containingDate }),
+  });
+}
+
+/** POST /ledger-core/fiscal-periods/:id/close */
+export function closeFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
+  return apiFetch(`/ledger-core/fiscal-periods/${id}/close`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /ledger-core/fiscal-periods/:id/reopen */
+export function reopenFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
+  return apiFetch(`/ledger-core/fiscal-periods/${id}/reopen`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /ledger-core/fiscal-periods/:id/lock — OWNER only; irreversible. */
+export function lockFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
+  return apiFetch(`/ledger-core/fiscal-periods/${id}/lock`, { method: 'POST', body: JSON.stringify({}) });
+}

@@ -3,6 +3,7 @@ import {
   Banknote,
   BookOpen,
   Building2,
+  CalendarCheck,
   FileBarChart,
   FileText,
   LayoutDashboard,
@@ -67,7 +68,10 @@ const NAV_GROUPS = [
   },
   {
     heading: 'Configure',
-    items: [{ to: 'settings', label: 'Settings', icon: SettingsIcon, end: false }],
+    items: [
+      { to: 'fiscal-periods', label: 'Fiscal Periods', icon: CalendarCheck, end: false },
+      { to: 'settings', label: 'Settings', icon: SettingsIcon, end: false },
+    ],
   },
 ] as const;
 
