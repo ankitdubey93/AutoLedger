@@ -3,7 +3,7 @@
 > A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`
+**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim
 **Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
 
 ---
@@ -146,6 +146,29 @@ And zero rows becomes *information*: a valid token signature with no matching ro
 
 The same shape works for a simple job queue: `DELETE FROM jobs WHERE id = (SELECT id FROM jobs ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *`.
 
+### `SKIP LOCKED` as a queue-claim primitive, contrasted with `DELETE … RETURNING`
+
+Phase 7's outbox drain needed the same "claim work exactly once" property as refresh-token rotation, but with a different shape: many rows claimed per pass, by potentially many concurrent workers, and the rows must **survive** the claim (a `webhook_deliveries` row is a durable record, not a one-shot token to be consumed and discarded). `DELETE … RETURNING` doesn't fit — deleting the row *is* the claim there, which is wrong when the row needs to still exist afterward for status tracking and audit purposes.
+
+```sql
+UPDATE outbox_events
+   SET published_at = now()
+ WHERE id IN (
+         SELECT id FROM outbox_events
+          WHERE published_at IS NULL
+          ORDER BY id
+          FOR UPDATE SKIP LOCKED
+          LIMIT $1
+       )
+RETURNING id, org_id, app_slug, event_type, payload, created_at
+```
+
+`FOR UPDATE` inside the subquery takes an exclusive lock on the selected candidate rows; `SKIP LOCKED` changes what happens when another transaction already holds that lock — instead of blocking (plain `FOR UPDATE`'s behavior) or erroring (`NOWAIT`'s), the row is silently excluded from *this* query's result set. Two drain passes running concurrently — two worker processes, or an overlapping retry — therefore partition the unpublished backlog between them automatically: each gets whatever the other hasn't already locked, with zero coordination beyond what row-level locking already provides.
+
+The outer `UPDATE` marks the claimed rows (`published_at = now()`) in the same statement that selects them, so "claimed" is a durable, queryable state (`WHERE published_at IS NULL` for the next pass) rather than a lock that vanishes the instant the transaction ends. `DELETE … RETURNING`'s one-shot consume-and-return shape suits a value used exactly once and then gone (a refresh token); `UPDATE ... SKIP LOCKED ... RETURNING` suits claiming a *batch* of rows that need to keep existing afterward — the general shape for "N workers, split this backlog, don't lose or duplicate any of it."
+
+Full mechanism and the rest of the drain's design: [../architecture/transactional-outbox.md](../architecture/transactional-outbox.md).
+
 ## Why we chose it here
 
 | Decision | Reasoning |
@@ -167,10 +190,15 @@ Built in Phase 1:
 - `server/src/db/migrate.ts` — one transaction per migration file, plus a session-level advisory lock
 - `server/src/db/connect.ts` — the `Pool` singleton with its idle-client `error` listener
 
-Phase 3 additions, still pending:
+Phase 3:
 
 - `server/src/services/ledger-core/journalService.ts` — the `BEGIN`/`COMMIT` block writing an entry and its lines together, every statement on the checked-out `client`
-- `004_ledger-core_journals.sql` — the `DEFERRABLE INITIALLY DEFERRED` constraint trigger, which is a transaction-scoped mechanism and belongs in this note when it lands: it is the clearest example in the codebase of work that happens *at* `COMMIT` rather than before it
+- `004_ledger-core_journals.sql` — the `DEFERRABLE INITIALLY DEFERRED` constraint trigger, the clearest example in the codebase of work that happens *at* `COMMIT` rather than before it (see [deferred-constraint-triggers.md](deferred-constraint-triggers.md))
+
+Phase 7:
+
+- `server/src/services/outboxService.ts` — `claimUnpublishedEvents`, the batch `SKIP LOCKED` claim above
+- `server/src/services/webhookDeliveryService.ts` — `claimStaleDeliveries`, the same primitive applied to the stale-delivery sweep
 
 ## Gotchas
 

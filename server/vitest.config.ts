@@ -27,6 +27,9 @@ export default defineConfig({
       PG_DATABASE: TEST_DATABASE,
       ACCESS_TOKEN_SECRET: 'test-access-secret-not-for-any-real-deployment-0001',
       REFRESH_TOKEN_SECRET: 'test-refresh-secret-not-for-any-real-deployment-0002',
+      // Index 1, never 0. globalSetup flushes this database before the suite;
+      // flushing index 0 would wipe the dev queues you were watching.
+      REDIS_DB: '1',
     },
 
     /**

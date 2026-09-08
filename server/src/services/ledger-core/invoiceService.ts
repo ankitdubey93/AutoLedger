@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
+import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
@@ -671,11 +672,16 @@ export async function issueInvoice(
       id: string;
       status: string;
       issue_date: string;
+      due_date: string;
+      customer_id: string;
       customer_name_snapshot: string;
+      currency_code: string;
+      subtotal_cents: string;
       total_cents: string;
       tax_cents: string;
     }>(
-      `SELECT id, status, issue_date, customer_name_snapshot, total_cents, tax_cents
+      `SELECT id, status, issue_date, due_date, customer_id, customer_name_snapshot,
+              currency_code, subtotal_cents, total_cents, tax_cents
          FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -755,6 +761,20 @@ export async function issueInvoice(
         WHERE id = $3 AND org_id = $4`,
       [invoiceNumber, journalEntryId, id, orgId],
     );
+
+    await emitEvent(client, orgId, 'ledger-core', 'invoice.issued', {
+      invoiceId: invoiceRow.id,
+      invoiceNumber,
+      customerId: invoiceRow.customer_id,
+      customerName: invoiceRow.customer_name_snapshot,
+      issueDate: invoiceRow.issue_date,
+      dueDate: invoiceRow.due_date,
+      currencyCode: invoiceRow.currency_code,
+      subtotalCents: parseCents(invoiceRow.subtotal_cents),
+      taxCents: taxTotalCents,
+      totalCents: totalCents,
+      journalEntryId,
+    });
 
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);

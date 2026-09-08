@@ -149,10 +149,13 @@ Layer-first, with an **app** subfolder inside each layer (platform code — auth
 
 Two kinds of file sit at a layer root. **Platform** code is identity, tenancy and the registry. **Shared infrastructure** is code more than one app consumes but no app owns — `redactionService.ts` (AP-Flow and TaxGuard AI both redact), `storageService.ts`, `utils/levenshtein.ts`. Both stay unprefixed. Neither reads any app's tables, which is what keeps rule 16 intact: a shared service is a pure transform or a platform concern, never a back door between two apps.
 
+`server/src/worker.ts` (Phase 7) is a **second OS process** sharing this same `src/` — it imports the identical `services/`, `db/`, `config/`, and `queue/handlers/` code the API server does, but has its own entry point, its own `pg` pool, and its own crash domain. Nothing under `services/`, `db/`, or `types/` is process-specific; only `index.ts` (API) and `worker.ts` (jobs) are.
+
 ```text
 server/
 ├── src/
 │   ├── index.ts                    ← process lifecycle: listen + graceful shutdown
+│   ├── worker.ts                   ← Phase 7 — a SECOND process, same lifecycle discipline as index.ts
 │   ├── app.ts                      ← createApp(): middleware + route mounting
 │   ├── config/
 │   │   ├── env.ts                  ← fail-fast env parsing, the only reader of process.env
@@ -166,13 +169,27 @@ server/
 │   │   ├── appService.ts           ← platform, unprefixed
 │   │   ├── redactionService.ts     ← shared infra, unprefixed — Phase 10
 │   │   ├── storageService.ts       ← shared infra, unprefixed — Phase 10
+│   │   ├── outboxService.ts        ← shared infra, unprefixed — Phase 7
+│   │   ├── webhookService.ts       ← platform, unprefixed — Phase 7
+│   │   ├── webhookDeliveryService.ts ← platform, unprefixed — Phase 7
 │   │   └── ledger-core/journalService.ts
+│   ├── queue/                      ← background jobs — Phase 7. Read by index.ts's app only
+│   │   │                             through routes/controllers enqueuing; worker.ts is its consumer
+│   │   ├── connection.ts           ← shared ioredis connection factory + health ping
+│   │   ├── queues.ts               ← one typed BullMQ Queue per name, enqueue()
+│   │   ├── worker.ts               ← startWorkers()/stopWorkers(), the dead-letter listener
+│   │   └── handlers/
+│   │       ├── integrityCheckHandler.ts
+│   │       ├── outboxDrainHandler.ts
+│   │       └── webhookDeliverHandler.ts
 │   ├── schemas/                    ← zod request schemas — Phase 3
 │   │   └── ledger-core/journalSchema.ts
 │   ├── routes/
 │   │   ├── index.ts                ← the /api/v1 router; every app mounts here
 │   │   ├── auth.ts                 ← platform, unprefixed
 │   │   ├── apps.ts                 ← platform, unprefixed
+│   │   ├── webhooks.ts             ← platform, unprefixed — Phase 7
+│   │   ├── webhookDeliveries.ts    ← platform, unprefixed — Phase 7
 │   │   └── ledger-core/journalRoutes.ts
 │   ├── middleware/
 │   │   ├── auth.ts                 ← JWT verify + active-org resolution
@@ -196,6 +213,8 @@ server/
 │   ├── types/
 │   │   ├── apps.ts                 ← platform, unprefixed
 │   │   ├── auth.ts                 ← platform, unprefixed
+│   │   ├── jobs.ts                 ← platform, unprefixed — Phase 7, queue names & payloads
+│   │   ├── webhooks.ts             ← platform, unprefixed — Phase 7, event types & delivery FSM
 │   │   └── ledger-core.ts
 │   └── __tests__/
 │       ├── platform/apps.test.ts

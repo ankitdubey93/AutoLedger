@@ -29,7 +29,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 |---|---|
 | [event-loop-and-blocking.md](node-express/event-loop-and-blocking.md) | Loop phases, microtask queues, `nextTick` vs `setImmediate`, libuv thread pool, why network I/O doesn't use it, `bcryptjs` blocking the main thread |
 | [express-middleware-and-async-errors.md](node-express/express-middleware-and-async-errors.md) | Router layer stack, `next()` closure, arity-based error-middleware detection, the Express 4 async-throw trap and how Express 5 closes it, path-to-regexp v8 breakage, middleware ordering |
-| [graceful-shutdown-and-process-lifecycle.md](node-express/graceful-shutdown-and-process-lifecycle.md) | Signal dispositions and exit code 143, `server.close()` vs `closeIdleConnections()`, drain ordering, unref'd watchdog timers, PID 1, why npm swallows signals |
+| [graceful-shutdown-and-process-lifecycle.md](node-express/graceful-shutdown-and-process-lifecycle.md) | Signal dispositions and exit code 143, `server.close()` vs `closeIdleConnections()`, drain ordering, unref'd watchdog timers, PID 1, why npm swallows signals, **and the worker process's own drain — waiting out an in-flight job rather than a request, and what BullMQ's lock-expiry reclaim does for a job whose process is SIGKILLed** |
 | [async-local-storage-request-context.md](node-express/async-local-storage-request-context.md) | **`AsyncLocalStorage` as implicit per-request state across `await` boundaries via Node's async resource graph, why concurrent requests don't collide, why the context object has to be mutable given middleware ordering, and what a background job loses when it crosses a process boundary** |
 | [parsing-untrusted-csv.md](node-express/parsing-untrusted-csv.md) | **A hand-written two-pass CSV state machine — why `split(',')` can't handle quoted commas or embedded newlines, quote-escaping and the `fieldStarted` guard, delimiter sniffing outside quotes only, BOM stripping, and row-length validation (pad short, reject long) instead of silent truncation** |
 
@@ -45,7 +45,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 
 | Note | Covers |
 |---|---|
-| [transactions-isolation-pooling.md](postgresql/transactions-isolation-pooling.md) | Session-per-connection, why `pool.query` escapes a transaction, MVCC, all four isolation levels, lost update, `FOR UPDATE`, deadlocks, `BIGINT`-as-string, **aborted-transaction state, `ON CONFLICT DO NOTHING` vs `SAVEPOINT`, `DELETE … RETURNING` as an atomic claim** |
+| [transactions-isolation-pooling.md](postgresql/transactions-isolation-pooling.md) | Session-per-connection, why `pool.query` escapes a transaction, MVCC, all four isolation levels, lost update, `FOR UPDATE`, deadlocks, `BIGINT`-as-string, **aborted-transaction state, `ON CONFLICT DO NOTHING` vs `SAVEPOINT`, `DELETE … RETURNING` as an atomic claim, and `FOR UPDATE SKIP LOCKED` as a batch queue-claim primitive — contrasted with `DELETE … RETURNING`'s one-shot consume-and-return shape** |
 | [migrations-and-schema-evolution.md](postgresql/migrations-and-schema-evolution.md) | Transactional DDL and why MySQL can't, what actually proves idempotency, where `IF NOT EXISTS` doesn't exist, checksums as edit-detection, session vs transaction advisory locks, expand/contract, `ALTER TABLE` lock levels, `CREATE INDEX CONCURRENTLY` |
 | [deferred-constraint-triggers.md](postgresql/deferred-constraint-triggers.md) | **Why a CHECK can't span rows, the four trigger timings, `DEFERRABLE INITIALLY DEFERRED` firing at COMMIT, the unassigned-`NEW`-on-DELETE trap, the zero-line hole, testing a DB guarantee by bypassing the service, partial immutability via a `to_jsonb` row-diff for one allowed transition, same-timing trigger firing order (alphabetical by name), and a deferred-trigger pair — parent-completeness plus a cross-table, cross-transaction no-overallocation check that needs a row lock, not just deferral, to be race-free** |
 | [gapless-numbering-and-counters.md](postgresql/gapless-numbering-and-counters.md) | **Why a `SEQUENCE` and `MAX(n)+1` both fail for a human-facing document number, a counter row locked by a plain `UPDATE`'s implicit row lock, allocating inside the document's own transaction so a rollback un-burns the number, `ON CONFLICT DO NOTHING` as a lazy row seed, and what "gapless" actually means for an auditor** |
@@ -72,6 +72,8 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [derived-vs-stored-state.md](architecture/derived-vs-stored-state.md) | **Why settlement (how much of an invoice/bill is paid) is a correlated-subquery read, never a stored column — voiding a payment un-settles for free because immutable allocation rows simply stop counting; the precedence rules in `settlementStatusOf`; and reconciling a derived subledger total against the GL as a cross-check, not just a display value** |
 | [append-only-audit-trails.md](architecture/append-only-audit-trails.md) | **CDC vs application-level activity logs, why the audit table is the one place FKs are deliberately omitted, an integer identity key over a UUID for arrival-order, `txid` as the grouping key for one multi-table transaction, and what "immutable" honestly does and doesn't prove against a privileged actor** |
 | [fuzzy-matching-and-confidence-scoring.md](architecture/fuzzy-matching-and-confidence-scoring.md) | **Hand-written Levenshtein distance and the rolling-array space reduction from O(m×n) to O(min(m,n)), text normalization before comparison, weighted independent multi-signal scoring (amount/date/counterparty) for explainability over one blended similarity number, the noise floor that keeps coincidental string overlap from reading as a real signal, storing the score breakdown rather than recomputing it, and the false-positive/false-negative cost asymmetry behind a high auto-match threshold** |
+| [background-jobs-and-queues.md](architecture/background-jobs-and-queues.md) | **BullMQ on Redis — lists/sorted-sets and the atomic Lua-scripted state transitions, why a worker needs `maxRetriesPerRequest: null`, retry/exponential-backoff, the dead-letter queue as the actual alerting mechanism (`removeOnFail` alone isn't one), `upsertJobScheduler`'s idempotent repeatable jobs vs the deprecated `add({ repeat })`, why the worker is a separate OS process rather than a `worker_threads` thread, and at-least-once delivery as the reason every handler must be idempotent** |
+| [transactional-outbox.md](architecture/transactional-outbox.md) | **The dual-write problem stated precisely, writing an event row on the caller's own transaction client as the fix, `FOR UPDATE SKIP LOCKED` as the drain's work-claiming primitive, `ON CONFLICT DO NOTHING` fan-out idempotency, the stale-PENDING re-enqueue sweep as what "at-least-once" actually costs, and why exactly-once delivery across a network boundary isn't achievable** |
 
 ### Tooling
 
@@ -97,6 +99,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [jwt-and-refresh-rotation.md](security-auth/jwt-and-refresh-rotation.md) | base64url anatomy, HMAC-SHA256, signed ≠ encrypted, why a JWT can't be revoked, the access/refresh split, `DELETE … RETURNING` as an atomic claim, reuse detection + family invalidation and its two-tab race, why `jti` is mandatory, why one shared secret is a vulnerability |
 | [password-hashing-and-timing.md](security-auth/password-hashing-and-timing.md) | Why not SHA-256, salts, work factors, the `$2b$` format, **the 72-byte truncation**, timing oracles and dummy-hash comparison, native bcrypt on the libuv threadpool vs `bcryptjs`, scrypt/Argon2 |
 | [cookies-samesite-and-csrf.md](security-auth/cookies-samesite-and-csrf.md) | Origin vs site, why `:5173`→`:5000` is same-site, the `127.0.0.1` trap, the three SameSite values, the Lax navigation hole that made refresh a POST, httpOnly vs `localStorage`, the `clearCookie` attribute-matching trap, CSRF mechanics |
+| [webhook-signing-and-ssrf.md](security-auth/webhook-signing-and-ssrf.md) | **HMAC-SHA256 over `timestamp.body` and why a shared MAC beats a bearer token, replay protection from folding the timestamp into the signed material, `timingSafeEqual` and the timing side-channel it closes, SSRF as the structural risk of fetching a user-supplied URL, the cloud-metadata-endpoint and private-IPv4-range guard, `redirect: 'manual'` as the second half of the same defense, and the DNS-rebinding gap this write-time check honestly doesn't close** |
 
 ---
 
@@ -119,11 +122,11 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Event loop, microtasks, thread pool | 0–1 | ✅ |
 | Middleware chain, async error handling | 0–1 | ✅ |
 | Streams & backpressure | 10 (AP-Flow document uploads), 15 (BoardDeck `.pptx`) | ◐ |
-| `worker_threads` vs child processes vs queue consumers | 7 | ◐ |
-| Graceful shutdown, connection draining, `SIGTERM` | 0 | ✅ |
+| `worker_threads` vs child processes vs queue consumers | 7 | ✅ |
+| Graceful shutdown, connection draining, `SIGTERM` | 0, 7 (worker process) | ✅ |
 | `AsyncLocalStorage` for request context | 5 (audit actor) | ✅ |
-| BullMQ: queues, workers, retries, DLQ, idempotent jobs | 7 | ⬜ |
-| Cron scheduling & idempotent batch jobs | 15 (BoardDeck close automation) | ⬜ |
+| BullMQ: queues, workers, retries, DLQ, idempotent jobs | 7 | ✅ |
+| Cron scheduling & idempotent batch jobs | 7 (integrity check), 15 (BoardDeck close automation) | ◐ |
 | Multipart uploads: MIME sniffing, size caps, path traversal | 10 (AP-Flow) | ⬜ |
 | Rate limiting: fixed vs sliding window, per-IP vs per-account | 3 | ◐ |
 | Hand-written parsing of an untrusted delimited text format (CSV) | 6 (bank statement import) | ✅ |
@@ -147,7 +150,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 
 | Topic | Phase | Status |
 |---|---|---|
-| Transactions, isolation, pooling | 1, 3 | ✅ |
+| Transactions, isolation, pooling | 1, 3, 7 (batch `SKIP LOCKED` claim) | ✅ |
 | Index types: B-tree, GIN, GiST, partial, covering | 3+ | ✅ |
 | `EXPLAIN ANALYZE` and reading a query plan | 3+ | ◐ |
 | Constraints: CHECK, UNIQUE, EXCLUDE, deferrable | 1, 3 | ✅ |
@@ -214,6 +217,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | PII redaction before an external model call | 10 (AP-Flow images), 16 (TaxGuard text) | ⬜ |
 | Caching strategies & invalidation | 7+ | ⬜ |
 | API versioning & backward compatibility | 0 | ✅ |
+| Transactional outbox: the dual-write problem, at-least-once delivery | 7 (webhook events) | ✅ |
 
 ### Security & auth
 
@@ -229,6 +233,8 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | OWASP Top 10 mapped to this codebase | later | ⬜ |
 | File upload threat model: MIME spoofing, path traversal, zip bombs | 10 (AP-Flow document capture) | ⬜ |
 | Data minimisation: what you send a third party, and proving it | 10 (PII pixel masking) | ⬜ |
+| HMAC request signing & timing-safe comparison | 7 (webhook delivery) | ✅ |
+| SSRF: fetching a user-supplied URL, private-range guards, DNS rebinding | 7 (webhook endpoints) | ✅ |
 
 ### Testing & tooling
 

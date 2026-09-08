@@ -1,10 +1,13 @@
 import { pool } from '../db/connect.js';
+import { pingRedis, type RedisPing } from '../queue/connection.js';
 
 export interface DatabaseHealth {
   connected: boolean;
   latencyMs: number | null;
   error?: string;
 }
+
+export type RedisHealth = RedisPing;
 
 /**
  * The only SQL in the health path, and it lives here because every query in
@@ -28,4 +31,13 @@ export async function checkDatabase(): Promise<DatabaseHealth> {
       error: err instanceof Error ? err.message : 'Unknown database error',
     };
   }
+}
+
+/**
+ * Delegates to queue/connection.ts's pingRedis, unchanged, so the controller
+ * still imports only services (guardrails rule 2's spirit) rather than
+ * reaching into src/queue/ directly.
+ */
+export async function checkRedis(): Promise<RedisHealth> {
+  return pingRedis();
 }

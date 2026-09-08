@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
+import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
 import {
@@ -725,12 +726,17 @@ export async function approveBill(
       id: string;
       status: string;
       bill_date: string;
+      due_date: string;
+      vendor_id: string;
       vendor_name_snapshot: string;
       vendor_reference: string;
+      currency_code: string;
+      subtotal_cents: string;
       total_cents: string;
       tax_cents: string;
     }>(
-      `SELECT id, status, bill_date, vendor_name_snapshot, vendor_reference, total_cents, tax_cents
+      `SELECT id, status, bill_date, due_date, vendor_id, vendor_name_snapshot, vendor_reference,
+              currency_code, subtotal_cents, total_cents, tax_cents
          FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -808,6 +814,20 @@ export async function approveBill(
         WHERE id = $3 AND org_id = $4`,
       [journalEntryId, userId, id, orgId],
     );
+
+    await emitEvent(client, orgId, 'ledger-core', 'bill.approved', {
+      billId: billRow.id,
+      vendorId: billRow.vendor_id,
+      vendorName: billRow.vendor_name_snapshot,
+      vendorReference: billRow.vendor_reference,
+      billDate: billRow.bill_date,
+      dueDate: billRow.due_date,
+      currencyCode: billRow.currency_code,
+      subtotalCents: parseCents(billRow.subtotal_cents),
+      taxCents: taxTotalCents,
+      totalCents: totalCents,
+      journalEntryId,
+    });
 
     await client.query('COMMIT');
     return await getBillById(orgId, id);

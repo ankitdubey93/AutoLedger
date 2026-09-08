@@ -46,6 +46,22 @@ function integer(name: string, fallback: number): number {
 }
 
 /**
+ * Like `integer`, but 0 is legal. Redis database index 0 is the default
+ * database, not a missing value — `integer()` would reject it as
+ * non-positive.
+ */
+function nonNegativeInteger(name: string, fallback: number): number {
+  const value = read(name);
+  if (value === undefined) return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    problems.push(`${name} must be a non-negative integer, got "${value}"`);
+    return fallback;
+  }
+  return parsed;
+}
+
+/**
  * A signing key short enough to brute-force makes the signature decorative.
  * 32 hex characters is the floor; `openssl rand -hex 32` gives 64.
  */
@@ -81,6 +97,13 @@ const parsed = {
   PG_USER: required('PG_USER'),
   PG_PASSWORD: required('PG_PASSWORD'),
   PG_DATABASE: required('PG_DATABASE'),
+
+  // Background jobs and the webhook dispatcher (Phase 7). All optional — a
+  // developer with default Docker settings must still boot with none of
+  // these set.
+  REDIS_HOST: optional('REDIS_HOST', 'localhost'),
+  REDIS_PORT: integer('REDIS_PORT', 6379),
+  REDIS_DB: nonNegativeInteger('REDIS_DB', 0),
 
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.

@@ -86,7 +86,7 @@ try {
 }
 ```
 
-Never do post-`COMMIT` follow-up work inside the same function and call it part of the operation. If something must happen after commit, it is a queued job (Phase 7), not a fire-and-forget query with a swallowed error. This is the specific reason financial-event webhooks wait for the queue rather than shipping with the ledger: an HTTP call cannot happen inside the transaction, and firing it after `COMMIT` without a queue loses the notification on any crash between the two.
+Never do post-`COMMIT` follow-up work inside the same function and call it part of the operation. If something must happen after commit, it is a queued job, not a fire-and-forget query with a swallowed error. Phase 7 delivered the mechanism: `outboxService.emitEvent` writes an event row on the *same transaction client* as the financial fact it describes, and a separate background drain (`server/src/queue/handlers/outboxDrainHandler.ts`) turns that row into a webhook delivery — an HTTP call cannot happen inside the transaction, and firing it after `COMMIT` without a durable record loses the notification on any crash between the two. See [study/architecture/transactional-outbox.md](../study/architecture/transactional-outbox.md).
 
 ## 6. Posted financial documents are immutable
 
@@ -152,7 +152,7 @@ Cost of Goods Sold is the one that tempts people into a sixth type. It is not on
 
 ## 14. No dependency before the phase that needs it
 
-Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies — including Redis (provisioned since Phase 0, unused until Phase 7) and any LLM/embeddings SDK. The LLM carve-out covers exactly two apps, **AP-Flow's vision extraction (Phase 10)** and **TaxGuard AI's RAG (Phase 16)**, and nothing else; both are recorded in [roadmap.md](roadmap.md#phase-renumbering--2026-09-01). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
+Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies. Redis was provisioned since Phase 0 and wired up in Phase 7 (`bullmq` + `ioredis`, the worker process, the webhook dispatcher); any LLM/embeddings SDK remains gated. The LLM carve-out covers exactly two apps, **AP-Flow's vision extraction (Phase 10)** and **TaxGuard AI's RAG (Phase 16)**, and nothing else; both are recorded in [roadmap.md](roadmap.md#phase-renumbering--2026-09-01). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
 
 ## 15. Every module ships tests, including a cross-tenant isolation test
 

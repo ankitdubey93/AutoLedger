@@ -4,6 +4,8 @@ import authRoutes from './auth.js';
 import organizationRoutes from './organizations.js';
 import appRoutes from './apps.js';
 import auditRoutes from './auditLogs.js';
+import webhookRoutes from './webhooks.js';
+import webhookDeliveryRoutes from './webhookDeliveries.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 
 /**
@@ -31,6 +33,12 @@ apiRouter.use('/apps', appRoutes);
 // Phase 5 — the shared CDC audit trail. Platform-level: it spans every app,
 // and `app_slug` on the row carries the namespace (guardrails rule 16).
 apiRouter.use('/audit-logs', auditRoutes);
+
+// Phase 7 — outbound financial-event webhooks. Platform-level: any app may
+// emit into the outbox, and `app_slug` on the event row carries the
+// namespace (guardrails rule 16), exactly as /audit-logs does.
+apiRouter.use('/webhooks', webhookRoutes);
+apiRouter.use('/webhook-deliveries', webhookDeliveryRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

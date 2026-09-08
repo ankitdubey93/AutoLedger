@@ -3,8 +3,8 @@
 > A Node process dies instantly on SIGTERM unless you take over the signal — and for a financial API, "instantly" means killing in-flight transactions mid-flight.
 
 **Category:** Node/Express
-**Introduced by:** Phase 0 — `server/src/index.ts`
-**Verified against:** Node 24.4.1 (defaults below read off `http.createServer()` at runtime), Express 5.2, `pg` 8.22
+**Introduced by:** Phase 0 — `server/src/index.ts`. Extended Phase 7 — `server/src/worker.ts`, a second process with the same discipline
+**Verified against:** Node 24.4.1 (defaults below read off `http.createServer()` at runtime), Express 5.2, `pg` 8.22, `bullmq` ^6.3.4
 
 ---
 
@@ -82,6 +82,26 @@ Both handlers log and then drain with exit code 1 rather than resuming. After an
 
 The exception is a *bounded* failure like a bad request; that is `ApiError` through the error middleware, and never reaches here.
 
+### The worker process: draining a job, not a request
+
+`server/src/worker.ts` (Phase 7) is a second, independent process consuming BullMQ queues, and it needs the same lifecycle discipline as the API server — but the *thing being drained* is different in a way worth being precise about.
+
+```ts
+export async function stopWorkers(): Promise<void> {
+  await Promise.all(workers.map((worker) => worker.close()));
+  workers = [];
+  await closeQueues();
+}
+```
+
+`Worker#close()` stops the worker from pulling *new* jobs off the queue, then waits for whatever job is **currently executing** to finish — the direct analogue of `server.close()` waiting out in-flight HTTP requests rather than cutting them off. The asymmetry with the HTTP case is concurrency shape: a worker's `concurrency: 5` option means up to five jobs can be genuinely in flight at once on one worker instance, so `close()` is waiting for a *set* of async handlers to settle, not one request. There is no `closeIdleConnections()` equivalent needed here — a worker with nothing to do simply isn't holding anything open the way an idle keep-alive socket is.
+
+Shutdown order mirrors the API server's reasoning exactly: workers close (stop taking new work, finish what's running) *before* `closeQueues()` tears down the Redis connections, and both happen before `closePool()` — a job mid-`withTransaction` must be allowed to reach its own `COMMIT`/`ROLLBACK` before the database connection it's using disappears. The same unref'd force-exit timer pattern applies, at the same `SHUTDOWN_TIMEOUT_MS`, so a hung job handler bounds the worker's shutdown exactly as a hung request bounds the API's.
+
+### What happens to a job whose process is `SIGKILL`ed mid-run
+
+This is the case graceful shutdown *can't* cover — `SIGKILL` bypasses every handler, so `worker.close()` never runs and the in-flight job's completion is simply never recorded. BullMQ's answer isn't a shutdown-time mechanism at all; it's a standing one. A job in the `active` list carries a **lock**, renewed periodically by the worker while it runs; a `SIGKILL`ed process stops renewing it, and once the lock expires, BullMQ's maintenance routine notices the stale lock and moves the job back to `wait` (or to `failed`, if it's already spent its retries) for another worker to pick up. This is the same at-least-once guarantee [background-jobs-and-queues.md](../architecture/background-jobs-and-queues.md) describes for an ordinary retry — from the queue's point of view, "the process was killed mid-job" and "the job legitimately failed" look identical, which is exactly why every handler here is written to be safely re-run rather than relying on graceful shutdown as its only correctness guarantee. Graceful shutdown reduces *how often* this reclaim path fires; it can't be the only thing standing between a `SIGKILL` and a lost or duplicated job.
+
 ## Why we chose it here
 
 The prior build had no shutdown handling at all. It didn't visibly hurt, because nothing about a single-user bookkeeping app made a truncated request expensive. That changes the moment a request spans `BEGIN … COMMIT` across several tables: killed mid-transaction, PostgreSQL rolls back when the connection drops, which is *correct* — but the client got no response and does not know whether it committed. Under a retry, that is a double-posted journal entry.
@@ -103,6 +123,8 @@ Related: [guardrails.md](../../docs/guardrails.md) rule 5 (transaction safety) i
 - `server/src/db/connect.ts` — `closePool()`, and the `pool.on('error')` listener that keeps an idle-client failure from crashing the process
 - `server/src/config/constants.ts` — `SHUTDOWN_TIMEOUT_MS`
 - `server/src/__tests__/health.test.ts` — `afterAll` closes the pool, or Vitest hangs on exit for exactly the same reason
+- `server/src/worker.ts` — the worker process entry point, mirroring `index.ts` line for line: same latch, same unref'd force-exit timer, same four `process.on` handlers
+- `server/src/queue/worker.ts` — `startWorkers()`/`stopWorkers()`, where the drain actually happens
 
 ## Gotchas
 
@@ -139,7 +161,8 @@ A: Building the Phase 0 scaffold I tested SIGTERM by killing the `npm run dev` p
 ## Follow-ups they'll dig into
 
 - "Your instance is behind an ALB with a 60s idle timeout and your `keepAliveTimeout` is 5s. What breaks?" — the server closes sockets the LB thinks are reusable, producing intermittent 502s. The LB's idle timeout must be the lower of the two.
-- "A request takes 30 seconds and your drain timeout is 10. What happens?" — force-exit kills it. Either the timeout accommodates your real p99, or long work belongs in a queue (Phase 5) rather than a request.
+- "A request takes 30 seconds and your drain timeout is 10. What happens?" — force-exit kills it. Either the timeout accommodates your real p99, or long work belongs in a queue (Phase 7) rather than a request.
+- "Your worker gets SIGKILLed mid-job. What happens to the job?" — nothing runs, because SIGKILL bypasses every handler; BullMQ's own lock-expiry mechanism (not a shutdown-time one) reclaims it once the job's lock lapses, and it retries elsewhere — which is also why handlers must be idempotent, not just gracefully-shut-down.
 - "How would you test this?" — spawn the built process, hold an in-flight request open, signal it, assert the response completes and the exit code is 0. Signal the actual node process, not npm.
 - "What if the shutdown handler itself throws?" — the `catch` exits 1, and the unref'd timer is the backstop if it hangs instead of throwing.
 - "You're running in Kubernetes and see 143s in the logs anyway." — likely PID 1 with no handler, a grace period shorter than the drain, or npm/shell in the entrypoint swallowing the signal.
@@ -149,3 +172,4 @@ A: Building the Phase 0 scaffold I tested SIGTERM by killing the `npm run dev` p
 - [event-loop-and-blocking.md](event-loop-and-blocking.md) — how signal events are dispatched, and why a blocked loop can't drain
 - [../postgresql/transactions-isolation-pooling.md](../postgresql/transactions-isolation-pooling.md) — what a checked-out client with an open transaction costs
 - [../architecture/stack-overview-request-lifecycle.md](../architecture/stack-overview-request-lifecycle.md) — the request path being drained
+- [../architecture/background-jobs-and-queues.md](../architecture/background-jobs-and-queues.md) — the worker process, retry, and lock-expiry reclaim mechanism this note's new section draws on

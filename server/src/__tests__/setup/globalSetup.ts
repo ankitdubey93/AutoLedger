@@ -73,4 +73,26 @@ export default async function setup(): Promise<void> {
 
   // The suite's own workers open their own pools; this one has done its job.
   await closePool();
+
+  // vitest.config.ts's `env` block does not reach this process (same trap as
+  // PG_DATABASE above), so pin the index explicitly here too.
+  const { Redis } = await import('ioredis');
+  const redis = new Redis({
+    host: process.env.REDIS_HOST ?? 'localhost',
+    port: Number(process.env.REDIS_PORT ?? 6379),
+    db: 1,
+    maxRetriesPerRequest: 1,
+    lazyConnect: true,
+  });
+  try {
+    await redis.connect();
+    await redis.flushdb();
+  } catch (err) {
+    await redis.quit().catch(() => undefined);
+    throw new Error(
+      'Could not reach Redis for the queue tests. Start it with ' +
+        `\`docker compose up -d redis\`.\n  ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  await redis.quit();
 }

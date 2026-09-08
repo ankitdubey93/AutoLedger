@@ -28,6 +28,8 @@ import AuditLogPage from './AuditLogPage';
 import BankTransactionsPage from './BankTransactionsPage';
 import BankImportPage from './BankImportPage';
 import BankReconciliationPage from './BankReconciliationPage';
+import WebhooksPage from './WebhooksPage';
+import WebhookDeliveriesPage from './WebhookDeliveriesPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -85,6 +87,8 @@ function AppPages() {
           <Route path="bank/import" element={<BankImportPage />} />
           <Route path="bank/reconciliation" element={<BankReconciliationPage />} />
           <Route path="audit" element={<AuditLogPage />} />
+          <Route path="webhooks" element={<WebhooksPage />} />
+          <Route path="webhooks/deliveries" element={<WebhookDeliveriesPage />} />
           <Route path="fiscal-periods" element={<FiscalPeriodsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />

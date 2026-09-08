@@ -92,7 +92,9 @@ export const MAX_PAGE_SIZE = 100;
  * password four times. It is per-IP, which is the honest limit of what a
  * stateless middleware can do — a distributed attacker with many IPs is
  * unaffected, and defending against that needs per-account tracking and a
- * shared store, which arrives with Redis in Phase 7.
+ * shared store. Redis is available since Phase 7, but this limiter has not
+ * been rewired to use it — that needs `rate-limit-redis`, which is not an
+ * approved Phase 7 dependency (docs/development.md's dependency policy).
  */
 export const AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
@@ -114,3 +116,47 @@ export const AUTH_RATE_LIMIT_MAX = env.isTest ? 1000 : 10;
  * limit.
  */
 export const MAX_CSV_CHARS = 900_000;
+
+// ------------------------------------------------ background jobs (7)
+
+/**
+ * BullMQ retry policy. Five attempts with exponential backoff from 1s
+ * (1s, 2s, 4s, 8s) spans ~15s of transient failure — long enough to ride
+ * out a receiver's restart, short enough that a genuinely dead endpoint
+ * reaches the dead-letter queue while the operator is still watching.
+ *
+ * Tests drop to two fast attempts: the suite must prove the dead-letter
+ * path, and proving it at production timings would add ~15s per case.
+ */
+export const JOB_ATTEMPTS = env.isTest ? 2 : 5;
+export const JOB_BACKOFF_MS = env.isTest ? 10 : 1_000;
+
+/** Jobs kept in Redis after success, for `GET /health` to count. */
+export const JOB_KEEP_COMPLETED = 100;
+
+/** How often the outbox is drained into webhook deliveries. */
+export const OUTBOX_DRAIN_INTERVAL_MS = 5_000;
+
+/** Rows claimed per drain pass. Bounded so one pass cannot hold a long lock. */
+export const OUTBOX_DRAIN_BATCH = 100;
+
+/**
+ * A PENDING delivery whose enqueue was lost (worker killed between COMMIT
+ * and the Redis round trip) is re-enqueued by the next drain pass once it
+ * is this stale. This is what makes delivery at-least-once rather than
+ * at-most-once — see study/architecture/transactional-outbox.md.
+ */
+export const DELIVERY_REENQUEUE_AFTER_MS = 60_000;
+
+/** Daily, at the top of the hour. Cron is UTC — the server's clock. */
+export const INTEGRITY_CHECK_CRON = '0 3 * * *';
+
+/**
+ * A receiver gets 5 seconds. Longer holds a worker slot hostage to someone
+ * else's slow endpoint; the retry policy covers a receiver that is merely
+ * busy.
+ */
+export const WEBHOOK_TIMEOUT_MS = 5_000;
+
+/** Response body bytes retained in `webhook_deliveries.last_error`. */
+export const WEBHOOK_ERROR_SNIPPET_CHARS = 500;

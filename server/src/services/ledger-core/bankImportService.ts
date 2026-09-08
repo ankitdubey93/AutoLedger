@@ -7,6 +7,7 @@ import { parseCents, parseMoneyText } from '../../utils/money.js';
 import { parseCsv, type CsvTable } from '../../utils/csv.js';
 import { parseFlexibleDate, type DateFormat } from '../../utils/dateParse.js';
 import { AUTO_MATCH_THRESHOLD, normalizeForMatching } from '../../utils/matchScore.js';
+import { emitEvent } from '../outboxService.js';
 import * as bankMatchService from './bankMatchService.js';
 import type { BankStatementImport } from '../../types/ledger-core.js';
 
@@ -387,7 +388,13 @@ export async function importStatement(
     const importId = importRows[0]?.id;
     if (importId === undefined) throw new Error('no import id');
 
-    const { rows: insertedRows } = await client.query<{ id: string }>(
+    const { rows: insertedRows } = await client.query<{
+      id: string;
+      txn_date: string;
+      description: string;
+      external_reference: string | null;
+      amount_cents: string;
+    }>(
       `INSERT INTO bank_transactions
          (org_id, import_id, account_id, txn_date, description, external_reference,
           currency_code, amount_cents, dedupe_hash)
@@ -395,7 +402,7 @@ export async function importStatement(
          FROM unnest($5::date[], $6::text[], $7::text[], $8::bigint[], $9::text[])
               AS v(txn_date, description, external_reference, amount_cents, dedupe_hash)
        ON CONFLICT (org_id, dedupe_hash) DO NOTHING
-       RETURNING id`,
+       RETURNING id, txn_date, description, external_reference, amount_cents`,
       [
         orgId,
         importId,
@@ -432,6 +439,36 @@ export async function importStatement(
     );
     const suggestedCount = Number(summaryRows[0]?.suggested ?? '0');
     const autoMatchableCount = Number(summaryRows[0]?.auto_matchable ?? '0');
+
+    // The roadmap's named webhook example — "an unallocated transaction
+    // above a configured threshold reaching the ledger". Only rows actually
+    // inserted (never a re-imported duplicate) can trigger it, and 0 means
+    // disabled.
+    const { rows: thresholdRows } = await client.query<{ unmatched_alert_threshold_cents: string }>(
+      'SELECT unmatched_alert_threshold_cents FROM ledger_settings WHERE org_id = $1',
+      [orgId],
+    );
+    const thresholdCents = parseCents(thresholdRows[0]?.unmatched_alert_threshold_cents ?? '0');
+
+    if (thresholdCents > 0) {
+      for (const row of insertedRows) {
+        const amountCents = parseCents(row.amount_cents);
+        // Signed: a large outflow matters as much as a large inflow.
+        if (Math.abs(amountCents) >= thresholdCents) {
+          await emitEvent(client, orgId, 'ledger-core', 'bank.large_unmatched', {
+            bankTransactionId: row.id,
+            importId,
+            accountId: input.accountId,
+            txnDate: row.txn_date,
+            currencyCode,
+            amountCents,
+            description: row.description,
+            externalReference: row.external_reference,
+            thresholdCents,
+          });
+        }
+      }
+    }
 
     await client.query('COMMIT');
     return {

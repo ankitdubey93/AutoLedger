@@ -32,6 +32,11 @@ cd server && npm run dev      # tsx watch, http://localhost:5000
 
 # terminal 2 — frontend
 cd client && npm run dev      # Vite, http://localhost:5173
+
+# terminal 3 — background worker (Phase 7). Optional for most work — only
+# needed to actually process queued jobs (the daily integrity check, the
+# outbox drain, webhook delivery). The API server runs fine without it.
+cd server && npm run worker
 ```
 
 Verify:
@@ -40,7 +45,7 @@ Verify:
 curl http://localhost:5000/api/v1/health
 ```
 
-A healthy response is `200` with `"status":"ok"` and `db.connected: true`. If PostgreSQL is unreachable the endpoint answers **503** with `"status":"degraded"` — deliberately, so a probe cannot report healthy while the datastore is down.
+A healthy response is `200` with `"status":"ok"`, `db.connected: true`, and `redis.connected: true`. If PostgreSQL is unreachable the endpoint answers **503** with `"status":"degraded"` — deliberately, so a probe cannot report healthy while the primary datastore is down. Redis being unreachable does **not** 503 — every read endpoint still works; only background job processing stops — so that case is `200` with `"status":"degraded"` and an explanatory `error`.
 
 Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the containers (add `-v` to also drop the Postgres volume, which destroys all data).
 
@@ -56,7 +61,9 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm start` | Runs the built `dist/index.js` |
 | `npm run migrate` | Applies pending migrations |
 | `npm run db:reset` | **Destructive.** Drops schema `public` and re-runs every migration. Refuses when `NODE_ENV=production` |
-| `npm run verify:integrity` | Phase 5 — standalone check that total debits equal total credits, every journal entry balances, and no ledger line is orphaned, across the whole database. Prints one line per check and exits non-zero on any failure — the script to run in front of an auditor |
+| `npm run verify:integrity` | Phase 5 — standalone check that total debits equal total credits, every journal entry balances, and no ledger line is orphaned, across the whole database. Prints one line per check and exits non-zero on any failure — the script to run in front of an auditor. From Phase 7 this also runs automatically once a day via the background worker |
+| `npm run worker` | Phase 7 — `tsx watch src/worker.ts`, a second process consuming the `integrity-check`, `outbox-drain`, and `webhook-deliver` queues. Requires `docker compose up -d redis` |
+| `npm run worker:start` | Runs the built `dist/worker.js` |
 | `npm test` | Vitest, single run |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage over `services/`, `utils/` and `middleware/` |
@@ -102,6 +109,9 @@ No application secrets live here.
 | `PG_DATABASE` | **yes** | |
 | `ACCESS_TOKEN_SECRET` | **yes** | Access JWTs (15m). ≥32 chars |
 | `REFRESH_TOKEN_SECRET` | **yes** | Refresh JWTs (7d). ≥32 chars, and **must differ** from the access secret |
+| `REDIS_HOST` | no — defaults `localhost` | Phase 7 — background jobs and the webhook dispatcher |
+| `REDIS_PORT` | no — defaults `6379` | |
+| `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
 
@@ -130,9 +140,9 @@ Only `VITE_`-prefixed variables reach the bundle, and Vite **inlines them at bui
 | Service | Container | Host port | Healthcheck | Used by |
 |---|---|---|---|---|
 | PostgreSQL 16 | `autodb_postgres` | 5432 | `pg_isready` | The server |
-| Redis 7 | `autodb_redis` | 6379 | none yet | **Nothing** |
+| Redis 7 | `autodb_redis` | 6379 | `redis-cli ping` | The background worker (`npm run worker`) — BullMQ's job queues and the webhook dispatcher (Phase 7) |
 
-**Redis is provisioned but must not be claimed.** The container runs so the port is reserved and the topology is visible, but no code connects to it. Phase 7 adds `bullmq` + `ioredis`, a worker process, a healthcheck, and `REDIS_HOST` / `REDIS_PORT` — shared infrastructure, not owned by any one app. Until then, queueing does not work.
+**Redis was provisioned since Phase 0 and wired up in Phase 7.** `bullmq` + `ioredis`, the worker process, the healthcheck, and `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB` all landed together — shared infrastructure, not owned by any one app. The API server itself does not require Redis to be up (`GET /health` reports it degraded, not down) — only `npm run worker` does.
 
 The Postgres volume `postgres-data` survives `docker compose down`. Only `down -v` destroys it.
 
@@ -194,12 +204,20 @@ Added in Phase 3:
 
 Nothing new in Phase 4 or Phase 5. Phase 5's request-context propagation uses `node:async_hooks`' `AsyncLocalStorage`, part of the Node runtime — no dependency to add.
 
+Added in Phase 7:
+
+| Package | Layer | Why |
+|---|---|---|
+| `bullmq` | server | Background job queues, workers, retry/backoff, and the repeatable-job scheduler behind the daily integrity check and the 5-second outbox drain |
+| `ioredis` | server | The Redis client BullMQ itself needs a connection factory for; also backs the `GET /health` Redis ping |
+
+No client-side dependency this phase — `WebhooksPage`/`WebhookDeliveriesPage` are built entirely from `lucide-react` (already present since Phase 3) and hand-rolled components, the same as every other LedgerCore page.
+
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
 | `csv-parse` | LedgerCore's bank statement ingestion. Real exports carry quoted commas, embedded newlines and a BOM; a hand-rolled RFC 4180 parser is a trap | 6 |
-| `bullmq` + `ioredis` | background workers, shared across apps (OCR, FX polling, depreciation cron, forecast batches), plus the webhook dispatcher | 7 |
 | `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 9 |
 | `multer` | AP-Flow's multipart document upload | 10 |
 | `tesseract.js` | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine | 10 |
@@ -237,3 +255,7 @@ Approved for later phases, add only when the app that needs it is being built:
 **Every authenticated request 401s, with no CORS error to explain it** — check that `VITE_API_BASE_URL` and the page origin both use `localhost`, not a mix of `localhost` and `127.0.0.1`. Same-site is computed from the registrable domain, and IP literals are not in the Public Suffix List, so each is its own site: `localhost:5173` → `127.0.0.1:5000` is genuinely cross-site and the browser silently withholds every `SameSite=Lax` cookie. Ports are irrelevant to this — `localhost:5173` → `localhost:5000` is same-site and works.
 
 **Integration tests fail with `database "autodb_test" does not exist`** — normally self-healing: `globalSetup` creates it. If it persists, Postgres is not reachable at all. The suite deliberately uses a **separate** database so its `TRUNCATE` between tests can never touch your dev data.
+
+**`npm test` fails with "Could not reach Redis for the queue tests"** — `docker compose up -d redis` is now a prerequisite for the full suite (Phase 7). The integration tests flush Redis database index **1**, never index 0, so your dev queues are never touched.
+
+**Worker throws `MaxRetriesPerRequestError` and exits** — this means a Redis connection was created without `maxRetriesPerRequest: null`, which every connection in `queue/connection.ts` sets deliberately: BullMQ's blocking commands (`BRPOPLPUSH` and similar) legitimately wait far longer than ioredis's default retry budget allows. If you see this from code that constructs its own `Redis`/`Queue`/`Worker` instance rather than going through `createRedisConnection()`, that is the bug — route it through the shared factory instead.

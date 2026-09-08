@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import {
   canTransitionPayment,
@@ -594,6 +595,23 @@ export async function createPaymentOnClient(
       input.allocations.map((a) => a.amountCents),
     ],
   );
+
+  // Placed here, in the OnClient half, not in createPayment: a payment
+  // created by a bank match (Phase 6 calls this half directly) must emit
+  // the same event as one created through POST /payments.
+  await emitEvent(client, orgId, 'ledger-core', 'payment.recorded', {
+    paymentId,
+    direction: input.direction,
+    paymentDate: input.paymentDate,
+    currencyCode,
+    amountCents: input.amountCents,
+    customerId: input.direction === 'RECEIVE' ? counterpartyId : null,
+    vendorId: input.direction === 'PAY' ? counterpartyId : null,
+    cashAccountId: input.cashAccountId,
+    reference: input.reference,
+    allocationCount: input.allocations.length,
+    journalEntryId,
+  });
 
   return paymentId;
 }

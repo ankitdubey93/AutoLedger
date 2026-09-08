@@ -122,9 +122,9 @@ flowchart LR
   PG -.->|deferred constraint trigger| PG
 ```
 
-### Webhooks for financial events — Phase 7
+### Webhooks for financial events — Phase 7 ✅ delivered
 
-An outbound notification when a watched condition fires: an unallocated transaction above a configured threshold reaching the ledger, for example. This lands in Phase 7 and not earlier for a specific reason — rule 5 forbids post-`COMMIT` follow-up work inside the posting function. An HTTP call to Slack cannot happen inside the transaction (it would hold the connection open on a network round trip, and a rollback could not un-send it), and firing it after `COMMIT` without a queue means a crash between the two silently loses the notification. So it needs the job queue, which is why it waits for one.
+Phase 7 is shared infrastructure, not one of LedgerCore's own phases (3–4, 6, 8–9 above) — but LedgerCore is the source of every event it fires, so the feature is recorded here too. An outbound, HMAC-signed notification fires when one of five things happens: an invoice is issued, a bill is approved, a payment is recorded, a fiscal period is closed, or an unmatched bank line exceeds a configurable threshold. This landed in Phase 7 and not earlier for a specific reason — rule 5 forbids post-`COMMIT` follow-up work inside the posting function. An HTTP call to a receiver cannot happen inside the transaction (it would hold the connection open on a network round trip, and a rollback could not un-send it), and firing it after `COMMIT` without a queue means a crash between the two silently loses the notification. The fix actually built is a transactional outbox: `outboxService.emitEvent` writes an event row on the *same* transaction client as the posting itself, and a separate background drain turns that row into a signed webhook delivery. Full detail: [roadmap.md#phase-7-as-delivered](roadmap.md#phase-7-as-delivered), [api.md](api.md), [study/architecture/transactional-outbox.md](../study/architecture/transactional-outbox.md).
 
 ---
 

@@ -24,15 +24,18 @@ services:
       timeout: 5s
       retries: 10
 
-  # Provisioned early so the port is reserved, but nothing connects to it until
-  # Phase 5 wires BullMQ. No healthcheck and no consumer yet — do not claim
-  # queueing works. See docs/roadmap.md Phase 5.
+  # Backs BullMQ's job queues and the webhook dispatcher from Phase 7.
   redis:
     image: redis:7-alpine
     container_name: autodb_redis
     restart: unless-stopped
     ports:
       - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   postgres-data:

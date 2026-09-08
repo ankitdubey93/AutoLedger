@@ -29,6 +29,7 @@ export async function resetTables(): Promise<void> {
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
               vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods,
               bank_statement_imports, bank_transactions, bank_match_suggestions,
+              outbox_events, webhook_endpoints, webhook_deliveries,
               audit_logs
      RESTART IDENTITY CASCADE`,
   );

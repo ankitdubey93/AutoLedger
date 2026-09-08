@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalPeriodRanges, fiscalYearBounds } from '../../utils/fiscalYear.js';
+import { emitEvent } from '../outboxService.js';
 import {
   canTransitionFiscalPeriod,
   type FiscalPeriod,
@@ -195,8 +196,14 @@ async function transition(
   try {
     await beginTransaction(client);
 
-    const { rows } = await client.query<{ status: FiscalPeriodStatus }>(
-      'SELECT status FROM fiscal_periods WHERE org_id = $1 AND id = $2 FOR UPDATE',
+    const { rows } = await client.query<{
+      status: FiscalPeriodStatus;
+      fiscal_year_label: string;
+      period_number: number;
+      starts_on: string;
+      ends_on: string;
+    }>(
+      'SELECT status, fiscal_year_label, period_number, starts_on, ends_on FROM fiscal_periods WHERE org_id = $1 AND id = $2 FOR UPDATE',
       [orgId, id],
     );
     const row = rows[0];
@@ -212,6 +219,17 @@ async function transition(
           WHERE org_id = $1 AND id = $2`,
         [orgId, id, userId],
       );
+
+      // Not on LOCKED and not on reopen: closing is the event a downstream
+      // system acts on.
+      await emitEvent(client, orgId, 'ledger-core', 'fiscal_period.closed', {
+        periodId: id,
+        fiscalYearLabel: row.fiscal_year_label,
+        periodNumber: row.period_number,
+        startsOn: row.starts_on,
+        endsOn: row.ends_on,
+        closedBy: userId,
+      });
     } else if (to === 'OPEN') {
       await client.query(
         `UPDATE fiscal_periods

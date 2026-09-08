@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 280 server tests + 65 client tests** (as of Phase 3.6).
+**Current state: 717 server tests + 144 client tests** (as of Phase 7).
 
 Server, in `server/src/__tests__/`:
 
@@ -29,10 +29,15 @@ Server, in `server/src/__tests__/`:
 | `ledger-core/journals.test.ts` | integration | Posting, unbalanced rejection, reversal, ROLLBACK, forged `sourceType`, **cross-tenant isolation** |
 | `ledger-core/ledgerConstraints.test.ts` | integration | **The database as the guardrail** — every case bypasses the service and writes raw SQL |
 | `ledger-core/reports.test.ts` | integration | Trial balance totals, type-aware balances, `asOf`, and that no summary table exists |
+| `platform/queue.test.ts` | integration (Redis) | Job processing via a real `Worker`, retry-then-dead-letter, `jobId` dedup |
+| `platform/webhookEndpoints.test.ts` | integration | `assertDeliverableUrl`'s SSRF rules, signature unit cases, endpoint CRUD, secret never leaked, **cross-tenant isolation** |
+| `platform/outboxDrain.test.ts` | integration (Redis) | `emitEvent` rollback-leaves-no-row proof, fan-out, idempotent re-drain, stale-delivery sweep, **cross-org isolation** |
+| `platform/webhookDelivery.test.ts` | integration (Redis, `fetch` stubbed) | Signed delivery, retry/status transitions, no-secret-in-body, **cross-tenant isolation** |
+| `ledger-core/outboxEmission.test.ts` | integration | One case per event type from the real posting services, rollback emits nothing, **cross-org scoping** |
 
-Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), and `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs).
+Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `ledgerCoreWebhooks.test.tsx` / `ledgerCoreWebhookDeliveries.test.tsx`.
 
-Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point.
+Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point. From Phase 7, tests that exercise the job queue also need `docker compose up -d redis` — `globalSetup` flushes Redis database index **1** (never index 0) before the run, the same `autodb_test`-not-`autodb` discipline applied to Redis.
 
 There is no CI yet. The prior build's `entrypoint.sh` ran the suite before server startup; that gate has no host equivalent and belongs in CI when it is set up.
 

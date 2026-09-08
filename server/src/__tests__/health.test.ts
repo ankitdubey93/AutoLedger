@@ -30,4 +30,13 @@ describe('GET /api/v1/health', () => {
     expect(typeof res.body.db.latencyMs).toBe('number');
     expect(typeof res.body.uptimeSeconds).toBe('number');
   });
+
+  it('reports redis alongside db', async () => {
+    const res = await request(app).get('/api/v1/health');
+
+    expect(res.status).toBe(200);
+    expect(res.body.redis.connected).toBe(true);
+    expect(typeof res.body.redis.latencyMs).toBe('number');
+    expect(Object.keys(res.body)).toEqual(expect.arrayContaining(['db', 'redis']));
+  });
 });

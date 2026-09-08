@@ -13,9 +13,11 @@ import {
   ListTree,
   ReceiptText,
   Scale,
+  Send,
   Settings as SettingsIcon,
   Upload,
   Users,
+  Webhook,
 } from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import CreateMenu from './CreateMenu';
@@ -84,6 +86,13 @@ const NAV_GROUPS = [
       { to: 'fiscal-periods', label: 'Fiscal Periods', icon: CalendarCheck, end: false },
       { to: 'settings', label: 'Settings', icon: SettingsIcon, end: false },
       { to: 'audit', label: 'Audit Trail', icon: History, end: false },
+    ],
+  },
+  {
+    heading: 'Automation',
+    items: [
+      { to: 'webhooks', label: 'Webhooks', icon: Webhook, end: true },
+      { to: 'webhooks/deliveries', label: 'Deliveries', icon: Send, end: false },
     ],
   },
 ] as const;

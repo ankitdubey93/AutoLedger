@@ -1733,3 +1733,159 @@ export function getBankReconciliation(
   if (asOf !== null) query.set('asOf', asOf);
   return apiFetch(`/ledger-core/reports/bank-reconciliation?${query.toString()}`, { signal: signal ?? null });
 }
+
+/* ------------------------------------------ webhooks & background jobs (Phase 7) */
+
+/** Mirrors server/src/types/webhooks.ts's OUTBOX_EVENT_TYPES exactly. */
+export const OUTBOX_EVENT_TYPES = [
+  'invoice.issued',
+  'bill.approved',
+  'payment.recorded',
+  'fiscal_period.closed',
+  'bank.large_unmatched',
+] as const;
+
+export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];
+
+export type WebhookDeliveryStatus = 'PENDING' | 'DELIVERED' | 'FAILED';
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  label: string;
+  eventTypes: OutboxEventType[];
+  isActive: boolean;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Present only on the response from create and rotate-secret. */
+export interface WebhookEndpointWithSecret extends WebhookEndpoint {
+  secret: string;
+}
+
+/** GET /webhooks — platform-level: not under /ledger-core (guardrails rule 16). */
+export function getWebhookEndpoints(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; endpoints: WebhookEndpoint[] }> {
+  return apiFetch('/webhooks', { signal: signal ?? null });
+}
+
+/** GET /webhooks/:id */
+export function getWebhookEndpoint(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; endpoint: WebhookEndpoint }> {
+  return apiFetch(`/webhooks/${id}`, { signal: signal ?? null });
+}
+
+export interface CreateWebhookEndpointInput {
+  url: string;
+  label: string;
+  eventTypes: OutboxEventType[];
+}
+
+/** POST /webhooks — the only response, besides rotate-secret, that ever carries a secret. */
+export function createWebhookEndpoint(
+  input: CreateWebhookEndpointInput,
+): Promise<{ success: boolean; endpoint: WebhookEndpointWithSecret; secretNotice: string }> {
+  return apiFetch('/webhooks', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export interface UpdateWebhookEndpointInput {
+  url?: string;
+  label?: string;
+  eventTypes?: OutboxEventType[];
+  isActive?: boolean;
+}
+
+/** PATCH /webhooks/:id */
+export function updateWebhookEndpoint(
+  id: string,
+  input: UpdateWebhookEndpointInput,
+): Promise<{ success: boolean; endpoint: WebhookEndpoint }> {
+  return apiFetch(`/webhooks/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** DELETE /webhooks/:id — OWNER only. Also deletes the endpoint's delivery history (cascade). */
+export function deleteWebhookEndpoint(id: string): Promise<null> {
+  return apiFetch(`/webhooks/${id}`, { method: 'DELETE' });
+}
+
+/** POST /webhooks/:id/rotate-secret — OWNER only. */
+export function rotateWebhookSecret(
+  id: string,
+): Promise<{ success: boolean; endpoint: WebhookEndpointWithSecret; secretNotice: string }> {
+  return apiFetch(`/webhooks/${id}/rotate-secret`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export interface WebhookDelivery {
+  id: string;
+  endpointId: string;
+  endpointLabel: string;
+  endpointUrl: string;
+  eventId: string;
+  eventType: OutboxEventType;
+  status: WebhookDeliveryStatus;
+  attemptCount: number;
+  lastStatusCode: number | null;
+  lastError: string | null;
+  deliveredAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebhookDeliveryDetail extends WebhookDelivery {
+  payload: Record<string, unknown>;
+}
+
+export interface WebhookDeliveryFilters {
+  page?: number;
+  limit?: number;
+  endpointId?: string;
+  status?: WebhookDeliveryStatus;
+  eventType?: string;
+  from?: string;
+  to?: string;
+}
+
+/** GET /webhook-deliveries */
+export function getWebhookDeliveries(
+  params: WebhookDeliveryFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  deliveries: WebhookDelivery[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.endpointId !== undefined && params.endpointId !== '') query.set('endpointId', params.endpointId);
+  if (params.status !== undefined) query.set('status', params.status);
+  if (params.eventType !== undefined && params.eventType !== '') query.set('eventType', params.eventType);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/webhook-deliveries${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /webhook-deliveries/:id */
+export function getWebhookDelivery(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; delivery: WebhookDeliveryDetail }> {
+  return apiFetch(`/webhook-deliveries/${id}`, { signal: signal ?? null });
+}
+
+/** POST /webhook-deliveries/:id/retry — 202 Accepted; only legal from FAILED. */
+export function retryWebhookDelivery(
+  id: string,
+): Promise<{ success: boolean; delivery: { id: string; status: WebhookDeliveryStatus } }> {
+  return apiFetch(`/webhook-deliveries/${id}/retry`, { method: 'POST', body: JSON.stringify({}) });
+}

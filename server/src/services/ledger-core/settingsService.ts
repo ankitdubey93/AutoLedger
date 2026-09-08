@@ -2,6 +2,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
+import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import type { LedgerSettings } from '../../types/ledger-core.js';
 
@@ -63,6 +64,7 @@ export interface UpdateSettingsInput {
   industry?: string | null | undefined;
   timezone?: string | undefined;
   cashAccountId?: string | null | undefined;
+  unmatchedAlertThresholdCents?: number | undefined;
 }
 
 interface SettingsRow {
@@ -78,6 +80,7 @@ interface SettingsRow {
   cash_account_id: string | null;
   onboarded_at: Date | null;
   has_lines: boolean;
+  unmatched_alert_threshold_cents: string | null;
 }
 
 function toLedgerSettings(row: SettingsRow): LedgerSettings {
@@ -97,6 +100,8 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     onboardedAt: row.onboarded_at === null ? null : row.onboarded_at.toISOString(),
     currentFiscalYear: fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, todayUtc()),
     baseCurrencyLocked: row.has_lines,
+    unmatchedAlertThresholdCents:
+      row.unmatched_alert_threshold_cents === null ? 0 : parseCents(row.unmatched_alert_threshold_cents),
   };
 }
 
@@ -104,6 +109,7 @@ const SETTINGS_SELECT = `
   SELECT o.name AS organization_name, o.base_currency, o.created_at AS org_created_at,
          s.legal_name, s.fiscal_year_start_month, s.fiscal_year_start_day,
          s.books_start_date, s.industry, s.timezone, s.cash_account_id, s.onboarded_at,
+         s.unmatched_alert_threshold_cents,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
@@ -211,6 +217,7 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
     industry: 'industry',
     timezone: 'timezone',
     cashAccountId: 'cash_account_id',
+    unmatchedAlertThresholdCents: 'unmatched_alert_threshold_cents',
   } as const;
 
   const assignments: string[] = [];

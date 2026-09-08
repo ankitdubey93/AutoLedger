@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -37,7 +37,7 @@ An `ApiError` supplies its own status and message. Any other thrown value become
 
 Public by design: a probe that needs a valid token cannot report on a system whose auth is broken.
 
-`200` when the database answers a `SELECT 1` round trip:
+`200` when the database answers a `SELECT 1` round trip. From Phase 7 the body also reports Redis, checked in parallel:
 
 ```json
 {
@@ -47,11 +47,12 @@ Public by design: a probe that needs a valid token cannot report on a system who
   "apiVersion": "v1",
   "environment": "development",
   "uptimeSeconds": 12,
-  "db": { "connected": true, "latencyMs": 2 }
+  "db": { "connected": true, "latencyMs": 2 },
+  "redis": { "connected": true, "latencyMs": 1 }
 }
 ```
 
-`503` when it does not — `success: false`, `status: "degraded"`, and the driver's message in `db.error`:
+`503` when the **database** is unreachable — `success: false`, `status: "degraded"`, and the driver's message in `db.error`:
 
 ```json
 {
@@ -62,9 +63,12 @@ Public by design: a probe that needs a valid token cannot report on a system who
   "apiVersion": "v1",
   "environment": "development",
   "uptimeSeconds": 2,
-  "db": { "connected": false, "latencyMs": null, "error": "connect ECONNREFUSED 127.0.0.1:5432" }
+  "db": { "connected": false, "latencyMs": null, "error": "connect ECONNREFUSED 127.0.0.1:5432" },
+  "redis": { "connected": true, "latencyMs": 1 }
 }
 ```
+
+Redis being down is deliberately **not** a `503` — every read endpoint still works with the queue offline; only background job processing stops. That case is `200` with `status: "degraded"` and `error: "Redis unreachable — background jobs are not running"` in the body, `db` unaffected.
 
 The check runs a real query rather than a TCP connect, so a reachable port with bad credentials fails as it should. No `org_id` scoping applies — it touches no tenant data.
 
@@ -126,7 +130,7 @@ Each refresh consumes its token and issues a new one, claimed atomically with `D
 
 Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a single-origin CORS allow-list, and JSON-only bodies (an HTML form cannot send `Content-Type: application/json`, so it cannot reach a handler without a preflight it will fail). No `csurf` — it is deprecated, and rule 14 defers new dependencies anyway. Double-submit tokens are deferred until there is a reason for them.
 
-**Login brute-force is mitigated from Phase 3** by `express-rate-limit` on `/register` and `/login` — see the note above. Its honest limit is that it is per-IP: a distributed attacker with many addresses is unaffected, and defending against that needs per-account tracking in a shared store, which arrives with Redis in Phase 7.
+**Login brute-force is mitigated from Phase 3** by `express-rate-limit` on `/register` and `/login` — see the note above. Its honest limit is that it is per-IP: a distributed attacker with many addresses is unaffected, and defending against that needs per-account tracking in a shared store. Redis has been available since Phase 7, but the limiter has not been rewired to use it — that needs `rate-limit-redis`, which is not an approved dependency (see [development.md](development.md#dependency-policy)).
 
 ---
 
@@ -216,7 +220,110 @@ Deliberately narrower than every other read endpoint in this codebase (`/reports
 
 Failure paths: `400 operation must be one of INSERT, UPDATE, DELETE` · `403` for any role other than `OWNER`/`ADMIN` · `404 Audit log entry not found`.
 
-`npm run verify:integrity` (not an HTTP route — a CLI script) independently re-derives three ledger-wide invariants — total debits equal total credits, every entry balances individually, no orphaned ledger line — and exits non-zero if any fails. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md).
+`npm run verify:integrity` (not an HTTP route — a CLI script) independently re-derives three ledger-wide invariants — total debits equal total credits, every entry balances individually, no orphaned ledger line — and exits non-zero if any fails. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md). From Phase 7 this also runs on a daily schedule via the background worker, not only on demand.
+
+---
+
+### Webhooks — `/api/v1/webhooks` — Phase 7
+
+Platform-level, not namespaced under any app slug — any app may emit into the outbox, and `app_slug` on the underlying event row carries the namespace (guardrails rule 16), the same convention `/audit-logs` uses.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | `OWNER`, `ADMIN` | List the org's webhook endpoints. Never includes `secret` |
+| POST | `/` | `OWNER`, `ADMIN` | Register an endpoint. `201`, includes `secret` — shown exactly once |
+| GET | `/:id` | `OWNER`, `ADMIN` | One endpoint. Never includes `secret` |
+| PATCH | `/:id` | `OWNER`, `ADMIN` | Update `url`, `label`, `eventTypes`, or `isActive` |
+| DELETE | `/:id` | `OWNER` only | Removes the endpoint and, by cascade, its delivery history. `204`, no body |
+| POST | `/:id/rotate-secret` | `OWNER` only | Issues a new signing secret, invalidating the old one. `200`, includes the new `secret` |
+
+`OWNER`/`ADMIN` can configure endpoints; `DELETE` and `rotate-secret` are `OWNER`-only because both are irreversible and neither is a bookkeeping action.
+
+`POST /` body:
+
+```json
+{
+  "url": "https://hooks.example.com/autoledger",
+  "label": "Ops Slack channel",
+  "eventTypes": ["invoice.issued", "bill.approved"]
+}
+```
+
+`eventTypes` — one to twenty of: `invoice.issued`, `bill.approved`, `payment.recorded`, `fiscal_period.closed`, `bank.large_unmatched`.
+
+`201` response:
+
+```json
+{
+  "success": true,
+  "endpoint": {
+    "id": "...",
+    "url": "https://hooks.example.com/autoledger",
+    "label": "Ops Slack channel",
+    "eventTypes": ["invoice.issued", "bill.approved"],
+    "isActive": true,
+    "createdBy": "...",
+    "createdByName": "Alice",
+    "createdAt": "2026-09-08T10:00:00.000Z",
+    "updatedAt": "2026-09-08T10:00:00.000Z",
+    "secret": "5061ece8...cc0650"
+  },
+  "secretNotice": "Store this secret now — it is shown once and cannot be retrieved again."
+}
+```
+
+`secret` is 64 lowercase hex characters (32 random bytes), used to HMAC-SHA256-sign every delivery to this endpoint. It is present **only** in the `create` and `rotate-secret` responses — never in `GET /`, `GET /:id`, or `PATCH /:id`. See [study/security-auth/webhook-signing-and-ssrf.md](../study/security-auth/webhook-signing-and-ssrf.md).
+
+The URL is validated at write time against SSRF: it must be `https`, or `http` outside production; no embedded credentials; and no `localhost`, `*.internal`, or private/reserved IPv4 range (including the cloud metadata address `169.254.169.254`). A rejected URL is `400 Webhook URL must not target a private host` (or the matching message for the other rules).
+
+Failure paths: `400` for a malformed body or an unsafe URL · `409 A webhook endpoint with this URL already exists` on a duplicate URL in the same org · `403` for any role below the route's requirement · `404` for another org's endpoint id.
+
+---
+
+### Webhook deliveries — `/api/v1/webhook-deliveries` — Phase 7
+
+Every attempt to deliver an event to a subscribed endpoint. `OWNER`/`ADMIN` only, mirroring `/webhooks`.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | `OWNER`, `ADMIN` | Paginated, filterable delivery list |
+| GET | `/:id` | `OWNER`, `ADMIN` | One delivery, including its full JSON `payload` |
+| POST | `/:id/retry` | `OWNER`, `ADMIN` | Re-queue a `FAILED` delivery. `202`, `409` from any other status |
+
+`GET /` query parameters, all optional: `page`, `limit` (caps at 100) · `endpointId` (UUID) · `status` (`PENDING`/`DELIVERED`/`FAILED`) · `eventType` · `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD`.
+
+```json
+{
+  "success": true,
+  "count": 20,
+  "totalCount": 3,
+  "currentPage": 1,
+  "totalPages": 1,
+  "deliveries": [
+    {
+      "id": "...",
+      "endpointId": "...",
+      "endpointLabel": "Ops Slack channel",
+      "endpointUrl": "https://hooks.example.com/autoledger",
+      "eventId": "418",
+      "eventType": "invoice.issued",
+      "status": "DELIVERED",
+      "attemptCount": 1,
+      "lastStatusCode": 200,
+      "lastError": null,
+      "deliveredAt": "2026-09-08T10:00:05.000Z",
+      "createdAt": "2026-09-08T10:00:00.000Z",
+      "updatedAt": "2026-09-08T10:00:05.000Z"
+    }
+  ]
+}
+```
+
+`GET /:id` adds `payload` — the full event body sent to the endpoint.
+
+`POST /:id/retry` is legal **only** from `FAILED` (the one reverse edge in the delivery FSM); `PENDING` or `DELIVERED` both `409 A delivery in status <STATUS> cannot be retried`. There is no `PUT`/`DELETE` — a delivery is an outbound record of fact; correction is a new attempt via retry, never a mutation.
+
+Failure paths: `400 status must be one of PENDING, DELIVERED, FAILED` for an unknown `status` filter · `403` for any role below `OWNER`/`ADMIN` · `404` for another org's delivery id · `409` for a retry on a non-`FAILED` delivery.
 
 ---
 
@@ -309,6 +416,8 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 **The base-currency lock.** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` to `POST /onboarding` returns `422` (`Base currency cannot be changed once journal entries exist`) — `ledger_lines.currency_code` is stamped at write time on rows that are immutable by trigger, so a retroactive change would silently invalidate every posted line. Re-submitting the *same* currency is always accepted. `settings.baseCurrencyLocked` tells the client when to disable the field.
 
 Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
+
+Phase 7 adds `unmatchedAlertThresholdCents` (integer cents, `PATCH` only, `≥ 0`) — the minimum absolute value of an unmatched bank line's `amountCents` that fires a `bank.large_unmatched` webhook event on import. Defaults to `0`, which means **disabled**: every organization starts with no alerting, and existing organizations are unaffected by the migration that added the column. See [ledger-core.md#webhooks-for-financial-events--phase-7](ledger-core.md#webhooks-for-financial-events--phase-7).
 
 This module only stores a fiscal-year *setting*; period rows themselves — `fiscal_periods`, close/lock, and the posting guard — are a separate module, `/api/v1/ledger-core/fiscal-periods` (Phase 4, below).
 

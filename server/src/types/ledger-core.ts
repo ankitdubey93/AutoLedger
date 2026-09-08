@@ -203,6 +203,11 @@ export interface LedgerSettings {
   currentFiscalYear: FiscalYearWindow;
   /** `true` once any ledger line exists — base currency can no longer change. */
   baseCurrencyLocked: boolean;
+  /**
+   * Integer cents (rule 3). 0 means disabled — no bank.large_unmatched
+   * webhook event fires (Phase 7).
+   */
+  unmatchedAlertThresholdCents: number;
 }
 
 /* ---------------------------------------------------------- Phase 3.5 — dashboard */

@@ -8,18 +8,29 @@ import { env } from '../config/env.js';
  * No SQL, no logic — docs/guardrails.md rule 2.
  */
 export const getHealth: RequestHandler = async (_req, res) => {
-  const db = await healthService.checkDatabase();
+  const [db, redis] = await Promise.all([healthService.checkDatabase(), healthService.checkRedis()]);
 
-  // 503 when the database is unreachable. A health endpoint that answers 200
-  // while its datastore is down is worse than no health endpoint.
-  res.status(db.connected ? 200 : 503).json({
+  // 503 only when the database is unreachable — every read endpoint still
+  // works with Redis down, so that alone must not fail health checks;
+  // only job processing stops. A health endpoint that answers 200 while its
+  // primary datastore is down is worse than no health endpoint, but Redis
+  // is secondary infrastructure, not the primary datastore.
+  const statusCode = db.connected ? 200 : 503;
+  const status = db.connected && redis.connected ? 'ok' : 'degraded';
+
+  res.status(statusCode).json({
     success: db.connected,
-    ...(db.connected ? {} : { error: 'Database unreachable' }),
-    status: db.connected ? 'ok' : 'degraded',
+    ...(!db.connected
+      ? { error: 'Database unreachable' }
+      : !redis.connected
+        ? { error: 'Redis unreachable — background jobs are not running' }
+        : {}),
+    status,
     service: 'autoledger-server',
     apiVersion: API_VERSION,
     environment: env.NODE_ENV,
     uptimeSeconds: Math.round(process.uptime()),
     db,
+    redis,
   });
 };
