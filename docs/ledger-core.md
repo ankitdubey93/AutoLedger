@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8, 9b, 17
-**Status: Phase 3 through Phase 8 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), live financial statements (fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table), bank reconciliation (CSV statement import idempotent by dedupe hash, a hand-written 40/30/30 confidence-matching engine, an approval queue, and a reconciliation report against the GL), and now the multi-currency FX engine — exchange rates with a latest-on-or-before lookup, foreign-currency invoices/bills/payments, realized settlement gain/loss, and period-end unrealized revaluation with an automatic next-day reversal. Phases 9b and 17 are unticked below — LedgerCore still has no way in for a business migrating off another system, and no QuickBooks sync. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 9b shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), live financial statements (fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table), bank reconciliation (CSV statement import idempotent by dedupe hash, a hand-written 40/30/30 confidence-matching engine, an approval queue, and a reconciliation report against the GL), the multi-currency FX engine (exchange rates with a latest-on-or-before lookup, foreign-currency invoices/bills/payments, realized settlement gain/loss, and period-end unrealized revaluation with an automatic next-day reversal), and now a way in for a business migrating off another system — a staged chart-of-accounts importer and a staged opening-balance importer, each validated before one all-or-nothing commit. Phase 17 is unticked below — no QuickBooks sync. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -272,21 +272,21 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ### Phase 9b — chart & opening-balance import
 
-LedgerCore's way in for a business moving off another system. The platform half of Phase 9 — resumable, skippable onboarding — is specified in [roadmap.md](roadmap.md#phase-9-planned-scope).
+LedgerCore's way in for a business moving off another system. The platform half of Phase 9 — resumable, skippable onboarding — is specified in [roadmap.md](roadmap.md#phase-9-as-delivered).
 
-- [ ] `migration_imports` / `migration_import_rows` migration, with the partial unique index allowing one committed opening-balance import per organization
-- [ ] `3400 Opening Balance Equity` delta seed **and** backfill for existing organizations — the default chart becomes 45 accounts
-- [ ] Staged CSV import reusing `utils/csv.ts`, `utils/dateParse.ts` and `parseMoneyText` — no new dependency
-- [ ] Every row stages, good and bad, with per-row errors and per-row fixes — **deliberately unlike** Phase 6's bank import, which aborts the whole file on any bad row
-- [ ] Chart commit: match on `code`, create unknown codes (parents resolved by parent *code*, depth-first as `seedDefaultChart` does), merge name/description only on known codes, error on a type conflict
-- [ ] `createAccountOnClient`, mirroring the existing `*OnClient` convention, so the commit runs on one transaction
-- [ ] Opening balances post **one** entry through `journalService.createEntryOnClient` at `books_start_date`, `source_type = 'opening_balance'` — never a direct `ledger_lines` write
-- [ ] Imbalance plugged to `3400`, shown in the preview before commit, never silently
-- [ ] `3200 Retained Earnings` refused — it is derived, and posting to it double-counts
-- [ ] The AR/AP control accounts refused — a lump receivable with no invoices makes `/reports/ar-aging`'s `reconciles` permanently false
-- [ ] Cross-tenant isolation test
+- [x] `migration_imports` / `migration_import_rows` migration, with the partial unique index allowing one committed opening-balance import per organization
+- [x] `3400 Opening Balance Equity` delta seed **and** backfill for existing organizations — the default chart becomes 45 accounts
+- [x] Staged CSV import reusing `utils/csv.ts` and `parseMoneyText` — no new dependency. **`utils/dateParse.ts` is not used**: neither importer has a date column, so this deviates from the phase's original plan — recorded in [roadmap.md](roadmap.md#phase-9-as-delivered)
+- [x] Every row stages, good and bad, with per-row errors and per-row fixes — **deliberately unlike** Phase 6's bank import, which aborts the whole file on any bad row
+- [x] Chart commit: match on `code`, create unknown codes (parents resolved by parent *code*, depth-first as `seedDefaultChart` does), merge name/description only on known codes, error on a type conflict
+- [x] `createAccountOnClient`, mirroring the existing `*OnClient` convention, so the commit runs on one transaction
+- [x] Opening balances post **one** entry through `journalService.createEntryOnClient` at `books_start_date`, `source_type = 'opening_balance'` — never a direct `ledger_lines` write
+- [x] Imbalance plugged to `3400`, shown in the preview before commit, never silently
+- [x] `3200 Retained Earnings` refused — it is derived, and posting to it double-counts
+- [x] The AR/AP control accounts refused — a lump receivable with no invoices makes `/reports/ar-aging`'s `reconciles` permanently false
+- [x] Cross-tenant isolation test
 
-**Acceptance:** an unbalanced trial balance imports, commits with the difference sitting in `3400`, and `GET /reports/balance-sheet` still balances afterwards. A chart CSV with two deliberately corrupt rows stages the rest as `VALID` and commits only after both are fixed. A second opening-balance commit is refused by the index, not by the service.
+**Acceptance ✅ — verified.** An unbalanced trial balance imports, commits with the difference sitting in `3400`, and `GET /reports/balance-sheet` still balances afterwards (`openingBalanceImport.test.ts`). A chart CSV with two deliberately corrupt rows stages the rest as `VALID` and commits only after both are fixed (`chartImport.test.ts`). A second opening-balance commit is refused by the index, not by the service — proven with a raw SQL statement bypassing `migrationImportService` entirely (`migrationImportConstraints.test.ts`). See [Phase 9, as delivered](roadmap.md#phase-9-as-delivered) in the roadmap for full detail.
 
 ### Phase 17 — QuickBooks sync
 
@@ -300,7 +300,7 @@ LedgerCore's way in for a business moving off another system. The platform half 
 
 ## Not built yet
 
-**Phase 17** — everything above its unticked boxes: no QuickBooks sync. **Phase 9b** — no chart-of-accounts or opening-balance import; a business migrating off another system has no way in.
+**Phase 17** — everything above its unticked boxes: no QuickBooks sync.
 
 - **Audit trail and `verify:integrity` are both shipped** — see the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net---shipped-phase-5), no longer a target description. This closes the compliance gap every earlier phase note in this file flagged.
 - **Bank reconciliation is shipped** (Phase 6) — CSV import, the 40/30/30 confidence engine, the approval queue, and the reconciliation report all exist. Not built within it: a bank line settling more than one document (or several lines settling one) in a single match, bank feeds/OFX/QIF/MT940 beyond CSV, multi-currency statements, and posting a journal entry directly from an unmatched line for fees/interest (`IGNORE` covers that case for now).

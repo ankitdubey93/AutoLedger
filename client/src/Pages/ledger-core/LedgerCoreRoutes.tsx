@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import LedgerCoreSidebar from './LedgerCoreSidebar';
 import { LedgerSettingsProvider, useLedgerSettings } from './LedgerSettingsContext';
+import OnboardingBanner from './OnboardingBanner';
+import { getOnboardingState, type OnboardingStatus } from '../../services/fetchServices';
 import DashboardPage from './DashboardPage';
 import AccountsPage from './AccountsPage';
 import AccountLedgerPage from './AccountLedgerPage';
@@ -33,6 +36,9 @@ import WebhookDeliveriesPage from './WebhookDeliveriesPage';
 import FxRatesPage from './FxRatesPage';
 import FxExposurePage from './FxExposurePage';
 import FxRevaluationsPage from './FxRevaluationsPage';
+import MigrationImportsPage from './MigrationImportsPage';
+import NewMigrationImportPage from './NewMigrationImportPage';
+import MigrationImportDetailPage from './MigrationImportDetailPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -56,14 +62,20 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * subtree on every organization switch — that is load-bearing here, not
  * incidental: it is what makes switching into a not-yet-onboarded
  * organization correctly show the wizard again. Do not "optimise" it away.
+ *
+ * Phase 9a makes the gate SOFT: a wizard that was explicitly skipped
+ * (onboarding_states.status === 'SKIPPED') no longer forces the redirect —
+ * every route stays reachable behind a persistent `OnboardingBanner`
+ * instead. Only NOT_STARTED / IN_PROGRESS still redirect.
  */
 
-function AppPages() {
+function AppPages({ showBanner }: { showBanner: boolean }) {
   const base = useAppBasePath();
   return (
     <div className="flex flex-col md:flex-row md:gap-6 px-4 md:px-6">
       <LedgerCoreSidebar />
       <div className="min-w-0 flex-1 py-6 max-w-[76rem]">
+        {showBanner && <OnboardingBanner />}
         <Routes>
           <Route index element={<DashboardPage />} />
           <Route path="accounts" element={<AccountsPage />} />
@@ -96,6 +108,9 @@ function AppPages() {
           <Route path="fx-exposure" element={<FxExposurePage />} />
           <Route path="fx-revaluations" element={<FxRevaluationsPage />} />
           <Route path="fiscal-periods" element={<FiscalPeriodsPage />} />
+          <Route path="migration-imports" element={<MigrationImportsPage />} />
+          <Route path="migration-imports/new" element={<NewMigrationImportPage />} />
+          <Route path="migration-imports/:importId" element={<MigrationImportDetailPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}
@@ -109,6 +124,29 @@ function AppPages() {
 function LedgerCoreGate() {
   const settings = useLedgerSettings();
   const base = useAppBasePath();
+
+  // Only needed once settings say "not onboarded" — a skipped wizard is the
+  // one case where the gate must NOT redirect, so its status decides that.
+  const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | 'loading'>('loading');
+
+  useEffect(() => {
+    if (settings.status !== 'ready' || settings.settings.onboardedAt !== null) return;
+    let ignore = false;
+
+    getOnboardingState('ledger-core')
+      .then((state) => {
+        if (!ignore) setOnboardingStatus(state.status);
+      })
+      .catch(() => {
+        // Unknown — treat as NOT_STARTED, which keeps the existing (hard)
+        // redirect behaviour rather than silently unlocking every route.
+        if (!ignore) setOnboardingStatus('NOT_STARTED');
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [settings.status, settings.status === 'ready' ? settings.settings.onboardedAt : null]);
 
   if (settings.status === 'loading') {
     return (
@@ -124,6 +162,12 @@ function LedgerCoreGate() {
   }
 
   const onboarded = settings.settings.onboardedAt !== null;
+  const skipped = !onboarded && onboardingStatus === 'SKIPPED';
+  // Only the catch-all route's decision needs onboardingStatus — the wizard
+  // itself (the `onboarding` route below) never did, and gating its render
+  // behind this second fetch too was needless latency on every mount of a
+  // not-yet-onboarded organization.
+  const catchAllLoading = !onboarded && onboardingStatus === 'loading';
 
   return (
     <Routes>
@@ -133,7 +177,18 @@ function LedgerCoreGate() {
       />
       <Route
         path="*"
-        element={onboarded ? <AppPages /> : <Navigate to={`${base}/onboarding`} replace />}
+        element={
+          onboarded || skipped ? (
+            <AppPages showBanner={skipped} />
+          ) : catchAllLoading ? (
+            <div className="shell" aria-busy="true">
+              <div className="skeleton skeleton--title" />
+              <span className="visually-hidden">Loading LedgerCore…</span>
+            </div>
+          ) : (
+            <Navigate to={`${base}/onboarding`} replace />
+          )
+        }
       />
     </Routes>
   );

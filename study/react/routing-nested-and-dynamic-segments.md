@@ -278,6 +278,18 @@ An entry that is itself a reversal (`reversesEntryId !== null`) shouldn't be rev
 - `client/src/Pages/ledger-core/NewJournalEntryPage.tsx` — the `?copyFrom=` one-shot seed effect and its `seeded` latch (Phase 3.7)
 - `client/src/Pages/ledger-core/money.ts` — `formatCents`/`parseCentsInput`, the exact integer round-trip the seed effect relies on
 - `client/src/Pages/ledger-core/JournalsPage.tsx`, `JournalDetailPage.tsx` — the duplicated `canReverse` rule, kept identical on purpose (Phase 3.7)
+- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — `LedgerCoreGate`'s **soft** gate (Phase 9a): a `SKIPPED` onboarding status renders `AppPages` with a banner instead of redirecting
+- `client/src/Pages/ledger-core/OnboardingBanner.tsx` — the persistent, non-dismissible notice a soft gate shows in place of a hard redirect
+
+## Hard vs. soft route gates (Phase 9a)
+
+Every gate this app had before Phase 9a was **hard**: `ProtectedRoute` redirects an unauthenticated visitor to `/login`, and `LedgerCoreGate` redirected a not-yet-onboarded organization to `onboarding` — in both cases, the guarded content never renders at all while the condition holds. A hard gate is the right shape when the guarded content is actually **unsafe or meaningless** to show — a dashboard with no session backing it isn't a smaller dashboard, it's nothing.
+
+Phase 9a's "skip this wizard" feature needed a different shape. Once a user explicitly chooses to skip LedgerCore's onboarding wizard, every other LedgerCore route becomes reachable — the chart of accounts, journals, everything — but rendered behind a small, persistent, non-dismissible banner (`OnboardingBanner`) saying setup is incomplete. That's a **soft** gate: the guarded content always renders when the *reason* for the gate is a choice rather than a hazard, and the gate becomes advisory UI instead of a blocking `<Navigate>`.
+
+The routing mechanics are almost identical either way — both are `<Route>` elements whose `element` is computed from application state rather than fixed JSX — but the two states a soft gate has to distinguish (`NOT_STARTED`/`IN_PROGRESS` still redirect; `SKIPPED` renders-with-banner) mean `LedgerCoreGate` now needs to know the wizard's actual lifecycle status, not just the boolean `onboardedAt !== null` it checked before. That's a second async read (`getOnboardingState('ledger-core')`) gating the render decision alongside the settings fetch it already had — see `context-effects-and-data-fetching.md` for the loading-state discipline that read needs.
+
+The rule this generalizes to: ask **why** the gate exists before choosing hard or soft. If the guarded content would be broken, unsafe, or meaningless without the gated precondition, gate hard — a `<Navigate>`, full stop. If the precondition is a recommendation the user is allowed to defer, gate soft — render the content, surface the recommendation as UI. Conflating the two is how a feature meant to *skip* onboarding accidentally still blocks the very pages the skip was supposed to unlock.
 
 ## Gotchas
 
@@ -356,6 +368,9 @@ A: Because the effect's guard clause reads `seeded` (`if (copyFrom === null || s
 
 **Q: Where does `formatCents`/`parseCentsInput` actually matter for correctness here, versus just being nice code hygiene?**
 A: It's the difference between the copy-seed feature preserving the exact amount that was originally posted, cent for cent, versus silently drifting by a cent on some inputs. `formatCents` turns `45000` into `"450.00"` using integer truncation and modulo, never float division; `parseCentsInput` turns `"450.00"` back into `45000` using integer rounding after multiplying by 100. Both directions are exact for every value the pair can produce, so seeding the form this way is guaranteed lossless. Reaching for `(cents / 100).toFixed(2)` instead would introduce IEEE-754 float division into a codepath specifically carved out to never touch a float with money — a violation of the same rule (guardrails rule 3) the original posting form was built to enforce, just introduced through a new feature instead of the old one.
+
+**Q: You added a "skip this wizard" feature. Why didn't you just remove the onboarding gate for that organization once it's skipped?**
+A: Because "skipped" and "no gate" mean different things — removing the gate entirely would mean the app has no way to remind the organization setup is still incomplete, and no way to route them back to finish it. What actually changes is *what the gate does* when its condition holds: instead of a blocking `<Navigate>`, it renders the real content with an advisory banner. The routing structure — a `<Route path="*">` whose `element` is computed from state — is identical to the hard gate's; only the computed element changed, from "redirect" to "render plus banner." Removing the gate would lose the ability to ever surface that reminder again.
 
 ## Follow-ups they'll dig into
 

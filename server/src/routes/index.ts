@@ -6,6 +6,7 @@ import appRoutes from './apps.js';
 import auditRoutes from './auditLogs.js';
 import webhookRoutes from './webhooks.js';
 import webhookDeliveryRoutes from './webhookDeliveries.js';
+import onboardingRoutes from './onboarding.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 
 /**
@@ -39,6 +40,11 @@ apiRouter.use('/audit-logs', auditRoutes);
 // namespace (guardrails rule 16), exactly as /audit-logs does.
 apiRouter.use('/webhooks', webhookRoutes);
 apiRouter.use('/webhook-deliveries', webhookDeliveryRoutes);
+
+// Phase 9 — resumable, skippable onboarding state. Platform-level: every app
+// that acquires a setup wizard gets skip-and-resume for free, and `app_slug`
+// on the row carries the namespace (guardrails rule 16), as /audit-logs does.
+apiRouter.use('/onboarding', onboardingRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

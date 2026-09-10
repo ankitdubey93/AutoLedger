@@ -99,6 +99,20 @@ Note what the journal schema deliberately omits: `sourceType` and `sourceId`. A 
 
 ---
 
+## The untrusted JSONB draft (Phase 9a) — parse, don't validate, applied to opaque data
+
+Every earlier example in this note ends with a *precise* TypeScript type: a journal entry's lines, an account's five-way type union. `onboarding_states.draft` (Phase 9a) is deliberately the opposite shape — it's `Record<string, unknown>` all the way through, from the zod schema (`z.record(z.string(), z.unknown())`) to the service (`saveDraft(orgId, appSlug, input: { draft: Record<string, unknown> })`) to the stored `JSONB` column, and it stays that way. There is no schema for what a draft contains, because a draft belongs to whichever wizard is saving it — LedgerCore's onboarding draft has different keys than a future app's would, and this table is shared platform infrastructure that knows nothing about any specific app's fields.
+
+That looks, at first glance, like exactly the "cast is not a check" anti-pattern this note warns against — an `unknown` blob moving through the system untouched. It isn't, because the blob is never *read as* anything here. Three rules keep it safe:
+
+1. **It is never spread into a query.** `saveDraft` binds the whole object as one `$n::jsonb` parameter (`JSON.stringify(input.draft)`), never destructured into individual column assignments — so a key named `"'; DROP TABLE onboarding_states; --"` is stored and returned as inert string data, never SQL. `onboardingStates.test.ts` proves this directly with exactly that key.
+2. **It is never used to pick a column, a table, or any other identifier.** Rule 4's parameterization discipline is about *values* reaching SQL safely; this is the same discipline applied one level up — the draft's *keys* never reach an identifier position either.
+3. **It is re-parsed through the target app's own zod schema at completion, not trusted from storage.** When LedgerCore's wizard finishes, `settingsService.completeOnboarding` validates its `OnboardingInput` the normal way — through `onboardingSchema`'s zod schema, exactly as if it had arrived fresh in a request body. The autosaved draft is a *convenience cache* for resuming a half-finished wizard, not a trusted intermediate value. If a user's draft is stale, malformed, or from an older version of the wizard, completion re-validates it from scratch and fails exactly as cleanly as a bad initial submission would.
+
+The interview-ready summary: "parse, don't validate" is usually taught as "always narrow to the most precise type you can." The onboarding draft shows the other half of that principle — when a value's *whole point* is that its shape isn't known yet, the correct move is to keep it maximally opaque (`Record<string, unknown>`, never destructured, never spread into anything with syntactic meaning) and defer the actual parse to the one place that does know the shape: completion time, through the real schema.
+
+---
+
 ## Gotchas
 
 - **A cast is not a check.** `as T` on request data is the single most common way typed codebases ship runtime errors.
@@ -125,6 +139,9 @@ A: Phase 1's bodies were flat objects of about five scalars — an email, a pass
 
 **Q: What's the advantage of zod over JSON Schema?**
 A: Type inference. With zod the schema is the single artifact and `z.infer` derives the TypeScript type from it, so they cannot drift. With JSON Schema plus Ajv you write the schema *and* a TypeScript interface, and nothing enforces that they agree — which means the failure mode is a schema that validates something the type says is impossible. JSON Schema wins when the contract has to be language-agnostic or published to consumers, which is a real reason to choose it; it just isn't this codebase's situation.
+
+**Q: You store an onboarding wizard's draft as opaque `Record<string, unknown>` JSON — doesn't that undermine everything you just said about validating at the boundary?**
+A: No, because it's never treated as trusted structured data at any point it's stored or moved — only when it's finally used. It's bound as a single JSONB parameter, never spread into a query or used to pick a column or table, so it can't reach SQL as anything but inert value data. The actual validation happens when the wizard completes: the draft is re-parsed through the real `zod` schema for that step, exactly as if it had just arrived in a fresh request. Storing it opaquely and validating it at the one point its shape actually matters is the same "parse, don't validate" discipline — just applied to a value whose whole purpose is that its shape isn't known until later.
 
 ---
 

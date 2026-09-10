@@ -2097,3 +2097,236 @@ export function getFxRevaluation(
 export function runFxRevaluation(asOfDate: string): Promise<{ success: boolean; revaluation: FxRevaluation }> {
   return apiFetch('/ledger-core/fx-revaluations', { method: 'POST', body: JSON.stringify({ asOfDate }) });
 }
+
+/* -------------------------------------------------------- platform: onboarding (Phase 9a) */
+
+/** Mirrors server/src/types/onboarding.ts's OnboardingStatus. */
+export type OnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'SKIPPED' | 'COMPLETED';
+
+/** Mirrors server/src/types/onboarding.ts's OnboardingState. */
+export interface OnboardingState {
+  appSlug: string;
+  status: OnboardingStatus;
+  currentStep: string | null;
+  draft: Record<string, unknown>;
+  completedAt: string | null;
+  skippedAt: string | null;
+  updatedAt: string | null;
+}
+
+/** Mirrors server/src/types/onboarding.ts's OnboardingChecklistItem. */
+export interface OnboardingChecklistItem extends OnboardingState {
+  appName: string;
+  appStatus: AppStatus;
+}
+
+/** GET /onboarding — platform-level; every app plus 'platform', a missing row reads as NOT_STARTED. */
+export function getOnboardingChecklist(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  items: OnboardingChecklistItem[];
+}> {
+  return apiFetch('/onboarding', { signal: signal ?? null });
+}
+
+/** GET /onboarding/:appSlug */
+export async function getOnboardingState(appSlug: string, signal?: AbortSignal): Promise<OnboardingState> {
+  const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
+    `/onboarding/${appSlug}`,
+    { signal: signal ?? null },
+  );
+  return body.onboarding;
+}
+
+/** PUT /onboarding/:appSlug/draft — OWNER/ADMIN only. */
+export async function saveOnboardingDraft(
+  appSlug: string,
+  input: { currentStep: string | null; draft: Record<string, unknown> },
+): Promise<OnboardingState> {
+  const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
+    `/onboarding/${appSlug}/draft`,
+    { method: 'PUT', body: JSON.stringify(input) },
+  );
+  return body.onboarding;
+}
+
+/** POST /onboarding/:appSlug/skip — OWNER/ADMIN only; the draft is preserved. */
+export async function skipOnboarding(appSlug: string): Promise<OnboardingState> {
+  const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
+    `/onboarding/${appSlug}/skip`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  return body.onboarding;
+}
+
+/** POST /onboarding/:appSlug/resume — OWNER/ADMIN only; legal from SKIPPED or COMPLETED. */
+export async function resumeOnboarding(appSlug: string): Promise<OnboardingState> {
+  const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
+    `/onboarding/${appSlug}/resume`,
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+  return body.onboarding;
+}
+
+/* ---------------------------------------------- ledger-core: migration imports (9b) */
+
+export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES';
+export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
+export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
+
+/** Mirrors server/src/types/ledger-core.ts's MigrationImport. */
+export interface MigrationImport {
+  id: string;
+  kind: MigrationImportKind;
+  status: MigrationImportStatus;
+  fileName: string;
+  delimiter: string;
+  rowCount: number;
+  errorCount: number;
+  validCount: number;
+  excludedCount: number;
+  journalEntryId: string | null;
+  committedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's MigrationImportRow. */
+export interface MigrationImportRow {
+  id: string;
+  rowNumber: number;
+  raw: Record<string, string>;
+  accountCode: string | null;
+  accountName: string | null;
+  accountType: AccountType | null;
+  parentCode: string | null;
+  description: string | null;
+  debitCents: number | null;
+  creditCents: number | null;
+  errors: string[];
+  status: MigrationRowStatus;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's MigrationCommitPreview. */
+export interface MigrationCommitPreview {
+  kind: MigrationImportKind;
+  canCommit: boolean;
+  blockingErrorCount: number;
+  accountsToCreate: number;
+  accountsToMerge: number;
+  totalDebitCents: number;
+  totalCreditCents: number;
+  /** Signed. Positive = a credit plug to 3400; negative = a debit plug. Zero = no plug. */
+  plugCents: number;
+  plugAccountCode: string;
+  entryDate: string | null;
+}
+
+export type MigrationCommitResult =
+  | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
+  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number };
+
+/** POST /ledger-core/migration-imports — OWNER, ADMIN or ACCOUNTANT. */
+export function createMigrationImport(body: {
+  kind: MigrationImportKind;
+  fileName: string;
+  content: string;
+}): Promise<{ success: boolean; import: MigrationImport; rows: MigrationImportRow[] }> {
+  return apiFetch('/ledger-core/migration-imports', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** GET /ledger-core/migration-imports */
+export function listMigrationImports(
+  params: { page?: number; limit?: number; kind?: MigrationImportKind } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  imports: MigrationImport[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.kind !== undefined) query.set('kind', params.kind);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/migration-imports${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/migration-imports/:id */
+export function getMigrationImport(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; import: MigrationImport }> {
+  return apiFetch(`/ledger-core/migration-imports/${id}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/migration-imports/:id/rows */
+export function getMigrationImportRows(
+  id: string,
+  params: { page?: number; limit?: number; status?: MigrationRowStatus } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  rows: MigrationImportRow[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined) query.set('status', params.status);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/migration-imports/${id}/rows${suffix}`, { signal: signal ?? null });
+}
+
+/** PATCH /ledger-core/migration-imports/:id/rows/:rowId — OWNER, ADMIN or ACCOUNTANT. */
+export function patchMigrationImportRow(
+  id: string,
+  rowId: string,
+  body: Partial<{
+    accountCode: string;
+    accountName: string;
+    accountType: AccountType;
+    parentCode: string | null;
+    description: string | null;
+    debitCents: number;
+    creditCents: number;
+    status: 'VALID' | 'EXCLUDED';
+  }>,
+): Promise<{ success: boolean; import: MigrationImport; row: MigrationImportRow }> {
+  return apiFetch(`/ledger-core/migration-imports/${id}/rows/${rowId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+/** POST /ledger-core/migration-imports/:id/validate — OWNER, ADMIN or ACCOUNTANT. */
+export function validateMigrationImport(id: string): Promise<{ success: boolean; import: MigrationImport }> {
+  return apiFetch(`/ledger-core/migration-imports/${id}/validate`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** GET /ledger-core/migration-imports/:id/preview — OWNER, ADMIN or ACCOUNTANT. */
+export function previewMigrationImport(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; preview: MigrationCommitPreview }> {
+  return apiFetch(`/ledger-core/migration-imports/${id}/preview`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/migration-imports/:id/commit — OWNER/ADMIN only; irreversible. */
+export function commitMigrationImport(
+  id: string,
+): Promise<{ success: boolean; import: MigrationImport; result: MigrationCommitResult }> {
+  return apiFetch(`/ledger-core/migration-imports/${id}/commit`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** DELETE /ledger-core/migration-imports/:id — refused once COMMITTED. */
+export async function deleteMigrationImport(id: string): Promise<void> {
+  await apiFetch(`/ledger-core/migration-imports/${id}`, { method: 'DELETE' });
+}

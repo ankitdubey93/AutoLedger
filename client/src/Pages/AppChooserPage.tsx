@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listApps, type AppSummary } from '../services/fetchServices';
+import SetupChecklist from './SetupChecklist';
 
 /**
  * The post-login landing page: one card per app in the suite. This replaced
@@ -48,6 +49,8 @@ export default function AppChooserPage() {
           ))}
         </div>
       )}
+
+      <SetupChecklist />
     </div>
   );
 }

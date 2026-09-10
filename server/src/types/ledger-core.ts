@@ -926,3 +926,92 @@ export interface FxRevaluation {
   createdAt: string;
   lines: FxRevaluationLine[];
 }
+
+// ------------------------------------------------- Phase 9b: migration imports
+
+export const MIGRATION_IMPORT_KINDS = ['CHART_OF_ACCOUNTS', 'OPENING_BALANCES'] as const;
+export type MigrationImportKind = (typeof MIGRATION_IMPORT_KINDS)[number];
+
+export function isMigrationImportKind(value: string): value is MigrationImportKind {
+  return (MIGRATION_IMPORT_KINDS as readonly string[]).includes(value);
+}
+
+export const MIGRATION_IMPORT_STATUSES = ['DRAFT', 'VALIDATED', 'COMMITTED'] as const;
+export type MigrationImportStatus = (typeof MIGRATION_IMPORT_STATUSES)[number];
+
+/**
+ * The one place a staged import's lifecycle is written down (rule 10).
+ * COMMITTED is terminal — a committed import produced real accounts and a
+ * real posted journal entry, and rule 6 says a posted document is corrected
+ * by a reversing entry, never by re-running the thing that posted it.
+ * VALIDATED -> DRAFT exists because editing a row after validation must
+ * invalidate the validation, not silently keep it.
+ */
+export const MIGRATION_IMPORT_TRANSITIONS = {
+  DRAFT: ['VALIDATED'],
+  VALIDATED: ['DRAFT', 'COMMITTED'],
+  COMMITTED: [],
+} as const satisfies Record<MigrationImportStatus, readonly MigrationImportStatus[]>;
+
+export function canTransitionMigrationImport(
+  from: MigrationImportStatus,
+  to: MigrationImportStatus,
+): boolean {
+  return (MIGRATION_IMPORT_TRANSITIONS[from] as readonly MigrationImportStatus[]).includes(to);
+}
+
+export const MIGRATION_ROW_STATUSES = ['VALID', 'INVALID', 'EXCLUDED'] as const;
+export type MigrationRowStatus = (typeof MIGRATION_ROW_STATUSES)[number];
+
+export function isMigrationRowStatus(value: string): value is MigrationRowStatus {
+  return (MIGRATION_ROW_STATUSES as readonly string[]).includes(value);
+}
+
+export interface MigrationImport {
+  id: string;
+  kind: MigrationImportKind;
+  status: MigrationImportStatus;
+  fileName: string;
+  delimiter: string;
+  rowCount: number;
+  errorCount: number;
+  validCount: number;
+  excludedCount: number;
+  journalEntryId: string | null;
+  committedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface MigrationImportRow {
+  id: string;
+  rowNumber: number;
+  raw: Record<string, string>;
+  accountCode: string | null;
+  accountName: string | null;
+  accountType: AccountType | null;
+  parentCode: string | null;
+  description: string | null;
+  debitCents: number | null;
+  creditCents: number | null;
+  errors: string[];
+  status: MigrationRowStatus;
+}
+
+/** What POST /:id/preview returns, and what commit will do if run now. */
+export interface MigrationCommitPreview {
+  kind: MigrationImportKind;
+  canCommit: boolean;
+  blockingErrorCount: number;
+  /** CHART_OF_ACCOUNTS only. */
+  accountsToCreate: number;
+  accountsToMerge: number;
+  /** OPENING_BALANCES only. */
+  totalDebitCents: number;
+  totalCreditCents: number;
+  /** Signed. Positive = a credit plug to 3400; negative = a debit plug. Zero = no plug. */
+  plugCents: number;
+  plugAccountCode: string;
+  entryDate: string | null;
+}

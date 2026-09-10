@@ -332,7 +332,7 @@ Two migrations. `020_platform_outbox_and_webhooks.sql` adds the transactional ou
 
 ---
 
-## Phase 8 — multi-currency FX engine (LedgerCore) — in progress
+## Phase 8 — multi-currency FX engine (LedgerCore) — applied
 
 `022_ledger-core_fx_rates.sql` adds `fx_rates`, the first piece: an organization's own record of exchange rates, entered by hand (`source = 'MANUAL'`) or by a future import (`source = 'IMPORT'`).
 
@@ -382,15 +382,35 @@ This closes Phase 8's scope as specified in [ledger-core.md § D](ledger-core.md
 
 ---
 
-## Phase 9+ — target tables
+## Phase 9a — platform onboarding state — applied
 
-Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible and so Phase 3 can seed forward-compatible accounts rather than leaving later phases a backfill.
+`027_platform_onboarding_states.sql` adds `onboarding_states`, one row per `(org_id, app_slug)`.
 
-**`onboarding_states`** (Phase 9, `027_platform_*`) — PK `(org_id, app_slug)` · `status` TEXT CHECK IN (`NOT_STARTED`,`IN_PROGRESS`,`SKIPPED`,`COMPLETED`) · `current_step` SMALLINT · `draft` JSONB NOT NULL DEFAULT `'{}'` · `skipped_at` · `completed_at` · timestamps. `app_slug` gets a non-blank CHECK only — validated against `isAppSlug` in the service rather than duplicating `config/apps.ts` into a constraint, the same call migration 017 made for `audit_logs` — plus a `'platform'` sentinel for the suite-level wizard. `COMPLETED` is deliberately **not** terminal: re-running onboarding is already legal.
+**`onboarding_states`** — `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `app_slug` TEXT NOT NULL (non-blank CHECK, `<= 40` chars) · `status` TEXT DEFAULT `'NOT_STARTED'` CHECK IN (`NOT_STARTED`,`IN_PROGRESS`,`SKIPPED`,`COMPLETED`) · `current_step` TEXT nullable, `<= 60` chars · `draft` JSONB NOT NULL DEFAULT `'{}'::jsonb`, CHECK `jsonb_typeof(draft) = 'object'` · `completed_at`/`skipped_at` TIMESTAMPTZ nullable · timestamps. `ux_onboarding_states_org_app` — `UNIQUE (org_id, app_slug)` (not a composite PK — the row still has its own UUID `id`, matching this schema's convention everywhere else). `idx_onboarding_states_org` on `org_id`.
 
-**`migration_imports`** / **`migration_import_rows`** (Phase 9b, `028_ledger-core_*`) — a staged importer. `kind` CHECK IN (`CHART_OF_ACCOUNTS`,`OPENING_BALANCES`) · `status` FSM `DRAFT → VALIDATED → COMMITTED` plus `DISCARDED` · counts · `journal_entry_id` composite FK → `journal_entries (org_id, id)` · `committed_at`/`committed_by`. Rows carry `row_number`, the source line as `raw` JSONB, per-row `status`/`errors`, an `action` (`CREATE`/`MERGE`/`IGNORE`) and `resolved_account_id`. A **partial unique index** — `UNIQUE (org_id) WHERE kind = 'OPENING_BALANCES' AND status = 'COMMITTED'` — allows exactly one committed opening-balance import per organization, ever; a wrong one is corrected by a reversing entry (rule 6), never by re-importing. Both tables get a `to_jsonb` row-diff immutability trigger once `COMMITTED`, mirroring `payments`.
+`app_slug` carries **no** `REFERENCES` and no enumerated CHECK — validated against `isOnboardingSlug` (`isAppSlug` plus a `'platform'` sentinel for the suite-level wizard) in the service, the same call migration 017 made for `audit_logs.app_slug`. `draft` is untrusted JSON, bound as one parameter everywhere it's written, never spread into a query. `COMPLETED` is deliberately **not** terminal — `ONBOARDING_TRANSITIONS` allows `COMPLETED → IN_PROGRESS`, since re-running a completed wizard is already legal (`settingsService.completeOnboarding` is an upsert). `trg_onboarding_states_updated_at` (`set_updated_at`) and `trg_onboarding_states_audit` (`audit_row_change('platform')`).
 
-**`3400 Opening Balance Equity`** (Phase 9b, `029_ledger-core_*`) — a delta seed adding one account to `DEFAULT_CHART` **and** backfilling every existing organization, structured like migration 003. **The default chart becomes 45 accounts.** It exists because opening balances cannot be plugged to `3200 Retained Earnings`: `reportService.balanceSheet` derives retained earnings from revenue and expense before the fiscal year start, and its own comment warns that anything posted to `3200` is counted twice.
+## Phase 9b — chart & opening-balance import (LedgerCore) — applied
+
+`028_ledger-core_opening_balance_equity.sql` adds `3400 Opening Balance Equity` to `DEFAULT_CHART` and backfills every existing organization, structured like migration 003. **The default chart becomes 45 accounts.** It exists because opening balances cannot be plugged to `3200 Retained Earnings`: `reportService.balanceSheet` derives retained earnings from revenue and expense before the fiscal year start, and its own comment warns that anything posted to `3200` is counted twice.
+
+`029_ledger-core_migration_imports.sql` adds the staged importer, deliberately shaped against Phase 6's bank import: that one aborts the whole file on the first bad row and writes live rows immediately; this one stages every row, good and bad, and separates validation from commit.
+
+**`migration_imports`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE RESTRICT · `kind` TEXT CHECK IN (`CHART_OF_ACCOUNTS`,`OPENING_BALANCES`) · `status` TEXT DEFAULT `'DRAFT'` CHECK IN (`DRAFT`,`VALIDATED`,`COMMITTED`) · `file_name`/`delimiter` · `row_count`/`error_count` INTEGER · `journal_entry_id` UUID nullable, composite FK → `journal_entries (org_id, id)` ON DELETE RESTRICT · `committed_at` TIMESTAMPTZ nullable · `created_by` FK → `users` ON DELETE RESTRICT · timestamps. `ux_migration_imports_org_id_id` — `UNIQUE (org_id, id)`, what makes the composite FK from `migration_import_rows` legal. `chk_migration_imports_error_count` — `error_count <= row_count`. `chk_migration_imports_committed` — `(status = 'COMMITTED') = (committed_at IS NOT NULL)`, the same "posted-complete" idiom `chk_bills_posted_complete`/`chk_fiscal_periods_locked_complete` use. `chk_migration_imports_entry_kind` — `journal_entry_id IS NULL OR kind = 'OPENING_BALANCES'`, since a chart import never posts to the GL.
+
+**A partial unique index**, not a service check — `ux_migration_imports_one_committed_opening`: `UNIQUE (org_id) WHERE kind = 'OPENING_BALANCES' AND status = 'COMMITTED'`. Allows exactly one committed opening-balance import per organization, ever; a wrong one is corrected by a reversing journal entry (rule 6), never by re-importing. A `CHART_OF_ACCOUNTS` import carries no such limit — merging a chart via a separate, later import is legal. See [study/postgresql/partial-unique-indexes.md](../study/postgresql/partial-unique-indexes.md).
+
+**`migration_import_rows`** — `id` UUID PK · `org_id` FK ON DELETE RESTRICT · `import_id` UUID NOT NULL, composite FK → `migration_imports (org_id, id)` ON DELETE CASCADE · `row_number` INTEGER `CHECK (>= 2)` (header row counted) · `raw` JSONB NOT NULL DEFAULT `'{}'::jsonb` (the row's fields as originally parsed, canonical-keyed, for showing a validation error against the actual input) · `account_code`/`account_name`/`parent_code`/`description` TEXT, each nullable with a length CHECK · `account_type` TEXT nullable, CHECK IN the five account types · `debit_cents`/`credit_cents` BIGINT nullable, each `CHECK (IS NULL OR >= 0)` · `errors` TEXT[] NOT NULL DEFAULT `'{}'` · `status` TEXT DEFAULT `'INVALID'` CHECK IN (`VALID`,`INVALID`,`EXCLUDED`) · timestamps. `ux_migration_rows_import_row` — `UNIQUE (org_id, import_id, row_number)`. `chk_migration_rows_one_side` — at most one of `debit_cents`/`credit_cents` may be non-zero, rule 7's shape applied to staged data. `chk_migration_rows_valid_has_no_errors` — `status <> 'VALID' OR cardinality(errors) = 0`, so a row can never claim to be valid while still carrying a recorded error.
+
+`trg_migration_imports_updated_at`/`trg_migration_rows_updated_at` (`set_updated_at`) on both tables. **Audited on the parent only** — `trg_migration_imports_audit` runs `audit_row_change('ledger-core')` on `migration_imports`; `migration_import_rows` carries **no** audit trigger, the same exemption `bank_match_suggestions` and `fx_revaluation_lines` carry — it's staging data, rewritten wholesale on every re-validate, and what it ultimately produces (real accounts, a real journal entry) is itself audited.
+
+**Neither table has an immutability trigger.** A `COMMITTED` import's row-level fields are not database-enforced read-only the way `invoices`/`bills`/`payments` are past their own posted state — `chk_migration_imports_committed` and `chk_migration_imports_entry_kind` protect specific invariants, but nothing stops a raw `UPDATE` from changing, say, a committed import's `file_name`. The service layer never issues such an `UPDATE` (every write path checks `status !== 'COMMITTED'` first), but this is a real gap relative to the immutability discipline the rest of the schema enforces at the database layer — recorded honestly rather than papered over.
+
+See [ledger-core.md § Phase 9b](ledger-core.md#phase-9b--chart--opening-balance-import) for the commit semantics (parent-before-child chart resolution, the imbalance-as-plug computation, the three refused accounts) and [api.md](api.md#migration-imports--apiv1ledger-coremigration-imports--phase-9b) for the routes.
+
+## Phase 9.5+ — target tables
+
+Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible.
 
 **`documents`** / **`document_links`** (Phase 9.5, `030_platform_*`) — the suite-wide vault. `documents`: `id` · `org_id` · `sha256` CHAR(64) · `byte_size` BIGINT · `mime_type` (sniffed from magic bytes, never the client's header) · `original_filename` · `uploaded_by` · timestamps, with `UNIQUE (org_id, sha256)` so re-uploading a file is idempotent. `document_links`: `(org_id, document_id, app_slug, entity_type, entity_id)` with a `UNIQUE` over all five. The link table is what keeps rule 16 intact — an app attaching a file talks to the platform, never to another app's tables. Both audited with `audit_row_change('platform')`; `documents` is insert-only.
 
@@ -456,11 +476,13 @@ Indentation below is `parent_id`. **H** marks a header account (`is_postable = f
 | 3100 | · Common Stock / Owner's Capital | Equity | | 6600 | · Bank Fees | Expense |
 | 3200 | · Retained Earnings | Equity | | 6810 | · Realized FX Loss | Expense |
 | 3300 | · Owner's Draw | Equity | | 6820 | · Unrealized FX Gain/Loss | Expense |
+| 3400 | · Opening Balance Equity | Equity | | | | |
 
-**Forty-four accounts: 34 postable leaves and 10 header rollups.** The two counts matter separately — only the 34 can receive a posting, and only they appear on a trial balance. Three groups exist to pay debts forward rather than because Phase 3 needs them, which is deliberate — adding an account to the seed later means writing *another* backfill for every organization created in between:
+**Forty-five accounts: 35 postable leaves and 10 header rollups.** The two counts matter separately — only the 35 can receive a posting, and only they appear on a trial balance. Four groups exist to pay debts forward rather than because Phase 3 needs them, which is deliberate — adding an account to the seed later means writing *another* backfill for every organization created in between:
 
 - **`1180` / `2140` (tax)** — AP-Flow splits input tax out of an invoice total into a dedicated account (Phase 11).
 - **`4910` / `6810` / `6820` (FX)** — the multi-currency engine posts realized gain or loss on settlement and unrealized movement at period end (Phase 8).
+- **`3400` (opening balance equity)** — a business migrating off another system plugs its trial balance's imbalance here rather than into `3200`, which is derived and never posted (Phase 9b). Added by `028_ledger-core_opening_balance_equity.sql`, with a backfill mirroring `003`'s for every organization that predates it — the count went from 44 to 45 on 2026-09-10.
 - **`5000` and `6000` are both `Expense`.** COGS and operating expenses are separated by code range and by parent, not by a sixth account type. Rule 12 is not negotiable: the type list is exactly five. The P&L (Phase 4) derives gross profit from the `5xxx` range, which is why the ranges above are load-bearing rather than cosmetic.
 
 Codes are chosen to match the worked examples in [ledger-core.md](ledger-core.md) and [ap-flow.md](ap-flow.md) literally — `6120 Software & IT Infrastructure` debited against `2100 Accounts Payable` for a cloud bill, `1500 Fixed Assets / Equipment` against `1110 Operating Cash` for a hardware receipt, and a supermarket receipt split across `6130` and `6140`.

@@ -137,6 +137,39 @@ export const BANK_TRANSACTION_TRANSITIONS = {
 
 This is also the one FSM in the codebase where the transition table alone is *not sufficient* to gate every operation that reaches a given target state. `IGNORED -> UNMATCHED` and `MATCHED -> UNMATCHED` are both legal by the table — both land on `UNMATCHED` — but they are reached through two different API verbs (`/unignore` and `/unmatch` respectively) that mean different things and should not be interchangeable at the route level: un-ignoring a line that was never matched has no GL side effect at all, while unmatching one does. `unmatchTransaction` therefore layers an *additional*, narrower check (`row.status !== 'MATCHED'`) on top of the generic `canTransitionBankTransaction` call rather than in place of it — the shared table still runs first as the single source of truth for bare legality, and the endpoint-specific restriction sits above it, never replacing it. A table that only ever gates "is X a legal successor of Y" cannot, on its own, express "and only when reached via this specific verb" — that distinction has to live in the service that knows which verb is calling.
 
+### A "completed" state that is deliberately not terminal
+
+Every FSM above eventually reaches a state with no way out (`VOID`, `LOCKED`) or a state whose only way out has a real side effect (`MATCHED`). `OnboardingStatus` (Phase 9a) is the first one where the state that *sounds* most final — `COMPLETED` — is neither:
+
+```ts
+export const ONBOARDING_TRANSITIONS = {
+  NOT_STARTED: ['IN_PROGRESS', 'SKIPPED', 'COMPLETED'],
+  IN_PROGRESS: ['SKIPPED', 'COMPLETED'],
+  SKIPPED:     ['IN_PROGRESS', 'COMPLETED'],
+  COMPLETED:   ['IN_PROGRESS'],
+} as const satisfies Record<OnboardingStatus, readonly OnboardingStatus[]>;
+```
+
+`COMPLETED -> IN_PROGRESS` is a real, intended edge, because re-running a completed wizard is already legal elsewhere in the system: `settingsService.completeOnboarding` — LedgerCore's own wizard completer — is an `UPSERT` (`ON CONFLICT (org_id) DO UPDATE`), not an insert-or-409, specifically so a double submit or a deliberate re-run overwrites cleanly rather than erroring. `markCompletedOnClient` (the function that flips `onboarding_states.status` to `COMPLETED`) reflects that by running with **no transition check at all** — completion is legal from every state, unconditionally, because the thing it's recording ("the wizard finished") is a fact about an action that just happened, not a claim about a state that can no longer change.
+
+This is the clearest illustration in the codebase of a rule worth stating explicitly: **an FSM's shape has to match what the *label* actually promises**, not what it sounds like it should promise by analogy with a similarly-named state elsewhere. `VOID` and `LOCKED` are terminal because their labels are promises about the *future* ("this will never be posted to again" / "this will never change again"). `COMPLETED` here is a label about the *past* ("this finished once") — and a fact about the past staying true forever doesn't require the *state* to be unable to move again. Reaching for "COMPLETED sounds final, make it terminal" without asking what the label is actually promising is exactly the mistake this FSM avoids.
+
+### A backward edge whose entire purpose is invalidation, not correction
+
+`MigrationImportStatus` (Phase 9b) has a second kind of intentional backward edge, different again from `CLOSED -> OPEN`'s "undo a decision" and `MATCHED -> UNMATCHED`'s "undo a GL side effect":
+
+```ts
+export const MIGRATION_IMPORT_TRANSITIONS = {
+  DRAFT:     ['VALIDATED'],
+  VALIDATED: ['DRAFT', 'COMMITTED'],
+  COMMITTED: [],
+} as const satisfies Record<MigrationImportStatus, readonly MigrationImportStatus[]>;
+```
+
+`VALIDATED -> DRAFT` doesn't undo anything a user asked for — nobody ever requests it directly, and there is no route that takes an import from `VALIDATED` back to `DRAFT` as its purpose. It happens as a **side effect** of `PATCH`ing a row: `migrationImportService.revalidateOnClient` runs after every row fix and recomputes the import's status from scratch (`errorCount === 0 ? 'VALIDATED' : 'DRAFT'`), and if the fix that was just applied introduced a *new* problem — or simply didn't fix the one it targeted — the import's status genuinely has to move backward, because "every row is currently valid" is no longer a true statement about the data. The edge exists so the FSM can never lie about that: without it, an import could get stuck reporting `VALIDATED` (and therefore commit-eligible) while a row underneath it silently carries an error, which is precisely the kind of drift between "the status column" and "the data it claims to summarize" that a single-source-of-truth transition table exists to prevent.
+
+`COMMITTED` stays genuinely terminal, though — once real accounts exist or a real journal entry has posted, there is no version of "un-committing" that doesn't mean editing a posted document, which rule 6 forbids outright. A wrong commit is corrected the same way every other posted document in this codebase is: a reversing entry (for opening balances) or a new, separate import (for a chart merge), never a backward walk on this FSM.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -164,11 +197,18 @@ This is also the one FSM in the codebase where the transition table alone is *no
 - `server/src/db/migrations/019_ledger-core_bank_reconciliation.sql` — the three-value `status` CHECK, `chk_bank_txn_matched_fields` requiring `matched_payment_id`/`matched_at`/`matched_by` exactly when `status = 'MATCHED'`
 - `server/src/services/ledger-core/bankMatchService.ts` — `matchTransaction`/`unmatchTransaction`/`setIgnored`, each calling `canTransitionBankTransaction` before writing; `unmatchTransaction` layers an additional `row.status !== 'MATCHED'` check on top of the table so `/unmatch` and `/unignore` — two different verbs that both land on `UNMATCHED` by the table alone — stay distinct at the route level
 - `server/src/__tests__/ledger-core/bankMatching.test.ts` — `'unmatching voids the payment and restores the amount due'` (the GL-side-effect proof), `'matching an already-matched line is 409'`, `'unmatching an unmatched line is 409'`
+- `server/src/types/onboarding.ts` — `ONBOARDING_STATUSES`, `OnboardingStatus`, `ONBOARDING_TRANSITIONS`, `canTransitionOnboarding` — the first FSM where the "finished" state is deliberately not terminal
+- `server/src/services/onboardingService.ts` — `markCompletedOnClient` runs no transition check at all (completion is legal from every state); every other write (`saveDraft`/`skip`/`resume`) calls `canTransitionOnboarding`, with `from === to` treated as always legal so re-saving a draft while already `IN_PROGRESS` isn't rejected as an illegal self-transition
+- `server/src/db/migrations/027_platform_onboarding_states.sql` — the four-value `status` CHECK matching `ONBOARDING_TRANSITIONS`'s keys exactly
+- `server/src/types/ledger-core.ts` — `MIGRATION_IMPORT_STATUSES`, `MigrationImportStatus`, `MIGRATION_IMPORT_TRANSITIONS`, `canTransitionMigrationImport` — the first FSM with a backward edge (`VALIDATED -> DRAFT`) that exists purely to prevent the status from lying about the data underneath it
+- `server/src/services/ledger-core/migrationImportService.ts` — `revalidateOnClient`, the one function that recomputes and writes the import's status after every row fix, shared by both the initial staging pass and every later `PATCH`
+- `server/src/db/migrations/029_ledger-core_migration_imports.sql` — the three-value `status` CHECK, plus `chk_migration_imports_committed` requiring `committed_at IS NOT NULL` exactly when `status = 'COMMITTED'` (the same "posted-complete" CHECK idiom `chk_bills_posted_complete`/`chk_fiscal_periods_locked_complete` use)
 
 ## Gotchas
 
 - `INVOICE_TRANSITIONS` and the migration's CHECK list must be edited together. Nothing enforces this at build time across the two files — only a test that tries to write a status neither list expects would catch drift, which is why `invoiceConstraints.test.ts` exists.
 - `canTransitionInvoice(from, to)` answers "is this edge in the graph," not "is this write otherwise valid." `issueInvoice` still needs its own checks (an invoice needs at least one line, a receivable account must be configured) — the FSM only gates the state change, not the business rules attached to it.
+- **A naive transition table rejects `from === to` as illegal, which breaks idempotent re-saves.** `ONBOARDING_TRANSITIONS['IN_PROGRESS']` doesn't list `'IN_PROGRESS'` as a legal target — it's a set of genuine *transitions*, and staying put isn't one. Saving a wizard's draft twice in a row (`IN_PROGRESS -> IN_PROGRESS`) is a real, expected no-op, not a graph edge that needs to exist. `onboardingService`'s `assertTransition` handles this with an explicit early return (`if (from === to) return;`) before consulting the table at all — the fix belongs in the *caller* of the transition check, not in padding every state's array with a self-loop, which would make the table lie about what a "transition" actually means everywhere else it's read.
 - The row-diff trigger technique (`to_jsonb(NEW) - 'col' IS DISTINCT FROM ...`) silently permits a change to *any* column not in the exclusion list. Adding a mutable field to `invoices` later (say, an internal reference number editable after issue) requires deliberately adding it to the exclusion list — it will not "just work," and forgetting it means that field becomes frozen at issue by default, which is the safe failure direction but still worth knowing.
 - `DELETE` and `UPDATE` share one trigger function here (`FOR EACH ROW`, both operations), branching on `TG_OP`. `NEW` is unassigned on `DELETE` — the same trap `study/postgresql/deferred-constraint-triggers.md` documents for the balance trigger — so the function checks `TG_OP = 'DELETE'` before touching `NEW` at all.
 - The recall edge (`AWAITING_APPROVAL -> DRAFT`) is legal in the FSM but has no dedicated route or button yet — `updateBill` reaching that state is a side effect of it being mutable in both directions, not a named "reject" action. A reviewer today rejects a bill by editing it back to something wrong on purpose, or by voiding it; a real "Send back for correction" feature would still just call the existing PATCH, since the FSM already permits it.

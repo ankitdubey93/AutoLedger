@@ -100,15 +100,36 @@ export async function updateOrganization(
       WHERE id = $1
       RETURNING id, name, slug, base_currency, tax_number, business_number, created_at`;
 
+  // Phase 9a: the base-currency lock used to live only in
+  // settingsService.completeOnboarding, leaving this route free to change a
+  // base currency out from under an organization that already has ledger
+  // lines. The guard and the write now share one transaction — a
+  // check-then-act split across two round trips would race a concurrent
+  // journal post.
+  async function runUpdate(client: Queryable): Promise<{ rows: OrganizationRow[] }> {
+    if (input.baseCurrency !== undefined) {
+      const { rows: guardRows } = await client.query<{ base_currency: string; has_lines: boolean }>(
+        `SELECT o.base_currency,
+                EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
+           FROM organizations o
+          WHERE o.id = $1`,
+        [orgId],
+      );
+      const guard = guardRows[0];
+      if (guard === undefined) throw new ApiError(404, 'Organization not found');
+      if (guard.has_lines && guard.base_currency.trim() !== input.baseCurrency) {
+        throw new ApiError(422, 'Base currency cannot be changed once journal entries exist');
+      }
+    }
+    return client.query<OrganizationRow>(sql, values);
+  }
+
   // `q === pool` means no caller has already opened a transaction, so this
   // write opens its own (Phase 5 — every write needs a transaction for the
   // audit context to attach to). A caller that passed its own `client`
   // (settingsService's onboarding transaction) already has one; wrapping it
   // again would try to BEGIN a transaction that is already open.
-  const { rows } =
-    q === pool
-      ? await withTransaction((client) => client.query<OrganizationRow>(sql, values))
-      : await q.query<OrganizationRow>(sql, values);
+  const { rows } = q === pool ? await withTransaction(runUpdate) : await runUpdate(q);
 
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Organization not found');

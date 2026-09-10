@@ -23,9 +23,13 @@ import type { SeededUser } from '../helpers/factories.js';
 const app = createApp();
 const BASE = '/api/v1/ledger-core/accounts';
 
-/** The seed's totals, asserted rather than assumed. See docs/schema.md. */
-const SEEDED_TOTAL = 44;
-const SEEDED_POSTABLE = 34;
+/**
+ * The seed's totals, asserted rather than assumed. See docs/schema.md.
+ * Phase 9b adds 3400 Opening Balance Equity, a postable leaf: 44 -> 45
+ * total, 34 -> 35 postable.
+ */
+const SEEDED_TOTAL = 45;
+const SEEDED_POSTABLE = 35;
 
 let userA: SeededUser;
 let userB: SeededUser;

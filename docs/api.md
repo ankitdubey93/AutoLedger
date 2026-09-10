@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -147,6 +147,8 @@ The active organization comes **only** from the verified access token. `orgId` i
 `/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the client renders as an explanatory notice rather than an error.
 
 `PATCH /` (Phase 3.5) is the platform half of LedgerCore's onboarding — organization name and `base_currency` are platform fields, not LedgerCore ones, so they are edited here rather than under `/ledger-core/settings`. Phase 3.8 adds `taxNumber` and `businessNumber` (each `string | null`, max 64 chars) — a business's tax and legal-entity registration numbers, also platform fields since they identify the legal entity rather than any one app. Whether they print on a LedgerCore invoice is a separate, app-owned choice — see `/ledger-core/settings/invoicing`'s `showTaxNumber`/`showBusinessNumber`. All fields optional, at least one required (`400 No fields to update`).
+
+**The base-currency lock (Phase 9a).** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` here returns `422 Base currency cannot be changed once journal entries exist` — the identical message and status `POST /ledger-core/settings/onboarding` has always returned (see the LedgerCore Settings section below). Before Phase 9a this route had no such check, leaving a gap where a base-currency change could bypass the lock entirely; the guard and the write now run inside one transaction here too. Re-submitting the *same* currency is always accepted.
 
 ---
 
@@ -327,7 +329,25 @@ Failure paths: `400 status must be one of PENDING, DELIVERED, FAILED` for an unk
 
 ---
 
-### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅, Phase 6 ✅, Phase 8 ✅
+### Onboarding — `/api/v1/onboarding` — Phase 9a
+
+Resumable, skippable setup-wizard state, one row per `(org, app)` plus a `'platform'` sentinel. Platform-level, not namespaced under any app — every app that acquires a wizard gets skip-and-resume for free (guardrails rule 16), mirroring `/audit-logs` and `/webhooks`.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | The checklist — one item per app in the registry plus `'platform'`, a missing row reads as `NOT_STARTED` |
+| GET | `/:appSlug` | any member | One app's onboarding state |
+| PUT | `/:appSlug/draft` | `OWNER`, `ADMIN` | Upsert the current step and draft; moves to `IN_PROGRESS` |
+| POST | `/:appSlug/skip` | `OWNER`, `ADMIN` | Upsert to `SKIPPED`; the draft is preserved |
+| POST | `/:appSlug/resume` | `OWNER`, `ADMIN` | Upsert to `IN_PROGRESS`; legal from `SKIPPED` or `COMPLETED` |
+
+`:appSlug` is a routing target validated against `config/apps.ts` (plus `'platform'`), never a tenancy boundary — `orgId` from the verified access token is still the only scope predicate. Every write is an upsert; there is no 409 for "you already started." `draft` is untrusted JSON — bound as one JSONB parameter, never spread into a query, and re-parsed through the target app's own schema when that app's own completion route (e.g. `POST /ledger-core/settings/onboarding`) runs. Completion is not a route here — each app's own wizard-completer calls `markCompletedOnClient` on its own transaction, so the app's data and its onboarding row commit together.
+
+Failure paths: `400` from the schema · `403` for anything below `OWNER`/`ADMIN` on a write · `404 Unknown app` for a slug not in the registry · `409 Cannot move onboarding from <FROM> to <TO>` for an illegal transition (e.g. skip after already `COMPLETED` — completion only ever moves back to `IN_PROGRESS`, never to `SKIPPED`).
+
+---
+
+### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅, Phase 6 ✅, Phase 8 ✅, Phase 9b ✅
 
 Full feature spec and the remaining phases: [ledger-core.md](ledger-core.md).
 
@@ -415,7 +435,7 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 
 `organizationName` and `baseCurrency` are accepted by `POST /onboarding` but are written through `PATCH /organizations`, not this table — see the Organizations section above. `PATCH /settings` does **not** accept either field.
 
-**The base-currency lock.** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` to `POST /onboarding` returns `422` (`Base currency cannot be changed once journal entries exist`) — `ledger_lines.currency_code` is stamped at write time on rows that are immutable by trigger, so a retroactive change would silently invalidate every posted line. Re-submitting the *same* currency is always accepted. `settings.baseCurrencyLocked` tells the client when to disable the field.
+**The base-currency lock.** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` to `POST /onboarding` returns `422` (`Base currency cannot be changed once journal entries exist`) — `ledger_lines.currency_code` is stamped at write time on rows that are immutable by trigger, so a retroactive change would silently invalidate every posted line. Re-submitting the *same* currency is always accepted. `settings.baseCurrencyLocked` tells the client when to disable the field. **As of Phase 9a, `PATCH /organizations` enforces the identical lock** (see the Organizations section above) — the two doors can no longer disagree.
 
 Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
 
@@ -636,13 +656,39 @@ Narrower than every other LedgerCore write route except `POST /fiscal-periods/:i
 
 Failure paths: `400` from the schema (`asOfDate` missing/malformed) · `403` for anything below `OWNER`/`ADMIN` · `422 There is no open foreign-currency balance to revalue on this date` · `422 No exchange rate for <currency> to <base> on or before <date>` · `422 The fiscal period covering <date> is closed/locked; ...` (from the entry or its next-day reversal — the whole attempt rolls back, writing nothing) · `409 A revaluation already exists for this date` · `404 FX revaluation not found`.
 
+#### Migration imports — `/api/v1/ledger-core/migration-imports` — Phase 9b
+
+A business moving off another system's way in: stage a chart-of-accounts or opening-balance CSV, fix per-row errors, then commit once. Deliberately the inverse of `/bank-imports` (Phase 6) — every row stages, good and bad, instead of the whole file aborting on the first bad one.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Stage a new import — `{ kind, fileName, content }`, `content` is CSV text, not multipart |
+| GET | `/` | any member | Paginated list, optional `?kind=` |
+| GET | `/:id` | any member | One import's summary |
+| GET | `/:id/rows` | any member | Paginated staged rows, optional `?status=VALID\|INVALID\|EXCLUDED` |
+| PATCH | `/:id/rows/:rowId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Fix one row's fields; re-validates the whole import |
+| POST | `/:id/validate` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Re-run validation without changing a row |
+| GET | `/:id/preview` | `OWNER`, `ADMIN`, `ACCOUNTANT` | What commit will do if run now — never applies anything |
+| POST | `/:id/commit` | **`OWNER`, `ADMIN` only** | Commit a `VALIDATED` import. Irreversible |
+| DELETE | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete a non-committed import (rows cascade) |
+
+There is no `dateFormat` and no `columnMap`, unlike `/bank-imports` — neither importer has a date column; columns resolve by header synonym only (`code`/`account code`/`account`/…, `debit`/`dr`/…, and so on).
+
+**Kind `CHART_OF_ACCOUNTS`.** Matches on `code`: an unknown code is created (parent resolved by parent *code*, depth-first, the same technique `seedDefaultChart` uses), a known code merges `name`/`description` only — never `code` or `type`. `preview` reports `accountsToCreate`/`accountsToMerge`; `commit`'s `result` is `{ kind: 'CHART_OF_ACCOUNTS', createdCount, mergedCount }`. A chart import may be committed any number of times as **separate** uploads — nothing here limits it to one, unlike the opening-balance kind below.
+
+**Kind `OPENING_BALANCES`.** Every `VALID` row becomes one line in **one** journal entry, posted through `journalService.createEntryOnClient` at `ledger_settings.books_start_date`, `sourceType: 'opening_balance'` — never a direct `ledger_lines` write, so the period-lock guard and the balance triggers apply unchanged. Any imbalance is plugged to `3400 Opening Balance Equity`, shown in `preview.plugCents` (signed: positive is a credit plug, negative a debit plug) before commit, never applied silently. `3200 Retained Earnings` and the AR/AP control accounts (`ledger_invoice_settings.receivableAccountId`/`ledger_settings.payableAccountId`, falling back to codes `1120`/`2100`) are refused per row — see the failure paths. `commit`'s `result` is `{ kind: 'OPENING_BALANCES', journalEntryId, plugCents }`. **A second committed opening-balance import for the same organization is refused, enforced by a partial unique index, not just the service** — see [schema.md](schema.md).
+
+Row-level `errors: string[]` accumulate rather than abort; an import's `status` is `DRAFT` while any row is `INVALID`, `VALIDATED` once every non-excluded row is `VALID`, `COMMITTED` once posted (terminal). `PATCH .../rows/:rowId` accepts `accountCode`, `accountName`, `accountType`, `parentCode`, `description`, `debitCents`, `creditCents`, `status` (`VALID`/`EXCLUDED` only) — whichever fields are sent — then re-validates the whole import, so fixing one row can change another row's errors (e.g. resolving a duplicate code).
+
+Failure paths: `400` from the schema · `403` for a write below its role tier · `404` for another org's import or row, or an unknown `id`/`rowId` · `409 Fix N invalid row(s) before committing` (commit attempted before `VALIDATED`) · `409 This import has already been committed` (any write to a `COMMITTED` import) · `409 A committed import cannot be deleted` · `409 This organization already has a committed opening-balance import` · `422 Could not find a(n) <field> column in the file` (a required header missing — the one whole-file failure) · `422 Complete LedgerCore onboarding before importing opening balances` · `422 Account 3400 Opening Balance Equity is missing — run migrations` · `422` from the period-lock guard if `books_start_date` falls inside a closed/locked period.
+
 ---
 
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
 
-Phase 3, Phase 4, Phase 6, and Phase 8 are **built** and documented in the section above — the FX engine's `fx_rates`, foreign-currency invoices/bills/payments with realized settlement gain/loss, and period-end unrealized revaluation are all complete. Still to come:
+Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in the section above — the FX engine's `fx_rates`, foreign-currency invoices/bills/payments with realized settlement gain/loss, period-end unrealized revaluation, and the staged chart-of-accounts/opening-balance importer are all complete. Still to come:
 
 #### QuickBooks Online sync — Phase 17
 

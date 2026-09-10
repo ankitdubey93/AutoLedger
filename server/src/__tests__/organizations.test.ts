@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../app.js';
-import { closePool } from '../db/connect.js';
+import { closePool, pool } from '../db/connect.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from './helpers/factories.js';
 import type { SeededUser } from './helpers/factories.js';
 
@@ -81,5 +81,51 @@ describe('PATCH /organizations — tax and business numbers', () => {
     expect(res.status).toBe(200);
     expect(res.body.organization.taxNumber).toBeNull();
     expect(orgB).not.toBe(orgA);
+  });
+});
+
+async function accountId(orgId: string, code: string): Promise<string> {
+  const { rows } = await pool.query<{ id: string }>('SELECT id FROM accounts WHERE org_id = $1 AND code = $2', [
+    orgId,
+    code,
+  ]);
+  const row = rows[0];
+  if (row === undefined) throw new Error(`fixture: no account ${code} in org ${orgId}`);
+  return row.id;
+}
+
+async function postSale(agent: Awaited<ReturnType<typeof loginAgent>>, orgId: string) {
+  const res = await agent.post('/api/v1/ledger-core/journals').send({
+    entryDate: '2026-06-01',
+    description: 'Fixture sale',
+    lines: [
+      { accountId: await accountId(orgId, '1110'), debitCents: 10000, creditCents: 0 },
+      { accountId: await accountId(orgId, '4200'), debitCents: 0, creditCents: 10000 },
+    ],
+  });
+  if (res.status !== 201) throw new Error(`fixture: posting failed ${res.status} ${res.text}`);
+  return res;
+}
+
+describe('PATCH /organizations — the base-currency lock (Phase 9a)', () => {
+  it('refuses a base-currency change once ledger lines exist', async () => {
+    const agent = await loginAgent(app, userA);
+    await postSale(agent, orgA);
+
+    const res = await agent.patch(ORGANIZATIONS).send({ baseCurrency: 'INR' });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Base currency cannot be changed once journal entries exist');
+  });
+
+  it('accepts the same base currency after lines exist', async () => {
+    const agent = await loginAgent(app, userA);
+    await postSale(agent, orgA);
+
+    const before = await agent.get(ORGANIZATIONS);
+    const currentCurrency = before.body.organization.baseCurrency as string;
+
+    const res = await agent.patch(ORGANIZATIONS).send({ baseCurrency: currentCurrency });
+    expect(res.status).toBe(200);
   });
 });

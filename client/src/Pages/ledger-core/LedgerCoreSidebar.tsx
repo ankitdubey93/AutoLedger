@@ -105,6 +105,10 @@ const NAV_GROUPS = [
       { to: 'webhooks/deliveries', label: 'Deliveries', icon: Send, end: false },
     ],
   },
+  {
+    heading: 'Data migration',
+    items: [{ to: 'migration-imports', label: 'Imports', icon: Upload, end: false }],
+  },
 ] as const;
 
 export default function LedgerCoreSidebar() {

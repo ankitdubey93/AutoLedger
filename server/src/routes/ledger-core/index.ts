@@ -12,6 +12,7 @@ import fiscalPeriodRoutes from './fiscalPeriodRoutes.js';
 import fxRateRoutes from './fxRateRoutes.js';
 import fxRevaluationRoutes from './fxRevaluationRoutes.js';
 import invoiceRoutes from './invoiceRoutes.js';
+import migrationImportRoutes from './migrationImportRoutes.js';
 import vendorRoutes from './vendorRoutes.js';
 
 /**
@@ -32,6 +33,7 @@ router.use('/fx-rates', fxRateRoutes);
 router.use('/fx-revaluations', fxRevaluationRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/journals', journalRoutes);
+router.use('/migration-imports', migrationImportRoutes);
 router.use('/payments', paymentRoutes);
 router.use('/reports', reportRoutes);
 router.use('/settings', settingsRoutes);

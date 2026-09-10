@@ -3,7 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import { useOrg } from '../../context/OrgContext';
 import {
   completeLedgerOnboarding,
+  getOnboardingState,
   listAccounts,
+  saveOnboardingDraft,
+  skipOnboarding,
   type Account,
   type OnboardingInput,
 } from '../../services/fetchServices';
@@ -86,6 +89,7 @@ export default function OnboardingPage() {
   const [cashAccountId, setCashAccountId] = useState('');
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [draftLoaded, setDraftLoaded] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -106,6 +110,70 @@ export default function OnboardingPage() {
       ignore = true;
     };
   }, []);
+
+  // Pre-fills from a saved draft once, via the effect-plus-latch pattern
+  // NewJournalEntryPage uses for `?copyFrom=`. A failed fetch is silent — the
+  // wizard still works with blank defaults, it just does not resume.
+  useEffect(() => {
+    if (draftLoaded) return;
+    let ignore = false;
+
+    getOnboardingState('ledger-core')
+      .then((state) => {
+        if (ignore) return;
+        const draft = state.draft;
+        if (typeof draft.organizationName === 'string') setOrganizationName(draft.organizationName);
+        if (typeof draft.legalName === 'string') setLegalName(draft.legalName);
+        if (typeof draft.industry === 'string') setIndustry(draft.industry);
+        if (typeof draft.baseCurrency === 'string') setBaseCurrency(draft.baseCurrency);
+        if (typeof draft.fiscalYearStartMonth === 'number') setFiscalYearStartMonth(draft.fiscalYearStartMonth);
+        if (typeof draft.fiscalYearStartDay === 'number') setFiscalYearStartDay(draft.fiscalYearStartDay);
+        if (typeof draft.booksStartDate === 'string') setBooksStartDate(draft.booksStartDate);
+        if (typeof draft.cashAccountId === 'string') setCashAccountId(draft.cashAccountId);
+        setDraftLoaded(true);
+      })
+      .catch(() => {
+        if (!ignore) setDraftLoaded(true);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [draftLoaded]);
+
+  /** Fire-and-forget: a failed autosave must never block the wizard. */
+  function autosaveDraft(step: WizardStep['step']) {
+    void saveOnboardingDraft('ledger-core', {
+      currentStep: String(step),
+      draft: {
+        organizationName,
+        legalName,
+        industry,
+        baseCurrency,
+        fiscalYearStartMonth,
+        fiscalYearStartDay,
+        booksStartDate,
+        cashAccountId,
+      },
+    }).catch(() => {
+      // Silent — see the comment above.
+    });
+  }
+
+  function goToStep(step: WizardStep['step']) {
+    setWizardStep({ step } as WizardStep);
+    autosaveDraft(step);
+  }
+
+  async function handleSkip() {
+    try {
+      await skipOnboarding('ledger-core');
+    } catch {
+      // A failed skip still lets the user leave — the gate re-checks status
+      // on next load and simply asks again if this didn't stick.
+    }
+    navigate(base, { replace: true });
+  }
 
   const derivedFiscalYear = fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, todayIso());
 
@@ -138,11 +206,16 @@ export default function OnboardingPage() {
 
   return (
     <section className="shell shell--narrow flex flex-col gap-6">
-      <header>
-        <h1 className="text-xl font-semibold m-0">Set up LedgerCore</h1>
-        <p className="text-sm text-[var(--muted)] m-0 mt-1">
-          Step {wizardStep.step} of 3
-        </p>
+      <header className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold m-0">Set up LedgerCore</h1>
+          <p className="text-sm text-[var(--muted)] m-0 mt-1">
+            Step {wizardStep.step} of 3
+          </p>
+        </div>
+        <button type="button" className={ghostButtonClass} onClick={() => void handleSkip()}>
+          Skip for now
+        </button>
       </header>
 
       {wizardStep.step === 1 && (
@@ -187,7 +260,7 @@ export default function OnboardingPage() {
               type="button"
               className={primaryButtonClass}
               disabled={organizationName.trim().length < 2}
-              onClick={() => setWizardStep({ step: 2 })}
+              onClick={() => goToStep(2)}
             >
               Next
             </button>
@@ -275,10 +348,10 @@ export default function OnboardingPage() {
           </label>
 
           <div className="flex justify-between">
-            <button type="button" className={ghostButtonClass} onClick={() => setWizardStep({ step: 1 })}>
+            <button type="button" className={ghostButtonClass} onClick={() => goToStep(1)}>
               Back
             </button>
-            <button type="button" className={primaryButtonClass} onClick={() => setWizardStep({ step: 3 })}>
+            <button type="button" className={primaryButtonClass} onClick={() => goToStep(3)}>
               Next
             </button>
           </div>
@@ -318,7 +391,7 @@ export default function OnboardingPage() {
             <button
               type="button"
               className={ghostButtonClass}
-              onClick={() => setWizardStep({ step: 2 })}
+              onClick={() => goToStep(2)}
               disabled={submitting}
             >
               Back

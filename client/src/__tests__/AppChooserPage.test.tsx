@@ -43,7 +43,17 @@ function renderChooser() {
 
 describe('AppChooserPage', () => {
   it('renders one card per app', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { success: true, count: 2, apps }));
+    // A fresh Response per call: AppChooserPage now fires a second, concurrent
+    // request for the setup checklist (Phase 9a), and a Response body can
+    // only be read once — mockResolvedValue would hand both callers the same
+    // consumed stream.
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/onboarding')) {
+        return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
+      }
+      return Promise.resolve(jsonResponse(200, { success: true, count: 2, apps }));
+    });
 
     renderChooser();
 
@@ -52,7 +62,13 @@ describe('AppChooserPage', () => {
   });
 
   it('links a building app but not a planned one', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(200, { success: true, count: 2, apps }));
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/onboarding')) {
+        return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
+      }
+      return Promise.resolve(jsonResponse(200, { success: true, count: 2, apps }));
+    });
 
     renderChooser();
 
@@ -65,7 +81,7 @@ describe('AppChooserPage', () => {
   });
 
   it('shows an error instead of a blank grid when the API call fails', async () => {
-    fetchMock.mockResolvedValue(jsonResponse(500, { success: false, error: 'boom' }));
+    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(500, { success: false, error: 'boom' })));
 
     renderChooser();
 

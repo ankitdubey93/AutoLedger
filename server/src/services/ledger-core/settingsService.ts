@@ -4,6 +4,7 @@ import { ApiError } from '../../utils/apiError.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
 import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
+import * as onboardingService from '../onboardingService.js';
 import type { LedgerSettings } from '../../types/ledger-core.js';
 
 /**
@@ -197,6 +198,10 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
         input.cashAccountId,
       ],
     );
+
+    // Marks LedgerCore's own onboarding row COMPLETED on this same client, so
+    // it commits or rolls back together with the settings write (rule 5).
+    await onboardingService.markCompletedOnClient(client, orgId, 'ledger-core');
 
     await client.query('COMMIT');
     return await getSettings(orgId);

@@ -156,7 +156,14 @@ async function assertParentIsValid(
   }
 }
 
-export async function createAccount(
+/**
+ * Creates one account on a caller-supplied, already-open transaction client.
+ * Runs no BEGIN, no COMMIT and no ROLLBACK — mirrors journalService's
+ * `createEntryOnClient`, so a chart import (Phase 9b) creates every account
+ * and its journal entry inside one transaction (guardrails rule 5).
+ */
+export async function createAccountOnClient(
+  client: PoolClient,
   orgId: string,
   createdBy: string,
   input: {
@@ -169,26 +176,24 @@ export async function createAccount(
   },
 ): Promise<Account> {
   if (input.parentId !== null) {
-    await assertParentIsValid(pool, orgId, input.parentId, input.type);
+    await assertParentIsValid(client, orgId, input.parentId, input.type);
   }
 
   try {
-    const { rows } = await withTransaction((client) =>
-      client.query<AccountRow>(
-        `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING ${ACCOUNT_COLUMNS}`,
-        [
-          orgId,
-          input.code,
-          input.name,
-          input.type,
-          input.parentId,
-          input.isPostable,
-          input.description,
-          createdBy,
-        ],
-      ),
+    const { rows } = await client.query<AccountRow>(
+      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING ${ACCOUNT_COLUMNS}`,
+      [
+        orgId,
+        input.code,
+        input.name,
+        input.type,
+        input.parentId,
+        input.isPostable,
+        input.description,
+        createdBy,
+      ],
     );
 
     const row = rows[0];
@@ -198,6 +203,21 @@ export async function createAccount(
     if (isUniqueViolation(err)) throw new ApiError(409, 'Account code already exists');
     throw err;
   }
+}
+
+export async function createAccount(
+  orgId: string,
+  createdBy: string,
+  input: {
+    code: string;
+    name: string;
+    type: AccountType;
+    parentId: string | null;
+    isPostable: boolean;
+    description: string | null;
+  },
+): Promise<Account> {
+  return withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
 }
 
 /**
@@ -311,12 +331,13 @@ interface SeedAccount {
  * Codes are load-bearing, not cosmetic: the P&L derives gross profit from the
  * 5xxx range, and the ranges in docs/schema.md are what reports rely on.
  *
- * Three groups are here to pay debt forward rather than because Phase 3 needs
+ * Four groups are here to pay debt forward rather than because Phase 3 needs
  * them. Adding an account to this list later means writing another backfill for
  * every organization created in between, so the accounts later phases are known
  * to need are seeded now:
  *   - 1180 / 2140  tax      — AP-Flow splits input tax out of an invoice (11)
  *   - 4910 / 6810 / 6820 FX — realized and unrealized gain/loss (8)
+ *   - 3400 opening balance equity — the import plug (9b)
  */
 export const DEFAULT_CHART: readonly SeedAccount[] = [
   // Assets 1000–1999
@@ -346,6 +367,7 @@ export const DEFAULT_CHART: readonly SeedAccount[] = [
   { code: '3100', name: "Common Stock / Owner's Capital", type: 'Equity', parent: '3000', postable: true },
   { code: '3200', name: 'Retained Earnings', type: 'Equity', parent: '3000', postable: true },
   { code: '3300', name: "Owner's Draw", type: 'Equity', parent: '3000', postable: true },
+  { code: '3400', name: 'Opening Balance Equity', type: 'Equity', parent: '3000', postable: true },
 
   // Revenue 4000–4999
   { code: '4000', name: 'Revenue', type: 'Revenue', parent: null, postable: false },
