@@ -163,18 +163,22 @@ interface DocumentCountsRow {
  * of the `UNION ALL`; omitting it from either is a tenant leak.
  */
 async function loadDocumentCounts(orgId: string): Promise<DocumentCountsRow> {
+  // Base currency, not native (Phase 8) — a draft or in-review bill may
+  // already be in a foreign currency (its base total is resolved on every
+  // draft save, see billService.resolveDocumentFxRate), and summing native
+  // amounts across currencies would be meaningless.
   const { rows } = await pool.query<DocumentCountsRow>(
     `SELECT
        COUNT(*) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT')::text AS invoice_draft_count,
-       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT'), 0)::text AS invoice_draft_cents,
+       COALESCE(SUM(base_total_cents) FILTER (WHERE kind = 'INVOICE' AND status = 'DRAFT'), 0)::text AS invoice_draft_cents,
        COUNT(*) FILTER (WHERE kind = 'BILL' AND status = 'DRAFT')::text AS bill_draft_count,
-       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'BILL' AND status = 'DRAFT'), 0)::text AS bill_draft_cents,
+       COALESCE(SUM(base_total_cents) FILTER (WHERE kind = 'BILL' AND status = 'DRAFT'), 0)::text AS bill_draft_cents,
        COUNT(*) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL')::text AS bill_review_count,
-       COALESCE(SUM(total_cents) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL'), 0)::text AS bill_review_cents
+       COALESCE(SUM(base_total_cents) FILTER (WHERE kind = 'BILL' AND status = 'AWAITING_APPROVAL'), 0)::text AS bill_review_cents
      FROM (
-       SELECT 'INVOICE' AS kind, status, total_cents FROM invoices WHERE org_id = $1
+       SELECT 'INVOICE' AS kind, status, base_total_cents FROM invoices WHERE org_id = $1
        UNION ALL
-       SELECT 'BILL'    AS kind, status, total_cents FROM bills    WHERE org_id = $1
+       SELECT 'BILL'    AS kind, status, base_total_cents FROM bills    WHERE org_id = $1
      ) d`,
     [orgId],
   );

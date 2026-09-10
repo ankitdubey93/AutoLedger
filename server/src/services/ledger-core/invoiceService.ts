@@ -3,9 +3,11 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
+import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
+import * as fxRateService from './fxRateService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
 import {
   canTransitionInvoice,
@@ -68,6 +70,8 @@ export interface CreateInvoiceInput {
   customerId: string;
   issueDate: string;
   dueDate: string;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string | undefined;
   notes: string | null;
   paymentTerms: string | null;
   lines: InvoiceLineInput[];
@@ -106,6 +110,10 @@ interface InvoiceRow {
   subtotal_cents: string;
   tax_cents: string;
   total_cents: string;
+  fx_rate: string;
+  base_subtotal_cents: string;
+  base_tax_cents: string;
+  base_total_cents: string;
   journal_entry_id: string | null;
   void_journal_entry_id: string | null;
   issued_at: Date | null;
@@ -137,6 +145,8 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.customer_name_snapshot, i.customer_address_snapshot,
                                 i.customer_tax_number_snapshot, i.notes, i.payment_terms,
                                 i.subtotal_cents, i.tax_cents, i.total_cents,
+                                i.fx_rate::text AS fx_rate, i.base_subtotal_cents,
+                                i.base_tax_cents, i.base_total_cents,
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
                                 i.created_by, u.name AS created_by_name, i.created_at, i.updated_at,
                                 ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents
@@ -194,6 +204,10 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
     totalCents,
+    fxRate: row.fx_rate,
+    baseSubtotalCents: parseCents(row.base_subtotal_cents),
+    baseTaxCents: parseCents(row.base_tax_cents),
+    baseTotalCents: parseCents(row.base_total_cents),
     journalEntryId: row.journal_entry_id,
     voidJournalEntryId: row.void_journal_entry_id,
     issuedAt: row.issued_at === null ? null : row.issued_at.toISOString(),
@@ -393,6 +407,25 @@ function validateInvoiceInput(input: CreateInvoiceInput): void {
   }
 }
 
+/**
+ * Resolves the rate to convert `currencyCode` to `baseCurrency` on `onDate`
+ * — identity (rate 1) when they match. Called on every draft save (so a
+ * draft always displays an honest base total) and again at `issueInvoice`
+ * (which freezes the result). Throws ApiError(422) via
+ * fxRateService.requireRateOnClient when no rate exists on or before onDate.
+ */
+async function resolveDocumentFxRate(
+  client: PoolClient,
+  orgId: string,
+  currencyCode: string,
+  baseCurrency: string,
+  onDate: string,
+): Promise<string> {
+  if (currencyCode === baseCurrency) return ONE_RATE;
+  const resolved = await fxRateService.requireRateOnClient(client, orgId, currencyCode, baseCurrency, onDate);
+  return resolved.rate;
+}
+
 async function insertInvoiceLines(
   client: PoolClient,
   orgId: string,
@@ -444,8 +477,9 @@ export async function createInvoice(
       'SELECT base_currency FROM organizations WHERE id = $1',
       [orgId],
     );
-    const currencyCode = orgRows[0]?.base_currency.trim();
-    if (currencyCode === undefined) throw new ApiError(404, 'Organization not found');
+    const baseCurrency = orgRows[0]?.base_currency.trim();
+    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+    const currencyCode = input.currencyCode ?? baseCurrency;
 
     const { rows: customerRows } = await client.query<{
       name: string;
@@ -464,12 +498,20 @@ export async function createInvoice(
       totals.map((t) => t.input.revenueAccountId),
     );
 
+    // Resolved on every draft save so the draft always displays an honest
+    // base-currency total; frozen for good at issueInvoice.
+    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
+    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+    const baseTaxCents = convertToBase(taxCents, fxRate);
+    const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
     const { rows: invoiceRows } = await client.query<{ id: string }>(
       `INSERT INTO invoices
          (org_id, customer_id, issue_date, due_date, currency_code,
           customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
-          notes, payment_terms, subtotal_cents, tax_cents, total_cents, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          notes, payment_terms, subtotal_cents, tax_cents, total_cents,
+          fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
        RETURNING id`,
       [
         orgId,
@@ -485,6 +527,10 @@ export async function createInvoice(
         subtotalCents,
         taxCents,
         totalCents,
+        fxRate,
+        baseSubtotalCents,
+        baseTaxCents,
+        baseTotalCents,
         createdBy,
       ],
     );
@@ -533,6 +579,14 @@ export async function updateInvoice(
       throw new ApiError(409, 'Only a draft invoice can be edited');
     }
 
+    const { rows: orgRows } = await client.query<{ base_currency: string }>(
+      'SELECT base_currency FROM organizations WHERE id = $1',
+      [orgId],
+    );
+    const baseCurrency = orgRows[0]?.base_currency.trim();
+    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+    const currencyCode = input.currencyCode ?? baseCurrency;
+
     const { rows: customerRows } = await client.query<{
       name: string;
       billing_address: string | null;
@@ -550,6 +604,11 @@ export async function updateInvoice(
       totals.map((t) => t.input.revenueAccountId),
     );
 
+    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
+    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+    const baseTaxCents = convertToBase(taxCents, fxRate);
+    const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
     await client.query('DELETE FROM invoice_lines WHERE invoice_id = $1 AND org_id = $2', [
       id,
       orgId,
@@ -557,15 +616,17 @@ export async function updateInvoice(
 
     await client.query(
       `UPDATE invoices
-          SET customer_id = $1, issue_date = $2, due_date = $3,
-              customer_name_snapshot = $4, customer_address_snapshot = $5,
-              customer_tax_number_snapshot = $6, notes = $7, payment_terms = $8,
-              subtotal_cents = $9, tax_cents = $10, total_cents = $11
-        WHERE id = $12 AND org_id = $13`,
+          SET customer_id = $1, issue_date = $2, due_date = $3, currency_code = $4,
+              customer_name_snapshot = $5, customer_address_snapshot = $6,
+              customer_tax_number_snapshot = $7, notes = $8, payment_terms = $9,
+              subtotal_cents = $10, tax_cents = $11, total_cents = $12,
+              fx_rate = $13, base_subtotal_cents = $14, base_tax_cents = $15, base_total_cents = $16
+        WHERE id = $17 AND org_id = $18`,
       [
         input.customerId,
         input.issueDate,
         input.dueDate,
+        currencyCode,
         customer.name,
         customer.billing_address,
         customer.tax_number,
@@ -574,6 +635,10 @@ export async function updateInvoice(
         subtotalCents,
         taxCents,
         totalCents,
+        fxRate,
+        baseSubtotalCents,
+        baseTaxCents,
+        baseTotalCents,
         id,
         orgId,
       ],
@@ -706,7 +771,25 @@ export async function issueInvoice(
     }
 
     const totalCents = parseCents(invoiceRow.total_cents);
+    const subtotalCents = parseCents(invoiceRow.subtotal_cents);
     const taxTotalCents = parseCents(invoiceRow.tax_cents);
+    const documentCurrency = invoiceRow.currency_code.trim();
+    const postingDate = entryDate ?? invoiceRow.issue_date;
+
+    // The rate is frozen HERE, at posting, re-resolved for the posting date
+    // rather than trusting whatever the draft last saved for issue_date —
+    // entryDate can differ from issue_date. Once issued this never changes
+    // again; every later settlement compares its own rate against this one.
+    const { rows: orgRows } = await client.query<{ base_currency: string }>(
+      'SELECT base_currency FROM organizations WHERE id = $1',
+      [orgId],
+    );
+    const baseCurrency = orgRows[0]?.base_currency.trim();
+    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+    const fxRate = await resolveDocumentFxRate(client, orgId, documentCurrency, baseCurrency, postingDate);
+    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+    const baseTaxCents = convertToBase(taxTotalCents, fxRate);
+    const baseTotalCents = baseSubtotalCents + baseTaxCents;
 
     const { receivableAccountId, taxAccountId } = await resolvePostingAccounts(
       client,
@@ -726,15 +809,23 @@ export async function issueInvoice(
     }
 
     const glLines = [
-      { accountId: receivableAccountId, debitCents: totalCents, creditCents: 0 },
+      { accountId: receivableAccountId, debitCents: totalCents, creditCents: 0, currencyCode: documentCurrency, fxRate },
       ...[...revenueByAccount.entries()].map(([accountId, netCents]) => ({
         accountId,
         debitCents: 0,
         creditCents: netCents,
+        currencyCode: documentCurrency,
+        fxRate,
       })),
     ];
     if (taxAccountId !== null && taxTotalCents > 0) {
-      glLines.push({ accountId: taxAccountId, debitCents: 0, creditCents: taxTotalCents });
+      glLines.push({
+        accountId: taxAccountId,
+        debitCents: 0,
+        creditCents: taxTotalCents,
+        currencyCode: documentCurrency,
+        fxRate,
+      });
     }
 
     const debitTotal = sumCents(glLines.map((l) => cents(l.debitCents)));
@@ -748,7 +839,7 @@ export async function issueInvoice(
     const invoiceNumber = await invoiceSettingsService.allocateInvoiceNumber(client, orgId);
 
     const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
-      entryDate: entryDate ?? invoiceRow.issue_date,
+      entryDate: postingDate,
       description: `Invoice ${invoiceNumber} — ${invoiceRow.customer_name_snapshot}`,
       sourceType: 'invoice',
       sourceId: id,
@@ -757,9 +848,10 @@ export async function issueInvoice(
 
     await client.query(
       `UPDATE invoices
-          SET status = 'ISSUED', invoice_number = $1, journal_entry_id = $2, issued_at = now()
-        WHERE id = $3 AND org_id = $4`,
-      [invoiceNumber, journalEntryId, id, orgId],
+          SET status = 'ISSUED', invoice_number = $1, journal_entry_id = $2, issued_at = now(),
+              fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6
+        WHERE id = $7 AND org_id = $8`,
+      [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId],
     );
 
     await emitEvent(client, orgId, 'ledger-core', 'invoice.issued', {
@@ -773,6 +865,8 @@ export async function issueInvoice(
       subtotalCents: parseCents(invoiceRow.subtotal_cents),
       taxCents: taxTotalCents,
       totalCents: totalCents,
+      fxRate,
+      baseTotalCents,
       journalEntryId,
     });
 

@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { convertToBase, isCurrencyCode, ONE_RATE } from '../../utils/fxRate.js';
 import { assertPeriodOpenOnClient } from './fiscalPeriodService.js';
 import type { JournalEntry, LedgerLine } from '../../types/ledger-core.js';
 
@@ -37,6 +38,10 @@ export interface JournalLineInput {
   accountId: string;
   debitCents: number;
   creditCents: number;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string;
+  /** Phase 8. NUMERIC(18,8) as a string. Omitted means ONE_RATE. Required when currencyCode differs from base. */
+  fxRate?: string;
 }
 
 export interface CreateEntryInput {
@@ -329,19 +334,6 @@ export async function createEntryOnClient(
   createdBy: string,
   input: CreateEntryInput,
 ): Promise<string> {
-  // Integer equality, never an epsilon. This is the invariant the whole system
-  // exists to protect, and it is checked again by a deferred constraint trigger
-  // at COMMIT so that a bug here cannot write an unbalanced entry.
-  const totalDebits = sumCents(input.lines.map((line) => cents(line.debitCents)));
-  const totalCredits = sumCents(input.lines.map((line) => cents(line.creditCents)));
-
-  if (totalDebits !== totalCredits) {
-    throw new ApiError(
-      422,
-      `Entry is unbalanced: debits ${String(totalDebits)}, credits ${String(totalCredits)}`,
-    );
-  }
-
   // A closed period refuses new postings. Checked here so every caller —
   // invoiceService, billService, paymentService and the journals route —
   // gets one readable 422 instead of a raw trigger exception, and checked
@@ -362,6 +354,60 @@ export async function createEntryOnClient(
   const baseCurrency = orgRows[0]?.base_currency.trim();
   if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
 
+  // Phase 8: each line may carry its own currency and rate. Omitted means the
+  // organization's base currency at ONE_RATE — the Phase 3 behaviour, kept
+  // byte-identical for every base-currency entry. A line whose currency
+  // differs from base must carry an explicit rate; if it does not, that is a
+  // service bug (no HTTP caller can reach this — every document service
+  // resolves a rate before building its lines), so it is a 500, not a 422.
+  const resolvedLines = input.lines.map((line) => {
+    const lineCurrency = line.currencyCode ?? baseCurrency;
+    if (lineCurrency === baseCurrency) {
+      return { ...line, currencyCode: baseCurrency, fxRate: ONE_RATE };
+    }
+    if (!isCurrencyCode(lineCurrency) || line.fxRate === undefined) {
+      throw new ApiError(500, 'A foreign-currency line requires an explicit fx rate');
+    }
+    return { ...line, currencyCode: lineCurrency, fxRate: line.fxRate };
+  });
+
+  const baseDebits = resolvedLines.map((line) =>
+    convertToBase(cents(line.debitCents), line.fxRate),
+  );
+  const baseCredits = resolvedLines.map((line) =>
+    convertToBase(cents(line.creditCents), line.fxRate),
+  );
+
+  // Base currency is what balances, always — integer equality, never an
+  // epsilon (guardrails rule 3). This is the invariant the whole system
+  // exists to protect, and it is checked again by a deferred constraint
+  // trigger at COMMIT (023) so a bug here cannot write an unbalanced entry.
+  const totalBaseDebits = sumCents(baseDebits);
+  const totalBaseCredits = sumCents(baseCredits);
+  if (totalBaseDebits !== totalBaseCredits) {
+    throw new ApiError(
+      422,
+      `Entry is unbalanced in base currency: debits ${String(totalBaseDebits)}, credits ${String(totalBaseCredits)}`,
+    );
+  }
+
+  // The native-currency sum is only meaningful — and only checked here —
+  // when every line shares one currency, mirroring migration 023's trigger
+  // exactly so the service and the database never disagree about what is
+  // legal. A single-currency entry (every entry before Phase 8, and every
+  // base-currency entry after it) is checked exactly as strictly as before.
+  const distinctCurrencies = new Set(resolvedLines.map((line) => line.currencyCode));
+  if (distinctCurrencies.size === 1) {
+    const totalDebits = sumCents(resolvedLines.map((line) => cents(line.debitCents)));
+    const totalCredits = sumCents(resolvedLines.map((line) => cents(line.creditCents)));
+    if (totalDebits !== totalCredits) {
+      throw new ApiError(
+        422,
+        `Entry is unbalanced: debits ${String(totalDebits)}, credits ${String(totalCredits)}`,
+      );
+    }
+  }
+
   const { rows: entryRows } = await client.query<{ id: string }>(
     `INSERT INTO journal_entries (org_id, created_by, entry_date, description, source_type, source_id)
      VALUES ($1, $2, $3, $4, $5, $6)
@@ -379,26 +425,24 @@ export async function createEntryOnClient(
   if (entryId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
   // One multi-row insert via unnest rather than a statement per line.
-  //
-  // Phase 3 posts base-currency entries only: currency_code is the org's base
-  // currency, fx_rate is 1, and the base_* columns equal the native ones. The
-  // columns exist now because they cannot be retrofitted later — Phase 8
-  // builds the engine that makes them differ.
   await client.query(
     `INSERT INTO ledger_lines
        (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
         currency_code, fx_rate, base_debit_cents, base_credit_cents)
      SELECT $1, $2, v.account_id, v.debit_cents, v.credit_cents,
-            $6, 1, v.debit_cents, v.credit_cents
-       FROM unnest($3::uuid[], $4::bigint[], $5::bigint[])
-            AS v(account_id, debit_cents, credit_cents)`,
+            v.currency_code, v.fx_rate, v.base_debit_cents, v.base_credit_cents
+       FROM unnest($3::uuid[], $4::bigint[], $5::bigint[], $6::text[], $7::numeric[], $8::bigint[], $9::bigint[])
+            AS v(account_id, debit_cents, credit_cents, currency_code, fx_rate, base_debit_cents, base_credit_cents)`,
     [
       orgId,
       entryId,
-      input.lines.map((line) => line.accountId),
-      input.lines.map((line) => line.debitCents),
-      input.lines.map((line) => line.creditCents),
-      baseCurrency,
+      resolvedLines.map((line) => line.accountId),
+      resolvedLines.map((line) => line.debitCents),
+      resolvedLines.map((line) => line.creditCents),
+      resolvedLines.map((line) => line.currencyCode),
+      resolvedLines.map((line) => line.fxRate),
+      baseDebits,
+      baseCredits,
     ],
   );
 
@@ -513,7 +557,10 @@ export async function reverseEntryOnClient(
   if (reversalId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
   // The swap: debit becomes credit, credit becomes debit, in both the native
-  // and the base columns. Amounts stay positive.
+  // and the base columns. Amounts stay positive. This needs no Phase 8
+  // change: currency_code and fx_rate are copied verbatim from the original
+  // line, so reversing a foreign-currency (or realized-FX plug) entry is
+  // correct for free — including a payment void's realized gain/loss line.
   await client.query(
     `INSERT INTO ledger_lines
        (org_id, journal_entry_id, account_id, debit_cents, credit_cents,

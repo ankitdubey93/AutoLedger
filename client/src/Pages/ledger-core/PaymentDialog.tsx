@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
   createPayment,
+  getLatestFxRate,
   listAccounts,
   type Account,
   type PaymentDirection,
+  type ResolvedRate,
 } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from './money';
 import { useLedgerSettings } from './LedgerSettingsContext';
@@ -24,6 +26,10 @@ export interface PaymentDialogProps {
   counterpartyName: string;
   documentId: string;
   amountDueCents: number;
+  /** The document's own currency (Phase 8) — the payment is always posted in it, never chosen. */
+  documentCurrencyCode: string;
+  /** The document's frozen rate to base currency, for the settlement-gain/loss estimate below. */
+  documentFxRate: string;
   onClose: () => void;
   onRecorded: () => void;
 }
@@ -44,10 +50,15 @@ export default function PaymentDialog({
   counterpartyName,
   documentId,
   amountDueCents,
+  documentCurrencyCode,
+  documentFxRate,
   onClose,
   onRecorded,
 }: PaymentDialogProps) {
   const ledgerSettings = useLedgerSettings();
+  const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : documentCurrencyCode;
+  const isForeign = documentCurrencyCode !== baseCurrency;
+
   const [cashAccounts, setCashAccounts] = useState<Account[]>([]);
   const [cashAccountId, setCashAccountId] = useState('');
   const [paymentDate, setPaymentDate] = useState(today);
@@ -56,6 +67,33 @@ export default function PaymentDialog({
   const [reference, setReference] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [settlementRate, setSettlementRate] = useState<ResolvedRate | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
+
+  // The settlement-date rate, resolved purely for the realized-gain/loss
+  // estimate below — the server resolves and freezes its own rate when it
+  // actually posts, so a stale estimate here can never corrupt the posting.
+  useEffect(() => {
+    if (!isForeign || paymentDate === '') {
+      setSettlementRate(null);
+      setRateError(null);
+      return;
+    }
+    let ignore = false;
+    getLatestFxRate(documentCurrencyCode, paymentDate)
+      .then((res) => {
+        if (!ignore) setSettlementRate(res.rate);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setSettlementRate(null);
+        setRateError(err instanceof Error ? err.message : 'Could not resolve an exchange rate');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [isForeign, documentCurrencyCode, paymentDate]);
 
   useEffect(() => {
     let ignore = false;
@@ -84,6 +122,21 @@ export default function PaymentDialog({
 
   const amountCents = parseCentsInput(amount);
   const overLimit = amountCents !== null && amountCents > amountDueCents;
+
+  // Estimated realized gain/loss, display-only — the same imbalance-as-plug
+  // arithmetic the server applies, mirrored here in floats since this is
+  // never what gets posted. cashBase - controlBase is the imbalance for
+  // RECEIVE; PAY flips the sign because a liability moves the other way.
+  const estimatedRealizedCents =
+    isForeign && amountCents !== null && settlementRate !== null
+      ? (() => {
+          const cashBase = amountCents * Number(settlementRate.rate);
+          const controlBase = amountCents * Number(documentFxRate);
+          const delta = cashBase - controlBase;
+          return Math.round(direction === 'RECEIVE' ? delta : -delta);
+        })()
+      : null;
+
   const canSave =
     !busy &&
     cashAccountId !== '' &&
@@ -102,6 +155,7 @@ export default function PaymentDialog({
         direction,
         paymentDate,
         amountCents,
+        currencyCode: documentCurrencyCode,
         cashAccountId,
         customerId: direction === 'RECEIVE' ? counterpartyId : null,
         vendorId: direction === 'PAY' ? counterpartyId : null,
@@ -186,6 +240,16 @@ export default function PaymentDialog({
             </span>
           )}
         </label>
+
+        {isForeign && (
+          <p className="text-xs text-[var(--muted)] m-0">
+            {rateError !== null
+              ? rateError
+              : settlementRate !== null && estimatedRealizedCents !== null
+                ? `Estimated realized ${estimatedRealizedCents >= 0 ? 'gain' : 'loss'}: ${formatCents(Math.abs(estimatedRealizedCents))} ${baseCurrency} (at ${settlementRate.rate}, vs ${documentFxRate} when posted)`
+                : 'Resolving the settlement rate…'}
+          </p>
+        )}
 
         <div className="flex gap-3">
           <label className="flex flex-col gap-1 text-sm flex-1">

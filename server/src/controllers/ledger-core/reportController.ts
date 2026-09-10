@@ -2,6 +2,7 @@ import type { RequestHandler } from 'express';
 import * as reportService from '../../services/ledger-core/reportService.js';
 import * as dashboardService from '../../services/ledger-core/dashboardService.js';
 import * as agingService from '../../services/ledger-core/agingService.js';
+import * as fxRevaluationService from '../../services/ledger-core/fxRevaluationService.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { optionalIsoDate, optionalUuid } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -81,4 +82,13 @@ export const bankReconciliation: RequestHandler = async (req, res) => {
 
   const report = await reportService.bankReconciliation(user.orgId, accountId, asOf);
   res.json({ success: true, ...report });
+};
+
+/** GET /ledger-core/reports/fx-exposure?asOf=YYYY-MM-DD */
+export const fxExposure: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const asOf = optionalIsoDate(req, 'asOf') ?? new Date().toISOString().slice(0, 10);
+
+  const report = await fxRevaluationService.computeExposure(user.orgId, asOf);
+  res.json({ success: true, exposure: report });
 };

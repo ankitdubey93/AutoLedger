@@ -68,9 +68,16 @@ interface CandidateRow {
   amount_due_cents: string;
 }
 
+/**
+ * Bank statements stay base-currency-only (Phase 6's stated limit, unchanged
+ * by Phase 8) — a base-currency bank line cannot settle a foreign-currency
+ * document, so one is never offered as a suggestion. `baseCurrency` is the
+ * organization's own, resolved once by the caller, never request input.
+ */
 async function loadInvoiceCandidates(
   client: PoolClient,
   orgId: string,
+  baseCurrency: string,
   windowLow: string,
   windowHigh: string,
 ): Promise<CandidateRow[]> {
@@ -83,10 +90,11 @@ async function loadInvoiceCandidates(
          JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
         WHERE i.org_id = $1
           AND i.status = 'ISSUED'
+          AND i.currency_code = $4
           AND i.issue_date BETWEEN $2::date AND $3::date
      ) sub
      WHERE amount_due_cents > 0`,
-    [orgId, windowLow, windowHigh],
+    [orgId, windowLow, windowHigh, baseCurrency],
   );
   return rows;
 }
@@ -94,6 +102,7 @@ async function loadInvoiceCandidates(
 async function loadBillCandidates(
   client: PoolClient,
   orgId: string,
+  baseCurrency: string,
   windowLow: string,
   windowHigh: string,
 ): Promise<CandidateRow[]> {
@@ -106,10 +115,11 @@ async function loadBillCandidates(
          JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
         WHERE b.org_id = $1
           AND b.status = 'POSTED'
+          AND b.currency_code = $4
           AND b.bill_date BETWEEN $2::date AND $3::date
      ) sub
      WHERE amount_due_cents > 0`,
-    [orgId, windowLow, windowHigh],
+    [orgId, windowLow, windowHigh, baseCurrency],
   );
   return rows;
 }
@@ -133,6 +143,13 @@ export async function generateSuggestionsOnClient(
   bankTransactionIds: string[],
 ): Promise<number> {
   if (bankTransactionIds.length === 0) return 0;
+
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
 
   await client.query(
     'DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = ANY($2::uuid[])',
@@ -170,6 +187,7 @@ export async function generateSuggestionsOnClient(
       ? await loadInvoiceCandidates(
           client,
           orgId,
+          baseCurrency,
           shiftDate(minDate(positiveLines.map((l) => l.txnDate)), -CANDIDATE_WINDOW_DAYS),
           shiftDate(maxDate(positiveLines.map((l) => l.txnDate)), CANDIDATE_WINDOW_DAYS),
         )
@@ -180,6 +198,7 @@ export async function generateSuggestionsOnClient(
       ? await loadBillCandidates(
           client,
           orgId,
+          baseCurrency,
           shiftDate(minDate(negativeLines.map((l) => l.txnDate)), -CANDIDATE_WINDOW_DAYS),
           shiftDate(maxDate(negativeLines.map((l) => l.txnDate)), CANDIDATE_WINDOW_DAYS),
         )
@@ -546,8 +565,9 @@ export async function matchTransaction(
       external_reference: string | null;
       amount_cents: string;
       account_id: string;
+      currency_code: string;
     }>(
-      `SELECT id, status, txn_date, description, external_reference, amount_cents, account_id
+      `SELECT id, status, txn_date, description, external_reference, amount_cents, account_id, currency_code
          FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -586,9 +606,10 @@ export async function matchTransaction(
         status: string;
         customer_id: string;
         total_cents: string;
+        currency_code: string;
         amount_due_cents: string;
       }>(
-        `SELECT i.status, i.customer_id, i.total_cents,
+        `SELECT i.status, i.customer_id, i.total_cents, i.currency_code,
                 (i.total_cents - ${paymentService.allocatedCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
            FROM invoices i WHERE i.id = $1 AND i.org_id = $2 FOR UPDATE`,
         [invId, orgId],
@@ -596,6 +617,13 @@ export async function matchTransaction(
       const doc = rows[0];
       if (doc === undefined) throw new ApiError(422, 'Invoice not found');
       if (doc.status !== 'ISSUED') throw new ApiError(422, 'Only an issued invoice can be paid');
+      // Bank statements are base-currency only (Phase 6's stated limit) — a
+      // base-currency bank line cannot settle a foreign-currency document.
+      // Candidates already exclude these (loadInvoiceCandidates), so this is
+      // the guard for a manually-chosen suggestionId/invoiceId.
+      if (doc.currency_code.trim() !== line.currency_code.trim()) {
+        throw new ApiError(422, 'A base-currency bank line cannot settle a foreign-currency document');
+      }
       const amountDue = parseCents(doc.amount_due_cents);
       if (amountDue <= 0) throw new ApiError(422, 'That document is already settled');
       if (amountCents > amountDue) {
@@ -610,9 +638,10 @@ export async function matchTransaction(
         status: string;
         vendor_id: string;
         total_cents: string;
+        currency_code: string;
         amount_due_cents: string;
       }>(
-        `SELECT b.status, b.vendor_id, b.total_cents,
+        `SELECT b.status, b.vendor_id, b.total_cents, b.currency_code,
                 (b.total_cents - ${paymentService.allocatedCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
            FROM bills b WHERE b.id = $1 AND b.org_id = $2 FOR UPDATE`,
         [bId, orgId],
@@ -620,6 +649,9 @@ export async function matchTransaction(
       const doc = rows[0];
       if (doc === undefined) throw new ApiError(422, 'Bill not found');
       if (doc.status !== 'POSTED') throw new ApiError(422, 'Only an approved bill can be paid');
+      if (doc.currency_code.trim() !== line.currency_code.trim()) {
+        throw new ApiError(422, 'A base-currency bank line cannot settle a foreign-currency document');
+      }
       const amountDue = parseCents(doc.amount_due_cents);
       if (amountDue <= 0) throw new ApiError(422, 'That document is already settled');
       if (Math.abs(amountCents) > amountDue) {

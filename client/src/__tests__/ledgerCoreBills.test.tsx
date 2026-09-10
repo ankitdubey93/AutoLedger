@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
+import { LedgerSettingsProvider } from '../Pages/ledger-core/LedgerSettingsContext';
 import BillsPage from '../Pages/ledger-core/BillsPage';
 import BillDetailPage from '../Pages/ledger-core/BillDetailPage';
 import type { Bill } from '../services/fetchServices';
@@ -38,6 +39,21 @@ const session = {
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };
 
+const ledgerSettings = {
+  organizationName: 'Acme',
+  legalName: 'Acme Inc.',
+  baseCurrency: 'USD',
+  fiscalYearStartMonth: 1,
+  fiscalYearStartDay: 1,
+  booksStartDate: '2026-01-01',
+  industry: null,
+  timezone: 'UTC',
+  cashAccountId: null,
+  onboardedAt: new Date().toISOString(),
+  currentFiscalYear: { startDate: '2026-01-01', endDate: '2026-12-31', label: 'FY 2026' },
+  baseCurrencyLocked: false,
+};
+
 function baseBill(overrides: Partial<Bill> = {}): Bill {
   return {
     id: 'bill-1',
@@ -56,6 +72,10 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
     subtotalCents: 60000,
     taxCents: 0,
     totalCents: 60000,
+    fxRate: '1.00000000',
+    baseSubtotalCents: 60000,
+    baseTaxCents: 0,
+    baseTotalCents: 60000,
     journalEntryId: null,
     voidJournalEntryId: null,
     submittedAt: null,
@@ -193,6 +213,9 @@ function mockDetailRoutes(bill: Bill) {
         jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
       );
     }
+    if (url.includes('/ledger-core/settings')) {
+      return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
+    }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
   });
 }
@@ -202,9 +225,11 @@ function renderBillDetailPage(billId: string) {
     <MemoryRouter initialEntries={[`/app/ledger-core/bills/${billId}`]}>
       <AuthProvider>
         <OrgProvider>
-          <Routes>
-            <Route path="/app/:appSlug/bills/:billId" element={<BillDetailPage />} />
-          </Routes>
+          <LedgerSettingsProvider>
+            <Routes>
+              <Route path="/app/:appSlug/bills/:billId" element={<BillDetailPage />} />
+            </Routes>
+          </LedgerSettingsProvider>
         </OrgProvider>
       </AuthProvider>
     </MemoryRouter>,

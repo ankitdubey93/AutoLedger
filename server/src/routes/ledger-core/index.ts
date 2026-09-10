@@ -9,6 +9,8 @@ import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
 import customerRoutes from './customerRoutes.js';
 import fiscalPeriodRoutes from './fiscalPeriodRoutes.js';
+import fxRateRoutes from './fxRateRoutes.js';
+import fxRevaluationRoutes from './fxRevaluationRoutes.js';
 import invoiceRoutes from './invoiceRoutes.js';
 import vendorRoutes from './vendorRoutes.js';
 
@@ -26,6 +28,8 @@ router.use('/bank-transactions', bankTransactionRoutes);
 router.use('/bills', billRoutes);
 router.use('/customers', customerRoutes);
 router.use('/fiscal-periods', fiscalPeriodRoutes);
+router.use('/fx-rates', fxRateRoutes);
+router.use('/fx-revaluations', fxRevaluationRoutes);
 router.use('/invoices', invoiceRoutes);
 router.use('/journals', journalRoutes);
 router.use('/payments', paymentRoutes);

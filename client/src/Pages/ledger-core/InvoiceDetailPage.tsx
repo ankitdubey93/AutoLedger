@@ -286,8 +286,14 @@ export default function InvoiceDetailPage() {
           </div>
           <div className="flex justify-between w-full font-semibold border-t border-[var(--border)] pt-1">
             <span>Total</span>
-            <span className="tabular-nums">{formatCents(invoice.totalCents)}</span>
+            <span className="tabular-nums">{formatCents(invoice.totalCents)} {invoice.currencyCode}</span>
           </div>
+          {ledgerSettings.status === 'ready' && invoice.currencyCode !== ledgerSettings.settings.baseCurrency && (
+            <div className="flex justify-between w-full text-[var(--muted)]">
+              <span>≈ {ledgerSettings.settings.baseCurrency} (at {invoice.fxRate})</span>
+              <span className="tabular-nums">{formatCents(invoice.baseTotalCents)}</span>
+            </div>
+          )}
           {invoice.status === 'ISSUED' && (
             <>
               <div className="flex justify-between w-full">
@@ -401,6 +407,8 @@ export default function InvoiceDetailPage() {
           counterpartyName={invoice.customerNameSnapshot}
           documentId={invoice.id}
           amountDueCents={invoice.amountDueCents}
+          documentCurrencyCode={invoice.currencyCode}
+          documentFxRate={invoice.fxRate}
           onClose={() => setShowPaymentDialog(false)}
           onRecorded={() => {
             setShowPaymentDialog(false);

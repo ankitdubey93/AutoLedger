@@ -2,9 +2,11 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { cents, parseCents, sumCents, type Cents } from '../../utils/money.js';
+import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
+import * as fxRateService from './fxRateService.js';
 import {
   canTransitionPayment,
   isPaymentStatus,
@@ -44,8 +46,19 @@ import {
  * (accountService/billService's SELECT builders), never request input — that
  * is what keeps guardrails rule 4 satisfied despite the string interpolation.
  */
-export function allocatedCentsSubquery(alias: string, column: 'invoice_id' | 'bill_id'): string {
-  return `COALESCE((SELECT SUM(pa.amount_cents)
+/**
+ * `amountColumn` defaults to the native amount, matching every pre-Phase-8
+ * call site exactly. `agingService` passes 'base_amount_cents' explicitly to
+ * reconcile against a base-currency GL control balance. Both values are a
+ * closed union — never request input — so the interpolation stays within
+ * guardrails rule 4's identifier-whitelisting allowance.
+ */
+export function allocatedCentsSubquery(
+  alias: string,
+  column: 'invoice_id' | 'bill_id',
+  amountColumn: 'amount_cents' | 'base_amount_cents' = 'amount_cents',
+): string {
+  return `COALESCE((SELECT SUM(pa.${amountColumn})
                       FROM payment_allocations pa
                       JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
                      WHERE pa.org_id = ${alias}.org_id
@@ -77,6 +90,8 @@ export interface CreatePaymentInput {
   direction: PaymentDirection;
   paymentDate: string;
   amountCents: number;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string | undefined;
   cashAccountId: string;
   customerId: string | null;
   vendorId: string | null;
@@ -107,6 +122,8 @@ interface PaymentRow {
   payment_date: string;
   currency_code: string;
   amount_cents: string;
+  fx_rate: string;
+  base_amount_cents: string;
   cash_account_id: string;
   cash_account_code: string;
   cash_account_name: string;
@@ -133,9 +150,11 @@ interface AllocationRow {
   document_reference: string;
   document_total_cents: string;
   amount_cents: string;
+  base_amount_cents: string;
 }
 
 const PAYMENT_SELECT = `SELECT p.id, p.direction, p.status, p.payment_date, p.currency_code, p.amount_cents,
+                                p.fx_rate::text AS fx_rate, p.base_amount_cents,
                                 p.cash_account_id, a.code AS cash_account_code, a.name AS cash_account_name,
                                 p.customer_id, p.vendor_id,
                                 COALESCE(c.name, v.name) AS counterparty_name,
@@ -156,6 +175,7 @@ function toAllocation(row: AllocationRow): PaymentAllocation {
     documentReference: row.document_reference,
     documentTotalCents: parseCents(row.document_total_cents),
     amountCents: parseCents(row.amount_cents),
+    baseAmountCents: parseCents(row.base_amount_cents),
   };
 }
 
@@ -175,6 +195,8 @@ function toPayment(row: PaymentRow, allocations: PaymentAllocation[]): Payment {
     paymentDate: row.payment_date,
     currencyCode: row.currency_code.trim(),
     amountCents: parseCents(row.amount_cents),
+    fxRate: row.fx_rate,
+    baseAmountCents: parseCents(row.base_amount_cents),
     cashAccountId: row.cash_account_id,
     cashAccountCode: row.cash_account_code,
     cashAccountName: row.cash_account_name,
@@ -204,7 +226,7 @@ async function loadAllocations(
   if (paymentIds.length === 0) return byPayment;
 
   const { rows } = await pool.query<AllocationRow>(
-    `SELECT pa.id, pa.payment_id, pa.invoice_id, pa.bill_id, pa.amount_cents,
+    `SELECT pa.id, pa.payment_id, pa.invoice_id, pa.bill_id, pa.amount_cents, pa.base_amount_cents,
             COALESCE(i.invoice_number, i.id::text, b.vendor_reference) AS document_reference,
             COALESCE(i.total_cents, b.total_cents) AS document_total_cents
        FROM payment_allocations pa
@@ -303,6 +325,9 @@ interface TargetDocument {
   totalCents: number;
   allocatedCents: number;
   counterpartyId: string;
+  /** Phase 8. The document's own currency and its rate frozen at issue/approve. */
+  currencyCode: string;
+  fxRate: string;
 }
 
 /**
@@ -315,6 +340,7 @@ async function lockAndValidateTargets(
   orgId: string,
   direction: PaymentDirection,
   expectedCounterpartyId: string,
+  expectedCurrency: string,
   allocations: AllocationInput[],
 ): Promise<Map<string, TargetDocument>> {
   const targets = new Map<string, TargetDocument>();
@@ -341,9 +367,11 @@ async function lockAndValidateTargets(
       status: string;
       total_cents: string;
       customer_id: string;
+      currency_code: string;
+      fx_rate: string;
     }>(
-      `SELECT id, status, total_cents, customer_id FROM invoices
-        WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+      `SELECT id, status, total_cents, customer_id, currency_code, fx_rate::text AS fx_rate
+         FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [invoiceId, orgId],
     );
     const row = rows[0];
@@ -353,6 +381,10 @@ async function lockAndValidateTargets(
     }
     if (row.status !== 'ISSUED') {
       throw new ApiError(422, 'Only an issued invoice can be paid');
+    }
+    const documentCurrency = row.currency_code.trim();
+    if (documentCurrency !== expectedCurrency) {
+      throw new ApiError(422, `A ${expectedCurrency} payment cannot settle a document in ${documentCurrency}`);
     }
     const { rows: allocatedRows } = await client.query<{ allocated: string }>(
       `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS allocated
@@ -366,6 +398,8 @@ async function lockAndValidateTargets(
       totalCents: parseCents(row.total_cents),
       allocatedCents: parseCents(allocatedRows[0]?.allocated ?? '0'),
       counterpartyId: row.customer_id,
+      currencyCode: documentCurrency,
+      fxRate: row.fx_rate,
     });
   }
 
@@ -375,9 +409,11 @@ async function lockAndValidateTargets(
       status: string;
       total_cents: string;
       vendor_id: string;
+      currency_code: string;
+      fx_rate: string;
     }>(
-      `SELECT id, status, total_cents, vendor_id FROM bills
-        WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+      `SELECT id, status, total_cents, vendor_id, currency_code, fx_rate::text AS fx_rate
+         FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [billId, orgId],
     );
     const row = rows[0];
@@ -387,6 +423,10 @@ async function lockAndValidateTargets(
     }
     if (row.status !== 'POSTED') {
       throw new ApiError(422, 'Only an approved bill can be paid');
+    }
+    const documentCurrency = row.currency_code.trim();
+    if (documentCurrency !== expectedCurrency) {
+      throw new ApiError(422, `A ${expectedCurrency} payment cannot settle a document in ${documentCurrency}`);
     }
     const { rows: allocatedRows } = await client.query<{ allocated: string }>(
       `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS allocated
@@ -400,6 +440,8 @@ async function lockAndValidateTargets(
       totalCents: parseCents(row.total_cents),
       allocatedCents: parseCents(allocatedRows[0]?.allocated ?? '0'),
       counterpartyId: row.vendor_id,
+      currencyCode: documentCurrency,
+      fxRate: row.fx_rate,
     });
   }
 
@@ -416,7 +458,7 @@ async function lockAndValidateTargets(
   return targets;
 }
 
-interface ControlAccount {
+export interface ControlAccount {
   id: string;
 }
 
@@ -424,8 +466,10 @@ interface ControlAccount {
  * Resolves the control account a payment posts against: the receivable
  * account for a RECEIVE (settling AR), the payable account for a PAY
  * (settling AP) — the same fallbacks `invoiceService`/`billService` use.
+ * Exported so `fxRevaluationService` can post against the same control
+ * accounts without duplicating this lookup (Phase 8).
  */
-async function resolveControlAccount(
+export async function resolveControlAccount(
   client: PoolClient,
   orgId: string,
   direction: PaymentDirection,
@@ -462,6 +506,39 @@ async function resolveControlAccount(
 }
 
 /**
+ * Resolves the realized-FX account for a gain or a loss: the configured
+ * `ledger_settings` column, falling back to chart code 4910 (gain, Revenue)
+ * or 6810 (loss, Expense) — seeded for every organization since Phase 3
+ * precisely so this phase would need no chart backfill. Resolved lazily, only
+ * when a settlement actually realizes a gain or loss, so an organization that
+ * removed 4910/6810 can still take base-currency payments without error.
+ */
+async function resolveFxAccount(client: PoolClient, orgId: string, kind: 'gain' | 'loss'): Promise<string> {
+  const column = kind === 'gain' ? 'realized_fx_gain_account_id' : 'realized_fx_loss_account_id';
+  const fallbackCode = kind === 'gain' ? '4910' : '6810';
+
+  const { rows } = await client.query<{ account_id: string | null }>(
+    `SELECT ${column} AS account_id FROM ledger_settings WHERE org_id = $1`,
+    [orgId],
+  );
+  const configuredId = rows[0]?.account_id ?? null;
+  if (configuredId !== null) return configuredId;
+
+  const { rows: fallbackRows } = await client.query<{ id: string }>(
+    'SELECT id FROM accounts WHERE org_id = $1 AND code = $2',
+    [orgId, fallbackCode],
+  );
+  const fallbackId = fallbackRows[0]?.id;
+  if (fallbackId === undefined) {
+    throw new ApiError(
+      422,
+      `No realized FX ${kind} account is configured. Set one in settings.`,
+    );
+  }
+  return fallbackId;
+}
+
+/**
  * Creates a payment on the caller's transaction. Returns the new payment's
  * id. Does not COMMIT — the caller's COMMIT is where both deferred
  * constraint triggers fire (allocations-complete and no-overallocation).
@@ -483,8 +560,16 @@ export async function createPaymentOnClient(
     'SELECT base_currency FROM organizations WHERE id = $1',
     [orgId],
   );
-  const currencyCode = orgRows[0]?.base_currency.trim();
-  if (currencyCode === undefined) throw new ApiError(404, 'Organization not found');
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+  const currencyCode = input.currencyCode ?? baseCurrency;
+
+  // Resolved once, up front — every foreign-currency line and the payment
+  // row itself use this same settlement-date rate.
+  const paymentRate =
+    currencyCode === baseCurrency
+      ? ONE_RATE
+      : (await fxRateService.requireRateOnClient(client, orgId, currencyCode, baseCurrency, input.paymentDate)).rate;
 
   const { rows: cashRows } = await client.query<{
     id: string;
@@ -528,20 +613,93 @@ export async function createPaymentOnClient(
     counterpartyName = vendor.name;
   }
 
-  await lockAndValidateTargets(client, orgId, input.direction, counterpartyId, input.allocations);
+  const targets = await lockAndValidateTargets(
+    client,
+    orgId,
+    input.direction,
+    counterpartyId,
+    currencyCode,
+    input.allocations,
+  );
 
   const controlAccount = await resolveControlAccount(client, orgId, input.direction);
 
-  const glLines =
-    input.direction === 'RECEIVE'
-      ? [
-          { accountId: input.cashAccountId, debitCents: input.amountCents, creditCents: 0 },
-          { accountId: controlAccount.id, debitCents: 0, creditCents: input.amountCents },
-        ]
-      : [
-          { accountId: controlAccount.id, debitCents: input.amountCents, creditCents: 0 },
-          { accountId: input.cashAccountId, debitCents: 0, creditCents: input.amountCents },
-        ];
+  let glLines: {
+    accountId: string;
+    debitCents: number;
+    creditCents: number;
+    currencyCode?: string;
+    fxRate?: string;
+  }[];
+  // Signed — positive is a realized gain, negative a realized loss, 0 for a
+  // base-currency payment or a settlement at the document's own rate.
+  // Captured before the plug line (if any) is appended to glLines below, so
+  // it reflects the imbalance the plug was built to close, not the
+  // now-balanced total after it exists.
+  let realizedFxCents = 0;
+
+  if (currencyCode === baseCurrency) {
+    // Unchanged from Phase 3.9: exactly two lines, cash + control, each for
+    // the full amountCents at base currency / ONE_RATE. Do not restructure
+    // this branch — every pre-Phase-8 payment test pins this exact shape.
+    glLines =
+      input.direction === 'RECEIVE'
+        ? [
+            { accountId: input.cashAccountId, debitCents: input.amountCents, creditCents: 0 },
+            { accountId: controlAccount.id, debitCents: 0, creditCents: input.amountCents },
+          ]
+        : [
+            { accountId: controlAccount.id, debitCents: input.amountCents, creditCents: 0 },
+            { accountId: input.cashAccountId, debitCents: 0, creditCents: input.amountCents },
+          ];
+  } else {
+    // Cash line: native paymentCurrency at the settlement-date paymentRate.
+    const cashLine =
+      input.direction === 'RECEIVE'
+        ? { accountId: input.cashAccountId, debitCents: input.amountCents, creditCents: 0, currencyCode, fxRate: paymentRate }
+        : { accountId: input.cashAccountId, debitCents: 0, creditCents: input.amountCents, currencyCode, fxRate: paymentRate };
+
+    // One control line PER ALLOCATION — native = that allocation's amount,
+    // rate = that DOCUMENT's own frozen fx_rate, not the payment's rate. This
+    // is what keeps every line individually satisfying
+    // chk_ledger_lines_base_matches_rate while the per-allocation base
+    // amounts still carry the document's original carrying value — the gap
+    // between that and the cash line's settlement-rate value is the realized
+    // gain or loss, captured by the plug below.
+    const controlLines = input.allocations.map((allocation) => {
+      const targetId = allocation.invoiceId ?? allocation.billId;
+      const target = targetId === null ? undefined : targets.get(targetId);
+      if (target === undefined) throw new Error('Allocation target missing after validation');
+      return input.direction === 'RECEIVE'
+        ? { accountId: controlAccount.id, debitCents: 0, creditCents: allocation.amountCents, currencyCode, fxRate: target.fxRate }
+        : { accountId: controlAccount.id, debitCents: allocation.amountCents, creditCents: 0, currencyCode, fxRate: target.fxRate };
+    });
+
+    glLines = [cashLine, ...controlLines];
+
+    const baseDebitTotal = sumCents(
+      glLines.map((l) => convertToBase(cents(l.debitCents), l.fxRate ?? ONE_RATE)),
+    );
+    const baseCreditTotal = sumCents(
+      glLines.map((l) => convertToBase(cents(l.creditCents), l.fxRate ?? ONE_RATE)),
+    );
+    // More base value came in (or went out) than the documents were carried
+    // at: imbalance > 0 is a gain (credit 4910); imbalance < 0 is a loss
+    // (debit 6810). A receivable settled at a higher rate than it was booked
+    // is a gain; a payable settled at a higher rate is a loss — the sign
+    // falls out of this one subtraction with no direction-specific branch,
+    // because the RECEIVE/PAY asymmetry is already baked into how the cash
+    // and control lines above were built.
+    const imbalance = baseDebitTotal - baseCreditTotal;
+    realizedFxCents = imbalance;
+    if (imbalance > 0) {
+      const gainAccountId = await resolveFxAccount(client, orgId, 'gain');
+      glLines.push({ accountId: gainAccountId, debitCents: 0, creditCents: imbalance, currencyCode: baseCurrency, fxRate: ONE_RATE });
+    } else if (imbalance < 0) {
+      const lossAccountId = await resolveFxAccount(client, orgId, 'loss');
+      glLines.push({ accountId: lossAccountId, debitCents: -imbalance, creditCents: 0, currencyCode: baseCurrency, fxRate: ONE_RATE });
+    }
+  }
 
   // The payment id is needed before the journal entry (as sourceId) and
   // the journal entry id is needed before the payment row (journal_entry_id
@@ -559,11 +717,13 @@ export async function createPaymentOnClient(
     lines: glLines,
   });
 
+  const baseAmountCents = convertToBase(cents(input.amountCents), paymentRate);
+
   await client.query(
     `INSERT INTO payments
-       (id, org_id, direction, payment_date, currency_code, amount_cents, cash_account_id,
-        customer_id, vendor_id, method, reference, notes, journal_entry_id, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+       (id, org_id, direction, payment_date, currency_code, amount_cents, fx_rate, base_amount_cents,
+        cash_account_id, customer_id, vendor_id, method, reference, notes, journal_entry_id, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       paymentId,
       orgId,
@@ -571,6 +731,8 @@ export async function createPaymentOnClient(
       input.paymentDate,
       currencyCode,
       input.amountCents,
+      paymentRate,
+      baseAmountCents,
       input.cashAccountId,
       input.direction === 'RECEIVE' ? counterpartyId : null,
       input.direction === 'PAY' ? counterpartyId : null,
@@ -582,17 +744,25 @@ export async function createPaymentOnClient(
     ],
   );
 
+  const allocationBaseCents: Cents[] = input.allocations.map((allocation) => {
+    const targetId = allocation.invoiceId ?? allocation.billId;
+    const target = targetId === null ? undefined : targets.get(targetId);
+    if (target === undefined) throw new Error('Allocation target missing after validation');
+    return convertToBase(cents(allocation.amountCents), target.fxRate);
+  });
+
   await client.query(
-    `INSERT INTO payment_allocations (org_id, payment_id, invoice_id, bill_id, amount_cents)
-     SELECT $1, $2, v.invoice_id, v.bill_id, v.amount_cents
-       FROM unnest($3::uuid[], $4::uuid[], $5::bigint[])
-            AS v(invoice_id, bill_id, amount_cents)`,
+    `INSERT INTO payment_allocations (org_id, payment_id, invoice_id, bill_id, amount_cents, base_amount_cents)
+     SELECT $1, $2, v.invoice_id, v.bill_id, v.amount_cents, v.base_amount_cents
+       FROM unnest($3::uuid[], $4::uuid[], $5::bigint[], $6::bigint[])
+            AS v(invoice_id, bill_id, amount_cents, base_amount_cents)`,
     [
       orgId,
       paymentId,
       input.allocations.map((a) => a.invoiceId),
       input.allocations.map((a) => a.billId),
       input.allocations.map((a) => a.amountCents),
+      allocationBaseCents,
     ],
   );
 
@@ -605,6 +775,9 @@ export async function createPaymentOnClient(
     paymentDate: input.paymentDate,
     currencyCode,
     amountCents: input.amountCents,
+    fxRate: paymentRate,
+    baseAmountCents,
+    realizedFxCents,
     customerId: input.direction === 'RECEIVE' ? counterpartyId : null,
     vendorId: input.direction === 'PAY' ? counterpartyId : null,
     cashAccountId: input.cashAccountId,

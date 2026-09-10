@@ -9,6 +9,7 @@ export const OUTBOX_EVENT_TYPES = [
   'payment.recorded',
   'fiscal_period.closed',
   'bank.large_unmatched',
+  'fx.revaluation_posted',
 ] as const;
 
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];

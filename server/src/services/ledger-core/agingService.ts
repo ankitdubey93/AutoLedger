@@ -52,6 +52,13 @@ const AGING_CONFIG: Record<'AR' | 'AP', AgingConfig> = {
  * The open, outstanding documents for one report, as a `WITH` fragment. `d`
  * and `cp` are this query's own aliases — `config` fields interpolated here
  * are the frozen `AGING_CONFIG` values above, never request input.
+ *
+ * Base currency, not native (Phase 8): the reporting currency is the
+ * organization's base currency, and a document's native amount may be in any
+ * currency — summing native amounts across currencies is meaningless. Every
+ * figure this CTE produces (and everything derived from it — the buckets,
+ * the per-counterparty rows, the totals, and the reconciles check against
+ * the base-currency GL control balance) is a base-currency figure.
  */
 function buildOpenDocsCte(config: AgingConfig): string {
   return `open_docs AS (
@@ -59,7 +66,7 @@ function buildOpenDocsCte(config: AgingConfig): string {
            d.due_date,
            d.${config.counterpartyColumn} AS counterparty_id,
            cp.name AS counterparty_name,
-           (d.total_cents - ${allocatedCentsSubquery('d', config.allocationColumn)}::bigint) AS outstanding_cents,
+           (d.base_total_cents - ${allocatedCentsSubquery('d', config.allocationColumn, 'base_amount_cents')}::bigint) AS outstanding_cents,
            CASE
              WHEN d.due_date >= $2::date THEN 'CURRENT'
              WHEN d.due_date >  $2::date - INTERVAL '30 days' THEN 'D1_30'

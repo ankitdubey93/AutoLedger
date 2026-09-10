@@ -2,12 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import {
+  ApiRequestError,
   createBill,
   getBill,
+  getLatestFxRate,
   listAccounts,
   listVendors,
   updateBill,
   type Account,
+  type ResolvedRate,
   type Vendor,
 } from '../../services/fetchServices';
 import {
@@ -19,7 +22,10 @@ import {
   parseRateInput,
 } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
 /**
  * Enter a bill, edit one, or duplicate one — the same page, told apart by
@@ -71,6 +77,9 @@ export default function NewBillPage() {
   const [params] = useSearchParams();
   const copyFrom = params.get('copyFrom');
 
+  const ledgerSettings = useLedgerSettings();
+  const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : 'USD';
+
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
 
@@ -78,6 +87,7 @@ export default function NewBillPage() {
   const [vendorReference, setVendorReference] = useState('');
   const [billDate, setBillDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
+  const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [paymentTerms, setPaymentTerms] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
@@ -86,6 +96,10 @@ export default function NewBillPage() {
   const [notEditable, setNotEditable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const [resolvedRate, setResolvedRate] = useState<ResolvedRate | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
+  const [rateLoading, setRateLoading] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -128,6 +142,7 @@ export default function NewBillPage() {
         setVendorReference(billId !== undefined ? bill.vendorReference : '');
         setBillDate(billId !== undefined ? bill.billDate : today());
         setDueDate(bill.dueDate);
+        setCurrencyCode(bill.currencyCode);
         setPaymentTerms(bill.paymentTerms ?? '');
         setNotes(bill.notes ?? '');
         setLines(
@@ -175,6 +190,41 @@ export default function NewBillPage() {
     return { subtotal, tax, total: subtotal + tax, malformed };
   }, [lines]);
 
+  // Resolves the display-only rate/base-total preview whenever a foreign
+  // currency is selected — the server resolves and freezes its own rate on
+  // save/approve independently.
+  useEffect(() => {
+    if (currencyCode === baseCurrency || billDate === '') {
+      setResolvedRate(null);
+      setRateError(null);
+      return;
+    }
+    let ignore = false;
+    setRateLoading(true);
+    setRateError(null);
+    getLatestFxRate(currencyCode, billDate)
+      .then((res) => {
+        if (!ignore) setResolvedRate(res.rate);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setResolvedRate(null);
+        setRateError(
+          err instanceof ApiRequestError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Could not resolve an exchange rate',
+        );
+      })
+      .finally(() => {
+        if (!ignore) setRateLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [currencyCode, baseCurrency, billDate]);
+
   function updateLine(index: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
@@ -194,7 +244,8 @@ export default function NewBillPage() {
         line.unitPrice.trim() !== '',
     );
 
-  const canSave = complete && !totals.malformed && !busy;
+  const canSave =
+    complete && !totals.malformed && !busy && (currencyCode === baseCurrency || (resolvedRate !== null && !rateLoading));
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -207,6 +258,7 @@ export default function NewBillPage() {
         vendorReference: vendorReference.trim(),
         billDate,
         dueDate,
+        currencyCode,
         notes: notes.trim() === '' ? null : notes.trim(),
         paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
         lines: lines.map((line) => ({
@@ -298,7 +350,34 @@ export default function NewBillPage() {
               className={inputClass}
             />
           </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Currency</span>
+            <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className={inputClass}>
+              {CURRENCIES.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                  {code === baseCurrency ? ' (base)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+
+        {currencyCode !== baseCurrency && (
+          <div className="text-sm">
+            {rateLoading && <p className="text-[var(--muted)] m-0">Resolving the {currencyCode} rate…</p>}
+            {rateError !== null && (
+              <p className="status status--bad m-0">
+                {rateError} — <Link to={`${base}/fx-rates`}>add one under Currency → Rates</Link>.
+              </p>
+            )}
+            {resolvedRate !== null && !rateLoading && (
+              <p className="text-[var(--muted)] m-0">
+                1 {currencyCode} = {resolvedRate.rate} {baseCurrency} (rate dated {resolvedRate.rateDate})
+              </p>
+            )}
+          </div>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Payment terms</span>
@@ -437,6 +516,12 @@ export default function NewBillPage() {
             <span>Total</span>
             <span className="tabular-nums">{formatCents(totals.total)}</span>
           </div>
+          {currencyCode !== baseCurrency && resolvedRate !== null && (
+            <div className="flex justify-between w-full text-[var(--muted)]">
+              <span>≈ {baseCurrency}</span>
+              <span className="tabular-nums">{formatCents(Math.round(totals.total * Number(resolvedRate.rate)))}</span>
+            </div>
+          )}
         </div>
 
         {totals.malformed && (

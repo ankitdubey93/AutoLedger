@@ -4,6 +4,7 @@ import {
   BookOpen,
   Building2,
   CalendarCheck,
+  Coins,
   FileBarChart,
   FileText,
   GitCompareArrows,
@@ -12,6 +13,7 @@ import {
   LayoutDashboard,
   ListTree,
   ReceiptText,
+  RefreshCw,
   Scale,
   Send,
   Settings as SettingsIcon,
@@ -78,6 +80,14 @@ const NAV_GROUPS = [
     items: [
       { to: 'trial-balance', label: 'Trial Balance', icon: Scale, end: false },
       { to: 'reports', label: 'Reports', icon: FileBarChart, end: false },
+    ],
+  },
+  {
+    heading: 'Currency',
+    items: [
+      { to: 'fx-rates', label: 'Rates', icon: Coins, end: false },
+      { to: 'fx-exposure', label: 'Exposure', icon: GitCompareArrows, end: false },
+      { to: 'fx-revaluations', label: 'Revaluations', icon: RefreshCw, end: false },
     ],
   },
   {

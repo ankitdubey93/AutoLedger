@@ -92,6 +92,8 @@ function renderPaymentDialog(overrides: Partial<React.ComponentProps<typeof Paym
           counterpartyName="Northwind Traders"
           documentId="inv-1"
           amountDueCents={40000}
+          documentCurrencyCode="USD"
+          documentFxRate="1.00000000"
           onClose={onClose}
           onRecorded={onRecorded}
           {...overrides}
@@ -158,6 +160,8 @@ const payment1: Payment = {
   paymentDate: '2026-07-01',
   currencyCode: 'USD',
   amountCents: 40000,
+  fxRate: '1.00000000',
+  baseAmountCents: 40000,
   cashAccountId: cashAccount.id,
   cashAccountCode: '1110',
   cashAccountName: 'Operating Cash',
@@ -175,7 +179,7 @@ const payment1: Payment = {
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   allocations: [
-    { id: 'alloc-1', invoiceId: 'inv-1', billId: null, documentReference: 'INV-000001', documentTotalCents: 100000, amountCents: 40000 },
+    { id: 'alloc-1', invoiceId: 'inv-1', billId: null, documentReference: 'INV-000001', documentTotalCents: 100000, amountCents: 40000, baseAmountCents: 40000 },
   ],
 };
 

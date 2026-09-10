@@ -208,6 +208,10 @@ export interface LedgerSettings {
    * webhook event fires (Phase 7).
    */
   unmatchedAlertThresholdCents: number;
+  /** Phase 8. `null` falls back to chart codes 4910/6810/6820 in the service. */
+  realizedFxGainAccountId: string | null;
+  realizedFxLossAccountId: string | null;
+  unrealizedFxAccountId: string | null;
 }
 
 /* ---------------------------------------------------------- Phase 3.5 — dashboard */
@@ -289,6 +293,11 @@ export interface Invoice {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency invoice. */
+  fxRate: string;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
   journalEntryId: string | null;
   voidJournalEntryId: string | null;
   issuedAt: string | null;
@@ -401,6 +410,11 @@ export interface Bill {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency bill. */
+  fxRate: string;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
   journalEntryId: string | null;
   voidJournalEntryId: string | null;
   submittedAt: string | null;
@@ -451,6 +465,8 @@ export interface PaymentAllocation {
   documentReference: string;
   documentTotalCents: number;
   amountCents: number;
+  /** Phase 8. amountCents converted to base currency at the document's own frozen rate. */
+  baseAmountCents: number;
 }
 
 export interface Payment {
@@ -460,6 +476,9 @@ export interface Payment {
   paymentDate: string;
   currencyCode: string;
   amountCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency payment. */
+  fxRate: string;
+  baseAmountCents: number;
   cashAccountId: string;
   cashAccountCode: string;
   cashAccountName: string;
@@ -814,4 +833,96 @@ export interface BankReconciliationReport {
   statedClosingBalanceCents: number | null;
   statedClosingBalanceOn: string | null;
   statedClosingDifferenceCents: number | null;
+}
+
+// ------------------------------------------------------------------ Phase 8 — FX
+
+export const FX_RATE_SOURCES = ['MANUAL', 'IMPORT'] as const;
+export type FxRateSource = (typeof FX_RATE_SOURCES)[number];
+
+export function isFxRateSource(value: string): value is FxRateSource {
+  return (FX_RATE_SOURCES as readonly string[]).includes(value);
+}
+
+export interface FxRate {
+  id: string;
+  fromCode: string;
+  toCode: string;
+  rateDate: string; // 'YYYY-MM-DD' — a DATE is a calendar fact, never an instant
+  rate: string; // NUMERIC(18,8) as a string, never a number — see utils/fxRate.ts
+  source: FxRateSource;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** What a lookup answers with: the rate, and which row supplied it. */
+export interface ResolvedRate {
+  fromCode: string;
+  toCode: string;
+  rate: string;
+  /** The date of the row actually used — on or BEFORE the date asked for. */
+  rateDate: string;
+  /** true when fromCode === toCode: rate '1.00000000', no row consulted. */
+  identity: boolean;
+}
+
+export interface FxExposureDocument {
+  documentType: 'INVOICE' | 'BILL';
+  documentId: string;
+  documentNumber: string | null;
+  counterpartyName: string;
+  currencyCode: string;
+  outstandingCents: number; // native, the document's own currency
+  documentRate: string;
+  revaluationRate: string;
+  carryingBaseCents: number; // outstanding x documentRate
+  revaluedBaseCents: number; // outstanding x revaluationRate
+  deltaCents: number; // revalued - carrying, signed
+}
+
+export interface FxExposureReport {
+  asOfDate: string;
+  baseCurrency: string;
+  documents: FxExposureDocument[];
+  /** Per-currency subtotals, ordered by currencyCode ASC. */
+  byCurrency: {
+    currencyCode: string;
+    outstandingCents: number;
+    carryingBaseCents: number;
+    revaluedBaseCents: number;
+    deltaCents: number;
+  }[];
+  totalDeltaCents: number;
+  /** true when a revaluation already exists for asOfDate. */
+  alreadyRevalued: boolean;
+}
+
+export interface FxRevaluationLine {
+  id: string;
+  documentType: 'INVOICE' | 'BILL';
+  invoiceId: string | null;
+  billId: string | null;
+  documentNumber: string | null;
+  counterpartyName: string;
+  currencyCode: string;
+  outstandingCents: number;
+  documentRate: string;
+  revaluationRate: string;
+  carryingBaseCents: number;
+  revaluedBaseCents: number;
+  deltaCents: number;
+}
+
+export interface FxRevaluation {
+  id: string;
+  asOfDate: string;
+  journalEntryId: string;
+  reversalJournalEntryId: string;
+  /** Signed — a revaluation delta is not a "money >= 0" amount. */
+  totalDeltaCents: number;
+  lineCount: number;
+  createdBy: string;
+  createdAt: string;
+  lines: FxRevaluationLine[];
 }

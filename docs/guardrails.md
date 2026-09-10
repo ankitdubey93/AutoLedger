@@ -57,6 +57,8 @@ Every money column is `BIGINT` cents — `debit_cents`, `credit_cents`, `amount_
 
 **Cents at the boundary too, not just in the database.** A request or an extracted document that carries `450.00` is converted on the way in, before anything sums it — `JSON.parse` produces an IEEE-754 double, and there is no exception to this rule for values that are "only in transit".
 
+**An exchange rate (`NUMERIC(18,8)`, Phase 8) is not money and is the one documented exception to "BIGINT cents"** — a rate is a ratio needing sub-cent precision, never an amount. It stays a `string` end to end, both on the wire and in TypeScript, and is converted through exactly one chokepoint, `utils/fxRate.ts`'s `rateNumerator` (scaled to an integer numerator, never a bare `Number(rate) * cents` float multiplication). Converting a native amount to base currency always goes through `convertToBase`, which is `scaleCents` under the hood — the same exact-`BigInt`, half-up rounding every other rational-factor scaling in this codebase uses (rule 3's `scaleCents` for tax, now reused for FX).
+
 ## 4. Parameterized queries only
 
 Always `$1, $2, ...` with a values array. Never interpolate user input into SQL — not even "safe-looking" values like sort columns or table names. Whitelist identifiers against a constant map instead.

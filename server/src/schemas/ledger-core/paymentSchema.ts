@@ -1,12 +1,19 @@
 import { z } from 'zod';
+import { SUPPORTED_CURRENCIES } from '../../config/currencies.js';
 
 /**
  * Request schemas for LedgerCore payments.
  *
  * Deliberately absent: `direction`'s counterpart validation happens in the
- * top-level `.refine` below, `currencyCode` (the organization's base
- * currency), `status` (a payment is born POSTED), `journalEntryId` (the
- * server posts it). A client-supplied total would be a client-supplied lie.
+ * top-level `.refine` below, `fxRate` (always resolved from `fx_rates`,
+ * never client-supplied), `status` (a payment is born POSTED),
+ * `journalEntryId` (the server posts it). A client-supplied total would be a
+ * client-supplied lie.
+ *
+ * `currencyCode` (Phase 8) is optional — omitted means the organization's
+ * base currency, the pre-Phase-8 behaviour. A payment may only allocate to
+ * documents already in that same currency (enforced by the service and by
+ * `trg_allocations_currency`, migration 025).
  */
 
 const allocationSchema = z
@@ -24,6 +31,7 @@ export const createPaymentSchema = z
     direction: z.enum(['RECEIVE', 'PAY']),
     paymentDate: z.iso.date(),
     amountCents: z.int().min(1).max(1_000_000_000_000),
+    currencyCode: z.enum(SUPPORTED_CURRENCIES).optional(),
     cashAccountId: z.uuid(),
     customerId: z.uuid().nullable().default(null),
     vendorId: z.uuid().nullable().default(null),

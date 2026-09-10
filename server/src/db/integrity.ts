@@ -40,11 +40,17 @@ export interface IntegrityReport {
  * the database. Integer `BigInt` comparison, never a float or an epsilon
  * (guardrails rule 3) — the two totals are either exactly equal or they are
  * not.
+ *
+ * Base currency, not native (Phase 8): the reporting currency is each
+ * organization's base currency, and a line's native amount may be in any
+ * currency — summing native amounts across currencies is meaningless. Base
+ * currency is what balances; see migration 023 and
+ * study/postgresql/multi-currency-and-functional-currency.md.
  */
 async function checkDebitsEqualCredits(): Promise<IntegrityCheck> {
   const { rows } = await pool.query<{ total_debits: string; total_credits: string }>(
-    `SELECT COALESCE(SUM(debit_cents), 0)::text AS total_debits,
-            COALESCE(SUM(credit_cents), 0)::text AS total_credits
+    `SELECT COALESCE(SUM(base_debit_cents), 0)::text AS total_debits,
+            COALESCE(SUM(base_credit_cents), 0)::text AS total_credits
        FROM ledger_lines`,
   );
   const row = rows[0];
@@ -54,7 +60,7 @@ async function checkDebitsEqualCredits(): Promise<IntegrityCheck> {
 
   return {
     name: 'debits_equal_credits',
-    description: 'Total debits must equal total credits across the entire ledger.',
+    description: 'Total base-currency debits must equal total base-currency credits across the entire ledger.',
     passed,
     offenders: passed
       ? []
@@ -70,9 +76,14 @@ async function checkDebitsEqualCredits(): Promise<IntegrityCheck> {
 
 /**
  * Every individual journal entry must balance on its own — the same
- * invariant migration 004's deferred constraint trigger enforces at
+ * invariant migration 004/023's deferred constraint trigger enforces at
  * `COMMIT` time, re-verified here from scratch against whatever is actually
  * in the table.
+ *
+ * Base currency, not native (Phase 8) — see checkDebitsEqualCredits above.
+ * An entry mixing currencies (a realized-FX settlement) legitimately fails
+ * a native-sum check while still balancing in base currency, which is the
+ * only sum this check is entitled to assert on.
  */
 async function checkEveryEntryBalances(): Promise<IntegrityCheck> {
   const { rows } = await pool.query<{
@@ -82,18 +93,18 @@ async function checkEveryEntryBalances(): Promise<IntegrityCheck> {
     total_credits: string;
   }>(
     `SELECT e.org_id, l.journal_entry_id,
-            SUM(l.debit_cents)::text AS total_debits,
-            SUM(l.credit_cents)::text AS total_credits
+            SUM(l.base_debit_cents)::text AS total_debits,
+            SUM(l.base_credit_cents)::text AS total_credits
        FROM ledger_lines l
        JOIN journal_entries e ON e.id = l.journal_entry_id
       GROUP BY e.org_id, l.journal_entry_id
-     HAVING SUM(l.debit_cents) <> SUM(l.credit_cents)
+     HAVING SUM(l.base_debit_cents) <> SUM(l.base_credit_cents)
       LIMIT 20`,
   );
 
   return {
     name: 'every_entry_balances',
-    description: 'Every journal entry must have equal debits and credits across its own lines.',
+    description: 'Every journal entry must have equal base-currency debits and credits across its own lines.',
     passed: rows.length === 0,
     offenders: rows.map((r) => ({
       orgId: r.org_id,

@@ -2,15 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import {
+  ApiRequestError,
   createInvoice,
   getInvoice,
   getInvoiceSettings,
+  getLatestFxRate,
   listAccounts,
   listCustomers,
   updateInvoice,
   type Account,
   type Customer,
   type InvoiceSettings,
+  type ResolvedRate,
 } from '../../services/fetchServices';
 import {
   formatCents,
@@ -21,7 +24,10 @@ import {
   parseRateInput,
 } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
 /**
  * Draft an invoice, or edit one — the same page, told apart by whether the
@@ -77,6 +83,8 @@ export default function NewInvoicePage() {
   const base = useAppBasePath();
   const navigate = useNavigate();
   const { invoiceId } = useParams<{ invoiceId?: string }>();
+  const ledgerSettings = useLedgerSettings();
+  const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : 'USD';
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [revenueAccounts, setRevenueAccounts] = useState<Account[]>([]);
@@ -85,9 +93,14 @@ export default function NewInvoicePage() {
   const [customerId, setCustomerId] = useState('');
   const [issueDate, setIssueDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
+  const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [paymentTerms, setPaymentTerms] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([]);
+
+  const [resolvedRate, setResolvedRate] = useState<ResolvedRate | null>(null);
+  const [rateError, setRateError] = useState<string | null>(null);
+  const [rateLoading, setRateLoading] = useState(false);
 
   const [seeded, setSeeded] = useState(false);
   const [notEditable, setNotEditable] = useState(false);
@@ -143,6 +156,7 @@ export default function NewInvoicePage() {
         setCustomerId(invoice.customerId);
         setIssueDate(invoice.issueDate);
         setDueDate(invoice.dueDate);
+        setCurrencyCode(invoice.currencyCode);
         setPaymentTerms(invoice.paymentTerms ?? '');
         setNotes(invoice.notes ?? '');
         setLines(
@@ -190,6 +204,42 @@ export default function NewInvoicePage() {
     return { subtotal, tax, total: subtotal + tax, malformed };
   }, [lines]);
 
+  // Resolves the display-only rate/base-total preview whenever a foreign
+  // currency is selected — the server resolves and freezes its own rate on
+  // save/issue independently, so a stale preview here can never corrupt what
+  // is actually posted.
+  useEffect(() => {
+    if (currencyCode === baseCurrency || issueDate === '') {
+      setResolvedRate(null);
+      setRateError(null);
+      return;
+    }
+    let ignore = false;
+    setRateLoading(true);
+    setRateError(null);
+    getLatestFxRate(currencyCode, issueDate)
+      .then((res) => {
+        if (!ignore) setResolvedRate(res.rate);
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setResolvedRate(null);
+        setRateError(
+          err instanceof ApiRequestError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Could not resolve an exchange rate',
+        );
+      })
+      .finally(() => {
+        if (!ignore) setRateLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [currencyCode, baseCurrency, issueDate]);
+
   function updateLine(index: number, patch: Partial<DraftLine>) {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
@@ -208,7 +258,8 @@ export default function NewInvoicePage() {
         line.unitPrice.trim() !== '',
     );
 
-  const canSave = complete && !totals.malformed && !busy;
+  const canSave =
+    complete && !totals.malformed && !busy && (currencyCode === baseCurrency || (resolvedRate !== null && !rateLoading));
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -220,6 +271,7 @@ export default function NewInvoicePage() {
         customerId,
         issueDate,
         dueDate,
+        currencyCode,
         notes: notes.trim() === '' ? null : notes.trim(),
         paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
         lines: lines.map((line) => ({
@@ -302,7 +354,35 @@ export default function NewInvoicePage() {
               className={inputClass}
             />
           </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Currency</span>
+            <select value={currencyCode} onChange={(e) => setCurrencyCode(e.target.value)} className={inputClass}>
+              {CURRENCIES.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                  {code === baseCurrency ? ' (base)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
+
+        {currencyCode !== baseCurrency && (
+          <div className="text-sm">
+            {rateLoading && <p className="text-[var(--muted)] m-0">Resolving the {currencyCode} rate…</p>}
+            {rateError !== null && (
+              <p className="status status--bad m-0">
+                {rateError} —{' '}
+                <Link to={`${base}/fx-rates`}>add one under Currency → Rates</Link>.
+              </p>
+            )}
+            {resolvedRate !== null && !rateLoading && (
+              <p className="text-[var(--muted)] m-0">
+                1 {currencyCode} = {resolvedRate.rate} {baseCurrency} (rate dated {resolvedRate.rateDate})
+              </p>
+            )}
+          </div>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Payment terms</span>
@@ -452,6 +532,14 @@ export default function NewInvoicePage() {
             <span>Total</span>
             <span className="tabular-nums">{formatCents(totals.total)}</span>
           </div>
+          {currencyCode !== baseCurrency && resolvedRate !== null && (
+            <div className="flex justify-between w-full text-[var(--muted)]">
+              <span>≈ {baseCurrency}</span>
+              {/* Preview only, rounded client-side — the server resolves and
+                  freezes the authoritative base total on save/issue. */}
+              <span className="tabular-nums">{formatCents(Math.round(totals.total * Number(resolvedRate.rate)))}</span>
+            </div>
+          )}
         </div>
 
         {totals.malformed && (

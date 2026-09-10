@@ -522,6 +522,10 @@ export interface LedgerSettings {
   currentFiscalYear: FiscalYearWindow;
   /** `true` once any ledger line exists — base currency can no longer change. */
   baseCurrencyLocked: boolean;
+  /** Phase 8. `null` falls back to chart codes 4910/6810/6820 in the service. */
+  realizedFxGainAccountId: string | null;
+  realizedFxLossAccountId: string | null;
+  unrealizedFxAccountId: string | null;
 }
 
 /** Mirrors server/src/services/ledger-core/settingsService.ts's OnboardingInput. */
@@ -741,6 +745,11 @@ export interface Invoice {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency invoice. */
+  fxRate: string;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
   journalEntryId: string | null;
   voidJournalEntryId: string | null;
   issuedAt: string | null;
@@ -814,6 +823,8 @@ export interface InvoiceInput {
   customerId: string;
   issueDate: string;
   dueDate: string;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string;
   notes: string | null;
   paymentTerms: string | null;
   lines: InvoiceLineInput[];
@@ -997,6 +1008,11 @@ export interface Bill {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency bill. */
+  fxRate: string;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
   journalEntryId: string | null;
   voidJournalEntryId: string | null;
   submittedAt: string | null;
@@ -1069,6 +1085,8 @@ export interface BillInput {
   vendorReference: string;
   billDate: string;
   dueDate: string;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string;
   notes: string | null;
   paymentTerms: string | null;
   lines: BillLineInput[];
@@ -1132,6 +1150,8 @@ export interface PaymentAllocation {
   documentReference: string;
   documentTotalCents: number;
   amountCents: number;
+  /** Phase 8. amountCents converted to base currency at the document's own frozen rate. */
+  baseAmountCents: number;
 }
 
 /** Mirrors server/src/types/ledger-core.ts's Payment. */
@@ -1142,6 +1162,9 @@ export interface Payment {
   paymentDate: string;
   currencyCode: string;
   amountCents: number;
+  /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency payment. */
+  fxRate: string;
+  baseAmountCents: number;
   cashAccountId: string;
   cashAccountCode: string;
   cashAccountName: string;
@@ -1216,6 +1239,8 @@ export interface PaymentInput {
   direction: PaymentDirection;
   paymentDate: string;
   amountCents: number;
+  /** Phase 8. Omitted means the organization's base currency. */
+  currencyCode?: string;
   cashAccountId: string;
   customerId: string | null;
   vendorId: string | null;
@@ -1888,4 +1913,187 @@ export function retryWebhookDelivery(
   id: string,
 ): Promise<{ success: boolean; delivery: { id: string; status: WebhookDeliveryStatus } }> {
   return apiFetch(`/webhook-deliveries/${id}/retry`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/* ------------------------------------------------------------- ledger-core: FX */
+
+/** Mirrors server/src/types/ledger-core.ts's FxRate. */
+export interface FxRate {
+  id: string;
+  fromCode: string;
+  toCode: string;
+  rateDate: string;
+  /** NUMERIC(18,8) as a string, never a number — never round-trip through JSON. */
+  rate: string;
+  source: 'MANUAL' | 'IMPORT';
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's ResolvedRate. */
+export interface ResolvedRate {
+  fromCode: string;
+  toCode: string;
+  rate: string;
+  rateDate: string;
+  identity: boolean;
+}
+
+export interface FxRateFilters {
+  page?: number;
+  limit?: number;
+  fromCode?: string;
+  from?: string;
+  to?: string;
+}
+
+/** GET /ledger-core/fx-rates */
+export function listFxRates(
+  params: FxRateFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  rates: FxRate[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.fromCode !== undefined && params.fromCode !== '') query.set('fromCode', params.fromCode);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/fx-rates${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/fx-rates/latest?from=<currency>&on=YYYY-MM-DD */
+export function getLatestFxRate(
+  fromCode: string,
+  on?: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; rate: ResolvedRate }> {
+  const query = new URLSearchParams({ from: fromCode });
+  if (on !== undefined) query.set('on', on);
+  return apiFetch(`/ledger-core/fx-rates/latest?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/fx-rates — re-posting the same (fromCode, toCode, rateDate) overwrites. */
+export function upsertFxRate(body: {
+  fromCode: string;
+  toCode: string;
+  rateDate: string;
+  rate: string;
+}): Promise<{ success: boolean; rate: FxRate }> {
+  return apiFetch('/ledger-core/fx-rates', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** DELETE /ledger-core/fx-rates/:id */
+export function deleteFxRate(id: string): Promise<void> {
+  return apiFetch(`/ledger-core/fx-rates/${id}`, { method: 'DELETE' });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's FxExposureDocument. */
+export interface FxExposureDocument {
+  documentType: 'INVOICE' | 'BILL';
+  documentId: string;
+  documentNumber: string | null;
+  counterpartyName: string;
+  currencyCode: string;
+  outstandingCents: number;
+  documentRate: string;
+  revaluationRate: string;
+  carryingBaseCents: number;
+  revaluedBaseCents: number;
+  deltaCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's FxExposureReport. */
+export interface FxExposureReport {
+  asOfDate: string;
+  baseCurrency: string;
+  documents: FxExposureDocument[];
+  byCurrency: {
+    currencyCode: string;
+    outstandingCents: number;
+    carryingBaseCents: number;
+    revaluedBaseCents: number;
+    deltaCents: number;
+  }[];
+  totalDeltaCents: number;
+  alreadyRevalued: boolean;
+}
+
+/** GET /ledger-core/reports/fx-exposure?asOf=YYYY-MM-DD — read-only preview, posts nothing. */
+export function getFxExposure(
+  asOf?: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; exposure: FxExposureReport }> {
+  const query = asOf !== undefined ? `?asOf=${asOf}` : '';
+  return apiFetch(`/ledger-core/reports/fx-exposure${query}`, { signal: signal ?? null });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's FxRevaluationLine. */
+export interface FxRevaluationLine {
+  id: string;
+  documentType: 'INVOICE' | 'BILL';
+  invoiceId: string | null;
+  billId: string | null;
+  documentNumber: string | null;
+  counterpartyName: string;
+  currencyCode: string;
+  outstandingCents: number;
+  documentRate: string;
+  revaluationRate: string;
+  carryingBaseCents: number;
+  revaluedBaseCents: number;
+  deltaCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's FxRevaluation. */
+export interface FxRevaluation {
+  id: string;
+  asOfDate: string;
+  journalEntryId: string;
+  reversalJournalEntryId: string;
+  totalDeltaCents: number;
+  lineCount: number;
+  createdBy: string;
+  createdAt: string;
+  lines: FxRevaluationLine[];
+}
+
+/** GET /ledger-core/fx-revaluations */
+export function listFxRevaluations(
+  params: { page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  revaluations: FxRevaluation[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/fx-revaluations${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/fx-revaluations/:id */
+export function getFxRevaluation(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; revaluation: FxRevaluation }> {
+  return apiFetch(`/ledger-core/fx-revaluations/${id}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/fx-revaluations — OWNER/ADMIN only; posts a GL entry plus an automatic next-day reversal. */
+export function runFxRevaluation(asOfDate: string): Promise<{ success: boolean; revaluation: FxRevaluation }> {
+  return apiFetch('/ledger-core/fx-revaluations', { method: 'POST', body: JSON.stringify({ asOfDate }) });
 }

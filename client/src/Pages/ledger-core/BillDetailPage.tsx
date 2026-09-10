@@ -13,6 +13,7 @@ import {
 import { formatCents, formatQuantity, formatRate } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { useAuth } from '../../context/AuthContext';
+import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
 import ConfirmDialog from './ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
@@ -39,6 +40,7 @@ export default function BillDetailPage() {
   const base = useAppBasePath();
   const auth = useAuth();
   const role = auth.status === 'authenticated' ? auth.role : null;
+  const ledgerSettings = useLedgerSettings();
 
   const [bill, setBill] = useState<Bill | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -271,8 +273,14 @@ export default function BillDetailPage() {
           </div>
           <div className="flex justify-between w-full font-semibold border-t border-[var(--border)] pt-1">
             <span>Total</span>
-            <span className="tabular-nums">{formatCents(bill.totalCents)}</span>
+            <span className="tabular-nums">{formatCents(bill.totalCents)} {bill.currencyCode}</span>
           </div>
+          {ledgerSettings.status === 'ready' && bill.currencyCode !== ledgerSettings.settings.baseCurrency && (
+            <div className="flex justify-between w-full text-[var(--muted)]">
+              <span>≈ {ledgerSettings.settings.baseCurrency} (at {bill.fxRate})</span>
+              <span className="tabular-nums">{formatCents(bill.baseTotalCents)}</span>
+            </div>
+          )}
           {bill.status === 'POSTED' && (
             <>
               <div className="flex justify-between w-full">
@@ -379,6 +387,8 @@ export default function BillDetailPage() {
           counterpartyName={bill.vendorNameSnapshot}
           documentId={bill.id}
           amountDueCents={bill.amountDueCents}
+          documentCurrencyCode={bill.currencyCode}
+          documentFxRate={bill.fxRate}
           onClose={() => setShowPaymentDialog(false)}
           onRecorded={() => {
             setShowPaymentDialog(false);

@@ -191,6 +191,16 @@ Built in Phase 3:
 
 Not yet applied: `Cents` does not appear on the `ledger_lines` DTOs in `types/ledger-core.ts`, which use plain `number`. Branding the transport types would mean re-validating on every `JSON.parse` boundary crossing for a value the database CHECK constraints already guarantee. The brand earns its keep in the calculation path — `sumCents` over an entry's lines — which is where it is used.
 
+### Phase 8: why an exchange rate is deliberately *not* branded like `Cents`
+
+`fx_rates.rate` and `ledger_lines.fx_rate` are `NUMERIC(18,8)` — a ratio, not an amount — and stay a bare `string` end to end in `utils/fxRate.ts`, never a branded type the way `Cents` is. Three reasons, all more specific than "it's a different kind of number":
+
+1. **It needs more precision than a `number` can carry safely across the wire.** `Cents` is deliberately erased to a `number` at runtime because integer cents up to 2⁵³−1 round-trip through IEEE-754 exactly. A rate has 8 decimal places of genuine precision (`83.50000000`), and encoding that as a JSON `number` risks the exact float-drift problem branding money was built to prevent in the first place — so the type stays `string` specifically so nothing is ever tempted to arithmetic on it directly.
+2. **There is exactly one legal operation on a rate — converting an amount by it — and that operation already lives in one function.** `Cents` needs a checked *constructor* (`cents()`) because a raw number can arrive from anywhere and must be validated once. A rate never gets constructed from arbitrary input in the same sense — it is either read verbatim from `fx_rates` (already validated by the database's `chk_fx_rates_rate_range` CHECK) or is the branded system's own `ONE_RATE` literal. The thing that needs guarding is not "is this string a valid rate" so much as "has this string ever been multiplied by anything except through `convertToBase`" — a narrower guarantee, and `rateNumerator` being the *only* function that ever calls `Number()` on a rate string is what actually provides it, no phantom type required.
+3. **`rateNumerator` is the single chokepoint that already does what branding would otherwise buy.** Branding earns its keep by making an unchecked value a compile error to use where a checked one is expected. Here, every rate that reaches money arithmetic has already passed through `rateNumerator` (which validates format and safe-integer range, mirroring `cents()`'s own checks) inside `convertToBase` — so the "only the checked path produces a usable value" property `Cents` gets from its brand, a rate gets from having no other function in the codebase that is allowed to touch it.
+
+The result: `Cents` is a `number` wearing a compile-time tag so it can't be confused with dollars or a row count; a rate is a `string` specifically so it is *never* tempted into `number` arithmetic except inside the one function that does it safely.
+
 ## Gotchas
 
 - **`as Cents` on unvalidated input defeats the whole thing.** Only the checked constructor should produce a branded value; the cast belongs inside it and nowhere else.
@@ -233,6 +243,9 @@ A: Because a third decimal digit almost always means something went wrong upstre
 **Q: Tell me about a type-level decision that prevented a class of bug.**
 A: On AutoLedger, money is integer cents end to end, and the type is branded rather than a bare `number`. The motivation was concrete: the previous version validated balance in cents but stored `DECIMAL`, and computed its `isBalanced` flag with a `< 0.01` epsilon. So the system's central invariant was checked with a tolerance that would drift as data grew. Making `Cents` a distinct type with a checked constructor means a raw number can't reach a function expecting cents, and having exactly one conversion module means the rounding rule has one implementation and one set of tests. It's a small amount of type machinery bought against the single most expensive bug class in the domain.
 
+**Q: You branded `Cents` to stop it being confused with a plain `number`. An exchange rate is also a number with special meaning — why isn't it branded the same way?**
+A: Branding buys you "a raw value can't reach a function expecting a checked one without going through the constructor." A rate gets that property a different way: it stays a `string` (never even widened to `number`) everywhere except inside one function, `rateNumerator`, which is the only place in the codebase allowed to call `Number()` on it — validated the same way `cents()` validates a raw amount. There's no meaningful difference in what's being prevented; the mechanism is just "don't erase to `number` at all" instead of "erase to `number`, but tag it." I picked the string-everywhere approach because a rate genuinely needs more decimal precision than round-trips safely through JSON as a float, which is the same problem branding money solves — just solved by never crossing into `number` rather than by tagging the crossing.
+
 ## Follow-ups they'll dig into
 
 - "How do you split 100 cents three ways?" (You can't exactly — pick an allocation strategy, usually largest-remainder, and make it explicit rather than letting rounding decide.)
@@ -243,4 +256,5 @@ A: On AutoLedger, money is integer cents end to end, and the type is branded rat
 ## See also
 
 - [../postgresql/transactions-isolation-pooling.md](../postgresql/transactions-isolation-pooling.md) — the `BIGINT`-as-string boundary
+- [../postgresql/multi-currency-and-functional-currency.md](../postgresql/multi-currency-and-functional-currency.md) — where the rate type is actually used: converting a `Cents` value across currencies
 - `docs/guardrails.md` rule 3

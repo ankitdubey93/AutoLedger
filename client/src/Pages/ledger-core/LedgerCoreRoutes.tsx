@@ -30,6 +30,9 @@ import BankImportPage from './BankImportPage';
 import BankReconciliationPage from './BankReconciliationPage';
 import WebhooksPage from './WebhooksPage';
 import WebhookDeliveriesPage from './WebhookDeliveriesPage';
+import FxRatesPage from './FxRatesPage';
+import FxExposurePage from './FxExposurePage';
+import FxRevaluationsPage from './FxRevaluationsPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -89,6 +92,9 @@ function AppPages() {
           <Route path="audit" element={<AuditLogPage />} />
           <Route path="webhooks" element={<WebhooksPage />} />
           <Route path="webhooks/deliveries" element={<WebhookDeliveriesPage />} />
+          <Route path="fx-rates" element={<FxRatesPage />} />
+          <Route path="fx-exposure" element={<FxExposurePage />} />
+          <Route path="fx-revaluations" element={<FxRevaluationsPage />} />
           <Route path="fiscal-periods" element={<FiscalPeriodsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />

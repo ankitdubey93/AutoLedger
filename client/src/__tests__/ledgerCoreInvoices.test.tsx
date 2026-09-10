@@ -88,6 +88,10 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
     subtotalCents: 25000,
     taxCents: 4500,
     totalCents: 29500,
+    fxRate: '1.00000000',
+    baseSubtotalCents: 25000,
+    baseTaxCents: 4500,
+    baseTotalCents: 29500,
     journalEntryId: null,
     voidJournalEntryId: null,
     issuedAt: null,
@@ -156,11 +160,23 @@ function renderInvoicesPage(invoices: Invoice[]) {
   );
 }
 
-function mockNewInvoiceRoutes(createResponse: { status: number; body: unknown }) {
+function mockNewInvoiceRoutes(
+  createResponse: { status: number; body: unknown },
+  rateResponse?: { status: number; body: unknown },
+) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (init?.method === 'POST' && url.includes('/ledger-core/invoices')) {
       return Promise.resolve(jsonResponse(createResponse.status, createResponse.body));
+    }
+    if (url.includes('/ledger-core/fx-rates/latest')) {
+      if (rateResponse !== undefined) return Promise.resolve(jsonResponse(rateResponse.status, rateResponse.body));
+      return Promise.resolve(
+        jsonResponse(200, {
+          success: true,
+          rate: { fromCode: 'EUR', toCode: 'USD', rate: '1.10000000', rateDate: '2026-06-01', identity: false },
+        }),
+      );
     }
     if (url.includes('/ledger-core/customers')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer1] }));
@@ -171,6 +187,9 @@ function mockNewInvoiceRoutes(createResponse: { status: number; body: unknown })
     if (url.includes('/ledger-core/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
     }
+    if (url.includes('/ledger-core/settings')) {
+      return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
+    }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
   });
 }
@@ -178,9 +197,11 @@ function mockNewInvoiceRoutes(createResponse: { status: number; body: unknown })
 function renderNewInvoicePage() {
   return render(
     <MemoryRouter initialEntries={['/app/ledger-core/invoices/new']}>
-      <Routes>
-        <Route path="/app/:appSlug/invoices/new" element={<NewInvoicePage />} />
-      </Routes>
+      <LedgerSettingsProvider>
+        <Routes>
+          <Route path="/app/:appSlug/invoices/new" element={<NewInvoicePage />} />
+        </Routes>
+      </LedgerSettingsProvider>
     </MemoryRouter>,
   );
 }
@@ -353,6 +374,35 @@ describe('NewInvoicePage', () => {
     expect(body.lines[0]?.quantityMilli).toBe(2500);
     expect(body.lines[0]?.unitPriceCents).toBe(10000);
     expect(body.lines[0]?.taxRateBp).toBe(1800);
+  });
+
+  it('shows the resolved rate and base total when a foreign currency is selected', async () => {
+    mockNewInvoiceRoutes({ status: 201, body: { success: true, invoice: baseInvoice() } });
+    const user = userEvent.setup();
+    renderNewInvoicePage();
+
+    await screen.findByText('Select a customer…');
+    await user.selectOptions(screen.getByLabelText('Currency'), 'EUR');
+    await user.type(screen.getByLabelText('Unit price for line 1'), '100.00');
+
+    await screen.findByText(/1 EUR = 1\.10000000 USD/);
+    // "≈ USD" appears once the rate resolves and the total preview shows it.
+    await screen.findByText(/≈ USD/);
+  });
+
+  it('shows an inline error and no base total when the rate lookup returns 422', async () => {
+    mockNewInvoiceRoutes(
+      { status: 201, body: { success: true, invoice: baseInvoice() } },
+      { status: 422, body: { success: false, error: 'No exchange rate for EUR to USD on or before 2026-06-01' } },
+    );
+    const user = userEvent.setup();
+    renderNewInvoicePage();
+
+    await screen.findByText('Select a customer…');
+    await user.selectOptions(screen.getByLabelText('Currency'), 'EUR');
+
+    await screen.findByText(/No exchange rate for EUR to USD/);
+    expect(screen.queryByText(/≈ USD/)).not.toBeInTheDocument();
   });
 });
 

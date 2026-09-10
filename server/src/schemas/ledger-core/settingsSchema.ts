@@ -32,6 +32,9 @@ export const updateSettingsSchema = z
     timezone: z.string().trim().max(64).optional(),
     cashAccountId: z.uuid().nullable().optional(),
     unmatchedAlertThresholdCents: z.int().min(0).optional(),
+    realizedFxGainAccountId: z.uuid().nullable().optional(),
+    realizedFxLossAccountId: z.uuid().nullable().optional(),
+    unrealizedFxAccountId: z.uuid().nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'No fields to update',

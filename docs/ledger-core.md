@@ -1,7 +1,7 @@
 # LedgerCore — App Spec & Build Ladder
 
 **Slug:** `ledger-core` · **Domain:** Core Accounting & Systems · **Phases:** 3–4, 6, 8–9
-**Status: Phase 3 through Phase 6 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), live financial statements (fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table), and now bank reconciliation — CSV statement import idempotent by dedupe hash, a hand-written 40/30/30 confidence-matching engine, an approval queue, and a reconciliation report against the GL. Phases 8 and 9 are unticked below. Keep this file verified against the filesystem, not against its own claims.
+**Status: Phase 3 through Phase 8 shipped.** The GL core is live — chart of accounts, journal entries, reversing entries, trial balance, with the balance invariant and immutability enforced by database triggers — LedgerCore has a front door (onboarding, settings, dashboard), a journal register with filters plus a per-account ledger with running balances and chart-wide rollups, navigation/confirmation UX (back links, collapsible chart, confirm-before-reverse), sales invoicing (customers, invoice settings, draft → issue → void posting a real balanced entry), accounts payable with settlement (vendors, a four-state bill approval workflow, payments against either invoices or bills, AR/AP aging reconciled to the GL), live financial statements (fiscal periods with a close/lock lifecycle and a database-enforced posting guard, plus P&L and the balance sheet, both computed from raw `ledger_lines` with no summary table), bank reconciliation (CSV statement import idempotent by dedupe hash, a hand-written 40/30/30 confidence-matching engine, an approval queue, and a reconciliation report against the GL), and now the multi-currency FX engine — exchange rates with a latest-on-or-before lookup, foreign-currency invoices/bills/payments, realized settlement gain/loss, and period-end unrealized revaluation with an automatic next-day reversal. Phase 9 is unticked below. Keep this file verified against the filesystem, not against its own claims.
 
 LedgerCore is the system of record. The other six apps do not keep their own ledgers — they post into this one through `journal_entries.source_type` / `source_id`, and read nothing of each other's tables ([guardrails.md](guardrails.md) rule 16).
 
@@ -262,13 +262,13 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 **Acceptance ✅ — both verified.** The same statement imported twice yields one set of rows (`bankImports.test.ts`, named test). A known-good fixture of 100 bank lines scores with no false auto-reconcile above the threshold (`bankMatching.test.ts`, a deterministic 40-true-match/30-near-miss/30-noise fixture). See [Phase 6, as delivered](roadmap.md#phase-6-as-delivered) in the roadmap for full detail.
 
-### Phase 8 — FX engine
+### Phase 8 — FX engine ✅ shipped
 
-- [ ] `fx_rates`, latest-on-or-before lookup
-- [ ] Realized gain/loss posted on settlement
-- [ ] Period-end unrealized revaluation
+- [x] `fx_rates`, latest-on-or-before lookup
+- [x] Realized gain/loss posted on settlement
+- [x] Period-end unrealized revaluation
 
-**Acceptance:** the [worked example](#3-realized-fx--the-worked-example) reproduces exactly, to the paisa, in a test.
+**Acceptance ✅ — verified.** The [worked example](#3-realized-fx--the-worked-example) reproduces exactly, to the paisa, in a named test: `fxRealized.test.ts`, `"reproduces docs/ledger-core.md's worked example to the paisa"`. See [Phase 8, as delivered](roadmap.md#phase-8-as-delivered) in the roadmap for full detail.
 
 ### Phase 9 — QuickBooks sync
 
@@ -282,11 +282,10 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 ## Not built yet
 
-**Phases 8 and 9** — everything above their unticked boxes. Concretely, as of Phase 6:
+**Phase 9** — everything above its unticked boxes: no QuickBooks sync.
 
-- **No FX conversion.** The columns are there; every line is base currency at rate 1.
-- **No QuickBooks sync.**
 - **Audit trail and `verify:integrity` are both shipped** — see the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net), no longer a target description. This closes the compliance gap every earlier phase note in this file flagged.
 - **Bank reconciliation is shipped** (Phase 6) — CSV import, the 40/30/30 confidence engine, the approval queue, and the reconciliation report all exist. Not built within it: a bank line settling more than one document (or several lines settling one) in a single match, bank feeds/OFX/QIF/MT940 beyond CSV, multi-currency statements, and posting a journal entry directly from an unmatched line for fees/interest (`IGNORE` covers that case for now).
+- **The FX engine is shipped** (Phase 8) — `fx_rates` with the latest-on-or-before lookup, foreign-currency invoices/bills/payments, realized settlement gain/loss, and period-end unrealized revaluation with an automatic next-day reversal. Not built within it: an external rate-feed integration (rates are entered by hand or imported as a batch — `fx_rates.source` distinguishes them — but nothing calls out to a live provider), FX on bank matching (bank statements remain base-currency-only, a Phase 6 limit this phase does not lift), a currency on an *account* itself (a cash account's balance is reported in base currency even though it may have received lines in several currencies), and consolidation-style translation of a whole subsidiary's trial balance (this phase revalues open AR/AP balances, not a full set of books).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

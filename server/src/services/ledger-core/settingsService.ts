@@ -65,6 +65,9 @@ export interface UpdateSettingsInput {
   timezone?: string | undefined;
   cashAccountId?: string | null | undefined;
   unmatchedAlertThresholdCents?: number | undefined;
+  realizedFxGainAccountId?: string | null | undefined;
+  realizedFxLossAccountId?: string | null | undefined;
+  unrealizedFxAccountId?: string | null | undefined;
 }
 
 interface SettingsRow {
@@ -81,6 +84,9 @@ interface SettingsRow {
   onboarded_at: Date | null;
   has_lines: boolean;
   unmatched_alert_threshold_cents: string | null;
+  realized_fx_gain_account_id: string | null;
+  realized_fx_loss_account_id: string | null;
+  unrealized_fx_account_id: string | null;
 }
 
 function toLedgerSettings(row: SettingsRow): LedgerSettings {
@@ -102,6 +108,9 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     baseCurrencyLocked: row.has_lines,
     unmatchedAlertThresholdCents:
       row.unmatched_alert_threshold_cents === null ? 0 : parseCents(row.unmatched_alert_threshold_cents),
+    realizedFxGainAccountId: row.realized_fx_gain_account_id,
+    realizedFxLossAccountId: row.realized_fx_loss_account_id,
+    unrealizedFxAccountId: row.unrealized_fx_account_id,
   };
 }
 
@@ -110,6 +119,7 @@ const SETTINGS_SELECT = `
          s.legal_name, s.fiscal_year_start_month, s.fiscal_year_start_day,
          s.books_start_date, s.industry, s.timezone, s.cash_account_id, s.onboarded_at,
          s.unmatched_alert_threshold_cents,
+         s.realized_fx_gain_account_id, s.realized_fx_loss_account_id, s.unrealized_fx_account_id,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
@@ -218,6 +228,9 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
     timezone: 'timezone',
     cashAccountId: 'cash_account_id',
     unmatchedAlertThresholdCents: 'unmatched_alert_threshold_cents',
+    realizedFxGainAccountId: 'realized_fx_gain_account_id',
+    realizedFxLossAccountId: 'realized_fx_loss_account_id',
+    unrealizedFxAccountId: 'unrealized_fx_account_id',
   } as const;
 
   const assignments: string[] = [];
