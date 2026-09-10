@@ -147,7 +147,7 @@ There is no `Flowchart/` directory — the `.drawio` files an earlier version of
 
 Layer-first, with an **app** subfolder inside each layer (platform code — auth, organizations, apps — stays at the layer root, unprefixed). Do **not** invent a parallel `src/modules/` or `src/apps/` tree on the server.
 
-Two kinds of file sit at a layer root. **Platform** code is identity, tenancy and the registry. **Shared infrastructure** is code more than one app consumes but no app owns — `redactionService.ts` (AP-Flow and TaxGuard AI both redact), `storageService.ts`, `utils/levenshtein.ts`. Both stay unprefixed. Neither reads any app's tables, which is what keeps rule 16 intact: a shared service is a pure transform or a platform concern, never a back door between two apps.
+Two kinds of file sit at a layer root. **Platform** code is identity, tenancy and the registry. **Shared infrastructure** is code more than one app consumes but no app owns — `redactionService.ts` (AP-Flow and TaxGuard AI both redact), `storageService.ts` (promoted out of AP-Flow on 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10)), `utils/levenshtein.ts`. Both stay unprefixed. Neither reads any app's tables, which is what keeps rule 16 intact: a shared service is a pure transform or a platform concern, never a back door between two apps.
 
 `server/src/worker.ts` (Phase 7) is a **second OS process** sharing this same `src/` — it imports the identical `services/`, `db/`, `config/`, and `queue/handlers/` code the API server does, but has its own entry point, its own `pg` pool, and its own crash domain. Nothing under `services/`, `db/`, or `types/` is process-specific; only `index.ts` (API) and `worker.ts` (jobs) are.
 
@@ -168,7 +168,9 @@ server/
 │   │   ├── authService.ts          ← platform, unprefixed
 │   │   ├── appService.ts           ← platform, unprefixed
 │   │   ├── redactionService.ts     ← shared infra, unprefixed — Phase 10
-│   │   ├── storageService.ts       ← shared infra, unprefixed — Phase 10
+│   │   ├── storageService.ts       ← shared infra, unprefixed — Phase 9.5
+│   │   ├── documentService.ts      ← platform, unprefixed — Phase 9.5
+│   │   ├── onboardingService.ts    ← platform, unprefixed — Phase 9
 │   │   ├── outboxService.ts        ← shared infra, unprefixed — Phase 7
 │   │   ├── webhookService.ts       ← platform, unprefixed — Phase 7
 │   │   ├── webhookDeliveryService.ts ← platform, unprefixed — Phase 7
@@ -195,7 +197,7 @@ server/
 │   │   ├── auth.ts                 ← JWT verify + active-org resolution
 │   │   ├── rbac.ts                 ← requireRole / requirePermission
 │   │   ├── rateLimit.ts            ← Phase 3
-│   │   ├── idempotency.ts          ← Phase 9
+│   │   ├── idempotency.ts          ← Phase 17
 │   │   └── errorHandler.ts
 │   ├── utils/
 │   │   ├── apiError.ts             ← ApiError(status, message)
@@ -219,7 +221,7 @@ server/
 │   └── __tests__/
 │       ├── platform/apps.test.ts
 │       └── ledger-core/journal.test.ts
-├── storage/                        ← hash-addressed documents, gitignored — Phase 10
+├── storage/                        ← org-scoped hash-named documents, gitignored — Phase 9.5
 ├── tsconfig.json                   ← type-check config (noEmit)
 ├── tsconfig.build.json             ← emit config
 ├── vitest.config.ts

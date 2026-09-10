@@ -100,9 +100,9 @@ A single supermarket receipt splits across `6130 Office Supplies` and `6140 Kitc
 
 The created journal entry carries `source_type = 'ap_flow'`, `source_id` = the document row, and the document's **SHA-256**. An auditor holding a ledger line can reach the exact image bytes it came from, and verify by hash that those bytes have not changed since extraction.
 
-Storage is content-addressed for the same reason: the filename *is* the hash, so a corrupted or substituted file cannot masquerade as the original. `UNIQUE (org_id, sha256)` means uploading the same receipt twice is one document, not a duplicate posting.
+Files are named by their hash for the same reason: a corrupted or substituted file cannot masquerade as the original. `UNIQUE (org_id, sha256)` means uploading the same receipt twice is one document, not a duplicate posting.
 
-**Storage is the local filesystem** under `server/storage/`, gitignored. Chosen deliberately for zero dependencies and inspectability; it does **not** survive a multi-instance deployment. The service interface stays narrow — `put(buffer) → hash`, `get(hash) → stream` — so object storage is a one-file swap when deployment becomes real. See [roadmap.md](roadmap.md#cross-cutting-infrastructure).
+**AP-Flow no longer owns storage.** Upload, MIME sniffing, hashing, the filesystem backend and the `put`/`get` interface were promoted to platform infrastructure on 2026-09-10 and are delivered by **Phase 9.5**, the Document Vault — LedgerCore, BoardDeck and TaxGuard AI all need files too, and leaving the store inside AP-Flow would have every other app reading AP-Flow's tables, which rule 16 forbids. Phase 10 **consumes** `services/storageService.ts` and the platform `documents` table, and attaches its own domain rows to a document through `document_links`. Note one behavioural difference the promotion brought: storage paths are keyed by organization (`server/storage/<org_id>/…`), not globally content-addressed, so two tenants uploading identical bytes get two blobs. See [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
 
 ---
 
@@ -113,9 +113,8 @@ Storage is content-addressed for the same reason: the filename *is* the hash, so
 Produces a draft. Posts nothing to the ledger.
 
 - [ ] `config/apps.ts` — flip `ap-flow` from `'planned'` to `'building'`
-- [ ] Upload endpoint accepting PDF/PNG/JPEG with a size cap and real MIME sniffing (not a trusted `Content-Type` header)
-- [ ] `storageService` — hash-addressed `put`/`get`, `server/storage/` gitignored
-- [ ] `ap_flow_documents`, `ap_flow_extractions` migrations
+- [ ] ~~Upload endpoint~~ / ~~`storageService`~~ — **delivered by Phase 9.5**, not built here. Phase 10 consumes `POST /api/v1/documents` and `services/storageService.ts`
+- [ ] `ap_flow_documents`, `ap_flow_extractions` migrations — `ap_flow_documents` now references the platform `documents` row rather than holding the bytes' location itself
 - [ ] PDF rasterization, page by page
 - [ ] Local OCR returning text with bounding boxes
 - [ ] `services/redactionService.ts` — shared, unprefixed; detection + pixel masking; `redacted_regions` persisted

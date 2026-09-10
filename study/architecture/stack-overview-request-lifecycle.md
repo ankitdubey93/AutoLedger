@@ -109,7 +109,7 @@ React  →  routes  →  controller  →  service  →  pool  →  PostgreSQL
                      ↑ HTTP stops here
 ```
 
-Controllers are the last place `req`/`res` appear; services take plain arguments. The test of whether the boundary is real: **could you call `journalService.createEntry` from a queue worker with no HTTP involved?** If yes, the layering holds. That's not architectural purity for its own sake — Phase 5 onward genuinely does call services from BullMQ workers, and Phase 9's PDF generation and Phase 11's payroll runs depend on it.
+Controllers are the last place `req`/`res` appear; services take plain arguments. The test of whether the boundary is real: **could you call `journalService.createEntry` from a queue worker with no HTTP involved?** If yes, the layering holds. That's not architectural purity for its own sake — Phase 5 onward genuinely does call services from BullMQ workers, and Phase 9.5's document handling and Phase 15's deck generation depend on it.
 
 ## Interview Q&A
 

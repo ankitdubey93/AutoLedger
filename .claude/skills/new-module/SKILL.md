@@ -17,7 +17,7 @@ Read [docs/roadmap.md](../../../docs/roadmap.md).
 
 - Which phase does this module belong to, and which app owns it?
 - Are its prerequisite phases actually **built** — verified on the filesystem, not claimed in a doc?
-- Does it depend on a gated phase (Phase 7 background jobs gates 9, 10, 15, 16)?
+- Does it depend on a gated phase (Phase 7 background jobs gates 10, 15, 16, 17; Phase 9.5 Document Vault gates 10)?
 
 If a prerequisite is missing, **stop and say so** before writing code. Do not build ahead of a gate without asking.
 
@@ -92,7 +92,7 @@ export const createX = async (req, res, next) => {
 - `auth` middleware on everything except `/auth/*` and `/health`.
 - `requireRole(...)` per route — decide the roles deliberately, don't default everything to ADMIN.
 - Posted documents get `POST /:id/reverse`. No `PUT`, no `PATCH`, no `DELETE`.
-- Financial mutations carry the idempotency middleware from Phase 9 onward.
+- Financial mutations carry the idempotency middleware from Phase 17 onward.
 
 ## 6. Mount — `server/src/routes/index.ts`
 

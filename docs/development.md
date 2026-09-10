@@ -217,9 +217,10 @@ Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
-| `csv-parse` | LedgerCore's bank statement ingestion. Real exports carry quoted commas, embedded newlines and a BOM; a hand-rolled RFC 4180 parser is a trap | 6 |
-| `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 9 |
-| `multer` | AP-Flow's multipart document upload | 10 |
+| ~~`csv-parse`~~ | LedgerCore's bank statement ingestion. **Approved but never installed** — Phase 6 hand-wrote `utils/csv.ts` (a two-pass state machine) instead, and the row is kept struck through rather than deleted so the reversal stays visible | ~~6~~ |
+| `multer` | The Document Vault's multipart upload. **Moved from Phase 10 on 2026-09-10** when document storage was promoted out of AP-Flow to platform infrastructure — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10). Scope it to the one upload route; do not register it globally beside `express.json` | 9.5 |
+| ~~`file-type`~~ | **Not approved.** The Document Vault must decide a MIME type from magic bytes rather than the client's `Content-Type` header, but that is a small parser, so `utils/mimeSniff.ts` is hand-written — the same call made for `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts` | — |
+| `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 17 |
 | `tesseract.js` | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine | 10 |
 | `sharp` | rasterizing and masking image buffers for the redaction pipeline | 10 |
 | `pdfjs-dist` | rendering PDF pages to images before OCR | 10 |
@@ -228,7 +229,7 @@ Approved for later phases, add only when the app that needs it is being built:
 | `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
 | An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
 
-**Phase 10 also adds a directory, not just packages.** AP-Flow stores original documents hash-addressed under `server/storage/`, which is gitignored. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; the storage service keeps a narrow `put`/`get` interface so object storage is a one-file swap later.
+**Phase 9.5 also adds a directory, not just a package.** The Document Vault stores uploads under `server/storage/`, which is gitignored. Files are named by SHA-256 but the path is keyed by organization first — `server/storage/<org_id>/<ab>/<cd>/<sha256>` — so two tenants uploading identical bytes get two blobs. Global content addressing was rejected: it would let one tenant detect that another holds the same file, and it would make deleting a blob unsafe whenever two organizations shared it. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; the storage service keeps a narrow `put`/`get` interface so object storage is a one-file swap later. This was Phase 10's, AP-Flow-owned, until 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
 
 **No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, recursive CTEs, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
 

@@ -106,7 +106,7 @@ This is the case graceful shutdown *can't* cover — `SIGKILL` bypasses every ha
 
 The prior build had no shutdown handling at all. It didn't visibly hurt, because nothing about a single-user bookkeeping app made a truncated request expensive. That changes the moment a request spans `BEGIN … COMMIT` across several tables: killed mid-transaction, PostgreSQL rolls back when the connection drops, which is *correct* — but the client got no response and does not know whether it committed. Under a retry, that is a double-posted journal entry.
 
-Graceful shutdown is therefore the first half of a pair. The second is the Phase 9 idempotency-key middleware, which makes the retry safe. Draining reduces how often the ambiguity happens; idempotency keys make it harmless when it does. Neither replaces the other.
+Graceful shutdown is therefore the first half of a pair. The second is the Phase 17 idempotency-key middleware, which makes the retry safe. Draining reduces how often the ambiguity happens; idempotency keys make it harmless when it does. Neither replaces the other.
 
 | Option | Trade-off | Verdict |
 |---|---|---|

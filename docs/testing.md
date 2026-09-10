@@ -106,7 +106,7 @@ At minimum:
 
 **A module without a cross-tenant isolation test is not done — one per app, not one for the whole suite.** `tenantIsolation.test.ts` covers the platform tables (`organizations`, `organization_members`); each app's first org-scoped table needs its own instance of the same fixture shape, because a bug in one app's scoping is invisible to a test that only ever queries another app's tables.
 
-**No test makes a network call.** From Phase 9 (QuickBooks) and Phase 10 (vision extraction) the codebase talks to external APIs; those are stubbed at the `fetch` boundary in tests, always. A suite that needs an API key to pass is a suite that fails in CI and gets skipped, and a stubbed call is also the only way to test the error paths — a rate limit, a truncated response, an expired token — that matter most and never happen on demand.
+**No test makes a network call.** From Phase 10 (vision extraction) and Phase 17 (QuickBooks) the codebase talks to external APIs; those are stubbed at the `fetch` boundary in tests, always. A suite that needs an API key to pass is a suite that fails in CI and gets skipped, and a stubbed call is also the only way to test the error paths — a rate limit, a truncated response, an expired token — that matter most and never happen on demand.
 
 ---
 

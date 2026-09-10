@@ -115,6 +115,8 @@ What's owed as the build progresses. The gap is recorded here rather than as a p
 
 **Renumbered again on 2026-09-01**, when LedgerCore and AP-Flow were specified in full: LedgerCore took Phases 3–4, 6, 8–9 and AP-Flow 10–11, shifting everything downstream. The Phase column below is updated to the new numbers; the mapping is in [roadmap.md](../docs/roadmap.md#phase-renumbering--2026-09-01).
 
+**Renumbered a third time on 2026-09-10**, but only at the tail: two platform phases were inserted as **9** (onboarding & data migration) and **9.5** (the Document Vault), QuickBooks sync moved from 9 to **17**, and **Phases 10–16 were left untouched**. Only rows citing Phase 9 needed updating. See [roadmap.md](../docs/roadmap.md#phase-renumbering--2026-09-10).
+
 That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as LedgerCore's chart-of-accounts hierarchy, `EXCLUDE USING GIST` as non-overlapping fiscal periods, `JSONB` as audit snapshots and extraction payloads, and fuzzy string matching as bank reconciliation. They were marked dropped when the modules that needed them were cut; different apps need the same techniques, which is a useful thing to have noticed. See [roadmap.md](../docs/roadmap.md) for the current phase table.
 
 ### Node & Express

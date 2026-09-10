@@ -114,7 +114,7 @@ Planned:
 
 - `server/src/middleware/auth.ts` — verifies the JWT, attaches `req.user = { id, orgId, role }` (Phase 1)
 - `server/src/middleware/rbac.ts` — `requireRole(...)`, runs *after* `auth` (Phase 1)
-- `server/src/middleware/idempotency.ts` — Phase 9
+- `server/src/middleware/idempotency.ts` — Phase 17
 
 **Ordering matters.** Current, in `app.ts`: `cors` → `express.json` → `/api/v1` router → `notFoundHandler` → `errorHandler`. Once auth exists: `cors` → `cookieParser` → `express.json` → routes (`auth` → `rbac` → controller) → 404 handler → `errorHandler` last.
 

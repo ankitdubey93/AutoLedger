@@ -45,7 +45,7 @@ Read [docs/roadmap.md](../../../docs/roadmap.md).
 
 - Which phase — and which app — does this work belong to?
 - Are its prerequisite phases actually built, verified in step 1?
-- Does it depend on a gated phase? Phase 7 (background jobs) gates 9 (QuickBooks), 10 (AP-Flow), 15 (BoardDeck Automator), 16 (TaxGuard AI). Phase 12 (FP&A Engine) gates 13 (ForecasterPro). Phase 4 (LedgerCore live statements) gates 12 and 14. Phase 8 (FX engine) gates 11 (AP-Flow posting).
+- Does it depend on a gated phase? Phase 7 (background jobs) gates 10 (AP-Flow), 15 (BoardDeck Automator), 16 (TaxGuard AI), 17 (QuickBooks). Phase 12 (FP&A Engine) gates 13 (ForecasterPro). Phase 4 (LedgerCore live statements) gates 9, 12 and 14. Phase 8 (FX engine) gates 11 (AP-Flow posting). Phase 9.5 (Document Vault) gates 10.
 
 If a prerequisite is missing, **stop and say so**. Then offer the largest slice that *is* legal today, and name the blocked remainder as a separate future plan. Do not plan across a gate and leave the reader to discover it.
 

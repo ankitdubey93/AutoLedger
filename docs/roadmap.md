@@ -13,20 +13,22 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **4 ✅ done** | LedgerCore — live statements: P&L, balance sheet, fiscal periods with close/lock — see [Phase 4, as delivered](#phase-4-as-delivered) below | Needs 3 |
 | **5 ✅ done** | Shared — CDC audit trail: `audit_logs` JSONB table, `OLD`/`NEW` snapshot triggers on every financial table across every app, actor + IP captured via `SET LOCAL`, plus the `verify:integrity` checker — see [Phase 5, as delivered](#phase-5-as-delivered) below | Blocked compliance claims until delivered |
 | **6 ✅ done** | LedgerCore — bank reconciliation: CSV ingestion, the 40/30/30 confidence engine, ≥85 auto-reconcile, interactive approval queue — see [Phase 6, as delivered](#phase-6-as-delivered) below | Needs 4 |
-| **7 ✅ done** | Shared — background jobs: `bullmq` + `ioredis`, Redis healthcheck, worker process, retry/DLQ policy, **plus financial-event webhooks** — see [Phase 7, as delivered](#phase-7-as-delivered) below | Blocks 9, 10, 15, 16 |
+| **7 ✅ done** | Shared — background jobs: `bullmq` + `ioredis`, Redis healthcheck, worker process, retry/DLQ policy, **plus financial-event webhooks** — see [Phase 7, as delivered](#phase-7-as-delivered) below | Blocks 10, 15, 16, 17 |
 | **8 ✅ done** | LedgerCore — multi-currency FX engine: `fx_rates` table, realized FX gain/loss on settlement, period-end unrealized revaluation — see [Phase 8, as delivered](#phase-8-as-delivered) below | Needs 3, 7 |
-| **9** | LedgerCore — QuickBooks Online sync: OAuth 2.0, per-org token storage, journal entry push | Needs 7 |
-| **10** | AP-Flow — capture & extraction: upload, hash-addressed storage, local OCR with bounding boxes, **PII pixel masking**, Claude Vision → structured JSON with per-field confidence. Produces a draft; posts nothing | Needs 7 |
+| **9** | Platform — onboarding & data migration: resumable, skippable onboarding state per app, plus LedgerCore's way in for a business moving off another system — chart-of-accounts import and opening-balance import — see [Phase 9, planned scope](#phase-9-planned-scope) below | Needs 4 |
+| **9.5** | Platform — the Document Vault: `/api/v1/documents`, org-scoped hash-named file storage, cross-app attachment links. A half-step — see [Phase 9.5, planned scope](#phase-95-planned-scope) below | Needs 2 · blocks 10 |
+| **10** | AP-Flow — capture & extraction: local OCR with bounding boxes, **PII pixel masking**, Claude Vision → structured JSON with per-field confidence. Produces a draft; posts nothing. Upload and storage now come from 9.5 | Needs 7, 9.5 |
 | **11** | AP-Flow — mapping, review & posting: vendor→COA classification from history, tax/VAT split, FX at invoice date, review-queue UI, one-click post into LedgerCore with document-hash stamping, COGS tracking | Needs 5, 8, 10 |
 | **12** | FP&A Engine — 3-statement financial linking, scenario modeling, cash runway forecasting | Needs 4 |
 | **13** | ForecasterPro — driver-based rolling forecasting, headcount planning, zero-based budgeting | Needs 12 |
 | **14** | UnitEcon — cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance | Needs 4 |
 | **15** | BoardDeck Automator — monthly close automation, BvA variance, automated `.pptx` deck generation | Needs 7, 13 |
 | **16** | TaxGuard AI — tax act parsing, RAG over `pgvector`, PII redaction | Needs 7 |
+| **17** | LedgerCore — QuickBooks Online sync: OAuth 2.0, per-org token storage, journal entry push. **Deferred from 9 on 2026-09-10** — not dropped, see [Phase renumbering — 2026-09-10](#phase-renumbering--2026-09-10) | Needs 7 |
 
 **Integration tests are not a phase.** They start in Phase 1 and grow with every module — see [testing.md](testing.md).
 
-Two apps have a spec detailed enough to warrant its own file: [ledger-core.md](ledger-core.md) (Phases 3–4, 6, 8–9) and [ap-flow.md](ap-flow.md) (Phases 10–11). Each carries the full feature scope, a checkbox ladder, and per-phase acceptance criteria. This table stays the index; those files hold the detail.
+Two apps have a spec detailed enough to warrant its own file: [ledger-core.md](ledger-core.md) (Phases 3–4, 6, 8, 9b, 17) and [ap-flow.md](ap-flow.md) (Phases 10–11). Each carries the full feature scope, a checkbox ladder, and per-phase acceptance criteria. This table stays the index; those files hold the detail.
 
 ---
 
@@ -167,7 +169,7 @@ LedgerCore has a front door. A user who registers and picks LedgerCore for the f
 
 **Known gaps, deliberate:** the dashboard's `position` is not the Phase 4 balance sheet — `equationHolds` checks `assets = liabilities + equity + currentEarningsCents` rather than exposing a true balance sheet, because current-period earnings have to be folded in by hand until Phase 4's live statements land. The cash tile is `null` until an organization configures a cash account; nothing infers one by account code. Base currency can only ever be locked, never unlocked — there is no path back to "no postings yet."
 
-**UX revision, 2026-09-03:** the suite header no longer wraps an app; `AppShell` became `AppFrame` + `AppTopBar`, the LedgerCore sidebar became a grouped full-height rail, the dashboard's position figures became links into a client-side `?type=` trial-balance filter, and the trend chart gained a hover readout. **No phase renumbering; Phase 4 remains unstarted.** See [architecture.md § Current](architecture.md#current-verified-2026-09-03-after-the-ledgercore-shelldashboard-ux-revision) for the file-level delta.
+**UX revision, 2026-09-03:** the suite header no longer wraps an app; `AppShell` became `AppFrame` + `AppTopBar`, the LedgerCore sidebar became a grouped full-height rail, the dashboard's position figures became links into a client-side `?type=` trial-balance filter, and the trend chart gained a hover readout. **No phase renumbering; Phase 4 remains unstarted.** See [architecture.md § Current](architecture.md#current-verified-2026-09-04-after-phase-6) for the file-level delta.
 
 ---
 
@@ -310,7 +312,7 @@ Closes LedgerCore's last GL-completion gap — reconciling the ledger against a 
 
 **Migration `019`, LedgerCore-tagged.** Three tables: `bank_statement_imports` (one row per uploaded CSV — file name, delimiter, date format, row/imported/duplicate counts, and an optional stated closing balance), `bank_transactions` (one row per parsed line, `amount_cents` **signed** — positive is money in, negative out, unlike a `ledger_lines` row which always has exactly one side populated — and a `UNIQUE (org_id, dedupe_hash)` constraint that makes re-importing a statement idempotent), and `bank_match_suggestions` (up to 5 scored candidates per unmatched line, deleted and regenerated wholesale on every rescore, deliberately **not** audited since it's disposable derived data). `bank_transactions` gets the same `to_jsonb` row-diff immutability carve-out `payments` (014) has — only its match state may change, `DELETE` always rejected — because a bank line is a record of fact from a downloaded statement. See [study/postgresql/idempotent-ingestion-and-dedupe-hashes.md](../study/postgresql/idempotent-ingestion-and-dedupe-hashes.md).
 
-**Nothing new was installed.** The CSV parser (`utils/csv.ts`, a hand-written two-pass state machine — quoted commas, embedded newlines, doubled-quote escaping, BOM stripping, delimiter sniffing outside quotes), the flexible date parser (`utils/dateParse.ts`, `ISO`/`DMY`/`MDY` plus month-name forms), the untrusted-text money parser (`utils/money.ts`'s new `parseMoneyText`, asymmetric dot/comma separator resolution, accounting parentheses and `CR`/`DR` notation, no intermediate float), and the Levenshtein distance implementation (`utils/levenshtein.ts`, a rolling-array `O(min(m,n))`-space DP) are all hand-written, exactly as this phase's roadmap entry always specified. A CSV statement arrives as a JSON string field, not a multipart upload — file storage stays Phase 10's problem — capped by `MAX_CSV_CHARS` (900,000 characters) comfortably under the 1MB JSON body limit.
+**Nothing new was installed.** The CSV parser (`utils/csv.ts`, a hand-written two-pass state machine — quoted commas, embedded newlines, doubled-quote escaping, BOM stripping, delimiter sniffing outside quotes), the flexible date parser (`utils/dateParse.ts`, `ISO`/`DMY`/`MDY` plus month-name forms), the untrusted-text money parser (`utils/money.ts`'s new `parseMoneyText`, asymmetric dot/comma separator resolution, accounting parentheses and `CR`/`DR` notation, no intermediate float), and the Levenshtein distance implementation (`utils/levenshtein.ts`, a rolling-array `O(min(m,n))`-space DP) are all hand-written, exactly as this phase's roadmap entry always specified. A CSV statement arrives as a JSON string field, not a multipart upload — file storage stays a later phase's problem (Phase 10 when this was written; reassigned to [Phase 9.5](#phase-95-planned-scope) on 2026-09-10) — capped by `MAX_CSV_CHARS` (900,000 characters) comfortably under the 1MB JSON body limit.
 
 **The 40/30/30 confidence engine** (`utils/matchScore.ts`) scores each unmatched line against open invoices (positive amounts) or bills (negative amounts) dated within ±30 days: 40 points for an exact integer-cent amount match, up to 30 for date proximity (stepped down by whole days apart, not continuous decay), up to 30 for counterparty text similarity (the document's number or the counterparty's name found in — or Levenshtein-similar to — the bank memo). A hand-tuned noise floor (0.5 similarity) keeps coincidental letter overlap between unrelated strings from reading as real evidence; `AUTO_MATCH_THRESHOLD` (85) is set high on purpose, since a false auto-match posts a real payment against the wrong document while a missed suggestion just costs one extra click. Every score is stored with its full breakdown (`{ amount, date, counterparty }`, each with `points`/`maxPoints`/a human-readable `reason`), so a suggestion is explainable on screen, never a bare number. See [study/architecture/fuzzy-matching-and-confidence-scoring.md](../study/architecture/fuzzy-matching-and-confidence-scoring.md).
 
@@ -370,15 +372,87 @@ LedgerCore's last GL-completion phase: the multi-currency FX engine the schema h
 
 ---
 
+## Phase renumbering — 2026-09-10
+
+Two capabilities that were never given a phase turned out to be prerequisites rather than nice-to-haves, and both are **platform** work rather than any one app's:
+
+1. **Onboarding is all-or-nothing and unresumable.** After `register`, a user lands on the app chooser with no suite-level orientation. Picking LedgerCore hard-redirects to a wizard that cannot be skipped and holds its state in local component state — close the tab at step 2 and you start over. Nothing records that onboarding was ever begun.
+2. **There is no way in for an existing business.** LedgerCore assumes an organization starts from zero on `books_start_date`. A business moving off QuickBooks, Xero or Tally arrives with a chart of accounts and a trial balance, and no route accepts either. `register` seeds a fixed default chart and that is the only chart obtainable without creating accounts one at a time.
+3. **No file has ever been stored.** Phase 6 deliberately dodged this — a bank CSV arrives as a JSON string under `MAX_CSV_CHARS`, with a comment in three places deferring storage to Phase 10. But documents are a *suite* concern: LedgerCore wants a PDF on an invoice, AP-Flow wants the source image, BoardDeck wants the generated deck. Leaving storage inside AP-Flow would make every other app read AP-Flow's tables, which rule 16 forbids.
+
+**QuickBooks sync is deferred, not dropped.** It has no dependents — nothing in the roadmap is gated on it — so it yields its number and moves to the tail rather than forcing a cascade:
+
+| Was | Is now | Note |
+|---|---|---|
+| 9 — LedgerCore QuickBooks sync | **17** | Deferred. No phase is gated on it, so moving it costs nothing but its position |
+| — | **9** (new) | Platform — onboarding & data migration |
+| — | **9.5** (new) | Platform — the Document Vault |
+| 10–16 | **unchanged** | AP-Flow, FP&A Engine, ForecasterPro, UnitEcon, BoardDeck, TaxGuard AI all keep their numbers |
+
+**Why 9.5 rather than 10, and why it is a table row.** Making the Document Vault a whole number would push AP-Flow to 11–12 and cascade every phase below it, for the second time in ten days. The half-step precedent set by 3.5–3.9 exists precisely to add work without renumbering, and 9.5 sits immediately before Phase 10, which is its first consumer. It does deviate from that precedent in one respect, stated openly: 3.5–3.9 were discovered mid-build and appear only as delivered sections, never as table rows, whereas 9.5 is planned in advance and so takes a row like any other unstarted phase.
+
+**Two settled rulings are amended by this entry.** Both were written down as decided, so both are reversed in the open rather than quietly:
+
+1. **`multer` moves from Phase 10 to Phase 9.5.** [development.md](development.md)'s approved-dependency table assigns it to "AP-Flow's multipart document upload." The upload route is now platform-level, so the dependency lands with it. The rule itself is unchanged: no dependency before the phase that needs it. No storage SDK is approved by this entry — the filesystem backend stands, and MIME sniffing is hand-rolled in `utils/mimeSniff.ts` rather than taking `file-type`, matching how `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts` were each built rather than installed.
+2. **Document storage is no longer AP-Flow-owned.** The [Cross-cutting infrastructure](#cross-cutting-infrastructure) entry below assigned hash-addressed storage under `server/storage/` to Phase 10. Three apps now consume it, so it becomes shared infrastructure — `services/storageService.ts` and `services/documentService.ts` at the services-layer root, unprefixed, the same status as `authService`. This is the identical promotion `redactionService.ts` received in the [2026-09-01 entry](#phase-renumbering--2026-09-01), for the identical reason. It does not violate rule 16: `documents` is a platform table, so an app attaching a file talks to the platform, never to another app.
+
+One design change comes with the promotion. AP-Flow's spec called for globally content-addressed storage — the filename *is* the SHA-256. Made suite-wide, that would let one tenant detect that another holds an identical file, and it would make deleting a blob unsafe whenever two organizations share it. The vault keys storage by organization instead (`server/storage/<org_id>/<ab>/<cd>/<sha256>`): two tenants uploading identical bytes get two blobs. It costs disk and buys tenant isolation, which is the trade this codebase makes everywhere else.
+
+---
+
+## Phase 9, planned scope
+
+**Nothing is built.** This section is the specification; it carries no `✅` and no test counts until the phase lands.
+
+**9a — resumable, skippable onboarding.** A platform table `onboarding_states`, one row per `(org_id, app_slug)`, holding a four-state FSM (`NOT_STARTED → IN_PROGRESS → SKIPPED → COMPLETED`, with `COMPLETED` deliberately **not** terminal — re-running onboarding is already legal, since `completeOnboarding` is an upsert), the current step, and a `JSONB` draft. `app_slug` gets a non-blank CHECK and is validated against `isAppSlug` in the service rather than duplicating `config/apps.ts` into a database constraint — the same call migration 017 made for `audit_logs` — with a `'platform'` sentinel for the suite-level wizard itself. The draft is untrusted JSON: never spread into a query, always re-parsed through the target app's own zod schema at completion.
+
+`/api/v1/onboarding` is platform-level, not namespaced under `/ledger-core` (rule 16), mirroring `/audit-logs` and `/webhooks`: a checklist read, a draft autosave, skip, and resume. LedgerCore's existing `POST /ledger-core/settings/onboarding` stays the completer and marks its own row `COMPLETED` on the transaction it already owns. Client-side, LedgerCore's route gate becomes **soft** — a skipped wizard leaves every route reachable behind a persistent banner instead of a forced redirect.
+
+**A base-currency lock gap is closed here.** `PATCH /organizations` accepts `baseCurrency` with no check that ledger lines exist; the lock documented in [api.md](api.md) lives only in the onboarding path. Onboarding owns currency, so the fix lands with this phase.
+
+**9b — chart of accounts and opening balances.** Two staged importers, `CHART_OF_ACCOUNTS` and `OPENING_BALANCES`, reusing `utils/csv.ts`, `utils/dateParse.ts` and `parseMoneyText` — no new dependency. **Deliberately shaped against Phase 6's bank import:** that one aborts the entire file on any bad row and writes live rows immediately. This one stages every row, good and bad, and separates validation from commit, because a partially-wrong chart is normal on a first export and re-uploading to discover the next error one at a time is a bad workflow. A `DRAFT → VALIDATED → COMMITTED` FSM, per-row errors and per-row fixes, then one all-or-nothing commit transaction.
+
+Chart commit matches on `code`: an unknown code is created (parents resolved by parent *code*, depth-first, the same technique `seedDefaultChart` uses), a known code merges name and description only — never `code` or `type`, which `updateAccountSchema` already refuses — and a type conflict is a row error that must be resolved before commit. Unused seeded accounts can be deactivated, never deleted; there is no account `DELETE` and the FKs forbid it.
+
+Opening balances post **one** journal entry through `journalService.createEntryOnClient`, dated `ledger_settings.books_start_date`, with `source_type = 'opening_balance'` — never a direct `ledger_lines` write, so the period guard and the balance triggers apply unchanged. A partial unique index allows exactly one committed opening-balance import per organization, ever; a wrong one is corrected by a reversing entry (rule 6), never by re-importing.
+
+Three refusals define the accounting, and each closes a way the books could quietly start out lying:
+
+- **Any imbalance is plugged to a new `3400 Opening Balance Equity` account**, shown in the preview before commit, never applied silently. A migration adds it to the default chart and backfills every existing organization, modelled on migration 003 — **the default chart becomes 45 accounts.**
+- **`3200 Retained Earnings` is refused.** `reportService.balanceSheet` derives retained earnings and its own comment already warns that anything posted there is counted twice. An imported prior-year profit goes to `3400`, where it is a real posted equity balance and derived retained earnings correctly stays zero.
+- **The AR/AP control accounts are refused.** A lump receivable with no invoices behind it would make `/reports/ar-aging`'s `reconciles` permanently `false`, and that flag is documented as a *correctness* claim about the books, not a completeness one. Open items migrate through the normal invoice and bill routes, which builds the control balance the honest way.
+
+All five account types are accepted, so a mid-year migration can carry year-to-date revenue and expense; dated inside the current fiscal year, those land in the P&L and leave derived retained earnings at zero, which is right.
+
+**Deliberately not planned:** open-item (per-customer, per-vendor) import; foreign-currency opening balances — a foreign balance needs a frozen rate on a document that does not exist yet; API-based migration from QuickBooks or Xero, which is Phase 17's shape rather than this one's; undo of a committed import beyond the reversing entry; whole-chart account-code remapping.
+
+---
+
+## Phase 9.5, planned scope
+
+**Nothing is built.** A half-step: it renumbers nothing, and Phase 10 remains entirely unstarted after it.
+
+A platform `documents` table — SHA-256, byte size, sniffed MIME type, original filename, `UNIQUE (org_id, sha256)` so re-uploading a file is idempotent — plus `document_links`, keyed by `(org_id, document_id, app_slug, entity_type, entity_id)`. That link table is what keeps rule 16 intact: LedgerCore attaching a PDF to an invoice and AP-Flow attaching a source image are both apps talking to the platform, never to each other.
+
+`services/storageService.ts` keeps the narrow interface [architecture.md](architecture.md#target-layout) already reserved for it — `put`, `get`, `stat` — so object storage stays a one-file swap. Paths are org-scoped and two-level hex fanned-out, for the isolation reason given in the [renumbering entry](#phase-renumbering--2026-09-10) above.
+
+`/api/v1/documents` is platform-level: upload, list filtered by app and entity, metadata, a streamed download, attach and detach, and a delete that is refused while any link exists. Upload takes `multer` in **memory** storage with a hard size cap, decides the MIME type by **magic bytes and never by the client's `Content-Type` header**, allowlists PDF/PNG/JPEG/CSV, and hashes with `node:crypto`. Downloads set `Content-Disposition: attachment` and `X-Content-Type-Options: nosniff`. The blob is written before the database row, and an orphaned blob is tolerated on rollback — rule 5 forbids post-`COMMIT` follow-up work, and an unreferenced file is inert.
+
+On the client the vault is a suite-level destination beside `/account`, plus a reusable attachments panel dropped onto LedgerCore's invoice, bill and journal-entry pages — the cross-app proof that the service is genuinely platform-level rather than LedgerCore's with a different prefix.
+
+**Deliberately not planned:** object storage; virus scanning; thumbnail or preview generation; document versioning; blob garbage collection; per-document permissions finer than organization membership.
+
+---
+
 ## App map
 
 The domain, headline skills, and DB/engineering pattern for each app in the suite.
 
-### LedgerCore — Core Accounting & Systems — Phases 3–4, 6, 8–9
+### LedgerCore — Core Accounting & Systems — Phases 3–4, 6, 8, 9b, 17
 
 The system of record every other app posts into. Double-entry integrity enforced by the database itself, an append-only ledger, multi-currency, bank reconciliation, and a QuickBooks API sync. Full spec: [ledger-core.md](ledger-core.md).
 
-*Includes:* chart of accounts with parent/child hierarchy, manual journal entries, reversing entries, trial balance, fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers, bank CSV ingestion with confidence matching, multi-currency FX with realized and unrealized gain/loss, QuickBooks Online sync.
+*Includes:* chart of accounts with parent/child hierarchy, manual journal entries, reversing entries, trial balance, fiscal periods with close/lock, P&L, balance sheet, AR/AP subledgers, bank CSV ingestion with confidence matching, multi-currency FX with realized and unrealized gain/loss, chart and opening-balance import for a business migrating in (9b), QuickBooks Online sync (17).
 
 *Pattern:* strict double-entry validation inside `BEGIN...COMMIT`, all amounts integer cents, and the same invariant enforced a second time by a `DEFERRABLE INITIALLY DEFERRED` constraint trigger that fires at `COMMIT` — the application is not the only thing standing between the ledger and an unbalanced entry. Posted rows are immutable by trigger, not by convention. `source_type` / `source_id` on `journal_entries` is the hook every other app uses to post into the GL.
 
@@ -430,7 +504,9 @@ Phase 5 also shipped **`npm run verify:integrity`**: a standalone checker assert
 
 Phase 7 also delivered **financial-event webhooks** — an outbound notification when a watched condition fires, e.g. a large unmatched bank transaction reaching the ledger. Webhooks landed here and not earlier because rule 5 forbids post-`COMMIT` follow-up work: an HTTP call to a receiver cannot be made inside the posting transaction, and firing it after `COMMIT` without a queue means a crash between the two silently loses the notification — the transactional outbox this phase built is exactly the mechanism that closes that gap.
 
-**Document storage (Phase 10).** AP-Flow retains every source document, hash-addressed on the local filesystem under `server/storage/`, with the SHA-256 recorded in the database. This is deliberately the simplest thing that satisfies the audit requirement, and it does **not** survive a multi-instance deployment; the storage service keeps a narrow interface (`put(buffer) → hash`, `get(hash) → stream`) so object storage is a one-file swap when deployment becomes real.
+**Onboarding state (Phase 9).** `onboarding_states`, one row per `(org_id, app_slug)`, is platform infrastructure rather than LedgerCore's: every app that acquires a setup wizard gets skip-and-resume for free, and the suite-level checklist reads across all of them. See [Phase 9, planned scope](#phase-9-planned-scope).
+
+**Document storage (Phase 9.5) — promoted from AP-Flow.** The suite retains uploaded documents on the local filesystem under `server/storage/`, org-scoped and named by SHA-256, with metadata in a platform `documents` table and per-app attachment rows in `document_links`. This is deliberately the simplest thing that satisfies the audit requirement, and it does **not** survive a multi-instance deployment; the storage service keeps a narrow interface (`put(orgId, buffer) → hash`, `get(orgId, hash) → stream`) so object storage is a one-file swap when deployment becomes real. It was AP-Flow-owned until 2026-09-10 — see the [renumbering entry](#phase-renumbering--2026-09-10) for why it moved and why the path is keyed by organization rather than globally content-addressed.
 
 ---
 

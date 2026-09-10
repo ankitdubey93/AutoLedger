@@ -12,7 +12,7 @@
 - Errors: throw or `next(new ApiError(status, message))` and let `errorHandler.ts` format them. Never hand-roll an error response.
 - **`400` vs `422`:** `400` means the request is malformed — a missing field, a wrong type, an unparseable date. `422` means it parsed fine and is still wrong for a domain reason: an entry whose debits do not equal its credits, a posting into a closed period, a parent account of the wrong type. The client shows the two differently, so the distinction is load-bearing rather than stylistic.
 - `404`, never `403`, for a resource that exists in another organization. A `403` confirms the id is real.
-- Financial mutations require an `Idempotency-Key` header from Phase 9 (QuickBooks sync) onward, where a retried request must not double-post.
+- Financial mutations require an `Idempotency-Key` header from Phase 17 (QuickBooks sync) onward, where a retried request must not double-post.
 - Posted documents expose `POST /:id/reverse`, never `PUT` or `DELETE`.
 
 ### Error response shape
@@ -419,7 +419,7 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 
 Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
 
-Phase 7 adds `unmatchedAlertThresholdCents` (integer cents, `PATCH` only, `≥ 0`) — the minimum absolute value of an unmatched bank line's `amountCents` that fires a `bank.large_unmatched` webhook event on import. Defaults to `0`, which means **disabled**: every organization starts with no alerting, and existing organizations are unaffected by the migration that added the column. See [ledger-core.md#webhooks-for-financial-events--phase-7](ledger-core.md#webhooks-for-financial-events--phase-7).
+Phase 7 adds `unmatchedAlertThresholdCents` (integer cents, `PATCH` only, `≥ 0`) — the minimum absolute value of an unmatched bank line's `amountCents` that fires a `bank.large_unmatched` webhook event on import. Defaults to `0`, which means **disabled**: every organization starts with no alerting, and existing organizations are unaffected by the migration that added the column. See [ledger-core.md#webhooks-for-financial-events--phase-7](ledger-core.md#webhooks-for-financial-events--phase-7--delivered).
 
 Phase 8 adds `realizedFxGainAccountId`/`realizedFxLossAccountId`/`unrealizedFxAccountId` (each `PATCH`-only, a UUID or `null`) — the posting accounts `paymentService`'s realized-FX plug and (once it lands) period-end revaluation use. `null` (the default) falls back to chart codes `4910`/`6810`/`6820`.
 
@@ -644,7 +644,7 @@ Failure paths: `400` from the schema (`asOfDate` missing/malformed) · `403` for
 
 Phase 3, Phase 4, Phase 6, and Phase 8 are **built** and documented in the section above — the FX engine's `fx_rates`, foreign-currency invoices/bills/payments with realized settlement gain/loss, and period-end unrealized revaluation are all complete. Still to come:
 
-#### QuickBooks Online sync — Phase 9
+#### QuickBooks Online sync — Phase 17
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
