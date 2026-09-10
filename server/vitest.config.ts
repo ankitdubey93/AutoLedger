@@ -30,6 +30,8 @@ export default defineConfig({
       // Index 1, never 0. globalSetup flushes this database before the suite;
       // flushing index 0 would wipe the dev queues you were watching.
       REDIS_DB: '1',
+      // Never the dev store: the suite deletes this directory between files.
+      STORAGE_ROOT: 'storage-test',
     },
 
     /**

@@ -408,11 +408,25 @@ This closes Phase 8's scope as specified in [ledger-core.md § D](ledger-core.md
 
 See [ledger-core.md § Phase 9b](ledger-core.md#phase-9b--chart--opening-balance-import) for the commit semantics (parent-before-child chart resolution, the imbalance-as-plug computation, the three refused accounts) and [api.md](api.md#migration-imports--apiv1ledger-coremigration-imports--phase-9b) for the routes.
 
-## Phase 9.5+ — target tables
+## Phase 9.5 — the Document Vault (platform) — applied
+
+`030_platform_documents.sql` adds `documents` and `document_links`, the suite-wide file vault. Both are platform tables, unprefixed — LedgerCore attaching a PDF and AP-Flow attaching a source image (Phase 10) are both apps talking to the platform, never to each other, which is what keeps guardrails rule 16 intact.
+
+**`documents`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `sha256` CHAR(64) NOT NULL, CHECK `sha256 ~ '^[0-9a-f]{64}$'` (lowercase hex only — this CHECK is what lets `storageService.blobPath` treat the value as a safe path segment) · `byte_size` BIGINT NOT NULL CHECK `> 0` · `mime_type` TEXT NOT NULL, CHECK IN (`application/pdf`,`image/png`,`image/jpeg`,`text/csv`) · `original_filename` TEXT NOT NULL, non-blank CHECK, `<= 255` chars · `uploaded_by` FK → `users` ON DELETE RESTRICT · `created_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`. **No `updated_at`** — the row is never updated (see immutability, below), so a `set_updated_at` trigger would be decorative. `ux_documents_org_sha` — `UNIQUE (org_id, sha256)`, what makes upload idempotent per tenant: re-uploading identical bytes returns the existing row rather than erroring. `ux_documents_org_id_id` — `UNIQUE (org_id, id)`, the composite target `document_links` references.
+
+**`document_links`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `document_id` UUID NOT NULL · `app_slug` TEXT NOT NULL, non-blank CHECK, `<= 40` chars (no `REFERENCES` and no enumerated CHECK — validated against `isAppSlug` in the service, the same call migrations 017/027 made) · `entity_type` TEXT NOT NULL, non-blank CHECK, `<= 40` chars · `entity_id` UUID NOT NULL · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`. `fk_document_links_document` — composite FK `(org_id, document_id) → documents (org_id, id)` ON DELETE CASCADE, making a cross-tenant link unrepresentable at the schema level (the same composite-FK-for-tenancy technique migration 005 uses). `ux_document_links_target` — `UNIQUE (org_id, document_id, app_slug, entity_type, entity_id)`.
+
+**`entity_id` carries no `REFERENCES`, deliberately.** Foreign-keying it to an app's own table would mean the platform reading that app's schema directly, which rule 16 forbids — a link can in principle outlive the entity it points at (an attached invoice later hard-deleted, say), and that is accepted and tested (`documentConstraints.test.ts`) rather than prevented.
+
+**Immutability: update-immutable by trigger, not insert-only.** `reject_document_mutation()` (`BEFORE UPDATE`, raising `0A000`) is attached to both tables — a document's metadata describes content-addressed bytes already on disk, and editing the row would make it describe a file that no longer matches. **DELETE stays legal on both tables**: `DELETE /documents/:id` is a real route, refused by `documentService` (`409`) while any `document_links` row still references it, never by a trigger. This is a correction from this section's earlier planned wording, which said "insert-only" — the shipped design needed a real deletion path once an attachment is removed, so only UPDATE is blocked.
+
+Both tables audited with `trg_documents_audit`/`trg_document_links_audit` (`audit_row_change('platform')`).
+
+The bytes themselves are never in Postgres — `services/storageService.ts` writes them to the filesystem under `STORAGE_ROOT/<org_id>/<sha[0:2]>/<sha[2:4]>/<sha256>` (gitignored), org-keyed rather than globally content-addressed so two tenants uploading identical bytes never share a blob. See [study/architecture/file-storage-and-streaming.md](../study/architecture/file-storage-and-streaming.md) and [api.md](api.md#documents--apiv1documents--phase-95) for the routes.
+
+## Phase 9.5+ (continued) — target tables
 
 Sketches only. Each is specified properly in the migration that creates it; they are listed here so the shape of the whole schema is visible.
-
-**`documents`** / **`document_links`** (Phase 9.5, `030_platform_*`) — the suite-wide vault. `documents`: `id` · `org_id` · `sha256` CHAR(64) · `byte_size` BIGINT · `mime_type` (sniffed from magic bytes, never the client's header) · `original_filename` · `uploaded_by` · timestamps, with `UNIQUE (org_id, sha256)` so re-uploading a file is idempotent. `document_links`: `(org_id, document_id, app_slug, entity_type, entity_id)` with a `UNIQUE` over all five. The link table is what keeps rule 16 intact — an app attaching a file talks to the platform, never to another app's tables. Both audited with `audit_row_change('platform')`; `documents` is insert-only.
 
 **`quickbooks_connections`** (Phase 17) — `id` · `org_id` UNIQUE · `realm_id` TEXT · `access_token_encrypted` · `refresh_token_encrypted` · `expires_at` · `connected_by` · `last_synced_at`. Tokens are encrypted at rest, never logged (rule 11).
 

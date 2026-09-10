@@ -160,3 +160,28 @@ export const WEBHOOK_TIMEOUT_MS = 5_000;
 
 /** Response body bytes retained in `webhook_deliveries.last_error`. */
 export const WEBHOOK_ERROR_SNIPPET_CHARS = 500;
+
+// ------------------------------------------------ document vault (9.5)
+
+/**
+ * Hard cap on one uploaded file, enforced by multer BEFORE the buffer is
+ * fully read — `express.json`'s 1mb limit does not apply to multipart, so
+ * without this a client could stream an arbitrarily large body into memory.
+ */
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/** The multipart field name the upload route accepts. Exactly one file. */
+export const UPLOAD_FIELD_NAME = 'file';
+
+/**
+ * Decided by magic bytes (utils/mimeSniff.ts), never by the client's
+ * Content-Type header. A header is a claim; a signature is evidence.
+ */
+export const ALLOWED_UPLOAD_MIME_TYPES = [
+  'application/pdf',
+  'image/png',
+  'image/jpeg',
+  'text/csv',
+] as const;
+
+export type AllowedUploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number];

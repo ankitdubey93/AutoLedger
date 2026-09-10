@@ -19,6 +19,7 @@ import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
 import ConfirmDialog from './ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
+import AttachmentsPanel from '../../components/AttachmentsPanel';
 
 /**
  * One invoice, in full — its own printable document, honouring the
@@ -371,6 +372,10 @@ export default function InvoiceDetailPage() {
           </div>
         </div>
       )}
+
+      <div className="no-print">
+        <AttachmentsPanel appSlug="ledger-core" entityType="invoice" entityId={invoice.id} />
+      </div>
 
       {confirmAction === 'issue' && (
         <ConfirmDialog

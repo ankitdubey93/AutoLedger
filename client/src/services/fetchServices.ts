@@ -1,5 +1,7 @@
 import {
+  AUTH_EXPIRED_EVENT,
   fetchWithAutoRefresh,
+  refreshSession,
   type AutoRefreshOptions,
 } from '../utils/fetchWithAutoRefresh';
 
@@ -2329,4 +2331,194 @@ export function commitMigrationImport(
 /** DELETE /ledger-core/migration-imports/:id — refused once COMMITTED. */
 export async function deleteMigrationImport(id: string): Promise<void> {
   await apiFetch(`/ledger-core/migration-imports/${id}`, { method: 'DELETE' });
+}
+
+/* --------------------------------------------------- document vault (9.5) */
+
+/** Mirrors server/src/types/documents.ts's DocumentRecord. */
+export interface VaultDocument {
+  id: string;
+  sha256: string;
+  byteSize: number;
+  mimeType: 'application/pdf' | 'image/png' | 'image/jpeg' | 'text/csv';
+  originalFilename: string;
+  uploadedBy: string;
+  uploadedByName: string | null;
+  createdAt: string;
+  linkCount: number;
+}
+
+/** Mirrors server/src/types/documents.ts's DocumentLink. */
+export interface VaultDocumentLink {
+  id: string;
+  documentId: string;
+  appSlug: string;
+  entityType: string;
+  entityId: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface VaultDocumentWithLinks extends VaultDocument {
+  links: VaultDocumentLink[];
+}
+
+export interface DocumentFilters {
+  page?: number;
+  limit?: number;
+  appSlug?: string;
+  entityType?: string;
+  entityId?: string;
+}
+
+/** GET /documents — platform-level, not under /ledger-core (guardrails rule 16). */
+export function listDocuments(
+  params: DocumentFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  documents: VaultDocument[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.appSlug !== undefined && params.appSlug !== '') query.set('appSlug', params.appSlug);
+  if (params.entityType !== undefined && params.entityType !== '') query.set('entityType', params.entityType);
+  if (params.entityId !== undefined && params.entityId !== '') query.set('entityId', params.entityId);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/documents${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /documents/:id — includes its links. */
+export function getDocument(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; document: VaultDocumentWithLinks }> {
+  return apiFetch(`/documents/${id}`, { signal: signal ?? null });
+}
+
+/**
+ * POST /documents — multipart. `201` for a new blob, `200` for an
+ * already-vaulted one (upload is idempotent by content hash within an org).
+ */
+export function uploadDocument(
+  file: File,
+): Promise<{ success: boolean; document: VaultDocument; created: boolean }> {
+  return apiUpload('/documents', () => {
+    const body = new FormData();
+    body.append('file', file);
+    return body;
+  });
+}
+
+/** GET /documents/:id/file — the stored original, streamed as a Blob. */
+export function downloadDocument(id: string): Promise<{ blob: Blob; filename: string }> {
+  return apiDownloadBlob(`/documents/${id}/file`);
+}
+
+/** DELETE /documents/:id — refused with 409 while any link exists. */
+export async function deleteDocument(id: string): Promise<void> {
+  await apiFetch(`/documents/${id}`, { method: 'DELETE' });
+}
+
+/** POST /documents/:id/links */
+export function attachDocument(
+  documentId: string,
+  body: { appSlug: string; entityType: string; entityId: string },
+): Promise<{ success: boolean; link: VaultDocumentLink }> {
+  return apiFetch(`/documents/${documentId}/links`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** DELETE /documents/:id/links/:linkId */
+export async function detachDocument(documentId: string, linkId: string): Promise<void> {
+  await apiFetch(`/documents/${documentId}/links/${linkId}`, { method: 'DELETE' });
+}
+
+function decodeErrorBody(body: unknown, status: number): string {
+  return body !== null && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
+    ? body.error
+    : `Request failed with status ${status}`;
+}
+
+/**
+ * Multipart upload. Deliberately NOT apiFetch: apiFetch forces
+ * `Content-Type: application/json`, and a multipart body must let the
+ * browser set the header itself so it can include the boundary token.
+ *
+ * `buildBody` is a factory, not a `FormData` value, because a 401 retry
+ * needs its own fresh body — `FormData` built around a `File` is not safely
+ * replayable the way a JSON string is, so `fetchWithAutoRefresh`'s
+ * replay-the-same-init retry cannot be reused here. This function does its
+ * own single retry instead, rebuilding the body on each attempt.
+ */
+export async function apiUpload<T>(path: string, buildBody: () => FormData): Promise<T> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+
+  const url = `${API_BASE_URL}${API_PREFIX}${path}`;
+  const send = (): Promise<Response> =>
+    fetch(url, { method: 'POST', credentials: 'include', body: buildBody() });
+
+  let response = await send();
+
+  if (response.status === 401) {
+    const refreshed = await refreshSession();
+    if (!refreshed) {
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    } else {
+      response = await send();
+      if (response.status === 401) {
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      }
+    }
+  }
+
+  const body: unknown = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new ApiRequestError(response.status, decodeErrorBody(body, response.status));
+  }
+
+  return body as T;
+}
+
+/** Streams a file response into a Blob. Same credentials and refresh path as apiUpload. */
+export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filename: string }> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+
+  const url = `${API_BASE_URL}${API_PREFIX}${path}`;
+  const send = (): Promise<Response> => fetch(url, { credentials: 'include' });
+
+  let response = await send();
+
+  if (response.status === 401) {
+    const refreshed = await refreshSession();
+    if (!refreshed) {
+      window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    } else {
+      response = await send();
+      if (response.status === 401) {
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      }
+    }
+  }
+
+  if (!response.ok) {
+    const body: unknown = await response.json().catch(() => null);
+    throw new ApiRequestError(response.status, decodeErrorBody(body, response.status));
+  }
+
+  const disposition = response.headers.get('content-disposition') ?? '';
+  const match = /filename="([^"]*)"/.exec(disposition);
+  const filename = match?.[1] ?? 'download';
+
+  return { blob: await response.blob(), filename };
 }

@@ -17,6 +17,7 @@ import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from './BackLink';
 import ConfirmDialog from './ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
+import AttachmentsPanel from '../../components/AttachmentsPanel';
 
 /**
  * One bill, in full. Approve and Void are both gated by a confirmation
@@ -351,6 +352,8 @@ export default function BillDetailPage() {
           </div>
         </div>
       )}
+
+      <AttachmentsPanel appSlug="ledger-core" entityType="bill" entityId={bill.id} />
 
       {confirmAction === 'approve' && (
         <ConfirmDialog

@@ -7,6 +7,7 @@ import auditRoutes from './auditLogs.js';
 import webhookRoutes from './webhooks.js';
 import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
+import documentRoutes from './documents.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 
 /**
@@ -45,6 +46,12 @@ apiRouter.use('/webhook-deliveries', webhookDeliveryRoutes);
 // that acquires a setup wizard gets skip-and-resume for free, and `app_slug`
 // on the row carries the namespace (guardrails rule 16), as /audit-logs does.
 apiRouter.use('/onboarding', onboardingRoutes);
+
+// Phase 9.5 — the Document Vault. Platform-level, not namespaced under an
+// app: LedgerCore attaching a PDF and AP-Flow attaching a source image are
+// both apps talking to the platform, and `app_slug` on the link row carries
+// the namespace (guardrails rule 16), exactly as /audit-logs does.
+apiRouter.use('/documents', documentRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

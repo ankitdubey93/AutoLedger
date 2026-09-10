@@ -30,6 +30,7 @@
     "express-rate-limit": "^8.7.0",
     "ioredis": "^6.0.0",
     "jsonwebtoken": "^9.0.3",
+    "multer": "^2.3.0",
     "pg": "^8.22.0",
     "zod": "^4.5.4"
   },
@@ -39,6 +40,7 @@
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.2.0",
     "@types/node": "^26.1.2",
     "@types/pg": "^8.20.0",
     "@types/supertest": "^7.2.1",

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import path from 'node:path';
 
 /**
  * Environment parsing happens once, at import time, and fails loudly.
@@ -104,6 +105,11 @@ const parsed = {
   REDIS_HOST: optional('REDIS_HOST', 'localhost'),
   REDIS_PORT: integer('REDIS_PORT', 6379),
   REDIS_DB: nonNegativeInteger('REDIS_DB', 0),
+
+  // Phase 9.5 — the Document Vault's filesystem backend. Optional: a fresh
+  // checkout must boot with none of this set. Relative to the server package
+  // root, because every npm script runs with cwd = server/.
+  STORAGE_ROOT: path.resolve(process.cwd(), optional('STORAGE_ROOT', 'storage')),
 
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.

@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
+import { rm } from 'node:fs/promises';
 import request from 'supertest';
 import type { Express } from 'express';
 import { pool } from '../../db/connect.js';
+import { env } from '../../config/env.js';
 import * as authService from '../../services/authService.js';
 import type { Role } from '../../types/auth.js';
 
@@ -30,7 +32,8 @@ export async function resetTables(): Promise<void> {
               vendors, bills, bill_lines, payments, payment_allocations, fiscal_periods,
               bank_statement_imports, bank_transactions, bank_match_suggestions,
               outbox_events, webhook_endpoints, webhook_deliveries,
-              audit_logs, onboarding_states, migration_imports, migration_import_rows
+              audit_logs, onboarding_states, migration_imports, migration_import_rows,
+              documents, document_links
      RESTART IDENTITY CASCADE`,
   );
 }
@@ -76,6 +79,14 @@ export async function addMember(orgId: string, userId: string, role: Role): Prom
     userId,
     role,
   ]);
+}
+
+/**
+ * Wipes STORAGE_ROOT between Document Vault tests. vitest.config.ts pins
+ * this to `storage-test/`, never the dev store.
+ */
+export async function clearStorage(): Promise<void> {
+  await rm(env.STORAGE_ROOT, { recursive: true, force: true });
 }
 
 /**

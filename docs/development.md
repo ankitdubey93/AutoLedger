@@ -112,6 +112,7 @@ No application secrets live here.
 | `REDIS_HOST` | no — defaults `localhost` | Phase 7 — background jobs and the webhook dispatcher |
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
+| `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. The test suite pins itself to `storage-test` so `npm test` never touches your dev vault |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
 
@@ -213,13 +214,22 @@ Added in Phase 7:
 
 No client-side dependency this phase — `WebhooksPage`/`WebhookDeliveriesPage` are built entirely from `lucide-react` (already present since Phase 3) and hand-rolled components, the same as every other LedgerCore page.
 
+Added in Phase 9.5:
+
+| Package | Layer | Why |
+|---|---|---|
+| `multer` | server | The Document Vault's multipart upload (`POST /documents`). **Moved from Phase 10 on 2026-09-10** when document storage was promoted out of AP-Flow to platform infrastructure — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10). Scoped to `middleware/upload.ts`, mounted on the one upload route only — never registered globally beside `express.json` |
+| `@types/multer` | server, dev | Multer 2.x ships no types of its own |
+
+No client-side dependency this phase either — `DocumentsPage`/`AttachmentsPanel` use `FormData`/`Blob`/`URL.createObjectURL`, all browser built-ins.
+
+**`file-type` was considered and refused.** The Document Vault must decide a MIME type from magic bytes rather than the client's `Content-Type` header, but that is a small parser, so `utils/mimeSniff.ts` is hand-written instead — the same call made for `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts`.
+
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
 | ~~`csv-parse`~~ | LedgerCore's bank statement ingestion. **Approved but never installed** — Phase 6 hand-wrote `utils/csv.ts` (a two-pass state machine) instead, and the row is kept struck through rather than deleted so the reversal stays visible | ~~6~~ |
-| `multer` | The Document Vault's multipart upload. **Moved from Phase 10 on 2026-09-10** when document storage was promoted out of AP-Flow to platform infrastructure — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10). Scope it to the one upload route; do not register it globally beside `express.json` | 9.5 |
-| ~~`file-type`~~ | **Not approved.** The Document Vault must decide a MIME type from magic bytes rather than the client's `Content-Type` header, but that is a small parser, so `utils/mimeSniff.ts` is hand-written — the same call made for `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts` | — |
 | `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 17 |
 | `tesseract.js` | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine | 10 |
 | `sharp` | rasterizing and masking image buffers for the redaction pipeline | 10 |
@@ -229,7 +239,9 @@ Approved for later phases, add only when the app that needs it is being built:
 | `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
 | An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
 
-**Phase 9.5 also adds a directory, not just a package.** The Document Vault stores uploads under `server/storage/`, which is gitignored. Files are named by SHA-256 but the path is keyed by organization first — `server/storage/<org_id>/<ab>/<cd>/<sha256>` — so two tenants uploading identical bytes get two blobs. Global content addressing was rejected: it would let one tenant detect that another holds the same file, and it would make deleting a blob unsafe whenever two organizations shared it. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; the storage service keeps a narrow `put`/`get` interface so object storage is a one-file swap later. This was Phase 10's, AP-Flow-owned, until 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
+**Phase 9.5 also added a directory, not just a package.** The Document Vault stores uploads under `server/storage/`, which is gitignored (`server/storage-test/` too, for the test suite). Files are named by SHA-256 but the path is keyed by organization first — `server/storage/<org_id>/<ab>/<cd>/<sha256>` — so two tenants uploading identical bytes get two blobs. Global content addressing was rejected: it would let one tenant detect that another holds the same file, and it would make deleting a blob unsafe whenever two organizations shared it. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; `services/storageService.ts` keeps a narrow `put`/`get`/`stat` interface so object storage is a one-file swap later. This was Phase 10's, AP-Flow-owned, until 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
+
+**`STORAGE_ROOT`** (optional, defaults to `storage`, resolved relative to `server/`'s package root) is the env var controlling where that directory lives — see the environment table below.
 
 **No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, recursive CTEs, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
 

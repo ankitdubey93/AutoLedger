@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 717 server tests + 144 client tests** (as of Phase 7).
+**Current state: 868 server tests + 172 client tests** (as of Phase 9.5). The table below was last fully re-verified at Phase 7 — rows for Phase 8/9's own test files are not yet listed here; only Phase 9.5's are added in this pass.
 
 Server, in `server/src/__tests__/`:
 
@@ -34,8 +34,12 @@ Server, in `server/src/__tests__/`:
 | `platform/outboxDrain.test.ts` | integration (Redis) | `emitEvent` rollback-leaves-no-row proof, fan-out, idempotent re-drain, stale-delivery sweep, **cross-org isolation** |
 | `platform/webhookDelivery.test.ts` | integration (Redis, `fetch` stubbed) | Signed delivery, retry/status transitions, no-secret-in-body, **cross-tenant isolation** |
 | `ledger-core/outboxEmission.test.ts` | integration | One case per event type from the real posting services, rollback emits nothing, **cross-org scoping** |
+| `mimeSniff.test.ts` | unit | Magic-byte detection for PDF/PNG/JPEG, the CSV UTF-8-round-trip carve-out, a renamed-file spoof and an executable-disguised-as-PDF spoof both refused |
+| `storageService.test.ts` | unit (real `fs` against `storage-test/`) | Idempotent `put`, the two-level hex fan-out path, cross-org isolation (`two orgs uploading identical bytes get two blobs`), `blobPath`'s traversal/non-UUID rejection |
+| `platform/documents.test.ts` | integration | Upload idempotency (`201`→`200`), MIME/size rejection (`415`/`413`), role gates, pagination, download headers, attach/detach, **cross-tenant isolation** (3 cases: `GET`/`GET .../file`/`DELETE` on another org's document, all `404`) |
+| `platform/documentConstraints.test.ts` | integration | **The database as the guardrail** — the composite FK rejecting a cross-tenant link, `0A000` on `UPDATE` for both tables, `23505`/`23514` constraint violations, cascade delete, the audit trail — all via raw SQL, bypassing the service |
 
-Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `ledgerCoreWebhooks.test.tsx` / `ledgerCoreWebhookDeliveries.test.tsx`.
+Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `ledgerCoreWebhooks.test.tsx` / `ledgerCoreWebhookDeliveries.test.tsx`. (Phase 9.5) `DocumentsPage.test.tsx` (upload/list/delete, the `415` message surfaced verbatim, Delete hidden while linked) and `AttachmentsPanel.test.tsx` (upload-then-link ordering, a `409` rendered as "Already attached to this record", detach-after-confirm, `readOnly` hiding every control).
 
 Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point. From Phase 7, tests that exercise the job queue also need `docker compose up -d redis` — `globalSetup` flushes Redis database index **1** (never index 0) before the run, the same `autodb_test`-not-`autodb` discipline applied to Redis.
 

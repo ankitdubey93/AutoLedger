@@ -11,6 +11,7 @@ import { formatCents } from './money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import BackLink from './BackLink';
 import ConfirmDialog from './ConfirmDialog';
+import AttachmentsPanel from '../../components/AttachmentsPanel';
 
 /**
  * One journal entry, in full: every field, both totals, and every line.
@@ -208,6 +209,8 @@ export default function JournalDetailPage() {
           </tfoot>
         </table>
       </div>
+
+      <AttachmentsPanel appSlug="ledger-core" entityType="journal_entry" entityId={entry.id} />
 
       {confirming && (
         <ConfirmDialog

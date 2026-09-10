@@ -78,6 +78,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [background-jobs-and-queues.md](architecture/background-jobs-and-queues.md) | **BullMQ on Redis — lists/sorted-sets and the atomic Lua-scripted state transitions, why a worker needs `maxRetriesPerRequest: null`, retry/exponential-backoff, the dead-letter queue as the actual alerting mechanism (`removeOnFail` alone isn't one), `upsertJobScheduler`'s idempotent repeatable jobs vs the deprecated `add({ repeat })`, why the worker is a separate OS process rather than a `worker_threads` thread, and at-least-once delivery as the reason every handler must be idempotent** |
 | [transactional-outbox.md](architecture/transactional-outbox.md) | **The dual-write problem stated precisely, writing an event row on the caller's own transaction client as the fix, `FOR UPDATE SKIP LOCKED` as the drain's work-claiming primitive, `ON CONFLICT DO NOTHING` fan-out idempotency, the stale-PENDING re-enqueue sweep as what "at-least-once" actually costs, and why exactly-once delivery across a network boundary isn't achievable** |
 | [realized-and-unrealized-fx.md](architecture/realized-and-unrealized-fx.md) | **Realized FX gain/loss as one subtraction (`Σ base debits − Σ base credits`) with no direction-specific sign branch, why a receivable settled high is a gain and the mirror payable case falls out for free, one control line per allocation at that allocation's own document rate (never the payment's settlement rate) so a multi-document payment stays per-line CHECK-valid, unrealized period-end revaluation through a single gain/loss account instead of a pair, and why the automatic next-day reversal is what keeps a later realized settlement comparing against a document's original frozen rate instead of a revalued one** |
+| [file-storage-and-streaming.md](architecture/file-storage-and-streaming.md) | **Content-addressed storage and free deduplication, why this vault is org-keyed rather than globally content-addressed — the cross-tenant existence oracle and the unsafe-shared-blob deletion problem it closes — two-level hex fan-out and the directory-entry limits it exists for, the narrow `put`/`get`/`stat` interface as the object-storage swap seam, why the blob is written before the database row and an orphan is tolerated (tied directly to the no-post-COMMIT-work rule), `pipe()`'s backpressure vs buffering the whole file, the mandatory `'error'` listener a bare pipe doesn't give you, and the link table as the rule-16 boundary — an app talking to the platform, never to another app's tables** |
 
 ### Tooling
 
@@ -104,6 +105,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [password-hashing-and-timing.md](security-auth/password-hashing-and-timing.md) | Why not SHA-256, salts, work factors, the `$2b$` format, **the 72-byte truncation**, timing oracles and dummy-hash comparison, native bcrypt on the libuv threadpool vs `bcryptjs`, scrypt/Argon2 |
 | [cookies-samesite-and-csrf.md](security-auth/cookies-samesite-and-csrf.md) | Origin vs site, why `:5173`→`:5000` is same-site, the `127.0.0.1` trap, the three SameSite values, the Lax navigation hole that made refresh a POST, httpOnly vs `localStorage`, the `clearCookie` attribute-matching trap, CSRF mechanics |
 | [webhook-signing-and-ssrf.md](security-auth/webhook-signing-and-ssrf.md) | **HMAC-SHA256 over `timestamp.body` and why a shared MAC beats a bearer token, replay protection from folding the timestamp into the signed material, `timingSafeEqual` and the timing side-channel it closes, SSRF as the structural risk of fetching a user-supplied URL, the cloud-metadata-endpoint and private-IPv4-range guard, `redirect: 'manual'` as the second half of the same defense, and the DNS-rebinding gap this write-time check honestly doesn't close** |
+| [file-upload-threat-model.md](security-auth/file-upload-threat-model.md) | **Why a multipart `Content-Type` header is an attacker-controlled claim, magic-byte sniffing vs the client's label, the UTF-8-round-trip carve-out for a format (CSV) with no signature, path traversal through a filename or hash and why a positive allowlist regex beats a post-join `startsWith` check, `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` as the pair that stops stored XSS, CRLF header injection through an unsanitized filename, why the size cap must live in the parser's own streaming limits, and decompression bombs as a stated non-defense here** |
 
 ---
 
@@ -212,7 +214,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | **Enforcing an invariant in the DB vs the application — and why both** | 3 | ✅ |
 | Edit distance (Levenshtein DP) & confidence scoring | 6 (bank reconciliation) | ✅ |
 | Human-in-the-loop review: thresholds, explainable scores | 6, 11 | ◐ |
-| Content-addressed storage & hash-based provenance | 10 (AP-Flow) | ⬜ |
+| Content-addressed storage & hash-based provenance | 9.5 (Document Vault — storage, dedup, org-keyed fan-out), 10 (AP-Flow — stamping the SHA-256 onto a journal entry so an auditor can walk from a ledger line back to the source) | ◐ |
 | Multimodal extraction: structured output, per-field confidence | 10 (AP-Flow) | ⬜ |
 | Optimistic vs pessimistic concurrency control | dropped (was Inventory `FOR UPDATE`) | ⬜ |
 | Layered architecture: controller / service / data | 0 | ✅ |
@@ -241,7 +243,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | RBAC vs ABAC modelling | 1 | ✅ |
 | SQL injection & why parameterisation works | 1 | ✅ |
 | OWASP Top 10 mapped to this codebase | later | ⬜ |
-| File upload threat model: MIME spoofing, path traversal, zip bombs | 10 (AP-Flow document capture) | ⬜ |
+| File upload threat model: MIME spoofing, path traversal, zip bombs | 9.5 (Document Vault) | ✅ |
 | Data minimisation: what you send a third party, and proving it | 10 (PII pixel masking) | ⬜ |
 | HMAC request signing & timing-safe comparison | 7 (webhook delivery) | ✅ |
 | SSRF: fetching a user-supplied URL, private-range guards, DNS rebinding | 7 (webhook endpoints) | ✅ |

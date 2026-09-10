@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -681,6 +681,28 @@ There is no `dateFormat` and no `columnMap`, unlike `/bank-imports` — neither 
 Row-level `errors: string[]` accumulate rather than abort; an import's `status` is `DRAFT` while any row is `INVALID`, `VALIDATED` once every non-excluded row is `VALID`, `COMMITTED` once posted (terminal). `PATCH .../rows/:rowId` accepts `accountCode`, `accountName`, `accountType`, `parentCode`, `description`, `debitCents`, `creditCents`, `status` (`VALID`/`EXCLUDED` only) — whichever fields are sent — then re-validates the whole import, so fixing one row can change another row's errors (e.g. resolving a duplicate code).
 
 Failure paths: `400` from the schema · `403` for a write below its role tier · `404` for another org's import or row, or an unknown `id`/`rowId` · `409 Fix N invalid row(s) before committing` (commit attempted before `VALIDATED`) · `409 This import has already been committed` (any write to a `COMMITTED` import) · `409 A committed import cannot be deleted` · `409 This organization already has a committed opening-balance import` · `422 Could not find a(n) <field> column in the file` (a required header missing — the one whole-file failure) · `422 Complete LedgerCore onboarding before importing opening balances` · `422 Account 3400 Opening Balance Equity is missing — run migrations` · `422` from the period-lock guard if `books_start_date` falls inside a closed/locked period.
+
+### Documents — `/api/v1/documents` — Phase 9.5
+
+Platform-level, not namespaced under `/ledger-core` (rule 16): LedgerCore attaching a PDF to an invoice and AP-Flow attaching a source image (Phase 10) are both apps talking to the platform, never to each other. Full spec: [ledger-core.md](ledger-core.md) is silent on this — see [roadmap.md](roadmap.md#phase-95-as-delivered) instead.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Upload a file — multipart, field name `file`. `201` for new bytes, `200` when identical bytes already exist for this org (upload is idempotent by content hash) |
+| GET | `/` | any member | Paginated documents, optional `?appSlug=&entityType=&entityId=` (an `EXISTS` filter against `document_links`) |
+| GET | `/:id` | any member | One document's metadata plus every `document_links` row attached to it |
+| GET | `/:id/file` | any member | Streams the stored original. Sets `Content-Disposition: attachment`, `Content-Type` (the sniffed MIME type), and `X-Content-Type-Options: nosniff` |
+| POST | `/:id/links` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Attach a document to `{ appSlug, entityType, entityId }` |
+| DELETE | `/:id/links/:linkId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Detach one link |
+| DELETE | `/:id` | `OWNER`, `ADMIN` | Delete a document. Refused while any link exists |
+
+Upload takes `multer` in **memory** storage, capped at `MAX_UPLOAD_BYTES` (10 MB). The MIME type is decided by **magic bytes**, never the client's `Content-Type` header — PDF/PNG/JPEG by signature, CSV by a UTF-8-round-trip text check plus a `.csv` filename — and restricted to that four-type allowlist (`server/src/utils/mimeSniff.ts`). A document's metadata row is update-immutable by trigger once written; there is no `PUT`/`PATCH` — the file itself is content-addressed, so an edit would mean the row no longer describes the bytes it names.
+
+`entityType` is validated against a per-app registry (`server/src/types/documents.ts`'s `DOCUMENT_ENTITY_TYPES_BY_APP`) — currently `ledger-core`: `invoice`, `bill`, `journal_entry`, `payment`, `customer`, `vendor`. `entity_id` carries **no foreign key**: checking one would mean the platform querying an app's own tables, which rule 16 forbids, so a link can in principle outlive the entity it points at — accepted and tested, not prevented.
+
+Failure paths: `400 Send exactly one file in a field named "file"` (no file, or wrong field) · `400 Uploaded file is empty` · `400 Invalid request body` (schema — `links`) · `403` for a write below its role tier · `404 Document not found` (also another org's) · `404 Attachment not found` · `409 This document is already attached to that record` · `409 Detach this document from every record before deleting it` · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG, CSV` · `422 Unknown app slug: <slug>` · `422 <app> documents cannot be attached to "<type>"`.
+
+Storage is org-keyed and content-addressed (`server/storage/<org_id>/<ab>/<cd>/<sha256>`, gitignored, not committed) — two organizations uploading byte-identical files get two independent blobs, deliberately: a shared global namespace would let one tenant detect that another holds the same file. See [study/architecture/file-storage-and-streaming.md](../study/architecture/file-storage-and-streaming.md) and [study/security-auth/file-upload-threat-model.md](../study/security-auth/file-upload-threat-model.md).
 
 ---
 

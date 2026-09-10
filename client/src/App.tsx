@@ -8,6 +8,7 @@ import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
 import AppChooserPage from './Pages/AppChooserPage';
 import AccountPage from './Pages/AccountPage';
+import DocumentsPage from './Pages/DocumentsPage';
 import NotFoundPage from './Pages/NotFoundPage';
 import ActiveAppRoutes from './apps/ActiveAppRoutes';
 
@@ -43,6 +44,7 @@ export default function App() {
               <Route element={<PlatformLayout />}>
                 <Route path="/" element={<AppChooserPage />} />
                 <Route path="/account" element={<AccountPage />} />
+                <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/dashboard" element={<Navigate to="/account" replace />} />
               </Route>
 

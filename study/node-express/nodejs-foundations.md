@@ -59,7 +59,7 @@ CommonJS wraps each file in a function receiving `exports`, `require`, `module`,
 
 ### Streams: the abstraction people skip
 
-Streams process data in chunks rather than loading it whole, and carry **backpressure** — if the consumer is slower than the producer, `write()` returns `false` and the producer should pause. `pipe()` and `stream.pipeline()` wire this automatically; hand-rolled `data` handlers usually don't, which is how a service reading a large file OOMs. Relevant to us for document uploads and streamed downloads (Phase 9.5) and `.pptx` generation (Phase 15).
+Streams process data in chunks rather than loading it whole, and carry **backpressure** — if the consumer is slower than the producer, `write()` returns `false` and the producer should pause. `pipe()` and `stream.pipeline()` wire this automatically; hand-rolled `data` handlers usually don't, which is how a service reading a large file OOMs. Relevant to us for document uploads and streamed downloads (Phase 9.5 — see [../architecture/file-storage-and-streaming.md](../architecture/file-storage-and-streaming.md) for the mandatory `'error'` listener a bare `pipe()` doesn't give you) and `.pptx` generation (Phase 15).
 
 ### Using more than one core
 

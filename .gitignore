@@ -4,6 +4,10 @@ node_modules/
 server/dist/
 client/dist/
 
+# uploaded documents (Phase 9.5) — never committed
+server/storage/
+server/storage-test/
+
 # test coverage — the prior build committed this
 coverage/
 

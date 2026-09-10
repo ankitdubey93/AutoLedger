@@ -29,6 +29,9 @@ export default function PlatformLayout() {
 
         <div className="app-header__actions">
           <OrgSwitcher />
+          <Link to="/documents" className="muted">
+            Documents
+          </Link>
           <Link to="/account" className="muted">
             {email}
           </Link>
