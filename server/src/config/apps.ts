@@ -35,7 +35,7 @@ export const APPS = [
     domain: 'Operational Accounting',
     tagline: 'Invoice capture to 3-way match, automatically.',
     skills: ['Multimodal OCR invoice parsing', '3-way matching', 'COGS tracking'],
-    status: 'planned',
+    status: 'building',
   },
   {
     slug: 'fpa-engine',

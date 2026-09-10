@@ -1,4 +1,4 @@
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 
 /**
  * A two-track stacked bar showing Assets against Liabilities + Equity +

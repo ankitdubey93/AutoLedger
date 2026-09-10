@@ -13,7 +13,7 @@ import {
 import { useOrg } from '../../context/OrgContext';
 import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import TrendChart from './TrendChart';
 import MetricTile from './MetricTile';
 import EquationBar from './EquationBar';

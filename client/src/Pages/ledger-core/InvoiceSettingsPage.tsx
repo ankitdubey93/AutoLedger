@@ -5,7 +5,7 @@ import {
   updateInvoiceSettings,
   type Account,
 } from '../../services/fetchServices';
-import { formatRate, parseRateInput } from './money';
+import { formatRate, parseRateInput } from '../../utils/money';
 import SettingsTabs from './SettingsTabs';
 
 /**

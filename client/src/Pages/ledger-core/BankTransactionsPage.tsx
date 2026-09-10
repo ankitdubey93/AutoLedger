@@ -10,9 +10,9 @@ import {
   type BankTransaction,
   type BankTransactionStatus,
 } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import ConfirmDialog from './ConfirmDialog';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import MatchScoreBadge from './MatchScoreBadge';
 
 /**

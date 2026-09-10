@@ -14,9 +14,9 @@ import {
   type MigrationRowStatus,
 } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import { formatCents, parseCentsInput } from './money';
-import BackLink from './BackLink';
-import ConfirmDialog from './ConfirmDialog';
+import { formatCents, parseCentsInput } from '../../utils/money';
+import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * One staged migration import — its rows, per-row fixes, the commit preview,

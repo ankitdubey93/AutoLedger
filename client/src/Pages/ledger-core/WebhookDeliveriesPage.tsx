@@ -12,8 +12,8 @@ import {
   type WebhookDeliveryStatus,
   type WebhookEndpoint,
 } from '../../services/fetchServices';
-import BackLink from './BackLink';
-import ConfirmDialog from './ConfirmDialog';
+import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**

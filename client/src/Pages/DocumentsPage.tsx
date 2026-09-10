@@ -7,7 +7,7 @@ import {
   type DocumentFilters,
   type VaultDocument,
 } from '../services/fetchServices';
-import ConfirmDialog from './ledger-core/ConfirmDialog';
+import ConfirmDialog from '../components/ConfirmDialog';
 
 /**
  * The suite-level Document Vault — every file uploaded to the platform, not

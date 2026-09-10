@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAccounts, importBankStatement, type Account, type DateFormat } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * Upload a bank statement CSV. The file's text goes straight into the JSON

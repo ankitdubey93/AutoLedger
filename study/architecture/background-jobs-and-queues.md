@@ -3,7 +3,7 @@
 > A queue is two data structures on one Redis instance — a list for "waiting" and a sorted set for "delayed" — plus a Lua script that moves a job between them atomically, so "exactly one worker claims this job" needs no distributed lock.
 
 **Category:** Architecture · Node/Express
-**Introduced by:** Phase 7 — `server/src/queue/`, the outbox drain, the scheduled integrity check
+**Introduced by:** Phase 7 — `server/src/queue/`, the outbox drain, the scheduled integrity check; extended Phase 10 — `ap-flow-extract`, the first purely event-driven, non-repeatable queue
 **Verified against:** `bullmq` ^6.3.4, `ioredis` ^6.0.0, Redis 7, Node 22
 
 ---
@@ -44,6 +44,32 @@ Node's event loop is single-threaded for JavaScript execution. A CPU-bound handl
 
 BullMQ (like virtually every real-world queue) guarantees **at-least-once** execution, not exactly-once. A worker can crash after finishing the real work but before the job is marked `completed`; on restart, the stalled-job sweep reclaims it and it runs again. The honest fix is not "try harder to make it exactly-once" (impossible without a distributed transaction spanning Redis and whatever the job touches) — it's making every handler safe to run twice. This codebase does that at two levels: `enqueue(..., { jobId })` deduplicates *identical* re-adds (BullMQ silently drops a second `add` with a `jobId` already present), and `webhookDeliverHandler` separately checks `delivery.status !== 'PENDING'` before sending, so even a job that *does* run twice (different jobId, same underlying delivery) is a no-op the second time.
 
+### An event-driven queue with no scheduler entry
+
+Every queue before Phase 10 is either a repeatable job (`outbox-drain` every 5s, `integrity-check` daily, both via `upsertJobScheduler`) or a reaction to an event that's already durable elsewhere (`webhook-deliver`, enqueued by the outbox drain reading a Postgres row). `ap-flow-extract` (Phase 10) is the first queue that is purely **event-driven and one-shot**: it gets exactly one `enqueue()` call per user action (registering a document, or requesting a re-extraction), no `upsertJobScheduler` entry at all, and the `HANDLERS` map's own type (`Record<Exclude<QueueName, 'dead-letter'>, ...>`) makes forgetting to wire up its handler a compile error rather than a silent gap.
+
+The `jobId` on each call is doing real dedup work, in two different directions:
+
+```ts
+// registration — one job per document, ever, unless it's re-extracted
+await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id }, {
+  jobId: `ap-flow-extract-${id}`,
+});
+
+// re-extraction — a NEW jobId so it isn't silently dropped as a duplicate
+await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id }, {
+  jobId: `ap-flow-extract-${id}-${Date.now()}`,
+});
+```
+
+The first call's `jobId` is deterministic from the document's own id — BullMQ silently drops a second `add()` sharing a `jobId` already present in the queue, so registering the same document twice (a double-click, a retried request) can never fan out two jobs for one document. The second call deliberately breaks that determinism by folding in a timestamp: a re-extraction is a *new* unit of work, not a duplicate of the first, and reusing the original `jobId` there would mean BullMQ drops it as "already seen," permanently blocking the very feature `POST /:id/reextract` exists to provide. Same primitive, two opposite outcomes, chosen deliberately per call site — this is also why `jobId`s use `-` rather than `:` as a delimiter: BullMQ reserves `:` as an internal key separator and rejects a custom id containing one.
+
+### Why this enqueue sits outside its transaction, when the outbox exists for exactly that problem
+
+`apFlowDocumentService.createApFlowDocument` calls `enqueue()` *after* its `withTransaction` block returns — deliberately outside the transaction, not inside it. That looks, at first glance, like exactly the dual-write problem the transactional outbox ([transactional-outbox.md](transactional-outbox.md)) exists to solve: a Postgres commit and a Redis write are two separate systems, and nothing atomically ties them together. A crash in the gap between them leaves the database saying one thing (`ap_flow_documents.status = 'PENDING'`) and Redis saying nothing happened.
+
+The reason this isn't routed through the outbox is what's actually at stake on either side of that gap. The outbox exists because losing a *financial* event silently — a webhook nobody gets told about, a payment notification that vanishes — is unacceptable, and the cost of the mechanism (a durable event row, a drain process, `FOR UPDATE SKIP LOCKED` claiming) is worth paying for that guarantee. Here, the entire phase posts nothing to the ledger — the worst case of the gap is a document visibly stuck at `PENDING` with no job ever queued for it, which is both visible (the status says so) and repairable by the user themselves (`POST /:id/reextract`, which enqueues fresh). Reaching for the outbox pattern everywhere a Postgres write and a Redis write are adjacent — rather than only where losing the second write silently is genuinely costly — would be solving a problem this phase doesn't have at the price of a mechanism it doesn't need.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -60,7 +86,8 @@ BullMQ (like virtually every real-world queue) guarantees **at-least-once** exec
 - `server/src/queue/queues.ts` — one typed `Queue` per name in `QUEUE_NAMES`, the `enqueue()` wrapper, retry/backoff defaults
 - `server/src/queue/worker.ts` — `startWorkers()`/`stopWorkers()`, the dead-letter `'failed'` listener, the two `upsertJobScheduler` calls
 - `server/src/worker.ts` — the process entry point (`npm run worker`), mirroring `index.ts`'s shutdown discipline
-- `server/src/queue/handlers/` — `integrityCheckHandler.ts` (Phase 5's on-demand check, now scheduled daily), `outboxDrainHandler.ts`, `webhookDeliverHandler.ts`
+- `server/src/queue/handlers/` — `integrityCheckHandler.ts` (Phase 5's on-demand check, now scheduled daily), `outboxDrainHandler.ts`, `webhookDeliverHandler.ts`, `apFlowExtractHandler.ts` (Phase 10, event-driven, no scheduler entry)
+- `server/src/services/ap-flow/apFlowDocumentService.ts` — the two `enqueue()` call sites, one deterministic `jobId` (registration), one timestamp-suffixed (re-extraction)
 
 ## Gotchas
 
@@ -89,6 +116,12 @@ A: The job stays in the `active` list holding a lock the (now-dead) worker can n
 
 **Q: Your outbox drain runs every 5 seconds via a repeatable job. Why not just use a plain `setInterval` in the worker process?**
 A: A `setInterval` ties the schedule to one specific process's lifetime — if that process is mid-restart (a deploy, a crash-restart) the tick is simply missed with no record of it, and running two worker instances for redundancy would double-fire it. `upsertJobScheduler` puts the schedule *in Redis*, shared state every worker instance reads: exactly one worker claims each tick (same `wait`-list mechanism as any other job), a missed tick because every worker was briefly down still gets caught up (it becomes a delayed job for "as soon as possible" rather than silently vanishing), and adding a second worker process for throughput doesn't double the frequency.
+
+**Q: AP-Flow's document-registration enqueue happens outside its own database transaction, right after it commits. Isn't that exactly the dual-write problem the transactional outbox exists to fix?**
+A: Structurally, yes — a Postgres commit and a Redis write are two separate systems with no atomic tie between them, and a crash in the gap leaves the database saying "PENDING" with no job ever queued for it. The reason it isn't routed through the outbox is what's actually lost if that gap is hit: the outbox protects *financial* events, where losing one silently is unacceptable and worth the mechanism's real cost (a durable event row, a drain process, row-locking to claim work). Here, nothing has posted to the ledger — the failure mode is a document visibly stuck at `PENDING`, which the user can see and fix themselves by re-requesting extraction. Paying the outbox's cost everywhere a Postgres write sits next to a Redis write, rather than only where the loss is genuinely expensive, would be solving a problem this feature doesn't have.
+
+**Q: You use two different `jobId` strategies for the same queue — a deterministic id for registration, a timestamp-suffixed one for re-extraction. Why not just always use a fresh id?**
+A: Because the deterministic id on registration is doing real work: BullMQ silently drops a second `add()` sharing a `jobId` already present in the queue, so a duplicate registration request (a double-click, a client retry after a slow response) can never fan out two extraction jobs for the same document — that's a feature, not friction. Re-extraction is different in kind, not degree: it's a *new*, deliberate unit of work the user explicitly asked for, and reusing the original deterministic id there would mean BullMQ treats it as the same job already seen and drops it — permanently breaking the re-extract feature the moment someone tried to use it twice. Same dedup primitive, applied deliberately in opposite directions depending on whether "this is the same request" or "this is a new request" is actually true.
 
 ## Follow-ups they'll dig into
 

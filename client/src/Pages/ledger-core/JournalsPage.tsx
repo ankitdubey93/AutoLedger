@@ -9,9 +9,9 @@ import {
   type JournalEntry,
   type JournalFilters,
 } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import ConfirmDialog from './ConfirmDialog';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * The journal register — every posted entry, filterable and paginated.

@@ -1,4 +1,4 @@
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 
 /**
  * A small, generic bar chart — hand-rolled inline SVG, no library (rule 14).

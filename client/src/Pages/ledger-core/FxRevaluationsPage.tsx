@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listFxRevaluations, type FxRevaluation } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 
 /** Past revaluations, newest first — each expands to its per-document lines. */
 export default function FxRevaluationsPage() {

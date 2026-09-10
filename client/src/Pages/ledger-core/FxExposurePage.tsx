@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getFxExposure, runFxRevaluation, type FxExposureReport } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import { formatCents } from './money';
-import ConfirmDialog from './ConfirmDialog';
+import { formatCents } from '../../utils/money';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * Period-end FX exposure preview — Phase 8. Read-only: this page never posts

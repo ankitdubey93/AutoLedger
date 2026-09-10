@@ -8,7 +8,7 @@ import {
   type SettlementFilter,
   type SettlementStatus,
 } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**

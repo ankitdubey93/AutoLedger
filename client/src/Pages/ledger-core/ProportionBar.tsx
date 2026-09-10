@@ -1,4 +1,4 @@
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 
 /**
  * A horizontal stacked proportion bar — plain divs, no SVG and no charting

@@ -10,12 +10,12 @@ import {
   type Bill,
   type Payment,
 } from '../../services/fetchServices';
-import { formatCents, formatQuantity, formatRate } from './money';
+import { formatCents, formatQuantity, formatRate } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { useAuth } from '../../context/AuthContext';
 import { useLedgerSettings } from './LedgerSettingsContext';
-import BackLink from './BackLink';
-import ConfirmDialog from './ConfirmDialog';
+import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 

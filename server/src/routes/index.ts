@@ -9,6 +9,7 @@ import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
+import apFlowRoutes from './ap-flow/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -59,5 +60,8 @@ apiRouter.use('/documents', documentRoutes);
 
 // Phase 3 — LedgerCore, the general ledger.
 apiRouter.use('/ledger-core', ledgerCoreRoutes);
+
+// Phase 10 — AP-Flow, invoice capture & extraction.
+apiRouter.use('/ap-flow', apFlowRoutes);
 
 export default apiRouter;

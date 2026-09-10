@@ -8,6 +8,9 @@ client/dist/
 server/storage/
 server/storage-test/
 
+# tesseract language data, downloaded on first dev run (Phase 10) — never committed
+server/.tesseract/
+
 # test coverage — the prior build committed this
 coverage/
 

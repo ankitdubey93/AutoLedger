@@ -8,7 +8,7 @@ import {
   uploadDocument,
   type VaultDocument,
 } from '../services/fetchServices';
-import ConfirmDialog from '../Pages/ledger-core/ConfirmDialog';
+import ConfirmDialog from './ConfirmDialog';
 
 /**
  * A reusable panel of the documents attached to one record — dropped onto

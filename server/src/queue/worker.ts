@@ -4,6 +4,7 @@ import { enqueue, closeQueues, queues } from './queues.js';
 import { handleIntegrityCheck } from './handlers/integrityCheckHandler.js';
 import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
+import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   INTEGRITY_CHECK_CRON,
@@ -23,6 +24,7 @@ const HANDLERS: {
   'integrity-check': handleIntegrityCheck,
   'outbox-drain': handleOutboxDrain,
   'webhook-deliver': handleWebhookDeliver,
+  'ap-flow-extract': handleApFlowExtract,
 };
 
 let workers: Worker[] = [];

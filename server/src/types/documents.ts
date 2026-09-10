@@ -16,6 +16,7 @@ import type { AllowedUploadMimeType } from '../config/constants.js';
  */
 export const DOCUMENT_ENTITY_TYPES_BY_APP = {
   'ledger-core': ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
+  'ap-flow': ['ap_flow_document'],
 } as const satisfies Record<string, readonly string[]>;
 
 export type DocumentEntityApp = keyof typeof DOCUMENT_ENTITY_TYPES_BY_APP;

@@ -7,7 +7,7 @@ import {
   type PaymentDirection,
   type ResolvedRate,
 } from '../../services/fetchServices';
-import { formatCents, parseCentsInput } from './money';
+import { formatCents, parseCentsInput } from '../../utils/money';
 import { useLedgerSettings } from './LedgerSettingsContext';
 
 /**

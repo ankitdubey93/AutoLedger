@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { createMigrationImport, type MigrationImportKind } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * Stages a new chart-of-accounts or opening-balance CSV (Phase 9b).

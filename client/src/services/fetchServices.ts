@@ -2522,3 +2522,109 @@ export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filen
 
   return { blob: await response.blob(), filename };
 }
+
+// ---------------------------------------------------------- ap-flow (10)
+
+/** Mirrors server/src/types/ap-flow.ts's ApFlowDocumentStatus. */
+export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED';
+
+export interface ApFlowLineItem {
+  description: string;
+  amountCents: number;
+}
+
+export interface ApFlowExtraction {
+  id: string;
+  vendorName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  currency: string | null;
+  subtotalCents: number | null;
+  taxCents: number | null;
+  totalCents: number | null;
+  lineItems: ApFlowLineItem[];
+  fieldConfidence: Record<string, number>;
+  arithmeticOk: boolean;
+  validationErrors: string[];
+  model: string;
+  createdAt: string;
+}
+
+export interface ApFlowPage {
+  id: string;
+  pageNumber: number;
+  widthPx: number;
+  heightPx: number;
+  redactedSha256: string;
+  redactedRegions: { kind: string; box: { x0: number; y0: number; x1: number; y1: number } }[];
+}
+
+export interface ApFlowDocument {
+  id: string;
+  documentId: string;
+  originalFilename: string;
+  mimeType: string;
+  sha256: string;
+  status: ApFlowDocumentStatus;
+  pageCount: number | null;
+  failureReason: string | null;
+  processedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface ApFlowDocumentDetail extends ApFlowDocument {
+  pages: ApFlowPage[];
+  extraction: ApFlowExtraction | null;
+}
+
+export interface ApFlowDocumentFilters {
+  status?: ApFlowDocumentStatus;
+  page?: number;
+  limit?: number;
+}
+
+/** POST /ap-flow/documents — registers an already-vaulted document. */
+export function createApFlowDocument(documentId: string): Promise<{ success: boolean; document: ApFlowDocument }> {
+  return apiFetch('/ap-flow/documents', { method: 'POST', body: JSON.stringify({ documentId }) });
+}
+
+/** GET /ap-flow/documents */
+export function listApFlowDocuments(
+  params: ApFlowDocumentFilters = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  documents: ApFlowDocument[];
+}> {
+  const query = new URLSearchParams();
+  if (params.status !== undefined) query.set('status', params.status);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ap-flow/documents${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ap-flow/documents/:id */
+export function getApFlowDocument(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
+  return apiFetch(`/ap-flow/documents/${id}`, { signal: signal ?? null });
+}
+
+/** GET /ap-flow/documents/:id/pages/:pageNumber/image — the redacted preview, as a Blob. */
+export function getApFlowPageImage(id: string, pageNumber: number): Promise<{ blob: Blob; filename: string }> {
+  return apiDownloadBlob(`/ap-flow/documents/${id}/pages/${String(pageNumber)}/image`);
+}
+
+/** POST /ap-flow/documents/:id/reextract */
+export function reextractApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocument }> {
+  return apiFetch(`/ap-flow/documents/${id}/reextract`, { method: 'POST' });
+}

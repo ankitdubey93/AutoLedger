@@ -1,7 +1,7 @@
 # AP-Flow — App Spec & Build Ladder
 
 **Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11
-**Status: nothing built.** `config/apps.ts` marks it `'planned'`; flipping that to `'building'` is part of Phase 10's own scope. Every checkbox below is unticked.
+**Status: Phase 10 done.** `config/apps.ts` marks it `'building'`. Phase 10's checkboxes below are ticked; Phase 11's are not — see [roadmap.md](roadmap.md#phase-10-as-delivered) for what was actually delivered, including the deliberate deviations from this ladder.
 
 AP-Flow turns a photograph of a receipt into a balanced, auditable journal entry. It keeps no ledger of its own — it posts into LedgerCore via `source_type = 'ap_flow'` and `source_id` pointing at its own document row ([guardrails.md](guardrails.md) rule 16).
 
@@ -112,19 +112,19 @@ Files are named by their hash for the same reason: a corrupted or substituted fi
 
 Produces a draft. Posts nothing to the ledger.
 
-- [ ] `config/apps.ts` — flip `ap-flow` from `'planned'` to `'building'`
+- [x] `config/apps.ts` — flip `ap-flow` from `'planned'` to `'building'`
 - [x] ~~Upload endpoint~~ / ~~`storageService`~~ — **delivered by Phase 9.5** (2026-09-10), not built here. Phase 10 consumes `POST /api/v1/documents` and `services/storageService.ts`
-- [ ] `ap_flow_documents`, `ap_flow_extractions` migrations — `ap_flow_documents` now references the platform `documents` row rather than holding the bytes' location itself
-- [ ] PDF rasterization, page by page
-- [ ] Local OCR returning text with bounding boxes
-- [ ] `services/redactionService.ts` — shared, unprefixed; detection + pixel masking; `redacted_regions` persisted
-- [ ] Claude Vision extraction to the schema above, with per-field confidence
-- [ ] Arithmetic validation: line items sum to subtotal, subtotal + tax = total
-- [ ] Queued as a background job (Phase 7); the upload returns immediately with a job handle
-- [ ] Vision calls stubbed in tests — never a live API call in CI
-- [ ] Cross-tenant isolation test under `__tests__/ap-flow/`
+- [x] `ap_flow_documents`, `ap_flow_extractions` migrations — plus a third table, `ap_flow_pages` (per-page raster/redaction metadata), not in this ladder's original two-table sketch. `ap_flow_documents` references the platform `documents` row rather than holding the bytes' location itself
+- [x] PDF rasterization, page by page
+- [x] Local OCR returning text with bounding boxes
+- [x] `services/redactionService.ts` — shared, unprefixed; detection + pixel masking; `redacted_regions` persisted
+- [x] Claude Vision extraction to the schema above, with per-field confidence
+- [x] Arithmetic validation: line items sum to subtotal, subtotal + tax = total — **flags** (`arithmeticOk: false`), never silently accepts or auto-rejects, since nothing posts yet
+- [x] Queued as a background job (Phase 7) — registration returns `201` immediately; the job runs async, not a returned job handle to poll
+- [x] Vision calls stubbed in tests — never a live API call in CI
+- [x] Cross-tenant isolation test under `__tests__/ap-flow/` — at both the API layer and the worker/handler layer
 
-**Acceptance:** a fixture receipt containing a card number produces a redacted image in which those pixels are demonstrably altered, verified by comparing the region before and after — not by trusting that the code ran. No test makes a network call.
+**Acceptance ✅ — verified.** A fixture receipt containing a card number produces a redacted image in which those pixels are demonstrably altered, verified by comparing the region before and after (`redaction.test.ts`) — not by trusting that the code ran. No test makes a network call or needs `ANTHROPIC_API_KEY`.
 
 ### Phase 11 — mapping, review & posting
 
@@ -142,6 +142,8 @@ Produces a draft. Posts nothing to the ledger.
 
 ## Not built yet
 
-Everything above. `ap-flow` has no migration, no service, no route and no page, and its card on the chooser is a disabled placeholder.
+Phase 11 only: `ap_flow_line_items` and `ap_flow_vendor_account_map` as real tables (line items stay JSONB on `ap_flow_extractions` until then), history-first COA classification, tax split into `1180`/`2140`, FX normalization at invoice date, the review-queue UI (side-by-side document, confidence colouring, per-line account override), and the one-click post into `journalService`. Nothing in Phase 10 writes `journal_entries` or `ledger_lines`, directly or otherwise.
+
+Also not built, beyond Phase 11's own scope: a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above), handwriting or non-English OCR, multi-document PDF splitting, duplicate-invoice detection, and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`; only `audit_logs` remembers it existed).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change.

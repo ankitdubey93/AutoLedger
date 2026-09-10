@@ -113,6 +113,7 @@ No application secrets live here.
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
 | `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. The test suite pins itself to `storage-test` so `npm test` never touches your dev vault |
+| `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction. The server and worker both boot without it; `extractionService` throws `503` only when a real extraction is attempted with no key configured. Every test stubs the vision client, so the suite needs no key at all |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
 
@@ -225,23 +226,32 @@ No client-side dependency this phase either — `DocumentsPage`/`AttachmentsPane
 
 **`file-type` was considered and refused.** The Document Vault must decide a MIME type from magic bytes rather than the client's `Content-Type` header, but that is a small parser, so `utils/mimeSniff.ts` is hand-written instead — the same call made for `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts`.
 
+Added in Phase 10:
+
+| Package | Layer | Why |
+|---|---|---|
+| `tesseract.js` | server | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine. Downloads `eng.traineddata` (~15MB) into `server/.tesseract/` on first real use; every test injects a fake `OcrAdapter` instead, so `npm test` never triggers the download |
+| `sharp` | server | Rasterizing and masking image buffers for the redaction pipeline (a native binding to libvips) |
+| `pdfjs-dist` | server | Rendering PDF pages to images before OCR. `@napi-rs/canvas` appears in `package-lock.json` as this package's own transitive `optionalDependency` — its Node canvas factory, lazily loaded, never imported directly here and never added to `dependencies` |
+| `@anthropic-ai/sdk` | server | AP-Flow's vision extraction of already-redacted documents, forced into a `record_invoice` tool call rather than free-form JSON. Needs `ANTHROPIC_API_KEY` in `server/.env`; every test injects a stub `VisionClient` and stubs `fetch` to throw, so the suite needs no key and makes no network call |
+
+No client-side dependency this phase — `ApFlowDocumentsPage`/`ApFlowDocumentDetailPage` are hand-rolled components, matching every other LedgerCore/AP-Flow page.
+
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
 | ~~`csv-parse`~~ | LedgerCore's bank statement ingestion. **Approved but never installed** — Phase 6 hand-wrote `utils/csv.ts` (a two-pass state machine) instead, and the row is kept struck through rather than deleted so the reversal stays visible | ~~6~~ |
 | `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 17 |
-| `tesseract.js` | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine | 10 |
-| `sharp` | rasterizing and masking image buffers for the redaction pipeline | 10 |
-| `pdfjs-dist` | rendering PDF pages to images before OCR | 10 |
-| `@anthropic-ai/sdk` | AP-Flow's vision extraction of redacted documents. Needs `ANTHROPIC_API_KEY` in `server/.env`; tests stub `fetch` and never call out | 10 |
 | `pptxgenjs` or similar | BoardDeck Automator's `.pptx` generation | 15 |
 | `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
-| An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
+| An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10, done) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
 
 **Phase 9.5 also added a directory, not just a package.** The Document Vault stores uploads under `server/storage/`, which is gitignored (`server/storage-test/` too, for the test suite). Files are named by SHA-256 but the path is keyed by organization first — `server/storage/<org_id>/<ab>/<cd>/<sha256>` — so two tenants uploading identical bytes get two blobs. Global content addressing was rejected: it would let one tenant detect that another holds the same file, and it would make deleting a blob unsafe whenever two organizations shared it. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; `services/storageService.ts` keeps a narrow `put`/`get`/`stat` interface so object storage is a one-file swap later. This was Phase 10's, AP-Flow-owned, until 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
 
 **`STORAGE_ROOT`** (optional, defaults to `storage`, resolved relative to `server/`'s package root) is the env var controlling where that directory lives — see the environment table below.
+
+**Phase 10 added a directory too.** `tesseract.js` caches its downloaded language data under `server/.tesseract/` (`TESSERACT_CACHE_DIR` in `config/constants.ts`), gitignored, separate from `server/storage/` — tenant document bytes and a language model are different kinds of thing and don't share a directory.
 
 **No ORM.** Financial correctness depends on knowing exactly what SQL runs — `SELECT ... FOR UPDATE` locks, recursive CTEs, `EXCLUDE USING GIST` constraints, and explicit transaction boundaries are all first-class here. Raw `pg` with parameterized queries and hand-written migrations stays.
 

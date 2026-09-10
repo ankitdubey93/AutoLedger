@@ -185,3 +185,26 @@ export const ALLOWED_UPLOAD_MIME_TYPES = [
 ] as const;
 
 export type AllowedUploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number];
+
+// ------------------------------------------------------------- ap-flow (10)
+
+/** Rasterization DPI. 200 is the floor at which tesseract reads a thermal receipt reliably. */
+export const AP_FLOW_RASTER_DPI = 200;
+
+/** Hard cap on pages per document — a 400-page PDF is a denial of service, not an invoice. */
+export const AP_FLOW_MAX_PAGES = 20;
+
+/** Outward padding on every mask box. OCR boxes are tight; an unpadded box leaves readable edges. */
+export const AP_FLOW_REDACTION_PAD_PX = 3;
+
+/** Where tesseract caches its language data. Never inside storage/, which is tenant data. */
+export const TESSERACT_CACHE_DIR = '.tesseract';
+
+/** The vision model AP-Flow extracts with. One place, so a change is one line. */
+export const AP_FLOW_VISION_MODEL = 'claude-sonnet-5';
+
+/** Ceiling on one extraction response. */
+export const AP_FLOW_VISION_MAX_TOKENS = 4096;
+
+/** A vision call that has not answered in 90s is not going to. */
+export const AP_FLOW_VISION_TIMEOUT_MS = 90_000;

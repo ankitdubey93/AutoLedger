@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { ApiRequestError, getAccountLedger, type AccountLedger } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { TYPE_STYLES } from './AccountsPage';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * One postable account's ledger — opening balance, every posted line with a

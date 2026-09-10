@@ -111,6 +111,12 @@ const parsed = {
   // root, because every npm script runs with cwd = server/.
   STORAGE_ROOT: path.resolve(process.cwd(), optional('STORAGE_ROOT', 'storage')),
 
+  // Phase 10 — AP-Flow's vision extraction. Optional by design: the server
+  // and the worker must both boot without it. extractionService throws 503
+  // when a real extraction is attempted with no key, rather than failing at
+  // import.
+  ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
+
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),

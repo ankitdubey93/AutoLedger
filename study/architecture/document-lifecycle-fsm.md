@@ -3,7 +3,7 @@
 > A status column is not a free-text field — it is a finite state machine, and the moment two files decide independently whether `DRAFT -> ISSUED` is legal, the two answers eventually disagree.
 
 **Category:** Architecture
-**Introduced by:** Phase 3.8 — `invoices.status`, the first lifecycle status in AutoLedger with more than two states; extended Phase 3.9 — `bills.status`, the first four-state document FSM with a recall edge; extended Phase 4 — `fiscal_periods.status`, the first FSM with a genuinely terminal state
+**Introduced by:** Phase 3.8 — `invoices.status`, the first lifecycle status in AutoLedger with more than two states; extended Phase 3.9 — `bills.status`, the first four-state document FSM with a recall edge; extended Phase 4 — `fiscal_periods.status`, the first FSM with a genuinely terminal state; extended Phase 10 — `ap_flow_documents.status`, the first FSM with no terminal state at all
 **Verified against:** TypeScript 7.0 (`as const satisfies`), PostgreSQL 16
 
 ---
@@ -170,6 +170,23 @@ export const MIGRATION_IMPORT_TRANSITIONS = {
 
 `COMMITTED` stays genuinely terminal, though — once real accounts exist or a real journal entry has posted, there is no version of "un-committing" that doesn't mean editing a posted document, which rule 6 forbids outright. A wrong commit is corrected the same way every other posted document in this codebase is: a reversing entry (for opening balances) or a new, separate import (for a chart merge), never a backward walk on this FSM.
 
+### An FSM where nothing is terminal, because nothing posts yet
+
+`ApFlowDocumentStatus` (Phase 10) is the first transition table in this codebase with **no empty array anywhere** in it:
+
+```ts
+export const AP_FLOW_DOCUMENT_TRANSITIONS = {
+  PENDING:    ['PROCESSING'],
+  PROCESSING: ['EXTRACTED', 'FAILED'],
+  EXTRACTED:  ['PENDING'],
+  FAILED:     ['PENDING'],
+} as const satisfies Record<ApFlowDocumentStatus, readonly ApFlowDocumentStatus[]>;
+```
+
+Every other FSM in this codebase earns a terminal state — or a state whose only exit carries a real side effect — because it guards something that, once posted, rule 6 forbids editing: `VOID` and `LOCKED` are terminal because a posted document or a locked period cannot un-happen; `MATCHED`'s reverse edge carries a GL side effect because unmatching has to void a real payment. `EXTRACTED` and `FAILED` here have neither restriction, and the reason is architectural rather than incidental: **Phase 10 posts nothing to the ledger.** An extraction is a draft sitting entirely in AP-Flow's own tables — re-running it via `EXTRACTED -> PENDING` or `FAILED -> PENDING` doesn't touch a financial fact anywhere, because there isn't one yet to protect. `requestReextraction` backs this with the same `canTransitionApFlowDocument` guard every other status write in this file uses, and the *database* backs it too — `ap_flow_pages`/`ap_flow_extractions` are update-immutable by trigger, so a re-extraction physically cannot edit the old attempt's rows; it deletes them and inserts a fresh set, keeping the old attempt's only remaining trace in `audit_logs`.
+
+This is the mirror image of the `COMPLETED -> IN_PROGRESS` lesson above, arrived at from the opposite direction: there, a label that *sounded* terminal (`COMPLETED`) wasn't, because it was a promise about the past, not the future. Here, `EXTRACTED` and `FAILED` sound like they could plausibly be terminal too — an interviewer's first guess might well be "well, once it's extracted, it's done" — but the actual test for terminality was never "does this sound final," it was always **"does an outbound edge from here require undoing a posted financial fact?"** For `LOCKED` and `VOID`, yes. For `EXTRACTED`/`FAILED` in a phase that posts nothing at all, the question doesn't even apply — so nothing here needed to be terminal, and Phase 11 (which does post) is exactly where a genuinely terminal state — something like `POSTED`, once GL posting exists — will show up in this table for the first time.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -203,6 +220,9 @@ export const MIGRATION_IMPORT_TRANSITIONS = {
 - `server/src/types/ledger-core.ts` — `MIGRATION_IMPORT_STATUSES`, `MigrationImportStatus`, `MIGRATION_IMPORT_TRANSITIONS`, `canTransitionMigrationImport` — the first FSM with a backward edge (`VALIDATED -> DRAFT`) that exists purely to prevent the status from lying about the data underneath it
 - `server/src/services/ledger-core/migrationImportService.ts` — `revalidateOnClient`, the one function that recomputes and writes the import's status after every row fix, shared by both the initial staging pass and every later `PATCH`
 - `server/src/db/migrations/029_ledger-core_migration_imports.sql` — the three-value `status` CHECK, plus `chk_migration_imports_committed` requiring `committed_at IS NOT NULL` exactly when `status = 'COMMITTED'` (the same "posted-complete" CHECK idiom `chk_bills_posted_complete`/`chk_fiscal_periods_locked_complete` use)
+- `server/src/types/ap-flow.ts` — `AP_FLOW_DOCUMENT_STATUSES`, `ApFlowDocumentStatus`, `AP_FLOW_DOCUMENT_TRANSITIONS`, `canTransitionApFlowDocument` — the first FSM with no terminal state anywhere in it
+- `server/src/services/ap-flow/apFlowDocumentService.ts` — `requestReextraction`, `markProcessing`, `savePipelineResult`, `markFailed` all call `canTransitionApFlowDocument` before writing `status`
+- `server/src/db/migrations/031_ap-flow_documents.sql` — the four-value `status` CHECK matching `AP_FLOW_DOCUMENT_TRANSITIONS`'s keys, plus `reject_ap_flow_mutation()` (update-immutable pages/extractions, DELETE still legal — the mechanism that makes `EXTRACTED -> PENDING` safe to allow at all)
 
 ## Gotchas
 
@@ -250,6 +270,9 @@ A: No, and that's the important difference between the two. Reopening a fiscal p
 
 **Q: `IGNORED -> UNMATCHED` and `MATCHED -> UNMATCHED` are both legal by the same transition table. How do you keep "un-ignore" and "unmatch" from being interchangeable, given the table alone can't tell them apart?**
 A: The table genuinely can't express that distinction — it only knows "is X a legal successor of Y," not "and only via this specific verb." So `unmatchTransaction` still calls the shared `canTransitionBankTransaction` check first, as the single source of truth for whether `UNMATCHED` is even a legal target at all, but then layers an *additional*, narrower condition on top — the source status must specifically be `MATCHED`, not merely "anything that can reach `UNMATCHED`." That extra check lives in the service, not the table, because it's a property of the endpoint (which verb is being called), not a property of the state graph itself.
+
+**Q: AP-Flow's document FSM has no terminal state at all — every status can eventually get back to every other one. Isn't that a sign the FSM is incomplete or badly modeled?**
+A: No — it's a correct reflection of what the FSM is actually protecting, or in this case, not yet protecting. Every terminal or side-effect-carrying edge elsewhere in this codebase exists because walking it would otherwise let someone edit a posted financial fact, which rule 6 forbids. AP-Flow's Phase 10 scope posts nothing to the ledger at all — an extraction is a draft sitting entirely in AP-Flow's own tables, so re-running it (`EXTRACTED -> PENDING`, `FAILED -> PENDING`) never touches anything rule 6 protects, because there's no posted fact yet to protect. The database backs this up independently: `ap_flow_pages`/`ap_flow_extractions` are update-immutable, so even a re-extraction can't edit a prior attempt's rows in place — it deletes and re-inserts, leaving the old attempt's only trace in `audit_logs`. The FSM having no terminal state isn't a gap; it's the correct shape for a phase that has nothing yet worth making a state terminal over. I'd expect that to change the moment Phase 11 adds a `POSTED` state.
 
 ## Follow-ups they'll dig into
 

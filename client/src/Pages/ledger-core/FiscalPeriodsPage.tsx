@@ -9,7 +9,7 @@ import {
   reopenFiscalPeriod,
   type FiscalPeriod,
 } from '../../services/fetchServices';
-import ConfirmDialog from './ConfirmDialog';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * Fiscal periods — the close/lock lifecycle that gates posting (Phase 4).

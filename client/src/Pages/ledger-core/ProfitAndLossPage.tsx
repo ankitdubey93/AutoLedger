@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getProfitAndLoss, type ProfitAndLoss, type StatementRow } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * Profit & Loss — Revenue minus Expenses, with the 5xxx range split out as

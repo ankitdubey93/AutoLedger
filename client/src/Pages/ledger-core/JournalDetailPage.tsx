@@ -7,10 +7,10 @@ import {
   reverseJournal,
   type JournalEntry,
 } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
-import ConfirmDialog from './ConfirmDialog';
+import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 
 /**

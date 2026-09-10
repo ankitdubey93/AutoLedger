@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`, `/ap-flow`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -706,6 +706,24 @@ Storage is org-keyed and content-addressed (`server/storage/<org_id>/<ab>/<cd>/<
 
 ---
 
+### AP-Flow — `/api/v1/ap-flow` — Phase 10
+
+Full spec: [ap-flow.md](ap-flow.md). Consumes the Document Vault above — a document is uploaded to `/api/v1/documents` first, then registered here by id. **Produces a draft; posts nothing to the ledger** (that's Phase 11).
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/documents` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Registers an already-vaulted PDF/PNG/JPEG document for extraction. `201`, status `PENDING`. Enqueues a background job — the response returns before extraction runs |
+| GET | `/documents` | any member | Paginated, optional `?status=PENDING\|PROCESSING\|EXTRACTED\|FAILED` |
+| GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`) and its extraction, if any |
+| GET | `/documents/:id/pages/:pageNumber/image` | any member | The **redacted** page image — PII pixels painted over, this is what was sent to the vision model, never the original |
+| POST | `/documents/:id/reextract` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Resets to `PENDING` and re-enqueues. `409` unless the document is `EXTRACTED` or `FAILED` |
+
+Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `409 This document is already registered with AP-Flow` · `409 Cannot re-extract a document in status <status>` · `422 AP-Flow can only process PDF, PNG and JPEG documents`.
+
+The pipeline (rasterize → local OCR → PII-mask → vision extraction → persist) runs entirely inside the background job, never inside the request. Extraction runs against Claude (`claude-sonnet-5`); a server with no `ANTHROPIC_API_KEY` configured processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` — nothing else in the app degrades. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
+
+---
+
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
@@ -716,21 +734,17 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-### AP-Flow — `/api/v1/ap-flow` — Phases 10–11
+### AP-Flow — `/api/v1/ap-flow` — Phase 11
 
-Full spec: [ap-flow.md](ap-flow.md).
+Phase 10 (capture & extraction) is **built** and documented in the section above. Still to come, per [ap-flow.md](ap-flow.md):
 
 | Method | Path | Description |
 |---|---|---|
-| POST | `/documents` | Upload a PDF/PNG/JPEG. Returns `202` with a job handle — extraction is queued, not synchronous |
-| GET | `/documents` | The org's documents with extraction status |
-| GET | `/documents/:id` | One document with its extraction, per-field confidence, and line items |
-| GET | `/documents/:id/file` | The stored original, for side-by-side review |
 | GET | `/review-queue` | Documents awaiting human approval, lowest confidence first |
 | PATCH | `/documents/:id/line-items/:lineId` | Override a suggested account before posting |
 | POST | `/documents/:id/post` | Approve and post into LedgerCore. `ACCOUNTANT` and above |
 
-`POST /documents/:id/post` is the app boundary in practice: it calls LedgerCore's `journalService` with `source_type = 'ap_flow'`, and never writes `journal_entries` or `ledger_lines` itself (rule 16).
+`POST /documents/:id/post` will be the app boundary in practice: it calls LedgerCore's `journalService` with `source_type = 'ap_flow'`, and never writes `journal_entries` or `ledger_lines` itself (rule 16).
 
 ### The other five apps
 

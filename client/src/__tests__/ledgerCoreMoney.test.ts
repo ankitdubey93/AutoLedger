@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatCents, parseCentsInput } from '../Pages/ledger-core/money';
+import { formatCents, parseCentsInput } from '../utils/money';
 
 /**
  * The client's half of guardrails rule 3.

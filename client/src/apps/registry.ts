@@ -14,7 +14,9 @@
  */
 import type { ComponentType } from 'react';
 import LedgerCoreRoutes from '../Pages/ledger-core/LedgerCoreRoutes';
+import ApFlowRoutes from '../Pages/ap-flow/ApFlowRoutes';
 
 export const APP_ELEMENTS: Record<string, ComponentType> = {
   'ledger-core': LedgerCoreRoutes,
+  'ap-flow': ApFlowRoutes,
 };

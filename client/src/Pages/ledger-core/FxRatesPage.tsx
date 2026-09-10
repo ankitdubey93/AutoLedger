@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { deleteFxRate, listFxRates, upsertFxRate, type FxRate } from '../../services/fetchServices';
 import { useLedgerSettings } from './LedgerSettingsContext';
-import ConfirmDialog from './ConfirmDialog';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * Exchange rates — Phase 8. A rate is always recorded foreign -> base: `toCode`

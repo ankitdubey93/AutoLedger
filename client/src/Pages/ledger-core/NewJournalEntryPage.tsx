@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
 import { createJournal, getJournal, listAccounts, type Account } from '../../services/fetchServices';
-import { formatCents, parseCentsInput } from './money';
+import { formatCents, parseCentsInput } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * Post a journal entry.

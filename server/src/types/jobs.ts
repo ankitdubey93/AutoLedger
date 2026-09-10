@@ -7,6 +7,7 @@ export const QUEUE_NAMES = [
   'outbox-drain',
   'webhook-deliver',
   'integrity-check',
+  'ap-flow-extract',
   'dead-letter',
 ] as const;
 
@@ -27,6 +28,7 @@ export interface JobPayloads {
   'outbox-drain': Record<string, never>;
   'webhook-deliver': { deliveryId: string };
   'integrity-check': Record<string, never>;
+  'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
   'dead-letter': {
     queue: QueueName;
     jobId: string;

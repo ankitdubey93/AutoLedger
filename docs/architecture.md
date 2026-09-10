@@ -53,7 +53,15 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-09-04, after Phase 6)
+### Current (verified 2026-09-10, after Phase 10)
+
+**This delta list has a known gap: Phases 7, 8, 9, and 9.5 were never backfilled here** — their entries in [roadmap.md](roadmap.md) (search "as delivered") are the accurate, current record of what each added; this file's list resumes below at Phase 6, the last phase it covered before Phase 10.
+
+**Phase 10 (2026-09-10)** added, on the server: `db/migrations/031_ap-flow_documents.sql`; `types/ap-flow.ts` (`ApFlowDocumentStatus`, `AP_FLOW_DOCUMENT_TRANSITIONS`, OCR/PII/extraction types); `utils/{checksum,pii}.ts` (hand-written Luhn/Verhoeff, PII span detection — zero dependencies); `services/redactionService.ts` (unprefixed, shared — `rasterize`, `tesseractOcr`, `redactPage`); `services/ap-flow/{apFlowDocumentService,extractionService}.ts`; `schemas/ap-flow/{documentSchema,extractionSchema}.ts`; `controllers/ap-flow/apFlowDocumentController.ts`; `routes/ap-flow/{index,documentRoutes}.ts`; `queue/handlers/apFlowExtractHandler.ts`; and `__tests__/{checksum,pii,redaction,ap-flow/{documents,apFlowConstraints,extraction,pipeline}}.test.ts`. `package.json` gained four dependencies: `tesseract.js`, `sharp`, `pdfjs-dist`, `@anthropic-ai/sdk`.
+
+Edited in place: `config/apps.ts` (`ap-flow` → `'building'`), `config/constants.ts` (`AP_FLOW_*` constants), `config/env.ts` (`ANTHROPIC_API_KEY`, optional), `types/documents.ts` (`ap-flow: ['ap_flow_document']` in `DOCUMENT_ENTITY_TYPES_BY_APP`), `types/jobs.ts` (`ap-flow-extract` queue + payload), `queue/worker.ts` (wires the new handler), `routes/index.ts` (mounts `/ap-flow`), `__tests__/helpers/factories.ts` (`resetTables()` truncates the three new tables).
+
+On the client: `Pages/ap-flow/{ApFlowRoutes,ApFlowDocumentsPage,ApFlowDocumentDetailPage}.tsx`, `__tests__/apFlowDocuments.test.tsx`. Edited in place: `apps/registry.ts` (`'ap-flow'` entry), `services/fetchServices.ts` (AP-Flow types and wrappers). **One promotion, not an addition:** `Pages/ledger-core/{BackLink,ConfirmDialog,money}.tsx|ts` moved to `components/{BackLink,ConfirmDialog}.tsx` and `utils/money.ts` — AP-Flow needed all three, and importing from another app's page directory would mirror a rule-16 violation; every importer's path was rewritten in the same change, behaviour otherwise untouched (client test count unchanged by the move itself).
 
 **Phase 6 (2026-09-04)** added, on the server: `db/migrations/019_ledger-core_bank_reconciliation.sql`; `utils/{csv,dateParse,levenshtein,matchScore}.ts` (all hand-written, zero new dependencies — a two-pass CSV state machine, an `ISO`/`DMY`/`MDY` date parser, a rolling-array Levenshtein distance, and the 40/30/30 confidence-scoring engine); `schemas/ledger-core/bankSchema.ts`; `services/ledger-core/{bankImportService,bankMatchService}.ts`; `controllers/ledger-core/{bankImportController,bankTransactionController}.ts`; `routes/ledger-core/{bankImportRoutes,bankTransactionRoutes}.ts`; and `__tests__/{csv,dateParse,levenshtein,matchScore}.test.ts` plus `__tests__/ledger-core/{bankConstraints,bankImports,bankMatching,bankReconciliation}.test.ts` and `__tests__/helpers/bankFixture.ts`. `package.json` unchanged — no new dependency.
 

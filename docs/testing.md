@@ -92,6 +92,8 @@ await expect(client.query('COMMIT')).rejects.toThrow(/balance/i);
 
 Write these against the raw pool, deliberately bypassing the service. The point of the trigger is that it holds when the service is not involved, so a test that goes through `journalService` proves the service, not the database.
 
+**A third, opt-in tier: gated real-dependency tests.** Phase 10's `redaction.test.ts` injects a fake `OcrAdapter` in every required case, so `npm test` never downloads tesseract's language pack or spends real time on OCR. One further case exercises the real `tesseractOcr` adapter deliberately, guarded by `describe.skipIf(process.env.AP_FLOW_OCR_E2E !== '1')` — it reports as skipped by default and only runs with `AP_FLOW_OCR_E2E=1 npm test -- redaction`. This is not a `server/.env` variable (`config/env.ts` never reads it); it is a one-off toggle read directly in the test file, for a developer who wants to prove the real adapter works without making that proof part of every CI run.
+
 ### The cross-tenant fixture
 
 `tenantIsolation.test.ts` establishes the shape every later module should copy: **user A** in org A only, **user C** in org B only, and **user B in both**.

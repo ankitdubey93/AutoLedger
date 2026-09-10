@@ -8,7 +8,7 @@ import {
   type AccountBalance,
   type AccountNode,
 } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import NewAccountForm from './NewAccountForm';
 

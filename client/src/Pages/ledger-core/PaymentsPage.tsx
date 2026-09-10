@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { listPayments, voidPayment, type Payment, type PaymentDirection } from '../../services/fetchServices';
-import { formatCents } from './money';
-import ConfirmDialog from './ConfirmDialog';
+import { formatCents } from '../../utils/money';
+import ConfirmDialog from '../../components/ConfirmDialog';
 
 /**
  * The payment register — every receipt and every vendor payment, across both

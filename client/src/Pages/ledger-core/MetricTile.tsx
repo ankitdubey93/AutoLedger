@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 
 /**
  * A dashboard position tile. Renders as a link when `to` is given — the

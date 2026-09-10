@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { getBalanceSheet, type BalanceSheet, type StatementRow } from '../../services/fetchServices';
-import { formatCents } from './money';
+import { formatCents } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
-import BackLink from './BackLink';
+import BackLink from '../../components/BackLink';
 
 /**
  * Balance sheet — Assets = Liabilities + Equity as at a chosen date.
