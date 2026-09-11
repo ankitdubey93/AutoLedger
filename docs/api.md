@@ -756,6 +756,50 @@ Every LedgerCore fact this app needs — posted actuals bucketed by month, the o
 
 ---
 
+### ForecasterPro — `/api/v1/forecaster` — Phase 13
+
+Full spec: [forecaster.md](forecaster.md). Read is open to every member including `VIEWER`; creating or editing a plan, driver, headcount role, forecast line, or budget line needs `ACCOUNTANT` and above; deleting a plan needs `OWNER`/`ADMIN` only, since it cascades away every driver, headcount role, forecast line and budget version on it; **approving a budget version needs `OWNER`/`ADMIN` only**, since it is a financial decision of record. Posts nothing to LedgerCore's GL — every route here is a read or an edit to ForecasterPro's own tables.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/plans` | any member | Paginated, optional `?status=DRAFT\|ACTIVE\|ARCHIVED` |
+| POST | `/plans` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `422` if `actualsThrough` is not before `startsOn` |
+| GET | `/plans/:id` | any member | One plan |
+| PATCH | `/plans/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update, including `status` — validated against `FORECASTER_PLAN_TRANSITIONS` (`ARCHIVED → ACTIVE` is legal; `ARCHIVED` is not terminal) |
+| DELETE | `/plans/:id` | `OWNER`, `ADMIN` | Deletes the plan and cascades every driver, headcount role, forecast line and budget version on it |
+| POST | `/plans/:id/roll` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Advances the window one month, `horizonMonths` unchanged; every driver's values shift in the same transaction |
+| GET | `/plans/:id/drivers` | any member | Every driver on the plan |
+| POST | `/plans/:id/drivers` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `kind` is `COUNT`, `CENTS`, or `BPS` |
+| PATCH | `/drivers/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/unit label only — `kind` cannot be changed after creation |
+| DELETE | `/drivers/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` if a forecast line still references it |
+| GET | `/drivers/:id/values` | any member | Every monthly value on the driver, ordered by month |
+| PUT | `/drivers/:id/values` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Bulk upsert, `200` on both create and update — the months named replace only those months |
+| GET | `/plans/:id/headcount` | any member | Every headcount role on the plan |
+| POST | `/plans/:id/headcount` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `accountId` must be a postable, active Expense account |
+| PATCH | `/headcount/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update |
+| DELETE | `/headcount/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | — |
+| GET | `/plans/:id/forecast-lines` | any member | Every forecast line on the plan |
+| POST | `/plans/:id/forecast-lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Body is a discriminated union on `kind` (`DRIVER_PRODUCT`, `DRIVER_PERCENT`, `FIXED_CENTS`) |
+| PATCH | `/forecast-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Restates the whole line — no partial update, so a `kind` change can never leave a stale payload column |
+| DELETE | `/forecast-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | — |
+| GET | `/plans/:id/forecast` | any member | The full driver-and-headcount build-up, month by month, per account — recomputed on every request, `hasMissingDriverValues` never hidden |
+| GET | `/plans/:id/budget-versions` | any member | Every budget version on the plan |
+| POST | `/plans/:id/budget-versions` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Born `DRAFT`, no lines |
+| GET | `/budget-versions/:id` | any member | One version, with its lines |
+| DELETE | `/budget-versions/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the version is still `DRAFT` |
+| POST | `/budget-versions/:id/compile` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete-then-reinsert of `DRIVER`/`HEADCOUNT` lines from the forecast build-up; `MANUAL` lines are untouched. `409` unless still `DRAFT` |
+| POST | `/budget-versions/:id/approve` | `OWNER`, `ADMIN` | Freezes the version; supersedes any prior `APPROVED` version on the same plan in the same transaction. `422` with no lines. `409` on an illegal transition |
+| POST | `/budget-versions/:id/lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | A `MANUAL` line — `source` is not settable via this route. `409` unless the version is `DRAFT` |
+| PATCH | `/budget-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the parent version is `DRAFT` |
+| DELETE | `/budget-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the parent version is `DRAFT` |
+| GET | `/plans/:id/variance` | any member | Budget-vs-actual for the plan's **approved** version, optional `?from=`/`?to=` (`YYYY-MM-DD`). `422` when the plan has no approved version |
+
+Failure paths: `400 Invalid request body` (schema — `startsOn`/`actualsThrough`/driver-value months not the first of a month, `horizonMonths` outside 1–60, a forecast-line kind/payload mismatch, a blank `justification`) · `400 status must be one of DRAFT, ACTIVE, ARCHIVED` · `403` for a write below its role tier · `404 Plan not found` / `404 Driver not found` / `404 Headcount role not found` / `404 Forecast line not found` / `404 Budget version not found` / `404 Budget line not found` (also another org's) · `409 A plan with that name already exists` / `409 A driver with that name already exists on this plan` / `409 A forecast line with that label already exists on this plan` / `409 A budget version with that label already exists on this plan` / `409 A manual budget line already exists for that account and month` · `409 Cannot move a plan from <status> to <status>` / `409 Cannot move a budget version from <status> to APPROVED` · `409 An archived plan cannot be rolled` · `409 This driver is used by a forecast line and cannot be deleted` · `409 Only a DRAFT budget version can be deleted` / `compiled` / `edited` · `422 actualsThrough must be before startsOn` · `422 A COUNT or BPS driver value cannot be negative` · `422 A headcount role must map to a postable, active account` / `an Expense account` · `422 endsOn must not be before startsOn` · `422 A forecast line must map to a postable, active account` / `a Revenue or Expense account` · `422 A DRIVER_PRODUCT line needs a COUNT quantity driver` / `a CENTS rate driver` · `422 A DRIVER_PERCENT line needs a CENTS source driver` · `422 A forecast line may only reference drivers on its own plan` · `422 A budget line must map to a postable, active account` · `422 A budget version must have at least one line before approval` · `422 This plan has no approved budget version` · `422 from must not be after to`.
+
+The **only** route into LedgerCore anywhere in this app is `reportService.monthlyActualsByAccount`, called once, from `varianceService.ts` — every other account fact comes from `accountService`'s exported functions, never a direct query, proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|ledger_settings|ledger_invoice_settings|fpa_models|fpa_scenarios|fpa_assumptions)" server/src/services/forecaster/ server/src/controllers/forecaster/` returns nothing. The forecast build engine itself (`utils/forecasterBuild.ts`) is a pure function with no database import, unit-tested without Postgres. See [forecaster.md](forecaster.md) for the full arithmetic and the zero-based-budgeting and approval-freeze rulings.
+
+---
+
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
@@ -766,6 +810,6 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-### The other four apps
+### The other three apps
 
-TaxGuard AI, UnitEcon, BoardDeck Automator, and ForecasterPro have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.
+TaxGuard AI, UnitEcon, and BoardDeck Automator have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.

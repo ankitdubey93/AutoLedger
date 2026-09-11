@@ -36,7 +36,10 @@ export async function resetTables(): Promise<void> {
               documents, document_links,
               ap_flow_documents, ap_flow_pages, ap_flow_extractions,
               ap_flow_line_items, ap_flow_vendor_account_map,
-              fpa_models, fpa_scenarios
+              fpa_models, fpa_scenarios,
+              forecaster_plans, forecaster_drivers, forecaster_driver_values,
+              forecaster_headcount_roles, forecaster_forecast_lines,
+              forecaster_budget_versions, forecaster_budget_lines
      RESTART IDENTITY CASCADE`,
   );
 }

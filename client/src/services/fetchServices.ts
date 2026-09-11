@@ -2975,3 +2975,461 @@ export function getFpaComparison(
 ): Promise<{ success: boolean } & FpaComparisonResponse> {
   return apiFetch(`/fpa-engine/models/${modelId}/comparison`, { signal: signal ?? null });
 }
+
+// ---------------------------------------------------------- forecaster (13)
+
+export type ForecasterPlanStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+export type ForecasterDriverKind = 'COUNT' | 'CENTS' | 'BPS';
+export type ForecasterLineKind = 'DRIVER_PRODUCT' | 'DRIVER_PERCENT' | 'FIXED_CENTS';
+export type ForecasterBudgetStatus = 'DRAFT' | 'APPROVED' | 'SUPERSEDED';
+export type ForecasterBudgetLineSource = 'DRIVER' | 'HEADCOUNT' | 'MANUAL';
+
+export interface ForecasterPlan {
+  id: string;
+  name: string;
+  description: string | null;
+  startsOn: string;
+  horizonMonths: number;
+  actualsThrough: string;
+  status: ForecasterPlanStatus;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterDriver {
+  id: string;
+  planId: string;
+  name: string;
+  unitLabel: string;
+  kind: ForecasterDriverKind;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterDriverValue {
+  driverId: string;
+  month: string;
+  value: number;
+}
+
+export interface ForecasterHeadcountRole {
+  id: string;
+  planId: string;
+  title: string;
+  department: string | null;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  startsOn: string;
+  endsOn: string | null;
+  fteCount: number;
+  annualSalaryCents: number;
+  loadingBps: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterForecastLine {
+  id: string;
+  planId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  label: string;
+  kind: ForecasterLineKind;
+  quantityDriverId: string | null;
+  rateDriverId: string | null;
+  sourceDriverId: string | null;
+  percentBps: number | null;
+  fixedCents: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterBuiltLine {
+  lineId: string;
+  label: string;
+  accountId: string;
+  amountCents: number;
+  missingDriverValue: boolean;
+}
+
+export interface ForecasterBuiltRole {
+  roleId: string;
+  title: string;
+  accountId: string;
+  fteCount: number;
+  amountCents: number;
+}
+
+export interface ForecasterBuiltMonth {
+  month: string;
+  lines: ForecasterBuiltLine[];
+  roles: ForecasterBuiltRole[];
+  accountTotals: { accountId: string; amountCents: number }[];
+  totalCents: number;
+}
+
+export interface ForecasterForecastBuild {
+  months: ForecasterBuiltMonth[];
+  accountIds: string[];
+  horizonTotals: { accountId: string; amountCents: number }[];
+  hasMissingDriverValues: boolean;
+}
+
+export interface ForecasterForecastResponse {
+  planId: string;
+  planName: string;
+  baseCurrency: string;
+  startsOn: string;
+  horizonMonths: number;
+  actualsThrough: string;
+  accounts: { accountId: string; code: string; name: string; type: AccountType }[];
+  build: ForecasterForecastBuild;
+}
+
+export interface ForecasterBudgetVersion {
+  id: string;
+  planId: string;
+  label: string;
+  status: ForecasterBudgetStatus;
+  createdBy: string;
+  createdByName: string;
+  approvedBy: string | null;
+  approvedByName: string | null;
+  approvedAt: string | null;
+  lineCount: number;
+  totalCents: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterBudgetLine {
+  id: string;
+  versionId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  month: string;
+  amountCents: number;
+  source: ForecasterBudgetLineSource;
+  justification: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ForecasterBudgetVersionDetail extends ForecasterBudgetVersion {
+  lines: ForecasterBudgetLine[];
+}
+
+export interface ForecasterVarianceRow {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountType: AccountType;
+  month: string;
+  budgetCents: number;
+  actualCents: number;
+  varianceCents: number;
+  favourable: boolean;
+}
+
+export interface ForecasterVarianceResponse {
+  planId: string;
+  planName: string;
+  versionId: string;
+  versionLabel: string;
+  baseCurrency: string;
+  from: string;
+  to: string;
+  rows: ForecasterVarianceRow[];
+}
+
+/** GET /forecaster/plans */
+export function listForecasterPlans(
+  params: { status?: ForecasterPlanStatus; page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  plans: ForecasterPlan[];
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}> {
+  const query = new URLSearchParams();
+  if (params.status !== undefined) query.set('status', params.status);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.toString() === '' ? '' : `?${query.toString()}`;
+  return apiFetch(`/forecaster/plans${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /forecaster/plans/:id */
+export function getForecasterPlan(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; plan: ForecasterPlan }> {
+  return apiFetch(`/forecaster/plans/${id}`, { signal: signal ?? null });
+}
+
+/** POST /forecaster/plans */
+export function createForecasterPlan(body: {
+  name: string;
+  description: string | null;
+  startsOn: string;
+  horizonMonths: number;
+  actualsThrough: string;
+}): Promise<{ success: boolean; plan: ForecasterPlan }> {
+  return apiFetch('/forecaster/plans', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /forecaster/plans/:id */
+export function updateForecasterPlan(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string | null;
+    startsOn: string;
+    horizonMonths: number;
+    actualsThrough: string;
+    status: ForecasterPlanStatus;
+  }>,
+): Promise<{ success: boolean; plan: ForecasterPlan }> {
+  return apiFetch(`/forecaster/plans/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /forecaster/plans/:id */
+export async function deleteForecasterPlan(id: string): Promise<void> {
+  await apiFetch(`/forecaster/plans/${id}`, { method: 'DELETE' });
+}
+
+/** POST /forecaster/plans/:id/roll */
+export function rollForecasterPlan(id: string): Promise<{ success: boolean; plan: ForecasterPlan }> {
+  return apiFetch(`/forecaster/plans/${id}/roll`, { method: 'POST' });
+}
+
+/** GET /forecaster/plans/:id/drivers */
+export function listForecasterDrivers(
+  planId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; drivers: ForecasterDriver[]; count: number }> {
+  return apiFetch(`/forecaster/plans/${planId}/drivers`, { signal: signal ?? null });
+}
+
+/** POST /forecaster/plans/:id/drivers */
+export function createForecasterDriver(
+  planId: string,
+  body: { name: string; unitLabel: string; kind: ForecasterDriverKind },
+): Promise<{ success: boolean; driver: ForecasterDriver }> {
+  return apiFetch(`/forecaster/plans/${planId}/drivers`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /forecaster/drivers/:id */
+export function updateForecasterDriver(
+  id: string,
+  body: Partial<{ name: string; unitLabel: string }>,
+): Promise<{ success: boolean; driver: ForecasterDriver }> {
+  return apiFetch(`/forecaster/drivers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /forecaster/drivers/:id */
+export async function deleteForecasterDriver(id: string): Promise<void> {
+  await apiFetch(`/forecaster/drivers/${id}`, { method: 'DELETE' });
+}
+
+/** GET /forecaster/drivers/:id/values */
+export function listForecasterDriverValues(
+  driverId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; values: ForecasterDriverValue[]; count: number }> {
+  return apiFetch(`/forecaster/drivers/${driverId}/values`, { signal: signal ?? null });
+}
+
+/** PUT /forecaster/drivers/:id/values */
+export function setForecasterDriverValues(
+  driverId: string,
+  values: { month: string; value: number }[],
+): Promise<{ success: boolean; values: ForecasterDriverValue[]; count: number }> {
+  return apiFetch(`/forecaster/drivers/${driverId}/values`, {
+    method: 'PUT',
+    body: JSON.stringify({ values }),
+  });
+}
+
+/** GET /forecaster/plans/:id/headcount */
+export function listForecasterHeadcountRoles(
+  planId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; roles: ForecasterHeadcountRole[]; count: number }> {
+  return apiFetch(`/forecaster/plans/${planId}/headcount`, { signal: signal ?? null });
+}
+
+/** POST /forecaster/plans/:id/headcount */
+export function createForecasterHeadcountRole(
+  planId: string,
+  body: {
+    title: string;
+    department: string | null;
+    accountId: string;
+    startsOn: string;
+    endsOn: string | null;
+    fteCount: number;
+    annualSalaryCents: number;
+    loadingBps: number;
+  },
+): Promise<{ success: boolean; role: ForecasterHeadcountRole }> {
+  return apiFetch(`/forecaster/plans/${planId}/headcount`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /forecaster/headcount/:id */
+export function updateForecasterHeadcountRole(
+  id: string,
+  body: Partial<{
+    title: string;
+    department: string | null;
+    accountId: string;
+    startsOn: string;
+    endsOn: string | null;
+    fteCount: number;
+    annualSalaryCents: number;
+    loadingBps: number;
+  }>,
+): Promise<{ success: boolean; role: ForecasterHeadcountRole }> {
+  return apiFetch(`/forecaster/headcount/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /forecaster/headcount/:id */
+export async function deleteForecasterHeadcountRole(id: string): Promise<void> {
+  await apiFetch(`/forecaster/headcount/${id}`, { method: 'DELETE' });
+}
+
+/** GET /forecaster/plans/:id/forecast-lines */
+export function listForecasterForecastLines(
+  planId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; lines: ForecasterForecastLine[]; count: number }> {
+  return apiFetch(`/forecaster/plans/${planId}/forecast-lines`, { signal: signal ?? null });
+}
+
+export type ForecasterCreateLineBody =
+  | { kind: 'DRIVER_PRODUCT'; accountId: string; label: string; quantityDriverId: string; rateDriverId: string }
+  | { kind: 'DRIVER_PERCENT'; accountId: string; label: string; sourceDriverId: string; percentBps: number }
+  | { kind: 'FIXED_CENTS'; accountId: string; label: string; fixedCents: number };
+
+/** POST /forecaster/plans/:id/forecast-lines */
+export function createForecasterForecastLine(
+  planId: string,
+  body: ForecasterCreateLineBody,
+): Promise<{ success: boolean; line: ForecasterForecastLine }> {
+  return apiFetch(`/forecaster/plans/${planId}/forecast-lines`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** PATCH /forecaster/forecast-lines/:id */
+export function updateForecasterForecastLine(
+  id: string,
+  body: ForecasterCreateLineBody,
+): Promise<{ success: boolean; line: ForecasterForecastLine }> {
+  return apiFetch(`/forecaster/forecast-lines/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /forecaster/forecast-lines/:id */
+export async function deleteForecasterForecastLine(id: string): Promise<void> {
+  await apiFetch(`/forecaster/forecast-lines/${id}`, { method: 'DELETE' });
+}
+
+/** GET /forecaster/plans/:id/forecast */
+export function getForecasterForecast(
+  planId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; forecast: ForecasterForecastResponse }> {
+  return apiFetch(`/forecaster/plans/${planId}/forecast`, { signal: signal ?? null });
+}
+
+/** GET /forecaster/plans/:id/budget-versions */
+export function listForecasterBudgetVersions(
+  planId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; versions: ForecasterBudgetVersion[]; count: number }> {
+  return apiFetch(`/forecaster/plans/${planId}/budget-versions`, { signal: signal ?? null });
+}
+
+/** POST /forecaster/plans/:id/budget-versions */
+export function createForecasterBudgetVersion(
+  planId: string,
+  body: { label: string },
+): Promise<{ success: boolean; version: ForecasterBudgetVersionDetail }> {
+  return apiFetch(`/forecaster/plans/${planId}/budget-versions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** GET /forecaster/budget-versions/:id */
+export function getForecasterBudgetVersion(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; version: ForecasterBudgetVersionDetail }> {
+  return apiFetch(`/forecaster/budget-versions/${id}`, { signal: signal ?? null });
+}
+
+/** DELETE /forecaster/budget-versions/:id */
+export async function deleteForecasterBudgetVersion(id: string): Promise<void> {
+  await apiFetch(`/forecaster/budget-versions/${id}`, { method: 'DELETE' });
+}
+
+/** POST /forecaster/budget-versions/:id/compile */
+export function compileForecasterBudgetVersion(
+  id: string,
+): Promise<{ success: boolean; version: ForecasterBudgetVersionDetail }> {
+  return apiFetch(`/forecaster/budget-versions/${id}/compile`, { method: 'POST' });
+}
+
+/** POST /forecaster/budget-versions/:id/approve */
+export function approveForecasterBudgetVersion(
+  id: string,
+): Promise<{ success: boolean; version: ForecasterBudgetVersionDetail }> {
+  return apiFetch(`/forecaster/budget-versions/${id}/approve`, { method: 'POST' });
+}
+
+/** POST /forecaster/budget-versions/:id/lines */
+export function addForecasterBudgetLine(
+  versionId: string,
+  body: { accountId: string; month: string; amountCents: number; justification: string },
+): Promise<{ success: boolean; line: ForecasterBudgetLine }> {
+  return apiFetch(`/forecaster/budget-versions/${versionId}/lines`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+/** PATCH /forecaster/budget-lines/:id */
+export function updateForecasterBudgetLine(
+  id: string,
+  body: Partial<{ amountCents: number; justification: string }>,
+): Promise<{ success: boolean; line: ForecasterBudgetLine }> {
+  return apiFetch(`/forecaster/budget-lines/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /forecaster/budget-lines/:id */
+export async function deleteForecasterBudgetLine(id: string): Promise<void> {
+  await apiFetch(`/forecaster/budget-lines/${id}`, { method: 'DELETE' });
+}
+
+/** GET /forecaster/plans/:id/variance */
+export function getForecasterVariance(
+  planId: string,
+  params: { from?: string; to?: string } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; variance: ForecasterVarianceResponse }> {
+  const query = new URLSearchParams();
+  if (params.from !== undefined) query.set('from', params.from);
+  if (params.to !== undefined) query.set('to', params.to);
+  const suffix = query.toString() === '' ? '' : `?${query.toString()}`;
+  return apiFetch(`/forecaster/plans/${planId}/variance${suffix}`, { signal: signal ?? null });
+}

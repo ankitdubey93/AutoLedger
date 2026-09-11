@@ -72,7 +72,7 @@ export const APPS = [
     domain: 'Budgeting & Planning',
     tagline: 'Driver-based rolling forecasts and headcount plans.',
     skills: ['Driver-based rolling forecasting', 'Headcount planning', 'Zero-based budgeting'],
-    status: 'planned',
+    status: 'building',
   },
 ] as const satisfies readonly AppDefinition[];
 

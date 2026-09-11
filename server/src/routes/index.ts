@@ -11,6 +11,7 @@ import documentRoutes from './documents.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 import apFlowRoutes from './ap-flow/index.js';
 import fpaEngineRoutes from './fpa-engine/index.js';
+import forecasterRoutes from './forecaster/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -67,5 +68,8 @@ apiRouter.use('/ap-flow', apFlowRoutes);
 
 // Phase 12 — FP&A Engine, the linked 3-statement model.
 apiRouter.use('/fpa-engine', fpaEngineRoutes);
+
+// Phase 13 — ForecasterPro, driver-based rolling forecasting.
+apiRouter.use('/forecaster', forecasterRoutes);
 
 export default apiRouter;
