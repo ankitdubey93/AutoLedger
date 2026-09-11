@@ -112,12 +112,16 @@ export default function ApFlowDocumentsPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <header>
-        <h2 className="text-lg font-semibold m-0">AP-Flow</h2>
-        <p className="text-sm text-[var(--muted)] m-0 mt-1">
-          Capture a vendor bill or receipt and extract it into a structured draft. Nothing here
-          posts to the ledger — review and posting are a later phase.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold m-0">AP-Flow</h2>
+          <p className="text-sm text-[var(--muted)] m-0 mt-1">
+            Capture a vendor bill or receipt and extract it into a structured draft.
+          </p>
+        </div>
+        <Link to={`${base}/review`} className="btn btn--ghost">
+          Review queue
+        </Link>
       </header>
 
       <div className="flex flex-wrap items-end gap-3">

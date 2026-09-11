@@ -14,10 +14,16 @@ import type {
   ApFlowDocumentStatus,
   ApFlowExtraction,
   ApFlowLineItem,
+  ApFlowLineItemRecord,
+  ApFlowMappingSource,
   ApFlowPage,
+  ApFlowReviewQueueEntry,
   RedactedRegion,
 } from '../../types/ap-flow.js';
 import type { ExtractionResult } from './extractionService.js';
+import * as accountService from '../ledger-core/accountService.js';
+import type { LineItemClassification } from './mappingService.js';
+import * as mappingService from './mappingService.js';
 
 /**
  * AP-Flow's document register (Phase 10). Every function takes `orgId`
@@ -49,6 +55,20 @@ interface DocumentRow {
   created_by: string;
   created_by_name: string | null;
   created_at: Date;
+  journal_entry_id: string | null;
+  posted_sha256: string | null;
+  posted_at: Date | null;
+}
+
+interface LineItemRow {
+  id: string;
+  line_index: number;
+  description: string;
+  amount_cents: string;
+  account_id: string | null;
+  suggested_account_id: string | null;
+  mapping_source: ApFlowMappingSource;
+  mapping_confidence: string | null;
 }
 
 interface PageRow {
@@ -83,7 +103,8 @@ interface ExtractionRow {
 // original filename/mime/hash, and to users for the uploader's display name.
 const DOCUMENT_SELECT = `SELECT a.id, a.document_id, d.original_filename, d.mime_type, d.sha256,
                                 a.status, a.page_count, a.failure_reason, a.processed_at,
-                                a.created_by, u.name AS created_by_name, a.created_at
+                                a.created_by, u.name AS created_by_name, a.created_at,
+                                a.journal_entry_id, a.posted_sha256, a.posted_at
                            FROM ap_flow_documents a
                            JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
                            LEFT JOIN users u ON u.id = a.created_by`;
@@ -102,6 +123,9 @@ function toDocument(row: DocumentRow): ApFlowDocumentRecord {
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdAt: row.created_at.toISOString(),
+    journalEntryId: row.journal_entry_id,
+    postedSha256: row.posted_sha256,
+    postedAt: row.posted_at === null ? null : row.posted_at.toISOString(),
   };
 }
 
@@ -133,6 +157,25 @@ function toExtraction(row: ExtractionRow): ApFlowExtraction {
     validationErrors: row.validation_errors,
     model: row.model,
     createdAt: row.created_at.toISOString(),
+  };
+}
+
+function toLineItem(
+  row: LineItemRow,
+  accountsById: Map<string, { code: string; name: string }>,
+): ApFlowLineItemRecord {
+  const account = row.account_id === null ? undefined : accountsById.get(row.account_id);
+  return {
+    id: row.id,
+    lineIndex: row.line_index,
+    description: row.description,
+    amountCents: Number(row.amount_cents),
+    accountId: row.account_id,
+    accountCode: account?.code ?? null,
+    accountName: account?.name ?? null,
+    suggestedAccountId: row.suggested_account_id,
+    mappingSource: row.mapping_source,
+    mappingConfidence: row.mapping_confidence === null ? null : Number(row.mapping_confidence),
   };
 }
 
@@ -276,6 +319,106 @@ export async function listApFlowDocuments(
   };
 }
 
+interface ReviewQueueRow {
+  id: string;
+  original_filename: string;
+  vendor_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  currency: string | null;
+  total_cents: string | null;
+  arithmetic_ok: boolean;
+  line_item_count: string;
+  unmapped_line_count: string;
+  lowest_confidence: string | null;
+  created_at: Date;
+}
+
+function toReviewQueueEntry(row: ReviewQueueRow): ApFlowReviewQueueEntry {
+  return {
+    id: row.id,
+    documentId: row.id,
+    originalFilename: row.original_filename,
+    vendorName: row.vendor_name,
+    invoiceNumber: row.invoice_number,
+    invoiceDate: row.invoice_date,
+    currency: row.currency,
+    totalCents: row.total_cents === null ? null : Number(row.total_cents),
+    arithmeticOk: row.arithmetic_ok,
+    lineItemCount: Number(row.line_item_count),
+    unmappedLineCount: Number(row.unmapped_line_count),
+    lowestConfidence: row.lowest_confidence === null ? null : Number(row.lowest_confidence),
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
+/**
+ * Documents awaiting human review — `status = 'EXTRACTED'` only; `POSTED`
+ * is done, and `PENDING`/`PROCESSING`/`FAILED` have nothing to review yet.
+ * Ordered so the reviewer's attention goes where it is worth most: an
+ * arithmetic contradiction first, then a document with an unmapped line,
+ * then lowest model confidence, then newest.
+ */
+export async function listReviewQueue(
+  orgId: string,
+  options: { page: number; limit: number },
+): Promise<{
+  entries: ApFlowReviewQueueEntry[];
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}> {
+  const page = options.page > 0 ? options.page : 1;
+  const limit = options.limit > 0 ? Math.min(options.limit, MAX_PAGE_SIZE) : DEFAULT_PAGE_SIZE;
+  const offset = (page - 1) * limit;
+
+  const where = 'a.org_id = $1 AND a.status = $2';
+  const values: unknown[] = [orgId, 'EXTRACTED'];
+
+  const { rows: countRows } = await pool.query<{ total: string }>(
+    `SELECT count(*) AS total FROM ap_flow_documents a WHERE ${where}`,
+    values,
+  );
+  const totalCount = Number(countRows[0]?.total ?? '0');
+
+  const { rows } = await pool.query<ReviewQueueRow>(
+    `SELECT a.id, d.original_filename, x.vendor_name, x.invoice_number, x.invoice_date,
+            x.currency, x.total_cents, x.arithmetic_ok, a.created_at,
+            coalesce(l.line_item_count, 0) AS line_item_count,
+            coalesce(l.unmapped_line_count, 0) AS unmapped_line_count,
+            c.lowest AS lowest_confidence
+       FROM ap_flow_documents a
+       JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
+       LEFT JOIN ap_flow_extractions x ON x.org_id = a.org_id AND x.ap_flow_document_id = a.id
+       LEFT JOIN LATERAL (
+         SELECT count(*) AS line_item_count,
+                count(*) FILTER (WHERE account_id IS NULL) AS unmapped_line_count
+           FROM ap_flow_line_items
+          WHERE org_id = a.org_id AND ap_flow_document_id = a.id
+       ) l ON true
+       LEFT JOIN LATERAL (
+         SELECT min((value)::numeric) AS lowest
+           FROM jsonb_each_text(x.field_confidence)
+          WHERE value ~ '^[0-9.]+$'
+       ) c ON true
+      WHERE ${where}
+      ORDER BY (x.arithmetic_ok = false) DESC,
+               (coalesce(l.unmapped_line_count, 0) > 0) DESC,
+               c.lowest ASC NULLS FIRST,
+               a.created_at DESC,
+               a.id DESC
+      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
+    [...values, limit, offset],
+  );
+
+  return {
+    entries: rows.map(toReviewQueueEntry),
+    totalCount,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+  };
+}
+
 export async function getApFlowDocumentById(orgId: string, id: string): Promise<ApFlowDocumentDetail> {
   const document = await loadDocument(orgId, id);
 
@@ -298,10 +441,33 @@ export async function getApFlowDocumentById(orgId: string, id: string): Promise<
     [orgId, id],
   );
 
+  const { rows: lineItemRows } = await pool.query<LineItemRow>(
+    `SELECT id, line_index, description, amount_cents, account_id,
+            suggested_account_id, mapping_source, mapping_confidence
+       FROM ap_flow_line_items
+      WHERE org_id = $1 AND ap_flow_document_id = $2
+      ORDER BY line_index`,
+    [orgId, id],
+  );
+
+  // Account names/codes are filled by calling accountService, never by
+  // joining `accounts` in this query — this file queries only ap_flow_*,
+  // documents and document_links (rule 16).
+  const accountsById =
+    lineItemRows.length === 0
+      ? new Map()
+      : new Map(
+          (await accountService.listAccounts(orgId, { includeInactive: true })).map((account) => [
+            account.id,
+            account,
+          ]),
+        );
+
   return {
     ...document,
     pages: pageRows.map(toPage),
     extraction: extractionRows[0] === undefined ? null : toExtraction(extractionRows[0]),
+    lineItems: lineItemRows.map((row) => toLineItem(row, accountsById)),
   };
 }
 
@@ -363,6 +529,59 @@ export async function requestReextraction(orgId: string, id: string): Promise<Ap
   });
 
   return loadDocument(orgId, id);
+}
+
+/**
+ * A reviewer's per-line account override. Only legal while the document is
+ * `EXTRACTED` — before that there is nothing to review yet, after that
+ * (`POSTED`) the row is frozen by migration 032's trigger regardless of
+ * what this check does. The account itself is validated by calling
+ * `accountService.getAccountById` (rule 16) — never a query against
+ * `accounts` in this file.
+ */
+export async function updateLineItemAccount(
+  orgId: string,
+  apFlowDocumentId: string,
+  lineItemId: string,
+  accountId: string,
+): Promise<ApFlowDocumentDetail> {
+  try {
+    await withTransaction(async (client) => {
+      const { rows } = await client.query<{ status: ApFlowDocumentStatus }>(
+        'SELECT status FROM ap_flow_documents WHERE org_id = $1 AND id = $2 FOR UPDATE',
+        [orgId, apFlowDocumentId],
+      );
+      const row = rows[0];
+      if (row === undefined) throw new ApiError(404, 'AP-Flow document not found');
+      if (row.status !== 'EXTRACTED') {
+        throw new ApiError(409, `Cannot edit line items on a document in status ${row.status}`);
+      }
+
+      const account = await accountService.getAccountById(orgId, accountId);
+      if (!account.isPostable) {
+        throw new ApiError(422, 'Account is a header and cannot be posted to');
+      }
+      if (!account.isActive) {
+        throw new ApiError(422, 'Account is inactive');
+      }
+
+      const { rowCount } = await client.query(
+        `UPDATE ap_flow_line_items
+            SET account_id = $3, mapping_source = 'MANUAL', mapping_confidence = NULL
+          WHERE org_id = $1 AND id = $2 AND ap_flow_document_id = $4`,
+        [orgId, lineItemId, accountId, apFlowDocumentId],
+      );
+      if (rowCount === 0) throw new ApiError(404, 'Line item not found');
+    });
+  } catch (err) {
+    if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_INVALID_TEXT_REPRESENTATION) {
+      throw new ApiError(404, 'AP-Flow document not found');
+    }
+    throw err;
+  }
+
+  return getApFlowDocumentById(orgId, apFlowDocumentId);
 }
 
 // -------------------------------------------------------- worker-side (E2)
@@ -437,6 +656,7 @@ export async function savePipelineResult(
   id: string,
   pages: PipelinePage[],
   extraction: ExtractionResult,
+  classifications: LineItemClassification[],
 ): Promise<void> {
   await withTransaction(async (client) => {
     await deletePipelineRows(client, orgId, id);
@@ -483,6 +703,11 @@ export async function savePipelineResult(
       ],
     );
 
+    // Line items, classified before this call reached the transaction —
+    // saved on this same client so pages, extraction, line items and
+    // status all commit together or not at all.
+    await mappingService.saveLineItemsOnClient(client, orgId, id, classifications);
+
     const { rows } = await client.query<{ status: ApFlowDocumentStatus }>(
       'SELECT status FROM ap_flow_documents WHERE org_id = $1 AND id = $2 FOR UPDATE',
       [orgId, id],
@@ -503,6 +728,13 @@ export async function savePipelineResult(
 }
 
 async function deletePipelineRows(client: PoolClient, orgId: string, id: string): Promise<void> {
+  // Line items first: a re-extraction is a new read of the document, and a
+  // prior reviewer override was an opinion about the old read, so it is
+  // wiped along with the pages/extraction it was classified from.
+  await client.query('DELETE FROM ap_flow_line_items WHERE org_id = $1 AND ap_flow_document_id = $2', [
+    orgId,
+    id,
+  ]);
   await client.query('DELETE FROM ap_flow_pages WHERE org_id = $1 AND ap_flow_document_id = $2', [
     orgId,
     id,

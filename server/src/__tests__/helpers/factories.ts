@@ -34,7 +34,8 @@ export async function resetTables(): Promise<void> {
               outbox_events, webhook_endpoints, webhook_deliveries,
               audit_logs, onboarding_states, migration_imports, migration_import_rows,
               documents, document_links,
-              ap_flow_documents, ap_flow_pages, ap_flow_extractions
+              ap_flow_documents, ap_flow_pages, ap_flow_extractions,
+              ap_flow_line_items, ap_flow_vendor_account_map
      RESTART IDENTITY CASCADE`,
   );
 }

@@ -26,6 +26,9 @@ function doc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
     createdBy: 'user-1',
     createdByName: 'Alice',
     createdAt: new Date('2026-06-01').toISOString(),
+    journalEntryId: null,
+    postedSha256: null,
+    postedAt: null,
     ...overrides,
   };
 }
@@ -35,6 +38,7 @@ function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDe
     ...doc(),
     pages: [],
     extraction: null,
+    lineItems: [],
     ...overrides,
   };
 }
@@ -178,6 +182,34 @@ describe('ApFlowDocumentDetailPage', () => {
           model: 'claude-sonnet-5',
           createdAt: new Date('2026-08-15').toISOString(),
         },
+        // Phase 11's materialized line items — what the page's review table
+        // actually renders from, not the extraction's own JSONB copy.
+        lineItems: [
+          {
+            id: 'line-1',
+            lineIndex: 0,
+            description: 'EC2 Compute Instances',
+            amountCents: 35000,
+            accountId: null,
+            accountCode: null,
+            accountName: null,
+            suggestedAccountId: null,
+            mappingSource: 'NONE',
+            mappingConfidence: null,
+          },
+          {
+            id: 'line-2',
+            lineIndex: 1,
+            description: 'S3 Storage Usage',
+            amountCents: 10000,
+            accountId: null,
+            accountCode: null,
+            accountName: null,
+            suggestedAccountId: null,
+            mappingSource: 'NONE',
+            mappingConfidence: null,
+          },
+        ],
       }),
     );
     renderDetail('ap-doc-1');

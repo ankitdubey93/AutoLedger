@@ -33,8 +33,13 @@ export const APPS = [
     slug: 'ap-flow',
     name: 'AP-Flow',
     domain: 'Operational Accounting',
-    tagline: 'Invoice capture to 3-way match, automatically.',
-    skills: ['Multimodal OCR invoice parsing', '3-way matching', 'COGS tracking'],
+    tagline: 'Invoice capture to a posted journal entry, with a human in the loop.',
+    skills: [
+      'Multimodal OCR invoice parsing',
+      'PII pixel masking',
+      'History-driven COA mapping',
+      'Human-in-the-loop review',
+    ],
     status: 'building',
   },
   {

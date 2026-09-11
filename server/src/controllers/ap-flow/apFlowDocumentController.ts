@@ -1,6 +1,8 @@
 import type { RequestHandler } from 'express';
 import * as apFlowDocumentService from '../../services/ap-flow/apFlowDocumentService.js';
+import * as postingService from '../../services/ap-flow/postingService.js';
 import { createApFlowDocumentSchema } from '../../schemas/ap-flow/documentSchema.js';
+import { updateLineItemSchema } from '../../schemas/ap-flow/lineItemSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -71,5 +73,42 @@ export const pageImage: RequestHandler = async (req, res) => {
 export const reextract: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const document = await apFlowDocumentService.requestReextraction(user.orgId, requireParam(req, 'id'));
+  res.json({ success: true, document });
+};
+
+/**
+ * POST /ap-flow/documents/:id/post
+ *
+ * No request body — there is nothing for the caller to supply, and
+ * accepting a sourceType/entryDate from the body would let a client forge
+ * provenance (docs/api.md's rule on journal_entries.source_type/source_id).
+ */
+export const post: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const document = await postingService.postApFlowDocument(user.orgId, user.id, requireParam(req, 'id'));
+  res.json({ success: true, document });
+};
+
+/** GET /ap-flow/review-queue */
+export const reviewQueue: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const { page, limit } = readPagination(req.query);
+  const { entries, totalCount, currentPage, totalPages } = await apFlowDocumentService.listReviewQueue(
+    user.orgId,
+    { page, limit },
+  );
+  res.json({ success: true, count: entries.length, totalCount, currentPage, totalPages, entries });
+};
+
+/** PATCH /ap-flow/documents/:id/line-items/:lineId */
+export const updateLineItem: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(updateLineItemSchema, req.body);
+  const document = await apFlowDocumentService.updateLineItemAccount(
+    user.orgId,
+    requireParam(req, 'id'),
+    requireParam(req, 'lineId'),
+    input.accountId,
+  );
   res.json({ success: true, document });
 };

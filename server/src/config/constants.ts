@@ -208,3 +208,14 @@ export const AP_FLOW_VISION_MAX_TOKENS = 4096;
 
 /** A vision call that has not answered in 90s is not going to. */
 export const AP_FLOW_VISION_TIMEOUT_MS = 90_000;
+
+// ------------------------------------------------ ap-flow mapping (11)
+
+/** Classification is a text call, not a vision call — the same model, far fewer tokens. */
+export const AP_FLOW_CLASSIFY_MODEL = 'claude-sonnet-5';
+
+/** Ceiling on one classification response — a short list of (line_index, account_code, confidence) triples. */
+export const AP_FLOW_CLASSIFY_MAX_TOKENS = 2048;
+
+/** Shorter than the vision timeout — no images in this call, so a slow answer is a service problem, not a large payload. */
+export const AP_FLOW_CLASSIFY_TIMEOUT_MS = 30_000;

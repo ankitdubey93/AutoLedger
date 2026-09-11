@@ -8,6 +8,7 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
+import { resolveApPostingAccountsOnClient } from './settingsService.js';
 import {
   canTransitionBill,
   isBillStatus,
@@ -730,53 +731,6 @@ export async function submitBill(orgId: string, id: string): Promise<Bill> {
 
 // ---------------------------------------------------------- approve and void
 
-interface PostingAccounts {
-  payableAccountId: string;
-  taxAccountId: string | null;
-}
-
-/**
- * Resolves the payable and (if needed) tax-input accounts to post a bill
- * against: `ledger_settings` first, falling back to the default chart's
- * `2100`/`1180`. Fails loudly rather than guessing further.
- */
-async function resolveApAccounts(
-  client: PoolClient,
-  orgId: string,
-  needsTaxAccount: boolean,
-): Promise<PostingAccounts> {
-  const { rows } = await client.query<{
-    payable_account_id: string | null;
-    tax_input_account_id: string | null;
-  }>('SELECT payable_account_id, tax_input_account_id FROM ledger_settings WHERE org_id = $1', [
-    orgId,
-  ]);
-  const settings = rows[0] ?? { payable_account_id: null, tax_input_account_id: null };
-
-  async function fallbackAccountId(code: string): Promise<string | null> {
-    const { rows: accountRows } = await client.query<{ id: string }>(
-      'SELECT id FROM accounts WHERE org_id = $1 AND code = $2',
-      [orgId, code],
-    );
-    return accountRows[0]?.id ?? null;
-  }
-
-  const payableAccountId = settings.payable_account_id ?? (await fallbackAccountId('2100'));
-  if (payableAccountId === null) {
-    throw new ApiError(422, 'No payable account is configured. Set one in settings.');
-  }
-
-  let taxAccountId: string | null = null;
-  if (needsTaxAccount) {
-    taxAccountId = settings.tax_input_account_id ?? (await fallbackAccountId('1180'));
-    if (taxAccountId === null) {
-      throw new ApiError(422, 'No tax account is configured. Set one in settings.');
-    }
-  }
-
-  return { payableAccountId, taxAccountId };
-}
-
 export async function approveBill(
   orgId: string,
   userId: string,
@@ -846,7 +800,7 @@ export async function approveBill(
     const baseTaxCents = convertToBase(taxTotalCents, fxRate);
     const baseTotalCents = baseSubtotalCents + baseTaxCents;
 
-    const { payableAccountId, taxAccountId } = await resolveApAccounts(
+    const { payableAccountId, taxAccountId } = await resolveApPostingAccountsOnClient(
       client,
       orgId,
       taxTotalCents > 0,

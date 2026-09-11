@@ -2526,7 +2526,7 @@ export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filen
 // ---------------------------------------------------------- ap-flow (10)
 
 /** Mirrors server/src/types/ap-flow.ts's ApFlowDocumentStatus. */
-export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED';
+export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'POSTED';
 
 export interface ApFlowLineItem {
   description: string;
@@ -2572,11 +2572,48 @@ export interface ApFlowDocument {
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
+  /** Phase 11. Null until POSTED. */
+  journalEntryId: string | null;
+  postedSha256: string | null;
+  postedAt: string | null;
+}
+
+/** Mirrors server/src/types/ap-flow.ts's ApFlowMappingSource. */
+export type ApFlowMappingSource = 'HISTORY' | 'CHART' | 'MODEL' | 'MANUAL' | 'NONE';
+
+export interface ApFlowLineItemRecord {
+  id: string;
+  lineIndex: number;
+  description: string;
+  amountCents: number;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  suggestedAccountId: string | null;
+  mappingSource: ApFlowMappingSource;
+  mappingConfidence: number | null;
+}
+
+export interface ApFlowReviewQueueEntry {
+  id: string;
+  documentId: string;
+  originalFilename: string;
+  vendorName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  currency: string | null;
+  totalCents: number | null;
+  arithmeticOk: boolean;
+  lineItemCount: number;
+  unmappedLineCount: number;
+  lowestConfidence: number | null;
+  createdAt: string;
 }
 
 export interface ApFlowDocumentDetail extends ApFlowDocument {
   pages: ApFlowPage[];
   extraction: ApFlowExtraction | null;
+  lineItems: ApFlowLineItemRecord[];
 }
 
 export interface ApFlowDocumentFilters {
@@ -2627,4 +2664,43 @@ export function getApFlowPageImage(id: string, pageNumber: number): Promise<{ bl
 /** POST /ap-flow/documents/:id/reextract */
 export function reextractApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocument }> {
   return apiFetch(`/ap-flow/documents/${id}/reextract`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------- ap-flow (11)
+
+/** GET /ap-flow/review-queue — documents awaiting human review, lowest confidence first. */
+export function listApFlowReviewQueue(
+  params: { page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  entries: ApFlowReviewQueueEntry[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ap-flow/review-queue${suffix}`, { signal: signal ?? null });
+}
+
+/** PATCH /ap-flow/documents/:id/line-items/:lineId — a reviewer's account override. */
+export function updateApFlowLineItem(
+  documentId: string,
+  lineItemId: string,
+  accountId: string,
+): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
+  return apiFetch(`/ap-flow/documents/${documentId}/line-items/${lineItemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ accountId }),
+  });
+}
+
+/** POST /ap-flow/documents/:id/post — one-click approve & post into LedgerCore. No request body. */
+export function postApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
+  return apiFetch(`/ap-flow/documents/${id}/post`, { method: 'POST' });
 }

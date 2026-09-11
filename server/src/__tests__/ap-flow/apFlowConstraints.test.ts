@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { closePool, pool } from '../../db/connect.js';
 import { createUserWithOrg, resetTables } from '../helpers/factories.js';
@@ -65,7 +66,9 @@ describe('ap-flow database constraints', () => {
     orgB = userB.orgId;
   });
 
-  afterAll(closePool);
+  // closePool() runs once, in the last describe block in this file — see
+  // the phase 11 describe below. Calling it here too would close the pool
+  // after this block's tests finish and break every test after it.
 
   it('rejects an in-place UPDATE on ap_flow_extractions with 0A000', async () => {
     const { apFlowDocId } = await seedApFlowDocument();
@@ -195,5 +198,236 @@ describe('ap-flow database constraints', () => {
     );
     expect(after[0]?.status).toBe('PROCESSING');
     expect(after[0]?.updated_at.getTime()).toBeGreaterThan(before[0]?.updated_at.getTime() ?? 0);
+  });
+});
+
+/**
+ * Phase 11 — migration 032's constraints and triggers, proven the same way:
+ * raw SQL straight at the pool, never through a service. ap_flow_line_items
+ * is deliberately mutable while its parent document is not yet POSTED
+ * (unlike ap_flow_pages/ap_flow_extractions, which are never editable) — the
+ * posted-guard triggers are what freeze it, not an absence of UPDATE
+ * privilege.
+ */
+describe('ap-flow phase 11 database constraints', () => {
+  beforeEach(async () => {
+    await resetTables();
+    userA = await createUserWithOrg({ label: 'alice', orgName: 'Org Alpha' });
+    orgA = userA.orgId;
+    userB = await createUserWithOrg({ label: 'bob', orgName: 'Org Bravo' });
+    orgB = userB.orgId;
+  });
+
+  afterAll(closePool);
+
+  /** Fetches an org's seeded default-chart account id by code (accounts is seeded at register). */
+  async function accountIdByCode(orgId: string, code: string): Promise<string> {
+    const { rows } = await pool.query<{ id: string }>(
+      'SELECT id FROM accounts WHERE org_id = $1 AND code = $2',
+      [orgId, code],
+    );
+    const id = rows[0]?.id;
+    if (id === undefined) throw new Error(`fixture: no account ${code} for org ${orgId}`);
+    return id;
+  }
+
+  it('rejects a line item whose org_id does not match its document', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    const accountId = await accountIdByCode(orgA, '6130');
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents, account_id)
+         VALUES ($1, $2, 0, 'Office supplies', 1000, $3)`,
+        [orgB, apFlowDocId, accountId],
+      ),
+    );
+    expect(code).toBe(FOREIGN_KEY_VIOLATION);
+  });
+
+  it('rejects two line items sharing a line_index on one document', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    await pool.query(
+      `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents)
+       VALUES ($1, $2, 0, 'Line one', 1000)`,
+      [orgA, apFlowDocId],
+    );
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents)
+         VALUES ($1, $2, 0, 'Line one again', 2000)`,
+        [orgA, apFlowDocId],
+      ),
+    );
+    expect(code).toBe(UNIQUE_VIOLATION);
+  });
+
+  it('rejects an unknown mapping_source', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents, mapping_source)
+         VALUES ($1, $2, 0, 'Line one', 1000, 'GUESS')`,
+        [orgA, apFlowDocId],
+      ),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it('rejects a mapping_confidence above 1', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents, mapping_confidence)
+         VALUES ($1, $2, 0, 'Line one', 1000, 1.500)`,
+        [orgA, apFlowDocId],
+      ),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it('rejects marking a document POSTED without a journal entry id', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+
+    const code = await errorCode(() =>
+      pool.query(`UPDATE ap_flow_documents SET status = 'POSTED' WHERE org_id = $1 AND id = $2`, [
+        orgA,
+        apFlowDocId,
+      ]),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  /** Marks a document POSTED via raw SQL, satisfying chk_ap_flow_documents_posted_complete. */
+  async function markPosted(apFlowDocId: string): Promise<void> {
+    await pool.query(
+      `UPDATE ap_flow_documents
+          SET status = 'POSTED', journal_entry_id = $3, posted_sha256 = $4, posted_at = now(), posted_by = $5
+        WHERE org_id = $1 AND id = $2`,
+      [orgA, apFlowDocId, randomUUID(), 'a'.repeat(64), userA.id],
+    );
+  }
+
+  it('rejects any UPDATE of a POSTED document', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    await markPosted(apFlowDocId);
+
+    const code = await errorCode(() =>
+      pool.query(`UPDATE ap_flow_documents SET failure_reason = $1 WHERE org_id = $2 AND id = $3`, [
+        'x',
+        orgA,
+        apFlowDocId,
+      ]),
+    );
+    expect(code).toBe(FEATURE_NOT_SUPPORTED);
+  });
+
+  it("rejects an UPDATE of a POSTED document's line item", async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    const accountId = await accountIdByCode(orgA, '6130');
+    await pool.query(
+      `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents, account_id)
+       VALUES ($1, $2, 0, 'Office supplies', 1000, $3)`,
+      [orgA, apFlowDocId, accountId],
+    );
+    await markPosted(apFlowDocId);
+
+    const otherAccountId = await accountIdByCode(orgA, '6140');
+    const code = await errorCode(() =>
+      pool.query(
+        `UPDATE ap_flow_line_items SET account_id = $1 WHERE org_id = $2 AND ap_flow_document_id = $3`,
+        [otherAccountId, orgA, apFlowDocId],
+      ),
+    );
+    expect(code).toBe(FEATURE_NOT_SUPPORTED);
+  });
+
+  it('allows updating a line item while the document is EXTRACTED', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    const accountId = await accountIdByCode(orgA, '6130');
+    await pool.query(
+      `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents, account_id)
+       VALUES ($1, $2, 0, 'Office supplies', 1000, $3)`,
+      [orgA, apFlowDocId, accountId],
+    );
+    await pool.query(`UPDATE ap_flow_documents SET status = 'EXTRACTED' WHERE org_id = $1 AND id = $2`, [
+      orgA,
+      apFlowDocId,
+    ]);
+
+    const otherAccountId = await accountIdByCode(orgA, '6140');
+    const result = await pool.query(
+      `UPDATE ap_flow_line_items SET account_id = $1 WHERE org_id = $2 AND ap_flow_document_id = $3`,
+      [otherAccountId, orgA, apFlowDocId],
+    );
+    expect(result.rowCount).toBe(1);
+  });
+
+  it("cascades line items when its AP-Flow document is deleted", async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    await pool.query(
+      `INSERT INTO ap_flow_line_items (org_id, ap_flow_document_id, line_index, description, amount_cents)
+       VALUES ($1, $2, 0, 'Line one', 1000)`,
+      [orgA, apFlowDocId],
+    );
+
+    await pool.query('DELETE FROM ap_flow_documents WHERE org_id = $1 AND id = $2', [orgA, apFlowDocId]);
+
+    const { rows } = await pool.query('SELECT id FROM ap_flow_line_items WHERE org_id = $1', [orgA]);
+    expect(rows).toHaveLength(0);
+  });
+
+  it('rejects two vendor map rows sharing a vendor_key in one org', async () => {
+    const accountId = await accountIdByCode(orgA, '6120');
+    await pool.query(
+      `INSERT INTO ap_flow_vendor_account_map (org_id, vendor_key, account_id) VALUES ($1, $2, $3)`,
+      [orgA, 'aws cloud services', accountId],
+    );
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_vendor_account_map (org_id, vendor_key, account_id) VALUES ($1, $2, $3)`,
+        [orgA, 'aws cloud services', accountId],
+      ),
+    );
+    expect(code).toBe(UNIQUE_VIOLATION);
+  });
+
+  it('allows the same vendor_key in two different organizations', async () => {
+    const accountIdA = await accountIdByCode(orgA, '6120');
+    const accountIdB = await accountIdByCode(orgB, '6120');
+
+    const codeA = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_vendor_account_map (org_id, vendor_key, account_id) VALUES ($1, $2, $3)`,
+        [orgA, 'aws cloud services', accountIdA],
+      ),
+    );
+    const codeB = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_vendor_account_map (org_id, vendor_key, account_id) VALUES ($1, $2, $3)`,
+        [orgB, 'aws cloud services', accountIdB],
+      ),
+    );
+    expect(codeA).toBeUndefined();
+    expect(codeB).toBeUndefined();
+  });
+
+  it('the database refuses a second POSTED transition even with the service bypassed', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    await markPosted(apFlowDocId);
+
+    const code = await errorCode(() =>
+      pool.query(
+        `UPDATE ap_flow_documents
+            SET status = 'POSTED', journal_entry_id = $3, posted_sha256 = $4, posted_at = now(), posted_by = $5
+          WHERE org_id = $1 AND id = $2`,
+        [orgA, apFlowDocId, randomUUID(), 'b'.repeat(64), userA.id],
+      ),
+    );
+    expect(code).toBe(FEATURE_NOT_SUPPORTED);
   });
 });

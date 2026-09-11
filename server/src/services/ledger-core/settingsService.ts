@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -277,4 +278,58 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
   }
 
   return getSettings(orgId);
+}
+
+// ------------------------------------------------------- AP posting accounts
+
+export interface ApPostingAccounts {
+  payableAccountId: string;
+  taxAccountId: string | null;
+}
+
+/**
+ * Resolves the payable and (if needed) tax-input accounts to post an AP
+ * document against: `ledger_settings` first, falling back to the default
+ * chart's `2100`/`1180`. Fails loudly rather than guessing further.
+ *
+ * Promoted here from `billService` in Phase 11 — `billService.approveBill`
+ * and AP-Flow's `postingService.postApFlowDocument` both need it, and this
+ * file already owns `ledger_settings`. Behaviour is unchanged: same two
+ * queries, same fallback codes, same two error messages.
+ */
+export async function resolveApPostingAccountsOnClient(
+  client: PoolClient,
+  orgId: string,
+  needsTaxAccount: boolean,
+): Promise<ApPostingAccounts> {
+  const { rows } = await client.query<{
+    payable_account_id: string | null;
+    tax_input_account_id: string | null;
+  }>('SELECT payable_account_id, tax_input_account_id FROM ledger_settings WHERE org_id = $1', [
+    orgId,
+  ]);
+  const settings = rows[0] ?? { payable_account_id: null, tax_input_account_id: null };
+
+  async function fallbackAccountId(code: string): Promise<string | null> {
+    const { rows: accountRows } = await client.query<{ id: string }>(
+      'SELECT id FROM accounts WHERE org_id = $1 AND code = $2',
+      [orgId, code],
+    );
+    return accountRows[0]?.id ?? null;
+  }
+
+  const payableAccountId = settings.payable_account_id ?? (await fallbackAccountId('2100'));
+  if (payableAccountId === null) {
+    throw new ApiError(422, 'No payable account is configured. Set one in settings.');
+  }
+
+  let taxAccountId: string | null = null;
+  if (needsTaxAccount) {
+    taxAccountId = settings.tax_input_account_id ?? (await fallbackAccountId('1180'));
+    if (taxAccountId === null) {
+      throw new ApiError(422, 'No tax account is configured. Set one in settings.');
+    }
+  }
+
+  return { payableAccountId, taxAccountId };
 }

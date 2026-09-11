@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import documentRoutes from './documentRoutes.js';
+import reviewRoutes from './reviewRoutes.js';
 
 /**
  * AP-Flow's router, mounted at /api/v1/ap-flow by routes/index.ts.
@@ -9,6 +10,7 @@ import documentRoutes from './documentRoutes.js';
  */
 const router = Router();
 
+router.use('/review-queue', reviewRoutes);
 router.use('/documents', documentRoutes);
 
 export default router;

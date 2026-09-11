@@ -26,5 +26,17 @@ router.post(
   requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
   apFlowDocumentController.reextract,
 );
+router.patch(
+  '/:id/line-items/:lineId',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  apFlowDocumentController.updateLineItem,
+);
+router.post(
+  '/:id/post',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  apFlowDocumentController.post,
+);
 
 export default router;

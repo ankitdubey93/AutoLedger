@@ -1,7 +1,7 @@
 # AP-Flow — App Spec & Build Ladder
 
 **Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11
-**Status: Phase 10 done.** `config/apps.ts` marks it `'building'`. Phase 10's checkboxes below are ticked; Phase 11's are not — see [roadmap.md](roadmap.md#phase-10-as-delivered) for what was actually delivered, including the deliberate deviations from this ladder.
+**Status: Phases 10 and 11 done.** `config/apps.ts` marks it `'building'`. Every checkbox below is ticked — see [roadmap.md](roadmap.md#phase-10-as-delivered) and [roadmap.md](roadmap.md#phase-11-as-delivered) for what was actually delivered, including the deliberate deviations from this ladder and its own two scope corrections (recorded in the Phase 11 section: input tax goes to `1180` only, and 3-way matching/COGS tracking were never in this ladder's own acceptance criteria and were not built).
 
 AP-Flow turns a photograph of a receipt into a balanced, auditable journal entry. It keeps no ledger of its own — it posts into LedgerCore via `source_type = 'ap_flow'` and `source_id` pointing at its own document row ([guardrails.md](guardrails.md) rule 16).
 
@@ -128,22 +128,22 @@ Produces a draft. Posts nothing to the ledger.
 
 ### Phase 11 — mapping, review & posting
 
-- [ ] `ap_flow_line_items`, `ap_flow_vendor_account_map` migrations
-- [ ] History-first COA classification, model only as fallback
-- [ ] Tax split into `1180` / `2140`
-- [ ] FX normalization at invoice date via LedgerCore's `fx_rates`
-- [ ] Review queue UI: side-by-side document, confidence colouring, per-line account override
-- [ ] One-click post → `journalService` with `source_type`, `source_id`, document hash
-- [ ] Approval is `ACCOUNTANT` or above; upload is any member
+- [x] `ap_flow_line_items`, `ap_flow_vendor_account_map` migrations
+- [x] History-first COA classification, model only as fallback
+- [x] Tax split into `1180` — **corrected from this ladder's original "`1180` / `2140`."** `2140 GST/VAT Output Payable` is the sales/output side; AP-Flow is a purchase-side app and never writes to it. See the C section above, which already had this right
+- [x] FX normalization at invoice date via LedgerCore's `fx_rates`
+- [x] Review queue UI: side-by-side document, confidence colouring, per-line account override
+- [x] One-click post → `journalService` with `source_type`, `source_id`, document hash
+- [x] Approval is `ACCOUNTANT` or above; upload is any member
 
-**Acceptance:** a two-line receipt posts one balanced entry debiting two different accounts. Re-approving the same document does not create a second entry. The posted entry's `source_id` resolves back to a document whose stored bytes still hash to the recorded SHA-256.
+**Acceptance ✅ — verified.** A two-line receipt posts one balanced entry debiting two different accounts (`posting.test.ts`). Re-approving the same document returns `409` and creates no second entry. The posted entry's `source_id` resolves back to a document whose stored bytes still hash to the recorded SHA-256.
 
 ---
 
-## Not built yet
+## Not built
 
-Phase 11 only: `ap_flow_line_items` and `ap_flow_vendor_account_map` as real tables (line items stay JSONB on `ap_flow_extractions` until then), history-first COA classification, tax split into `1180`/`2140`, FX normalization at invoice date, the review-queue UI (side-by-side document, confidence colouring, per-line account override), and the one-click post into `journalService`. Nothing in Phase 10 writes `journal_entries` or `ledger_lines`, directly or otherwise.
+Not built, and deliberately out of scope for Phase 11 despite appearing elsewhere as a one-line mention — corrected in [roadmap.md](roadmap.md#phase-11-as-delivered) once the discrepancy was noticed: **3-way matching and COGS tracking.** Neither is in this file's own Phase 11 ladder or acceptance criteria above, which are what this doc treats as authoritative.
 
-Also not built, beyond Phase 11's own scope: a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above), handwriting or non-English OCR, multi-document PDF splitting, duplicate-invoice detection, and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`; only `audit_logs` remembers it existed).
+Also not built: editing an extracted amount (only the account per line is editable — a wrong number is fixed by re-extracting, which discards prior overrides); un-posting or reversing from AP-Flow's own side (correction is LedgerCore's `POST /journals/:id/reverse`, reached from the linked journal entry — `POSTED` has no outbound edge in AP-Flow's own FSM); an outbox event or webhook firing on a posting; open-item or partial-document posting; duplicate-invoice detection; a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above); handwriting or non-English OCR; multi-document PDF splitting; and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`, and now also its materialized line items; only `audit_logs` remembers either existed).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change.

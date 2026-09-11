@@ -706,21 +706,26 @@ Storage is org-keyed and content-addressed (`server/storage/<org_id>/<ab>/<cd>/<
 
 ---
 
-### AP-Flow — `/api/v1/ap-flow` — Phase 10
+### AP-Flow — `/api/v1/ap-flow` — Phases 10–11
 
-Full spec: [ap-flow.md](ap-flow.md). Consumes the Document Vault above — a document is uploaded to `/api/v1/documents` first, then registered here by id. **Produces a draft; posts nothing to the ledger** (that's Phase 11).
+Full spec: [ap-flow.md](ap-flow.md). Consumes the Document Vault above — a document is uploaded to `/api/v1/documents` first, then registered here by id. Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into LedgerCore.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/documents` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Registers an already-vaulted PDF/PNG/JPEG document for extraction. `201`, status `PENDING`. Enqueues a background job — the response returns before extraction runs |
-| GET | `/documents` | any member | Paginated, optional `?status=PENDING\|PROCESSING\|EXTRACTED\|FAILED` |
-| GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`) and its extraction, if any |
+| GET | `/documents` | any member | Paginated, optional `?status=PENDING\|PROCESSING\|EXTRACTED\|FAILED\|POSTED` |
+| GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`), its extraction if any, and its line items (each carrying `accountId`/`accountCode`/`accountName`, `mappingSource`, `mappingConfidence`) |
 | GET | `/documents/:id/pages/:pageNumber/image` | any member | The **redacted** page image — PII pixels painted over, this is what was sent to the vision model, never the original |
-| POST | `/documents/:id/reextract` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Resets to `PENDING` and re-enqueues. `409` unless the document is `EXTRACTED` or `FAILED` |
+| POST | `/documents/:id/reextract` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Resets to `PENDING` and re-enqueues, discarding any line items and account overrides from the prior run. `409` unless the document is `EXTRACTED` or `FAILED` |
+| GET | `/review-queue` | any member | Documents with `status = EXTRACTED`, ordered arithmetic failure first, then any unmapped line, then lowest model confidence, then newest |
+| PATCH | `/documents/:id/line-items/:lineId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Overrides one line item's account. Only legal while the document is `EXTRACTED`; sets `mappingSource` to `MANUAL` |
+| POST | `/documents/:id/post` | `OWNER`, `ADMIN`, `ACCOUNTANT` | One-click approve & post — calls LedgerCore's `journalService` with `source_type = 'ap_flow'`, `source_id` = this document's id, freezing `journalEntryId`/`postedSha256`/`postedAt` on this row. No request body. `EXTRACTED → POSTED` only; `POSTED` is terminal, so re-posting is `409`, not a second entry |
 
-Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `409 This document is already registered with AP-Flow` · `409 Cannot re-extract a document in status <status>` · `422 AP-Flow can only process PDF, PNG and JPEG documents`.
+Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `400 accountId must be a UUID` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `404 Line item not found` (also another document's) · `409 This document is already registered with AP-Flow` · `409 Cannot re-extract a document in status <status>` · `409 Cannot edit line items on a document in status <status>` · `409 Cannot post a document in status <status>` · `422 AP-Flow can only process PDF, PNG and JPEG documents` · `422 Account is a header and cannot be posted to` · `422 Account is inactive` · `422 This document has no extraction to post` · `422 Extraction totals do not reconcile — re-extract before posting` · `422 This document needs an invoice date before it can be posted` · `422 This document needs a positive total before it can be posted` · `422 This document needs at least one line item before it can be posted` · `422 Every line item needs an account before this document can be posted` · `422 Extracted line items and tax do not sum to the document total` · `422 No exchange rate for <from> to <to> on or before <date>`.
 
-The pipeline (rasterize → local OCR → PII-mask → vision extraction → persist) runs entirely inside the background job, never inside the request. Extraction runs against Claude (`claude-sonnet-5`); a server with no `ANTHROPIC_API_KEY` configured processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` — nothing else in the app degrades. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
+The capture pipeline (rasterize → local OCR → PII-mask → vision extraction → account classification → persist) runs entirely inside the background job, never inside the request. Extraction runs against Claude (`claude-sonnet-5`); a server with no `ANTHROPIC_API_KEY` configured processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` — nothing else in the app degrades. Account classification (also `claude-sonnet-5`, a separate text call) degrades quietly instead: a missing key or a model error leaves any still-unmapped line `NONE` rather than failing the document, since the extraction already succeeded.
+
+GL coding is inferred in a fixed order, cheapest and most explainable first, and each tier that hits skips the ones after it: (1) the organization's own posting history for this vendor (`ap_flow_vendor_account_map`, keyed by a normalized vendor-name string, never LedgerCore's `vendors` table — rule 16), (2) a name-similarity match against the org's own postable expense accounts, (3) the model, given only the line descriptions and the chart's account codes, forced into a tool call so a code outside the chart is structurally discarded rather than becoming a suggestion. Posting itself debits the line items' own summed amount per account (never `subtotal_cents`, so a reviewer's override can never silently change the money), splits input tax to `1180 GST/VAT Input Credit` when present (never `2140`, which is the sales/output side), and resolves its exchange rate at the **invoice date** via LedgerCore's `fx_rates` — never the day it happens to be posted. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
 
 ---
 
@@ -733,18 +738,6 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 #### QuickBooks Online sync — Phase 17
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
-
-### AP-Flow — `/api/v1/ap-flow` — Phase 11
-
-Phase 10 (capture & extraction) is **built** and documented in the section above. Still to come, per [ap-flow.md](ap-flow.md):
-
-| Method | Path | Description |
-|---|---|---|
-| GET | `/review-queue` | Documents awaiting human approval, lowest confidence first |
-| PATCH | `/documents/:id/line-items/:lineId` | Override a suggested account before posting |
-| POST | `/documents/:id/post` | Approve and post into LedgerCore. `ACCOUNTANT` and above |
-
-`POST /documents/:id/post` will be the app boundary in practice: it calls LedgerCore's `journalService` with `source_type = 'ap_flow'`, and never writes `journal_entries` or `ledger_lines` itself (rule 16).
 
 ### The other five apps
 

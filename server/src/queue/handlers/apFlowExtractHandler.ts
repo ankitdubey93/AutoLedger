@@ -4,6 +4,8 @@ import { rasterize, redactPage, tesseractOcr } from '../../services/redactionSer
 import type { OcrAdapter } from '../../services/redactionService.js';
 import { extractFromPages } from '../../services/ap-flow/extractionService.js';
 import type { VisionClient } from '../../services/ap-flow/extractionService.js';
+import * as mappingService from '../../services/ap-flow/mappingService.js';
+import type { ClassificationClient } from '../../services/ap-flow/mappingService.js';
 import type { JobPayloads } from '../../types/jobs.js';
 import type { RedactedRegion } from '../../types/ap-flow.js';
 
@@ -25,7 +27,7 @@ async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
 
 export async function handleApFlowExtract(
   payload: JobPayloads['ap-flow-extract'],
-  deps?: { ocr?: OcrAdapter; vision?: VisionClient },
+  deps?: { ocr?: OcrAdapter; vision?: VisionClient; classifier?: ClassificationClient },
 ): Promise<void> {
   const { orgId, apFlowDocumentId } = payload;
   const ocr = deps?.ocr ?? tesseractOcr;
@@ -79,7 +81,19 @@ export async function handleApFlowExtract(
     // false: that PII is masked before any image leaves the machine.
     const extraction = await extractFromPages(redactedBuffers, deps?.vision);
 
-    await apFlowDocumentService.savePipelineResult(orgId, apFlowDocumentId, pipelinePages, extraction);
+    const classifications = await mappingService.classifyLineItems(
+      orgId,
+      { vendorName: extraction.vendorName, lineItems: extraction.lineItems },
+      deps?.classifier === undefined ? undefined : { classifier: deps.classifier },
+    );
+
+    await apFlowDocumentService.savePipelineResult(
+      orgId,
+      apFlowDocumentId,
+      pipelinePages,
+      extraction,
+      classifications,
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     await apFlowDocumentService.markFailed(orgId, apFlowDocumentId, message);
