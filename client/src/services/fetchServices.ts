@@ -2704,3 +2704,274 @@ export function updateApFlowLineItem(
 export function postApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
   return apiFetch(`/ap-flow/documents/${id}/post`, { method: 'POST' });
 }
+
+// ---------------------------------------------------------- fpa-engine (12)
+
+export type FpaModelStatus = 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+export type FpaScenarioKind = 'BASE' | 'UPSIDE' | 'DOWNSIDE' | 'CUSTOM';
+export type FpaAssumptionKind = 'GROWTH_BPS' | 'FIXED_CENTS' | 'PERCENT_OF_REVENUE_BPS';
+
+export interface FpaScenario {
+  id: string;
+  modelId: string;
+  name: string;
+  kind: FpaScenarioKind;
+  isDefault: boolean;
+  dsoDays: number;
+  dpoDays: number;
+  taxRateBps: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FpaModel {
+  id: string;
+  name: string;
+  description: string | null;
+  startsOn: string;
+  horizonMonths: number;
+  actualsThrough: string;
+  status: FpaModelStatus;
+  createdBy: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  scenarioCount: number;
+}
+
+export interface FpaModelDetail extends FpaModel {
+  scenarios: FpaScenario[];
+}
+
+export interface FpaAssumption {
+  id: string;
+  scenarioId: string;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  accountType: string;
+  kind: FpaAssumptionKind;
+  growthBps: number | null;
+  fixedCents: number | null;
+  percentOfRevenueBps: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FpaProjectedLine {
+  accountId: string;
+  code: string;
+  name: string;
+  type: string;
+  amountCents: number;
+}
+
+export interface FpaProjectedMonth {
+  month: string;
+  incomeStatement: {
+    lines: FpaProjectedLine[];
+    revenueCents: number;
+    costOfSalesCents: number;
+    grossProfitCents: number;
+    operatingExpensesCents: number;
+    operatingIncomeCents: number;
+    taxCents: number;
+    netIncomeCents: number;
+  };
+  cashFlow: {
+    netIncomeCents: number;
+    changeInReceivablesCents: number;
+    changeInPayablesCents: number;
+    netCashFlowCents: number;
+    openingCashCents: number;
+    closingCashCents: number;
+  };
+  balanceSheet: {
+    cashCents: number;
+    receivablesCents: number;
+    otherAssetsCents: number;
+    totalAssetsCents: number;
+    payablesCents: number;
+    otherLiabilitiesCents: number;
+    equityCents: number;
+    retainedEarningsCents: number;
+    totalLiabilitiesAndEquityCents: number;
+    balances: boolean;
+  };
+}
+
+export interface FpaProjection {
+  months: FpaProjectedMonth[];
+  runwayMonths: number | null;
+  cashOutMonth: string | null;
+  averageMonthlyBurnCents: number;
+  balances: boolean;
+}
+
+export interface FpaProjectionResponse {
+  modelId: string;
+  modelName: string;
+  scenarioId: string;
+  scenarioName: string;
+  baseCurrency: string;
+  actualsThrough: string;
+  actuals: { month: string; revenueCents: number; netIncomeCents: number }[];
+  projection: FpaProjection;
+}
+
+export interface FpaScenarioSummary {
+  scenarioId: string;
+  scenarioName: string;
+  kind: FpaScenarioKind;
+  isDefault: boolean;
+  runwayMonths: number | null;
+  cashOutMonth: string | null;
+  closingCashCents: number;
+  totalRevenueCents: number;
+  totalNetIncomeCents: number;
+  balances: boolean;
+}
+
+export interface FpaComparisonResponse {
+  modelId: string;
+  modelName: string;
+  baseCurrency: string;
+  scenarios: FpaScenarioSummary[];
+}
+
+/** GET /fpa-engine/models */
+export function listFpaModels(
+  params: { status?: FpaModelStatus; page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  models: FpaModel[];
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}> {
+  const query = new URLSearchParams();
+  if (params.status !== undefined) query.set('status', params.status);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/fpa-engine/models${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /fpa-engine/models/:id */
+export function getFpaModel(id: string, signal?: AbortSignal): Promise<{ success: boolean; model: FpaModelDetail }> {
+  return apiFetch(`/fpa-engine/models/${id}`, { signal: signal ?? null });
+}
+
+/** POST /fpa-engine/models */
+export function createFpaModel(body: {
+  name: string;
+  description?: string | null;
+  startsOn: string;
+  horizonMonths: number;
+  actualsThrough: string;
+}): Promise<{ success: boolean; model: FpaModelDetail }> {
+  return apiFetch('/fpa-engine/models', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /fpa-engine/models/:id */
+export function updateFpaModel(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string | null;
+    startsOn: string;
+    horizonMonths: number;
+    actualsThrough: string;
+    status: FpaModelStatus;
+  }>,
+): Promise<{ success: boolean; model: FpaModelDetail }> {
+  return apiFetch(`/fpa-engine/models/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /fpa-engine/models/:id */
+export async function deleteFpaModel(id: string): Promise<void> {
+  await apiFetch(`/fpa-engine/models/${id}`, { method: 'DELETE' });
+}
+
+/** GET /fpa-engine/models/:id/scenarios */
+export function listFpaScenarios(
+  modelId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; scenarios: FpaScenario[]; count: number }> {
+  return apiFetch(`/fpa-engine/models/${modelId}/scenarios`, { signal: signal ?? null });
+}
+
+/** POST /fpa-engine/models/:id/scenarios */
+export function createFpaScenario(
+  modelId: string,
+  body: { name: string; kind: FpaScenarioKind; dsoDays: number; dpoDays: number; taxRateBps: number },
+): Promise<{ success: boolean; scenario: FpaScenario }> {
+  return apiFetch(`/fpa-engine/models/${modelId}/scenarios`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /fpa-engine/scenarios/:id */
+export function updateFpaScenario(
+  id: string,
+  body: Partial<{
+    name: string;
+    kind: FpaScenarioKind;
+    isDefault: true;
+    dsoDays: number;
+    dpoDays: number;
+    taxRateBps: number;
+  }>,
+): Promise<{ success: boolean; scenario: FpaScenario }> {
+  return apiFetch(`/fpa-engine/scenarios/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /fpa-engine/scenarios/:id */
+export async function deleteFpaScenario(id: string): Promise<void> {
+  await apiFetch(`/fpa-engine/scenarios/${id}`, { method: 'DELETE' });
+}
+
+/** GET /fpa-engine/scenarios/:id/assumptions */
+export function listFpaAssumptions(
+  scenarioId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; assumptions: FpaAssumption[]; count: number }> {
+  return apiFetch(`/fpa-engine/scenarios/${scenarioId}/assumptions`, { signal: signal ?? null });
+}
+
+/** PUT /fpa-engine/scenarios/:id/assumptions/:accountId */
+export function upsertFpaAssumption(
+  scenarioId: string,
+  accountId: string,
+  body:
+    | { kind: 'GROWTH_BPS'; growthBps: number }
+    | { kind: 'FIXED_CENTS'; fixedCents: number }
+    | { kind: 'PERCENT_OF_REVENUE_BPS'; percentOfRevenueBps: number },
+): Promise<{ success: boolean; assumption: FpaAssumption }> {
+  return apiFetch(`/fpa-engine/scenarios/${scenarioId}/assumptions/${accountId}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+/** DELETE /fpa-engine/scenarios/:id/assumptions/:accountId */
+export async function deleteFpaAssumption(scenarioId: string, accountId: string): Promise<void> {
+  await apiFetch(`/fpa-engine/scenarios/${scenarioId}/assumptions/${accountId}`, { method: 'DELETE' });
+}
+
+/** GET /fpa-engine/scenarios/:id/projection */
+export function getFpaProjection(
+  scenarioId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & FpaProjectionResponse> {
+  return apiFetch(`/fpa-engine/scenarios/${scenarioId}/projection`, { signal: signal ?? null });
+}
+
+/** GET /fpa-engine/models/:id/comparison */
+export function getFpaComparison(
+  modelId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & FpaComparisonResponse> {
+  return apiFetch(`/fpa-engine/models/${modelId}/comparison`, { signal: signal ?? null });
+}

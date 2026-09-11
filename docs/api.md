@@ -729,6 +729,33 @@ GL coding is inferred in a fixed order, cheapest and most explainable first, and
 
 ---
 
+### FP&A Engine — `/api/v1/fpa-engine` — Phase 12
+
+Full spec: [fpa-engine.md](fpa-engine.md). Read is open to every member including `VIEWER`; creating or editing a model, scenario, or assumption needs `ACCOUNTANT` and above; deleting a model needs `OWNER`/`ADMIN` only, because it cascades away every scenario and assumption on it. Posts nothing to LedgerCore's GL — every route here is a read or an edit to FP&A's own tables.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/models` | any member | Paginated, optional `?status=DRAFT\|ACTIVE\|ARCHIVED` |
+| POST | `/models` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Creates a model plus its default `Base` scenario, one transaction. `422` if `actualsThrough` is not before `startsOn` |
+| GET | `/models/:id` | any member | One model plus every scenario on it |
+| PATCH | `/models/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update, including `status` — validated against `FPA_MODEL_TRANSITIONS` (`ARCHIVED → ACTIVE` is legal; `ARCHIVED` is not terminal) |
+| DELETE | `/models/:id` | `OWNER`, `ADMIN` | Deletes the model and cascades its scenarios and assumptions |
+| GET | `/models/:id/scenarios` | any member | Every scenario on the model, default first |
+| POST | `/models/:id/scenarios` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Creates a non-default scenario |
+| GET | `/models/:id/comparison` | any member | Every scenario's projection, reduced to a summary — runway, cash-out month, closing cash, totals, `balances` |
+| PATCH | `/scenarios/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update. `isDefault: true` un-defaults the current default first, in the same transaction |
+| DELETE | `/scenarios/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` on the default scenario or the model's last remaining one |
+| GET | `/scenarios/:id/assumptions` | any member | Every assumption on the scenario, joined against the chart in application code (this file's services never query `accounts` directly — rule 16) |
+| PUT | `/scenarios/:id/assumptions/:accountId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Upsert, `200` on both create and update — the resource is fully addressed by `(scenarioId, accountId)`. Body is a discriminated union on `kind` |
+| DELETE | `/scenarios/:id/assumptions/:accountId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Removes the assumption — the account reverts to flat-lining its last actual |
+| GET | `/scenarios/:id/projection` | any member | The scenario's linked 3-statement projection: trailing actuals, then a month-by-month income statement, cash flow, and balance sheet, plus `runwayMonths`/`cashOutMonth`/`averageMonthlyBurnCents` and a `balances` flag |
+
+Failure paths: `400 Invalid request body` (schema — `startsOn`/`actualsThrough` not the first of a month, `horizonMonths` outside 1–60, a kind/payload mismatch on an assumption) · `400 status must be one of DRAFT, ACTIVE, ARCHIVED` · `403` for a write below its role tier · `404 Model not found` / `404 Scenario not found` / `404 Assumption not found` (also another org's) · `409 A model with that name already exists` / `409 A scenario with that name already exists on this model` · `409 Cannot move a model from <status> to <status>` · `409 The default scenario cannot be deleted` · `409 A model must keep at least one scenario` · `422 actualsThrough must be before startsOn` · `422 Assumptions can only be set on a postable, active account` · `422 Assumptions apply to Revenue and Expense accounts only` · `422 A revenue account cannot be a percentage of revenue`.
+
+Every LedgerCore fact this app needs — posted actuals bucketed by month, the opening balance sheet, the cash/receivable/payable control accounts — arrives through two functions exported from LedgerCore's own `reportService` (`monthlyActualsByAccount`, `resolveControlAccounts`), never a direct query against `accounts`/`ledger_lines`/`journal_entries`/`ledger_settings` from this app's services (rule 16), proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|ledger_settings|ledger_invoice_settings)" server/src/services/fpa-engine/ server/src/controllers/fpa-engine/` returns nothing. The projection engine itself (`utils/fpaProjection.ts`) is a pure function with no database import, unit-tested without Postgres. See [fpa-engine.md](fpa-engine.md) for the full arithmetic and why its `balances` flag is a real proof rather than a hard-coded value.
+
+---
+
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
@@ -739,6 +766,6 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-### The other five apps
+### The other four apps
 
-TaxGuard AI, FP&A Engine, UnitEcon, BoardDeck Automator, and ForecasterPro have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.
+TaxGuard AI, UnitEcon, BoardDeck Automator, and ForecasterPro have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.

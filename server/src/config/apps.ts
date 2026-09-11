@@ -48,7 +48,7 @@ export const APPS = [
     domain: 'Financial Modeling',
     tagline: 'A linked 3-statement model you can stress-test.',
     skills: ['3-statement financial linking', 'Scenario modeling', 'Cash runway forecasting'],
-    status: 'planned',
+    status: 'building',
   },
   {
     slug: 'unitecon',

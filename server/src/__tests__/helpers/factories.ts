@@ -35,7 +35,8 @@ export async function resetTables(): Promise<void> {
               audit_logs, onboarding_states, migration_imports, migration_import_rows,
               documents, document_links,
               ap_flow_documents, ap_flow_pages, ap_flow_extractions,
-              ap_flow_line_items, ap_flow_vendor_account_map
+              ap_flow_line_items, ap_flow_vendor_account_map,
+              fpa_models, fpa_scenarios
      RESTART IDENTITY CASCADE`,
   );
 }

@@ -6,6 +6,8 @@ import {
   isAccountType,
   type BalanceSheet,
   type BankReconciliationReport,
+  type ControlAccounts,
+  type MonthlyActualRow,
   type ProfitAndLoss,
   type StatementRow,
   type StatementSection,
@@ -465,4 +467,111 @@ export async function bankReconciliation(
     statedClosingDifferenceCents:
       statedClosingBalanceCents === null ? null : statementBalanceCents - statedClosingBalanceCents,
   };
+}
+
+// ------------------------------------------------ Phase 12 — the FP&A actuals bridge
+//
+// These two functions are the rule-16 boundary FP&A Engine reaches through:
+// it never queries accounts, ledger_lines, journal_entries, ledger_settings
+// or ledger_invoice_settings directly (see services/fpa-engine/forecastService.ts's
+// own header). They live here, in LedgerCore's own reportService, because
+// LedgerCore owns those tables.
+
+interface MonthlyActualRowResult {
+  account_id: string;
+  code: string;
+  name: string;
+  type: string;
+  month: string;
+  debit_cents: string;
+  credit_cents: string;
+}
+
+/**
+ * Actuals bucketed by calendar month, base currency, for every account with
+ * activity in [from, to]. `INNER JOIN`, like `profitAndLoss` — a month with
+ * no activity on an account produces no row, which is exactly what a
+ * flat-lining projection engine wants: "no data" and "zero activity" are
+ * different facts, and the caller (forecastService) decides how to treat an
+ * account with no baseline row at all.
+ *
+ * Sums the base_* columns, never the native ones — the same ruling
+ * `trialBalance` and `profitAndLoss` already record: a report mixing
+ * currencies would be meaningless.
+ */
+export async function monthlyActualsByAccount(
+  orgId: string,
+  from: string,
+  to: string,
+): Promise<MonthlyActualRow[]> {
+  if (from > to) throw new ApiError(422, 'from must not be after to');
+
+  const { rows } = await pool.query<MonthlyActualRowResult>(
+    `SELECT a.id AS account_id, a.code, a.name, a.type,
+            date_trunc('month', e.entry_date)::date::text AS month,
+            COALESCE(SUM(l.base_debit_cents),  0)::text AS debit_cents,
+            COALESCE(SUM(l.base_credit_cents), 0)::text AS credit_cents
+       FROM accounts a
+       JOIN ledger_lines l    ON l.account_id = a.id           AND l.org_id = a.org_id
+       JOIN journal_entries e ON e.id = l.journal_entry_id     AND e.org_id = a.org_id
+      WHERE a.org_id = $1
+        AND e.entry_date >= $2::date
+        AND e.entry_date <= $3::date
+      GROUP BY a.id, a.code, a.name, a.type, date_trunc('month', e.entry_date)
+      ORDER BY month ASC, a.code ASC`,
+    [orgId, from, to],
+  );
+
+  return rows.map((row) => {
+    if (!isAccountType(row.type)) {
+      throw new Error(`Unknown account type "${row.type}" on account ${row.account_id}`);
+    }
+    return {
+      accountId: row.account_id,
+      code: row.code,
+      name: row.name,
+      type: row.type,
+      month: row.month,
+      debitCents: parseCents(row.debit_cents),
+      creditCents: parseCents(row.credit_cents),
+    };
+  });
+}
+
+/**
+ * The org's cash / receivable / payable control accounts, resolved per slot
+ * in this order: the configured settings column, else the default-chart
+ * code, else null. Mirrors `agingService`'s private control-account
+ * resolver, generalized to all three slots FP&A needs and exported so it is
+ * the one place that logic lives.
+ */
+export async function resolveControlAccounts(orgId: string): Promise<ControlAccounts> {
+  const { rows: settingsRows } = await pool.query<{
+    cash_account_id: string | null;
+    payable_account_id: string | null;
+  }>('SELECT cash_account_id, payable_account_id FROM ledger_settings WHERE org_id = $1', [orgId]);
+  const settings = settingsRows[0];
+
+  const { rows: invoiceSettingsRows } = await pool.query<{ receivable_account_id: string | null }>(
+    'SELECT receivable_account_id FROM ledger_invoice_settings WHERE org_id = $1',
+    [orgId],
+  );
+  const invoiceSettings = invoiceSettingsRows[0];
+
+  async function resolve(configured: string | null | undefined, fallbackCode: string): Promise<string | null> {
+    if (configured !== null && configured !== undefined) return configured;
+    const { rows } = await pool.query<{ id: string }>(
+      'SELECT id FROM accounts WHERE org_id = $1 AND code = $2 AND is_postable',
+      [orgId, fallbackCode],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  const [cashAccountId, receivableAccountId, payableAccountId] = await Promise.all([
+    resolve(settings?.cash_account_id, '1110'),
+    resolve(invoiceSettings?.receivable_account_id, '1120'),
+    resolve(settings?.payable_account_id, '2100'),
+  ]);
+
+  return { cashAccountId, receivableAccountId, payableAccountId };
 }

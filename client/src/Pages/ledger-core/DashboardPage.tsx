@@ -14,7 +14,7 @@ import { useOrg } from '../../context/OrgContext';
 import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { formatCents } from '../../utils/money';
-import TrendChart from './TrendChart';
+import TrendChart from '../../components/TrendChart';
 import MetricTile from './MetricTile';
 import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';

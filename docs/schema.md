@@ -458,6 +458,28 @@ See [api.md](api.md#ap-flow--apiv1ap-flow--phases-1011) for the routes, [study/a
 
 See [api.md](api.md#ap-flow--apiv1ap-flow--phases-1011) for the routes.
 
+## Phase 12 — FP&A Engine linked model — applied
+
+`033_fpa-engine_models.sql` adds two tables; `034_fpa-engine_assumptions.sql` adds a third.
+
+**`fpa_models`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `name` TEXT NOT NULL, non-blank, `<= 120` chars · `description` TEXT NULL, `<= 1000` chars · `starts_on` DATE NOT NULL, CHECK `EXTRACT(DAY FROM starts_on) = 1` (monthly calendar buckets, not LedgerCore's fiscal periods) · `horizon_months` INT NOT NULL, CHECK `1..60` · `actuals_through` DATE NOT NULL, same first-of-month CHECK · `status` TEXT NOT NULL DEFAULT `'DRAFT'`, CHECK IN (`DRAFT`,`ACTIVE`,`ARCHIVED`) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at`/`updated_at`, bumped by `set_updated_at`. `ux_fpa_models_name` — `UNIQUE (org_id, name)`. `ux_fpa_models_org_id_id` — the composite target `fpa_scenarios` references. `chk_fpa_models_actuals_before_start` — CHECK `actuals_through < starts_on`.
+
+**`fpa_scenarios`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `model_id` UUID NOT NULL, composite FK → `fpa_models (org_id, id)` ON DELETE CASCADE · `name` TEXT NOT NULL, non-blank, `<= 120` chars · `kind` TEXT NOT NULL, CHECK IN (`BASE`,`UPSIDE`,`DOWNSIDE`,`CUSTOM`) · `is_default` BOOLEAN NOT NULL DEFAULT `false` · `dso_days`/`dpo_days` INT NOT NULL DEFAULT `0`, CHECK `0..365` · `tax_rate_bps` INT NOT NULL DEFAULT `0`, CHECK `0..10000` · `created_at`/`updated_at`. `ux_fpa_scenarios_name` — `UNIQUE (org_id, model_id, name)`. **`ux_fpa_scenarios_one_default`** — a **partial unique index** `ON fpa_scenarios (org_id, model_id) WHERE is_default`, proving exactly one default scenario per model at the database level, the same technique migration 029's `ux_migration_imports_one_committed_opening` uses.
+
+**`fpa_assumptions`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `scenario_id` UUID NOT NULL, composite FK → `fpa_scenarios (org_id, id)` ON DELETE CASCADE · `account_id` UUID NOT NULL (**no `REFERENCES`** — see below) · `kind` TEXT NOT NULL, CHECK IN (`GROWTH_BPS`,`FIXED_CENTS`,`PERCENT_OF_REVENUE_BPS`) · `growth_bps` INT NULL, CHECK `-10000..100000` · `fixed_cents` BIGINT NULL (**no `>= 0` CHECK** — a contra-revenue or credit-side assumption legitimately reads negative, mirroring `ap_flow_line_items.amount_cents`) · `percent_of_revenue_bps` INT NULL, CHECK `0..10000` · `created_at`/`updated_at`. `ux_fpa_assumptions_account` — `UNIQUE (org_id, scenario_id, account_id)`, one assumption per account per scenario. **`chk_fpa_assumptions_kind_payload`** — a discriminated union expressed as a CHECK: the column the `kind` names is `NOT NULL` and the other two are `NULL`, so a `GROWTH_BPS` row can never carry a stale `fixed_cents`.
+
+**No `NUMERIC` anywhere in these three tables.** `dso_days`/`dpo_days`/`tax_rate_bps`/`growth_bps`/`percent_of_revenue_bps` are all plain `INT` basis points — every application downstream is `scaleCents(amount, n, 10000 | 30)`, exact `BigInt` scaling (guardrails rule 3). Contrast with `fx_rates.rate` (022), which genuinely needs 8 decimal places and pays for that by staying a string end to end.
+
+**No immutability trigger on any of the three tables, and no terminal FSM state.** Every other FSM in this schema enforces immutability once a document reaches the general ledger — `ap_flow_documents.POSTED` (032), `fiscal_periods.LOCKED` (015), `migration_imports.COMMITTED` (029). FP&A posts nothing to the GL, ever: a model and its scenarios are read-only arithmetic containers, never a source document, so rule 6 ("posted financial documents are immutable") does not apply and `PATCH`/`DELETE` on a model, scenario, or assumption are correct, not a violation.
+
+**Why `account_id` carries no `REFERENCES` here, the same ruling `ap_flow_line_items.account_id` (032) already carries.** Rules 8 and 16 collide on this column, and 16 wins: a schema-level FK from an FP&A table into LedgerCore's `accounts` table would hard-wire the app boundary into the database itself. Validity is enforced at the service layer instead — `assumptionService.upsertAssumption` calls `accountService.getAccountById` (`404` cross-tenant), refuses a non-postable or inactive account, and refuses `PERCENT_OF_REVENUE_BPS` on a Revenue account (the circularity guard the projection engine's two-pass design depends on). Safe because accounts are never actually deleted in this codebase — retired via `is_active = false` — so a dangling `account_id` is not a reachable state.
+
+**All three tables are audited** (`trg_fpa_models_audit`/`trg_fpa_scenarios_audit`/`trg_fpa_assumptions_audit`, `audit_row_change('fpa-engine')`) — a scenario's assumptions are business state a user deliberately sets, not derived output regenerated wholesale, the ruling `bank_match_suggestions`/`ap_flow_pages` carry in the opposite direction.
+
+No new table holds a projection. `GET /scenarios/:id/projection` computes every figure fresh from `fpa_assumptions` plus two functions exported from `reportService` (`monthlyActualsByAccount`, `resolveControlAccounts`) on every request — the same "no summary table" discipline `reportService`'s own header states for the trial balance and P&L.
+
+See [api.md](api.md#fpa-engine--apiv1fpa-engine--phase-12) for the routes and [fpa-engine.md](fpa-engine.md) for the full projection arithmetic.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

@@ -19,7 +19,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **9.5 ✅ done** | Platform — the Document Vault: `/api/v1/documents`, org-scoped hash-named file storage, cross-app attachment links. A half-step — see [Phase 9.5, as delivered](#phase-95-as-delivered) below | Needs 2 · blocks 10 |
 | **10 ✅ done** | AP-Flow — capture & extraction: local OCR with bounding boxes, **PII pixel masking**, Claude Vision → structured JSON with per-field confidence. Produces a draft; posts nothing. Upload and storage now come from 9.5 — see [Phase 10, as delivered](#phase-10-as-delivered) below | Needs 7, 9.5 |
 | **11 ✅ done** | AP-Flow — mapping, review & posting: vendor→COA classification from history, tax split into `1180`, FX at invoice date, review-queue UI, one-click post into LedgerCore with document-hash stamping — see [Phase 11, as delivered](#phase-11-as-delivered) below | Needs 5, 8, 10 |
-| **12** | FP&A Engine — 3-statement financial linking, scenario modeling, cash runway forecasting | Needs 4 |
+| **12 ✅ done** | FP&A Engine — linked 3-statement model: models & scenarios, integer-basis-point assumptions, a pure projection engine, cash runway, scenario comparison — see [Phase 12, as delivered](#phase-12-as-delivered) below | Needs 4 |
 | **13** | ForecasterPro — driver-based rolling forecasting, headcount planning, zero-based budgeting | Needs 12 |
 | **14** | UnitEcon — cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance | Needs 4 |
 | **15** | BoardDeck Automator — monthly close automation, BvA variance, automated `.pptx` deck generation | Needs 7, 13 |
@@ -28,7 +28,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 
 **Integration tests are not a phase.** They start in Phase 1 and grow with every module — see [testing.md](testing.md).
 
-Two apps have a spec detailed enough to warrant its own file: [ledger-core.md](ledger-core.md) (Phases 3–4, 6, 8, 9b, 17) and [ap-flow.md](ap-flow.md) (Phases 10–11). Each carries the full feature scope, a checkbox ladder, and per-phase acceptance criteria. This table stays the index; those files hold the detail.
+Three apps have a spec detailed enough to warrant its own file: [ledger-core.md](ledger-core.md) (Phases 3–4, 6, 8, 9b, 17), [ap-flow.md](ap-flow.md) (Phases 10–11), and [fpa-engine.md](fpa-engine.md) (Phase 12). Each carries the full feature scope, a checkbox ladder, and per-phase acceptance criteria. This table stays the index; those files hold the detail.
 
 ---
 
@@ -507,6 +507,30 @@ Client: `ApFlowReviewQueuePage` (the queue, confidence colour-banded red/amber/n
 
 ---
 
+## Phase 12, as delivered
+
+**Built in full**, 2026-09-11. FP&A Engine's first module — a linked 3-statement model, closing the "needs 4" gate this table has carried since Phase 4 landed. Zero new dependencies, server or client.
+
+Migrations 033–034 add three tables. `fpa_models` (a named forecast container — start month, horizon in months, the month through which actuals are final) and `fpa_scenarios` (DSO/DPO/tax-rate assumptions, exactly one default per model enforced by a partial unique index) landed together in 033; `fpa_assumptions` (per-account growth/fixed/percent-of-revenue rules) followed in 034. **None of the three carries an immutability trigger, and `fpa_models.status` has no terminal state** — the deliberate contrast with every other FSM in this schema (`ap_flow_documents.POSTED`, `fiscal_periods.LOCKED`, `migration_imports.COMMITTED`): FP&A posts nothing to the general ledger, ever, so rule 6 does not apply and `PATCH`/`DELETE` on a model, scenario, or assumption are correct, not a violation.
+
+**Percentages are integer basis points everywhere — `dso_days`, `dpo_days`, `tax_rate_bps`, `growth_bps`, `percent_of_revenue_bps` are all plain `INT`, never `NUMERIC`.** Every application downstream is `scaleCents(amount, n, 10000 | 30)`, exact `BigInt` scaling (guardrails rule 3) — deliberately unlike `fx_rates.rate` (Phase 8), which genuinely needs 8 decimal places and pays for that by staying a string end to end.
+
+**The rule-16 boundary, proven structurally, not just asserted:** `grep -rnE "FROM (accounts|ledger_lines|journal_entries|ledger_settings|ledger_invoice_settings)" server/src/services/fpa-engine/ server/src/controllers/fpa-engine/` returns nothing. Every LedgerCore fact FP&A needs arrives through two functions newly exported from LedgerCore's own `reportService` — `monthlyActualsByAccount` (posted actuals bucketed by calendar month, base currency) and `resolveControlAccounts` (the org's cash/receivable/payable control accounts, generalizing `agingService`'s own private resolver to all three slots) — never a direct query against LedgerCore's tables from this app's services. `services/fpa-engine/forecastService.ts` is the app boundary in practice, the identical ruling `services/ap-flow/postingService.ts` carries for writes, applied here to reads. `fpa_assumptions.account_id` carries **no `REFERENCES`** into `accounts` — rules 8 and 16 collide, and 16 wins, the same ruling migration 032 records for `ap_flow_line_items.account_id`.
+
+**`utils/fpaProjection.ts`'s `projectModel` is a pure function** — no database import, no clock, no I/O — mirroring `utils/matchScore.ts`'s own posture, and unit-tested (15 hand-computed cases) without a running Postgres. Per month: a first pass resolves every `GROWTH_BPS`/`FIXED_CENTS`/flat-lined account, revenue is then fully known, and a second pass resolves every `PERCENT_OF_REVENUE_BPS` account against it — one extra pass, never a fixed-point iteration, because `assumptionService.upsertAssumption`'s circularity guard refuses that kind on a Revenue account outright. Cost of sales splits from operating expenses by **code prefix** (`5xxx`), the identical ruling `reportService.profitAndLoss` already records — COGS is not a sixth account type (rule 12). A loss pays **no tax**. Working capital uses a **30-day month convention**. `otherAssetsCents`/`otherLiabilitiesCents`/`equityCents` are held **flat** at their opening value for the whole horizon — Phase 12 models no capex, no depreciation, no debt schedule, all explicitly ForecasterPro's (Phase 13) territory.
+
+**The balance sheet's `balances` flag is a proof, not a hard-coded value.** Substituting the cash-flow identity into the balance-sheet equality and simplifying by induction over the months reduces it to exactly the model's *opening* balance-sheet identity — since those opening figures come from `reportService.balanceSheet`, which already asserts its own `balances`, every projected month balances if and only if the actual books balanced on the day the model's actuals end. `fpaProjection.test.ts` proves the flag is load-bearing by breaking the opening equity figure by exactly one cent and watching it flip to `false`; the end-to-end integration suite (`projection.test.ts`) proves the same property against a real Postgres database through the real API, and separately proves the projection's month-0 opening cash matches LedgerCore's own `GET /reports/balance-sheet` to the cent.
+
+`/api/v1/fpa-engine` — 14 routes: models (8, including `GET /models/:id/comparison`), scenarios (3, including `GET /scenarios/:id/projection`), assumptions (3, nested under scenarios with `{ mergeParams: true }`). Read is open to every member including `VIEWER`; mutations need `ACCOUNTANT` and above; deleting a model needs `OWNER`/`ADMIN` only, since it cascades away every scenario and assumption. `PUT .../assumptions/:accountId` is a `200`-on-both upsert, never a `201`, since the caller cannot tell create from update and does not need to.
+
+Client: `FpaModelsPage`, `NewFpaModelPage`, `FpaModelDetailPage` (status transitions gated by the same client-side `FPA_MODEL_TRANSITIONS` mirror every FSM page in this suite uses, a scenario table with a **Set default** action, an assumption editor reusing `parseRateInput`/`formatRate` for every basis-point field), `FpaProjectionPage` (three month-columned statement tables, a visible `balances` badge — green or red, never hidden — and a runway callout), `FpaComparisonPage`. `TrendChart.tsx` was promoted from `Pages/ledger-core/` to `components/` for this phase, the same promotion `BackLink`/`ConfirmDialog`/`money.ts` received in Phase 10 — importing from another app's page directory would mirror a rule-16 violation on the client. No onboarding gate — Phase 12 has no setup wizard, exactly as AP-Flow has none.
+
+**Acceptance ✅ — verified.** Every projected month balances by integer equality when the opening books balance, and the property survives end-to-end through the real API. Cross-tenant isolation is proven across models, scenarios, assumptions, the actuals bridge, and the projection itself — ten separate cases, every one asserting `404`, never `403` or `200` — including a case that seeds ten times the money into a second organization in the same month and proves the first organization's projected revenue is unchanged to the cent. `npm run verify:integrity` passes; it is unaffected by this phase by construction, since FP&A posts nothing to the GL. **1050 server tests** (up from 984, plus the same 1 gated E2E case still reporting as skipped) **+ 197 client tests** (up from 189).
+
+**Deliberately not built:** scenario cloning; projection export (PDF/CSV/XLSX); fiscal-period-aligned horizons (projections use plain monthly calendar buckets, not `fiscal_periods`); multi-currency projection (actuals and openings come from `base_*_cents` only, the same base-currency-only limit Phase 6 recorded for bank reconciliation); external driver data (headcount, pipeline, CRM) feeding an assumption automatically; a stored or cached projection (every read recomputes from raw ledger lines, the same "no summary table" discipline `reportService`'s own header states). **Also not written: the study notes this phase would otherwise owe** — `date_trunc` monthly bucketing (PostgreSQL), the discriminated-union CHECK constraint (`chk_fpa_assumptions_kind_payload`, PostgreSQL), and exact basis-point integer scaling as an alternative to `fx_rates`'s string-decimal approach (TypeScript/architecture) — explicitly skipped for this phase at the user's direction, recorded here as debt rather than silently dropped.
+
+---
+
 ## App map
 
 The domain, headline skills, and DB/engineering pattern for each app in the suite.
@@ -533,9 +557,9 @@ A photograph of a receipt becomes a balanced, auditable journal entry. Full spec
 
 ### FP&A Engine — Financial Modeling — Phase 12
 
-A linked 3-statement model you can stress-test.
+A linked 3-statement model you can stress-test. Full spec: [fpa-engine.md](fpa-engine.md).
 
-*Pattern:* 3-statement financial linking (income statement → balance sheet → cash flow, changes propagate), scenario modeling, cash runway forecasting.
+*Pattern:* 3-statement financial linking (income statement → balance sheet → cash flow, changes propagate — proved by algebraic induction, not asserted), scenario modeling with integer-basis-point assumptions, cash runway forecasting. The projection engine (`utils/fpaProjection.ts`) is a pure function, unit-tested without a database, that consumes LedgerCore's posted actuals through two exported `reportService` functions and posts nothing back — a forecast is read-only arithmetic, never a source document.
 
 ### ForecasterPro — Budgeting & Planning — Phase 13
 

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { TrendPoint } from '../../services/fetchServices';
-import { formatCents } from '../../utils/money';
+import type { TrendPoint } from '../services/fetchServices';
+import { formatCents } from '../utils/money';
 
 /**
  * Revenue vs. expense over the trailing 6 months, as grouped bars.

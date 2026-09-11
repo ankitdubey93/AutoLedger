@@ -1015,3 +1015,28 @@ export interface MigrationCommitPreview {
   plugAccountCode: string;
   entryDate: string | null;
 }
+
+/* ------------------------------------------------ Phase 12 — the FP&A actuals bridge */
+
+/** One row per (account, month) of posted actuals, base currency. */
+export interface MonthlyActualRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  month: string; // 'YYYY-MM-01'
+  debitCents: number;
+  creditCents: number;
+}
+
+/**
+ * The three GL control accounts an FP&A model needs, resolved through
+ * LedgerCore so no other app queries ledger_settings, ledger_invoice_settings
+ * or accounts directly (guardrails rule 16). `null` means neither a
+ * configured setting nor the default-chart code was found.
+ */
+export interface ControlAccounts {
+  cashAccountId: string | null;
+  receivableAccountId: string | null;
+  payableAccountId: string | null;
+}

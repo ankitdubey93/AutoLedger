@@ -10,6 +10,7 @@ import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 import apFlowRoutes from './ap-flow/index.js';
+import fpaEngineRoutes from './fpa-engine/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -63,5 +64,8 @@ apiRouter.use('/ledger-core', ledgerCoreRoutes);
 
 // Phase 10 — AP-Flow, invoice capture & extraction.
 apiRouter.use('/ap-flow', apFlowRoutes);
+
+// Phase 12 — FP&A Engine, the linked 3-statement model.
+apiRouter.use('/fpa-engine', fpaEngineRoutes);
 
 export default apiRouter;
