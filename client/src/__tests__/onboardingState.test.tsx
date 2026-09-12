@@ -188,10 +188,15 @@ describe('Skip for now', () => {
 });
 
 describe('the suite checklist', () => {
+  // AuthProvider because the chooser also renders SandboxCard (Phase 18),
+  // which reads the session for its OWNER-only actions — the same provider
+  // the real app always mounts this page inside.
   function renderChooser() {
     return render(
       <MemoryRouter>
-        <AppChooserPage />
+        <AuthProvider>
+          <AppChooserPage />
+        </AuthProvider>
       </MemoryRouter>,
     );
   }

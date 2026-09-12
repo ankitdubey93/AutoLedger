@@ -1,0 +1,19 @@
+{
+  "comment": "Extra postable revenue accounts created on top of the 45-account default chart. UnitEcon's Price-Volume-Mix decomposition works at revenue-account grain, so two revenue accounts would make for a two-line PVM that proves very little. Four gives a decomposition worth looking at. Created through accountService.createAccount like any other account — nothing here bypasses the chart.",
+  "accounts": [
+    {
+      "code": "4300",
+      "name": "Subscription Revenue",
+      "type": "Revenue",
+      "parentCode": "4000",
+      "isPostable": true
+    },
+    {
+      "code": "4400",
+      "name": "Support & Maintenance Revenue",
+      "type": "Revenue",
+      "parentCode": "4000",
+      "isPostable": true
+    }
+  ]
+}

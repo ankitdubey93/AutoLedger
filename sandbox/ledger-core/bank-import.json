@@ -1,0 +1,33 @@
+{
+  "comment": "A policy, not a committed CSV. Bank lines have to match payments whose amounts are computed from the customer and vendor schedules at seed time, so a CSV with hard-coded amounts could never score against them - every line would land in the unmatched pile and the 40/30/30 matcher would look broken rather than working. Instead the seeder builds the statement CSV from the payments it actually created and applies the perturbations below, so the real matching engine runs against real data and produces real scores. Nothing here fabricates a score.",
+
+  "fileName": "operating-account-statement.csv",
+  "dateFormat": "ISO",
+  "cashAccountCode": "1110",
+
+  "window": {
+    "comment": "Only the current month is imported. Every real payment the seeder creates is dated in the current month regardless of which historical invoice or bill it settles, so a wider window would add only noise lines and no real matches - and BoardDeck's close-readiness check requires NO_UNMATCHED_BANK_LINES within a period's own date range, so any earlier OPEN month must stay completely free of bank_transactions rows to be a genuine READY candidate. A 1-month window is what makes that possible.",
+    "fromMonthOffset": 0,
+    "toMonthOffset": 0
+  },
+
+  "matching": {
+    "comment": "AUTO_MATCH_THRESHOLD is 85 (utils/matchScore.ts). Scoring is amount 40 / date 30 / counterparty 30, so an exact amount on the exact date with the counterparty name in the description clears 85 comfortably, while shifting the date and roughening the description drops a line below it and leaves it for a human. Both outcomes must exist or the approval queue is either empty or entirely full.",
+    "exactFraction": 0.6,
+    "perturbed": {
+      "comment": "Applied to the remaining lines. The amount is left EXACT - a bank does not round a payment - and only the date and the description are degraded, which is what actually happens when a payment clears a few days late under a payment-processor descriptor.",
+      "dateShiftDays": 3,
+      "descriptionStyle": "processor"
+    }
+  },
+
+  "noiseLines": {
+    "comment": "Lines with no counterpart in the ledger at all - the ordinary bank traffic that should never match anything. They are what make the unmatched pile honest rather than an artifact of the perturbation above. All within the current month, matching the narrowed window above.",
+    "monthlyBankFee": "38.00",
+    "monthlyInterest": "12.40",
+    "extras": [
+      { "monthOffset": 0, "day": 9, "description": "WIRE FEE INTL", "amount": "-45.00" },
+      { "monthOffset": 0, "day": 14, "description": "ACH RETURN FEE", "amount": "-25.00" }
+    ]
+  }
+}

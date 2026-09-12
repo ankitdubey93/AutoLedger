@@ -14,23 +14,26 @@ A suite of seven portfolio applications sharing one multi-tenant platform: Postg
 
 Double-entry accounting is the suite's system of record: LedgerCore is the General Ledger every other app posts into, rather than each app keeping its own private notion of money. All amounts are integer `BIGINT` cents; all business data is scoped to an `organization`.
 
-## Status — Phase 10 complete (AP-Flow capture & extraction)
+## Status — all seven apps built; Phase 18 sandbox dataset live
 
-Auth, tenancy, the app registry, **LedgerCore's general ledger through multi-currency FX, bank reconciliation and a staged migration importer**, the shared CDC audit trail, background jobs & webhooks, the platform Document Vault, and **AP-Flow's first module — capture & extraction** all work. The other five apps are `'planned'` — visible on the chooser, no routes behind them.
+Auth, tenancy, the app registry, and all seven portfolio apps are built end to end — **LedgerCore** (GL core, multi-currency FX, bank reconciliation, a staged migration importer), **AP-Flow** (capture, extraction, and posting into the GL), **FP&A Engine**, **ForecasterPro**, **UnitEcon**, **BoardDeck Automator**, and **TaxGuard AI** (RAG over `pgvector`) — plus the shared CDC audit trail, background jobs & webhooks, and the platform Document Vault. **Phase 18** adds a one-click, 24-month sandbox dataset covering all seven apps, seeded through the real services so every trigger, FSM and audit row fires genuinely (`npm run seed:demo`, or the in-app "Load sample data" action). Only **QuickBooks Online sync (Phase 17)** remains unbuilt — deferred, not dropped; see [docs/roadmap.md](docs/roadmap.md).
 
 | Built | Not built |
 |---|---|
 | Express + TypeScript server, strict compiler config; migrations, auth, tenancy, RBAC, org switching (Phases 0–1) | QuickBooks Online sync (Phase 17, deferred from 9) |
-| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | AP-Flow's mapping, review queue & posting — extraction produces a draft only (Phase 11) |
-| **LedgerCore (Phases 3–4, 6, 8, 9): GL core, live financial statements with fiscal period close/lock, bank reconciliation, multi-currency FX, and a staged chart/opening-balance importer — the balance invariant and immutability enforced by database triggers throughout** | FP&A Engine, UnitEcon, BoardDeck Automator, ForecasterPro, TaxGuard AI — no routes yet (Phases 12–16) |
+| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | |
+| **LedgerCore (Phases 3–4, 6, 8, 9): GL core, live financial statements with fiscal period close/lock, bank reconciliation, multi-currency FX, and a staged chart/opening-balance importer — the balance invariant and immutability enforced by database triggers throughout** | |
 | Onboarding, settings, dashboard, journal register, account ledgers, sales invoicing, accounts payable with settlement (Phases 3.5–3.9) | |
 | The shared CDC audit trail (Phase 5); background jobs, the transactional outbox, and financial-event webhooks (Phase 7) | |
 | Platform onboarding state and LedgerCore's data-migration importer (Phase 9); the platform Document Vault — org-scoped, content-addressed file storage shared across apps (Phase 9.5) | |
-| **AP-Flow (Phase 10): local OCR, checksum-verified PII pixel masking before any image reaches an external model, then Claude Vision extraction into a structured draft with per-field confidence — posts nothing to the ledger yet** | |
-| React + Vite client: login/register, app chooser, account page, the Document Vault, LedgerCore's full page set, AP-Flow's capture pages | |
-| Vitest — see [docs/roadmap.md](docs/roadmap.md#phase-10-as-delivered) for the current test count | |
+| **AP-Flow (Phases 10–11): local OCR, PII pixel masking, Claude Vision extraction, history-driven COA mapping, and one-click posting into the GL** | |
+| **FP&A Engine (12), ForecasterPro (13), UnitEcon (14), BoardDeck Automator (15): a linked 3-statement model, driver-based rolling forecasts and zero-based budgeting, cohort/LTV/PVM analytics, and close automation with automated `.pptx` deck generation** | |
+| **TaxGuard AI (16): tax act parsing, RAG over `pgvector`, cited answers with question redaction** | |
+| **The sandbox dataset (18): a 24-month demo across all seven apps, seeded through the real services** | |
+| React + Vite client: every app's full page set | |
+| 1370+ server tests, 234+ client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
-Nothing under `docs/` describes working code unless this table says so — it is target-state design. See [docs/roadmap.md](docs/roadmap.md).
+Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
 
 ## Running it
 
@@ -83,6 +86,8 @@ server/     Express + TypeScript API — controllers / services / routes / middl
             platform code (auth, organizations, apps) is unprefixed; each app's
             code nests under an <app-slug>/ subfolder in every layer
 client/     React + Vite frontend — same platform-vs-app split under Pages/
+sandbox/    Phase 18's demo fixtures — human-readable JSON/CSV, no binaries;
+            seeded through the real services, never a raw INSERT
 docs/       Architecture, schema, API, guardrails, roadmap
 study/      Interview-prep notes generated from this project's decisions
 ```

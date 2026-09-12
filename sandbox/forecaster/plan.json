@@ -1,0 +1,133 @@
+{
+  "comment": "One driver-based rolling plan. `actualsThroughMonthOffset` must be strictly before `startsOnMonthOffset` (planService.createPlan throws 422 otherwise). Budget figures deliberately diverge from seeded actuals in BOTH directions - marketing is underspent, contract delivery labour is overspent - because a budget-vs-actual where everything is favourable proves nothing, and BoardDeck's four board sections collapse to zeros if the variance is one-sided. Shapes here mirror services/forecaster/forecastLineService.ts's CreateForecastLineInput union and headcountService.ts's CreateHeadcountRoleInput exactly: a DRIVER_PRODUCT line needs a COUNT quantity driver and a CENTS rate driver, and a DRIVER_PERCENT line needs a CENTS source driver plus its own percentBps - the percentage lives on the line, not in a BPS driver.",
+
+  "plan": {
+    "name": "FY Operating Plan",
+    "description": "Driver-based operating plan covering the current quarter.",
+    "startsOnMonthOffset": -2,
+    "actualsThroughMonthOffset": -3,
+    "horizonMonths": 12
+  },
+
+  "drivers": [
+    {
+      "key": "active-accounts",
+      "name": "Active accounts",
+      "unitLabel": "accounts",
+      "kind": "COUNT",
+      "monthly": [
+        { "monthOffset": -2, "value": 6 },
+        { "monthOffset": -1, "value": 6 },
+        { "monthOffset": 0, "value": 7 }
+      ]
+    },
+    {
+      "key": "avg-monthly-fee",
+      "name": "Average monthly fee per account",
+      "unitLabel": "USD per account",
+      "kind": "CENTS",
+      "monthly": [
+        { "monthOffset": -2, "value": 950000 },
+        { "monthOffset": -1, "value": 970000 },
+        { "monthOffset": 0, "value": 990000 }
+      ]
+    },
+    {
+      "key": "planned-revenue",
+      "name": "Planned monthly revenue",
+      "unitLabel": "USD",
+      "kind": "CENTS",
+      "monthly": [
+        { "monthOffset": -2, "value": 5700000 },
+        { "monthOffset": -1, "value": 5820000 },
+        { "monthOffset": 0, "value": 6930000 }
+      ]
+    }
+  ],
+
+  "headcount": [
+    {
+      "title": "Delivery Consultant",
+      "department": "Delivery",
+      "accountCode": "5200",
+      "startsOnMonthOffset": -2,
+      "endsOnMonthOffset": null,
+      "fteCount": 6,
+      "annualSalaryCents": 11400000,
+      "loadingBps": 2200
+    },
+    {
+      "title": "Account Manager",
+      "department": "Revenue",
+      "accountCode": "6100",
+      "startsOnMonthOffset": -2,
+      "endsOnMonthOffset": null,
+      "fteCount": 3,
+      "annualSalaryCents": 9600000,
+      "loadingBps": 2200
+    },
+    {
+      "title": "Operations Analyst",
+      "department": "G&A",
+      "accountCode": "6100",
+      "startsOnMonthOffset": -1,
+      "endsOnMonthOffset": null,
+      "fteCount": 2,
+      "annualSalaryCents": 8200000,
+      "loadingBps": 2000
+    }
+  ],
+
+  "forecastLines": [
+    {
+      "kind": "DRIVER_PRODUCT",
+      "label": "Service revenue",
+      "accountCode": "4200",
+      "quantityDriverKey": "active-accounts",
+      "rateDriverKey": "avg-monthly-fee"
+    },
+    {
+      "kind": "DRIVER_PERCENT",
+      "label": "Contract delivery labour",
+      "accountCode": "5200",
+      "sourceDriverKey": "planned-revenue",
+      "percentBps": 3500
+    },
+    {
+      "kind": "FIXED_CENTS",
+      "label": "Rent and utilities",
+      "accountCode": "6110",
+      "fixedCents": 910000
+    },
+    {
+      "kind": "FIXED_CENTS",
+      "label": "Cloud infrastructure",
+      "accountCode": "6120",
+      "fixedCents": 820000
+    },
+    {
+      "kind": "FIXED_CENTS",
+      "label": "Marketing and demand generation",
+      "accountCode": "6400",
+      "fixedCents": 950000
+    }
+  ],
+
+  "budget": {
+    "comment": "Compiled from the build-up above, then approved so the freeze trigger - this app's only immutability trigger - is demonstrable. Every manual line carries a non-blank justification because the migration's CHECK requires one: that is what makes the budget zero-based rather than last year plus five percent.",
+    "label": "FY Operating Budget v1",
+    "approve": true,
+    "manualLines": [
+      {
+        "accountCode": "6200",
+        "amountCents": 240000,
+        "justification": "Annual statutory audit plus two contract reviews, quoted by Ashfield Legal LLP."
+      },
+      {
+        "accountCode": "6130",
+        "amountCents": 95000,
+        "justification": "Office consumables held at the current run rate; no headcount-driven increase assumed."
+      }
+    ]
+  }
+}

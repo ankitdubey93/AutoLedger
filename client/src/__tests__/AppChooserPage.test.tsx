@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AppChooserPage from '../Pages/AppChooserPage';
+import { AuthProvider } from '../context/AuthContext';
 
 /**
  * The chooser is the new post-login landing page — it replaced the single-app
@@ -33,10 +34,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/**
+ * Wrapped in AuthProvider because the chooser now renders SandboxCard
+ * (Phase 18), which reads the session to decide whether to show its
+ * OWNER-only actions — the same provider the real app always mounts this
+ * page inside. The provider renders its children in every session state,
+ * so the assertions below are unaffected by which state it settles on.
+ */
 function renderChooser() {
   return render(
     <MemoryRouter>
-      <AppChooserPage />
+      <AuthProvider>
+        <AppChooserPage />
+      </AuthProvider>
     </MemoryRouter>,
   );
 }

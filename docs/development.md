@@ -62,6 +62,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm run migrate` | Applies pending migrations |
 | `npm run db:reset` | **Destructive.** Drops schema `public` and re-runs every migration. Refuses when `NODE_ENV=production` |
 | `npm run verify:integrity` | Phase 5 — standalone check that total debits equal total credits, every journal entry balances, and no ledger line is orphaned, across the whole database. Prints one line per check and exits non-zero on any failure — the script to run in front of an auditor. From Phase 7 this also runs automatically once a day via the background worker |
+| `npm run seed:demo` | Phase 18 — seeds the 24-month sandbox dataset into the single organization in the database (or the one named by an argument: `npm run seed:demo -- "Acme Inc"`). Refuses when `NODE_ENV=production`, mirroring `db:reset`. Also reachable as `POST /api/v1/sandbox/load` |
 | `npm run worker` | Phase 7 — `tsx watch src/worker.ts`, a second process consuming the `integrity-check`, `outbox-drain`, and `webhook-deliver` queues. Requires `docker compose up -d redis` |
 | `npm run worker:start` | Runs the built `dist/worker.js` |
 | `npm test` | Vitest, single run |

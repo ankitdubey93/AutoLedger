@@ -201,6 +201,18 @@ export async function createApFlowDocument(
   orgId: string,
   createdBy: string,
   input: { documentId: string },
+  // Phase 18 — the sandbox seeder inserts a document and, with no worker and
+  // no API key involved, immediately supplies a canned result via
+  // savePipelineResult, skipping the real pipeline entirely. Enqueuing the
+  // real job here regardless would risk it racing that canned result against
+  // a genuine (and, with no key configured, failing) extraction attempt if a
+  // worker happens to be running concurrently — two processes writing
+  // ap_flow_pages/ap_flow_extractions for the same document with no
+  // ordering guarantee between them. `skipEnqueue` closes that race by
+  // never creating the job, rather than trying to win a timing race against
+  // it. Every real caller (the upload route) omits this option, so ordinary
+  // uploads are unaffected.
+  options?: { skipEnqueue?: boolean },
 ): Promise<ApFlowDocumentRecord> {
   const id = await withTransaction(async (client) => {
     const vaultDoc = await client.query<{ id: string; mime_type: string }>(
@@ -252,11 +264,13 @@ export async function createApFlowDocument(
   // stuck at PENDING). That gap is accepted: nothing financial is at stake,
   // the document is visibly PENDING, and POST /:id/reextract is the
   // user-visible repair — this is not the outbox case rule 5 exists for.
-  await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id.id }, {
-    // BullMQ rejects ':' in a custom jobId — '-' is the safe delimiter (see
-    // outboxDrainHandler.ts and webhookDeliveryController.ts).
-    jobId: `ap-flow-extract-${id.id}`,
-  });
+  if (options?.skipEnqueue !== true) {
+    await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id.id }, {
+      // BullMQ rejects ':' in a custom jobId — '-' is the safe delimiter (see
+      // outboxDrainHandler.ts and webhookDeliveryController.ts).
+      jobId: `ap-flow-extract-${id.id}`,
+    });
+  }
 
   return loadDocument(orgId, id.id);
 }

@@ -3915,3 +3915,66 @@ export function askQuestion(input: {
 export async function deleteQuestion(id: string): Promise<void> {
   await apiFetch(`/taxguard/questions/${id}`, { method: 'DELETE' });
 }
+
+/* ------------------------------------------------- platform: sandbox (Phase 18) */
+
+/** Mirrors server/src/types/sandbox.ts's SandboxCounts. */
+export interface SandboxCounts {
+  customers: number;
+  vendors: number;
+  invoices: number;
+  bills: number;
+  payments: number;
+  bankLines: number;
+  apFlowDocuments: number;
+  forecastPlans: number;
+  fpaModels: number;
+  productLines: number;
+  closeRuns: number;
+  corpusDocuments: number;
+}
+
+/** Mirrors server/src/types/sandbox.ts's SandboxDataset. */
+export interface SandboxDataset {
+  orgId: string;
+  datasetVersion: string;
+  /** 'YYYY-MM-01' — the month every fixture's relative offset was resolved against. */
+  anchorMonth: string;
+  counts: SandboxCounts;
+  loadedAt: string;
+}
+
+/** Mirrors server/src/types/sandbox.ts's SandboxStatus. */
+export interface SandboxStatus {
+  loaded: boolean;
+  dataset: SandboxDataset | null;
+}
+
+/** GET /sandbox — platform-level; open to every member. */
+export function getSandboxStatus(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; sandbox: SandboxStatus }> {
+  return apiFetch('/sandbox', { signal: signal ?? null });
+}
+
+/**
+ * POST /sandbox/load — OWNER only. Seeds 24 months across all seven apps
+ * through the real services, so this takes tens of seconds, not milliseconds.
+ * A second call is refused with 409 by the database's own UNIQUE (org_id).
+ */
+export async function loadSandbox(): Promise<SandboxDataset> {
+  const body = await apiFetch<{ success: boolean; dataset: SandboxDataset }>('/sandbox/load', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  return body.dataset;
+}
+
+/**
+ * DELETE /sandbox — OWNER only. Clears the load marker ONLY; the seeded
+ * financial records stay, because posted documents are immutable by trigger
+ * (guardrails rule 6). Removing them means deleting the organization.
+ */
+export async function unloadSandbox(): Promise<void> {
+  await apiFetch('/sandbox', { method: 'DELETE' });
+}

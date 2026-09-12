@@ -1,0 +1,220 @@
+{
+  "comment": "Twelve customers acquired across offsets -23..-2. `monthly` is the invoiced amount for each consecutive month starting at `cohortOffset`; the array ending is the customer churning. UnitEcon assigns a cohort from a customer's earliest positive-revenue month searched over ALL history, so acquisitions must be spread across the window rather than bunched at the start, and revenue must taper, or the retention matrix reads 100% everywhere and proves nothing. Two customers bill in a non-base currency to exercise the FX engine; UnitEcon's PVM excludes those and reports the count honestly, which is the behaviour being demonstrated.",
+  "customers": [
+    {
+      "key": "acme",
+      "name": "Acme Manufacturing Co",
+      "email": "ap@acme.example",
+      "phone": "+1-555-0142",
+      "billingAddress": "2100 Industrial Parkway, Cleveland, OH 44114",
+      "taxNumber": "US-34-2910447",
+      "notes": "Anchor account. Renewed twice.",
+      "cohortOffset": -23,
+      "currency": "USD",
+      "revenueAccount": "4100",
+      "taxRateBp": 850,
+      "paysInDays": 27,
+      "monthly": [
+        "14500.00", "14500.00", "14500.00", "15200.00", "15200.00", "15200.00",
+        "15200.00", "16100.00", "16100.00", "16100.00", "16100.00", "16100.00",
+        "17400.00", "17400.00", "17400.00", "17400.00", "18200.00", "18200.00",
+        "18200.00", "18200.00", "19000.00", "19000.00", "19000.00", "19000.00"
+      ]
+    },
+    {
+      "key": "borealis",
+      "name": "Borealis Freight Ltd",
+      "email": "accounts@borealis.example",
+      "phone": "+1-555-0178",
+      "billingAddress": "88 Dockside Road, Duluth, MN 55802",
+      "taxNumber": "US-41-8827310",
+      "notes": "Churned after a pricing change.",
+      "cohortOffset": -23,
+      "currency": "USD",
+      "revenueAccount": "4200",
+      "taxRateBp": 850,
+      "paysInDays": 41,
+      "monthly": [
+        "9200.00", "9200.00", "8600.00", "8600.00", "7900.00",
+        "7900.00", "6800.00", "6100.00", "4400.00", "2200.00"
+      ]
+    },
+    {
+      "key": "cedarworks",
+      "name": "Cedarworks Design Studio",
+      "email": "finance@cedarworks.example",
+      "phone": "+1-555-0193",
+      "billingAddress": "17 Mill Lane, Asheville, NC 28801",
+      "taxNumber": "US-56-1120934",
+      "notes": null,
+      "cohortOffset": -22,
+      "currency": "USD",
+      "revenueAccount": "4300",
+      "taxRateBp": 850,
+      "paysInDays": 30,
+      "monthly": [
+        "6400.00", "6400.00", "6400.00", "6400.00", "6900.00", "6900.00",
+        "6900.00", "6900.00", "6900.00", "7300.00", "7300.00", "7300.00",
+        "7300.00", "6800.00", "6800.00", "6100.00", "5400.00", "4900.00"
+      ]
+    },
+    {
+      "key": "delta-labs",
+      "name": "Delta Labs GmbH",
+      "email": "kreditoren@deltalabs.example",
+      "phone": "+49-30-555-0117",
+      "billingAddress": "Chausseestrasse 42, 10115 Berlin, Germany",
+      "taxNumber": "DE-812394771",
+      "notes": "Bills in EUR. Excluded from PVM by design.",
+      "cohortOffset": -20,
+      "currency": "EUR",
+      "revenueAccount": "4100",
+      "taxRateBp": 1900,
+      "paysInDays": 45,
+      "monthly": [
+        "11000.00", "11000.00", "11000.00", "11800.00", "11800.00",
+        "11800.00", "11800.00", "12400.00", "12400.00", "12400.00",
+        "12400.00", "13100.00", "13100.00", "13100.00", "13100.00"
+      ]
+    },
+    {
+      "key": "eastbrook",
+      "name": "Eastbrook Health Partners",
+      "email": "payables@eastbrook.example",
+      "phone": "+1-555-0210",
+      "billingAddress": "400 Medical Center Drive, Rochester, NY 14620",
+      "taxNumber": "US-22-4471908",
+      "notes": null,
+      "cohortOffset": -18,
+      "currency": "USD",
+      "revenueAccount": "4400",
+      "taxRateBp": 850,
+      "paysInDays": 52,
+      "monthly": [
+        "8800.00", "8800.00", "8800.00", "8800.00", "9400.00", "9400.00",
+        "9400.00", "9400.00", "9400.00", "8900.00", "8900.00", "8200.00",
+        "7600.00"
+      ]
+    },
+    {
+      "key": "fairlight",
+      "name": "Fairlight Media Group",
+      "email": "ap@fairlight.example",
+      "phone": "+1-555-0234",
+      "billingAddress": "915 Broadway, Nashville, TN 37203",
+      "taxNumber": "US-62-3318805",
+      "notes": "Churned. Cited budget cuts.",
+      "cohortOffset": -16,
+      "currency": "USD",
+      "revenueAccount": "4200",
+      "taxRateBp": 850,
+      "paysInDays": 35,
+      "monthly": [
+        "5600.00", "5600.00", "5200.00", "5200.00", "4700.00",
+        "4200.00", "3600.00", "2800.00", "1400.00"
+      ]
+    },
+    {
+      "key": "granite",
+      "name": "Granite Peak Outfitters",
+      "email": "accounting@granitepeak.example",
+      "phone": "+1-555-0256",
+      "billingAddress": "62 Summit Road, Boulder, CO 80302",
+      "taxNumber": "US-84-7719223",
+      "notes": null,
+      "cohortOffset": -14,
+      "currency": "USD",
+      "revenueAccount": "4100",
+      "taxRateBp": 850,
+      "paysInDays": 29,
+      "monthly": [
+        "7100.00", "7100.00", "7100.00", "7600.00", "7600.00", "7600.00",
+        "7600.00", "8100.00", "8100.00", "8100.00", "8100.00"
+      ]
+    },
+    {
+      "key": "harborview",
+      "name": "Harborview Capital LLP",
+      "email": "invoices@harborview.example",
+      "phone": "+44-20-7555-0188",
+      "billingAddress": "34 Lombard Street, London EC3V 9BQ, United Kingdom",
+      "taxNumber": "GB-449102778",
+      "notes": "Bills in GBP. Excluded from PVM by design.",
+      "cohortOffset": -11,
+      "currency": "GBP",
+      "revenueAccount": "4300",
+      "taxRateBp": 2000,
+      "paysInDays": 38,
+      "monthly": [
+        "9600.00", "9600.00", "9600.00", "10200.00", "10200.00", "10200.00",
+        "10200.00", "10900.00", "10900.00", "10900.00", "10900.00", "10900.00"
+      ]
+    },
+    {
+      "key": "ironwood",
+      "name": "Ironwood Logistics Inc",
+      "email": "ap@ironwoodlog.example",
+      "phone": "+1-555-0271",
+      "billingAddress": "7700 Container Way, Newark, NJ 07114",
+      "taxNumber": "US-13-9902384",
+      "notes": null,
+      "cohortOffset": -9,
+      "currency": "USD",
+      "revenueAccount": "4200",
+      "taxRateBp": 850,
+      "paysInDays": 33,
+      "monthly": [
+        "6800.00", "6800.00", "6800.00", "7200.00", "7200.00",
+        "7200.00", "7200.00", "6900.00", "6400.00", "6400.00"
+      ]
+    },
+    {
+      "key": "juniper",
+      "name": "Juniper Retail Holdings",
+      "email": "finance@juniperretail.example",
+      "phone": "+1-555-0288",
+      "billingAddress": "230 Commerce Street, Austin, TX 78701",
+      "taxNumber": "US-74-5583017",
+      "notes": null,
+      "cohortOffset": -6,
+      "currency": "USD",
+      "revenueAccount": "4400",
+      "taxRateBp": 850,
+      "paysInDays": 31,
+      "monthly": [
+        "5900.00", "5900.00", "5900.00", "6300.00", "6300.00", "6300.00",
+        "6300.00"
+      ]
+    },
+    {
+      "key": "kestrel",
+      "name": "Kestrel Analytics",
+      "email": "ap@kestrelanalytics.example",
+      "phone": "+1-555-0299",
+      "billingAddress": "1 Innovation Plaza, Seattle, WA 98109",
+      "taxNumber": "US-91-2204558",
+      "notes": null,
+      "cohortOffset": -4,
+      "currency": "USD",
+      "revenueAccount": "4300",
+      "taxRateBp": 850,
+      "paysInDays": 26,
+      "monthly": ["4200.00", "4200.00", "4200.00", "4700.00", "4700.00"]
+    },
+    {
+      "key": "lumen",
+      "name": "Lumen Civic Trust",
+      "email": "accounts@lumencivic.example",
+      "phone": "+1-555-0304",
+      "billingAddress": "55 Statehouse Square, Hartford, CT 06103",
+      "taxNumber": "US-06-7781290",
+      "notes": "Newest account.",
+      "cohortOffset": -2,
+      "currency": "USD",
+      "revenueAccount": "4200",
+      "taxRateBp": 850,
+      "paysInDays": 30,
+      "monthly": ["3800.00", "3800.00", "3800.00"]
+    }
+  ]
+}

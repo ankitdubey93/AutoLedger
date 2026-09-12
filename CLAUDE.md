@@ -14,7 +14,7 @@ AutoLedger is a suite, not one app: a shared identity/tenancy platform hosting *
 
 All seven apps have real routes (`status: 'building'` in `server/src/config/apps.ts`) — TaxGuard AI was the last to flip, in Phase 16.
 
-## State: Phase 16 done — TaxGuard AI tax act parsing, RAG over pgvector, cited answers
+## State: Phase 18 done — the sandbox dataset: one-click 24-month demo data across all seven apps
 
 On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, ~65 files) was **deleted deliberately** for a from-scratch rebuild. There is no legacy code to preserve, extend, or migrate. Do not reference old files by path — they do not exist.
 
@@ -42,7 +42,8 @@ On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, 
 - **Phase 13** — ForecasterPro: driver-based rolling forecasts, headcount planning, zero-based budgeting with an approval freeze.
 - **Phase 14** — UnitEcon: cohort retention matrices, LTV/CAC from configured acquisition accounts, Price-Volume-Mix variance at revenue-account grain.
 - **Phase 15** — BoardDeck Automator: five-check monthly close readiness against a LedgerCore fiscal period, budget-vs-actual at board-section grain, background-job `.pptx` deck generation.
-- **Phase 16** — TaxGuard AI: tax act PDF ingestion (`pgvector`-backed corpus, background-job embedding), retrieval-grounded cited answers, question redaction before any provider call. **1370 server tests + 234 client tests** (current totals; see [docs/roadmap.md](docs/roadmap.md#phase-16-as-delivered)).
+- **Phase 16** — TaxGuard AI: tax act PDF ingestion (`pgvector`-backed corpus, background-job embedding), retrieval-grounded cited answers, question redaction before any provider call. 1370 server + 234 client tests at the time (see [docs/roadmap.md](docs/roadmap.md#phase-16-as-delivered)).
+- **Phase 18** — the sandbox dataset: a one-click, 24-month demo across all seven apps, seeded through the real services (`invoiceService.createInvoice`, `billService.approveBill`, `bankMatchService.matchTransaction`, …) so every trigger, FSM and audit row fires genuinely. `POST /api/v1/sandbox/load`, `npm run seed:demo`, and an `OWNER`-only card on the app chooser. **1394 server tests + 244 client tests** (current totals; see [docs/roadmap.md](docs/roadmap.md#phase-18-as-delivered)). (Phase 17, QuickBooks, stays deferred and unbuilt.)
 
 **Not built** — QuickBooks sync (deferred from Phase 9 to 17), and every deliberate scope gap each shipped phase carries (e.g. no credit notes/vendor credits/partial void, no year-end closing entry, no `audit_logs` retention, no Document Vault object storage, no AP-Flow 3-way matching, no FP&A scenario cloning, no ForecasterPro formula language, no UnitEcon SKU-level dimension or churn model, no BoardDeck deck template/branding, no PDF/XLSX export, no TaxGuard in-place re-ingest or measured retrieval-precision figure). **None of this is summarized here** — each phase's own "Deliberately not built" note lives in [docs/roadmap.md](docs/roadmap.md), and each app's own gaps in its spec file ([ledger-core.md](docs/ledger-core.md), [ap-flow.md](docs/ap-flow.md), [fpa-engine.md](docs/fpa-engine.md), [forecaster.md](docs/forecaster.md), [unitecon.md](docs/unitecon.md), [taxguard.md](docs/taxguard.md)) — read the relevant section before claiming a capability exists or doesn't.
 

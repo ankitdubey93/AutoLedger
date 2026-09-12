@@ -1,0 +1,108 @@
+{
+  "comment": "Three supplier invoices, seeded WITHOUT running the capture pipeline. Reaching EXTRACTED normally needs rasterization, local OCR, PII masking, a vision call and a running worker; the seeder instead calls apFlowDocumentService.savePipelineResult with the canned results below, which lands a genuinely EXTRACTED document - real rows, real FSM transition, real audit trail - with no API key and no worker. Uploading a fresh invoice through the UI still exercises the real pipeline when a key is configured. Amounts are decimal strings and are parsed through parseMoneyText at load, exactly as they would be coming off a vision model, so no float ever touches a cents value. `arithmeticOk` is the extractor's own subtotal + tax = total check and must agree with the numbers here, or the seeded document would claim a validation state its own data contradicts.",
+
+  "pageImage": {
+    "comment": "No binary blobs are committed. The seeder renders a plain invoice-looking PNG per document with sharp (a dependency since Phase 10) from the values below, writes it through storageService.put, and uses the returned SHA-256 as the page's redactedSha256. That keeps the repo text-only while still producing real bytes an auditor can open from the ledger line, and the image genuinely matches what the extraction claims.",
+    "widthPx": 1240,
+    "heightPx": 1754
+  },
+
+  "documents": [
+    {
+      "key": "cloudspan-latest",
+      "originalFilename": "cloudspan-invoice-8841.png",
+      "monthOffset": -1,
+      "day": 6,
+      "outcome": "POSTED",
+      "outcomeComment": "Posted through postingService so the AP-Flow -> LedgerCore link is visible end to end: the journal entry carries source_type 'ap_flow' and the source document's SHA-256, so an auditor can walk from a ledger line back to the original image.",
+      "extraction": {
+        "vendorName": "Cloudspan Infrastructure",
+        "invoiceNumber": "CS-8841",
+        "currency": "USD",
+        "subtotal": "6400.00",
+        "tax": "544.00",
+        "total": "6944.00",
+        "arithmeticOk": true,
+        "validationErrors": [],
+        "fieldConfidence": {
+          "vendorName": 0.97,
+          "invoiceNumber": 0.95,
+          "invoiceDate": 0.93,
+          "currency": 0.99,
+          "subtotal": 0.96,
+          "tax": 0.94,
+          "total": 0.98
+        },
+        "lineItems": [
+          { "description": "Managed Kubernetes cluster - production", "amount": "4100.00", "accountCode": "6120" },
+          { "description": "Object storage 14 TB", "amount": "1500.00", "accountCode": "6120" },
+          { "description": "Egress bandwidth", "amount": "800.00", "accountCode": "6120" }
+        ]
+      }
+    },
+    {
+      "key": "brightpath-review",
+      "originalFilename": "brightpath-invoice-2207.png",
+      "monthOffset": 0,
+      "day": 4,
+      "outcome": "REVIEW",
+      "outcomeComment": "Left EXTRACTED so the review queue is not empty. Its second line is deliberately low-confidence and unmapped, which is exactly the case the human-in-the-loop screen exists for - a reviewer picks the account before it can post.",
+      "extraction": {
+        "vendorName": "Brightpath Media",
+        "invoiceNumber": "BPM-2207",
+        "currency": "USD",
+        "subtotal": "6800.00",
+        "tax": "578.00",
+        "total": "7378.00",
+        "arithmeticOk": true,
+        "validationErrors": [],
+        "fieldConfidence": {
+          "vendorName": 0.96,
+          "invoiceNumber": 0.91,
+          "invoiceDate": 0.88,
+          "currency": 0.99,
+          "subtotal": 0.94,
+          "tax": 0.9,
+          "total": 0.95
+        },
+        "lineItems": [
+          { "description": "Paid search management - monthly retainer", "amount": "4800.00", "accountCode": "6400" },
+          { "description": "Creative production - misc", "amount": "2000.00", "accountCode": null }
+        ]
+      }
+    },
+    {
+      "key": "quill-arithmetic-flag",
+      "originalFilename": "quill-invoice-5512.png",
+      "monthOffset": 0,
+      "day": 11,
+      "outcome": "REVIEW",
+      "outcomeComment": "Subtotal plus tax does NOT equal the printed total - a real and common defect on a scanned invoice. arithmeticOk is false and the mismatch is recorded in validationErrors, so the review screen shows the extractor refusing to paper over a document it could not reconcile. This is the honest-failure case; without it the demo only ever shows the happy path.",
+      "extraction": {
+        "vendorName": "Quill Office Supply",
+        "invoiceNumber": "QOS-5512",
+        "currency": "USD",
+        "subtotal": "970.00",
+        "tax": "82.45",
+        "total": "1058.45",
+        "arithmeticOk": false,
+        "validationErrors": [
+          "subtotal + tax (1052.45) does not equal the stated total (1058.45)"
+        ],
+        "fieldConfidence": {
+          "vendorName": 0.93,
+          "invoiceNumber": 0.84,
+          "invoiceDate": 0.79,
+          "currency": 0.98,
+          "subtotal": 0.81,
+          "tax": 0.68,
+          "total": 0.86
+        },
+        "lineItems": [
+          { "description": "Copy paper A4 80gsm - 40 reams", "amount": "520.00", "accountCode": "6130" },
+          { "description": "Toner cartridges - assorted", "amount": "450.00", "accountCode": "6130" }
+        ]
+      }
+    }
+  ]
+}

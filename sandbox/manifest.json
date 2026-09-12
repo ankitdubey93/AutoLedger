@@ -1,0 +1,15 @@
+{
+  "datasetVersion": "1.0.0",
+  "baseCurrency": "USD",
+  "months": 24,
+  "description": "A 24-month B2B services business with FX exposure, used to demonstrate all seven AutoLedger apps.",
+  "apps": [
+    "ledger-core",
+    "ap-flow",
+    "forecaster",
+    "fpa-engine",
+    "unitecon",
+    "boarddeck",
+    "taxguard"
+  ]
+}

@@ -1,0 +1,31 @@
+{
+  "comment": "UnitEcon reads its settings with defaults in code and does not seed a row on read, so this fixture is what turns the defaults into a deliberate configuration. `acquisitionAccountIds` is a REPLACE list, not a merge - the seeder sends the full set. Marketing (6400) and the account-management share of salaries are what this business actually spends to acquire a customer; rent and audit fees are not, and including them would inflate CAC into meaninglessness. Product lines map to revenue accounts because the PVM decomposition's product dimension IS the revenue account - that is why the dataset creates 4300 and 4400 on top of the default chart, so the decomposition has four lines rather than two.",
+
+  "settings": {
+    "grossMarginBps": 6800,
+    "acquisitionAccountCodes": ["6400"]
+  },
+
+  "productLines": [
+    {
+      "revenueAccountCode": "4100",
+      "name": "Implementation",
+      "unitLabel": "project"
+    },
+    {
+      "revenueAccountCode": "4200",
+      "name": "Advisory Services",
+      "unitLabel": "engagement"
+    },
+    {
+      "revenueAccountCode": "4300",
+      "name": "Platform Subscription",
+      "unitLabel": "seat-month"
+    },
+    {
+      "revenueAccountCode": "4400",
+      "name": "Support & Maintenance",
+      "unitLabel": "contract"
+    }
+  ]
+}

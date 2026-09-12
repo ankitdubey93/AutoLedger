@@ -890,6 +890,28 @@ The **only** route into the platform anywhere in this app is `documentService.ge
 
 ---
 
+### Sandbox — `/api/v1/sandbox` — Phase 18
+
+A one-click, 24-month demo dataset covering all seven apps, seeded through the real services so every trigger, FSM and audit row fires genuinely — see [schema.md](schema.md#phase-18--the-sandbox-dataset-platform--applied). Platform-level, not namespaced under any app.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | `{ loaded, dataset }` — whether sample data is loaded, and its version/anchor month/counts if so |
+| POST | `/load` | `OWNER` | Seeds the dataset. `201` with the new `dataset` row. Writes two years of financial documents into the organization's own books, which is why this is `OWNER`-only rather than `OWNER`/`ADMIN` |
+| DELETE | `/` | `OWNER` | Removes the load marker only |
+
+`POST /load` and `DELETE /` are both idempotent-safe rather than silently repeatable: a second load returns `409 Sample data is already loaded for this organization` (the database's own `UNIQUE (org_id)` constraint, not a service-level check), and an unload with nothing loaded returns `409 No sample data is loaded for this organization`.
+
+**Unloading does not unpick the ledger.** Posted financial documents are immutable by trigger (rule 6) and stay that way — `DELETE /sandbox` removes only the `sandbox_datasets` marker row. Removing the seeded financial records themselves means deleting the organization; the client states this plainly before an unload, never implies otherwise.
+
+Also reachable from a terminal: `cd server && npm run seed:demo`, which seeds the single organization in the database (or the one named by an argument) and refuses under `NODE_ENV=production`, mirroring `npm run db:reset`'s own posture. On the client, `Pages/SandboxCard.tsx` on the app chooser exposes the same three routes: status to every member, Load and Remove **hidden** below `OWNER` and each gated by a `ConfirmDialog`.
+
+Every business record the load produces is created by calling the real app services — `invoiceService.createInvoice`, `billService.approveBill`, `forecaster/planService.createPlan`, and so on — never a raw `INSERT`. No app's seeder queries another app's tables directly (guardrails rule 16); account ids and similar cross-app facts are resolved once by LedgerCore's own seeder and passed down as plain data.
+
+Failure paths: `403` below `OWNER` on either write · `409` per above.
+
+---
+
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases

@@ -566,6 +566,20 @@ See [api.md](api.md#boarddeck-automator--apiv1boarddeck--phase-15) for the route
 
 See [api.md](api.md#taxguard-ai--apiv1taxguard--phase-16) for the routes.
 
+## Phase 18 — the sandbox dataset (platform) ✅ applied
+
+Numbered after Phase 17 (QuickBooks sync) but applied before it — 17 was deferred to the tail of the roadmap on 2026-09-10 and stays unbuilt; migration numbers simply follow build order, not phase numbers. See [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
+
+`047_platform_sandbox_datasets.sql` adds one table: `sandbox_datasets`. One migration.
+
+**`sandbox_datasets`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `dataset_version` TEXT NOT NULL, non-blank, `<= 40` chars · `anchor_month` DATE NOT NULL (the month every fixture's relative `monthOffset` was resolved against) · `counts` JSONB NOT NULL DEFAULT `'{}'`, CHECK `jsonb_typeof = 'object'` (display data only — the loader's own returned counts, never a request body) · `loaded_by` FK → `users` ON DELETE RESTRICT · `loaded_at`, `created_at`, `updated_at`. `ux_sandbox_datasets_org` — `UNIQUE (org_id)`: the one-dataset-per-org rule enforced by the database, not a service-level check — a concurrent or repeated `POST /sandbox/load` cannot double-seed, it 409s on the constraint. Audited (`audit_row_change('platform')`).
+
+**No money column, no status column, no immutability trigger.** A dataset is either loaded for an organization or it is not — one row's existence, not a lifecycle needing an FSM. The business records the dataset produces (customers, invoices, drivers, models, corpus documents…) are ordinary rows in their own apps' existing tables, created through those apps' own services; this migration adds nothing to any of them.
+
+**This is the one platform table every app's seeder writes nothing to directly.** `services/sandbox/sandboxService.ts` is the only file with SQL against `sandbox_datasets`; every business record is created by calling one of seven `seedSandbox` functions, one per app, each importing only its own app's services (guardrails rule 16) — the same boundary discipline every other cross-app mechanism in this suite already follows.
+
+See [api.md](api.md#sandbox--apiv1sandbox--phase-18) for the routes.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

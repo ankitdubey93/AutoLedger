@@ -1,0 +1,56 @@
+{
+  "comment": "One linked 3-statement model with the auto-created Base scenario plus a downside. `actualsThroughMonthOffset` must be strictly before `startsOnMonthOffset` (modelService.createModel throws 422 otherwise). Assumption kinds mirror FPA_ASSUMPTION_KINDS exactly - GROWTH_BPS, FIXED_CENTS, PERCENT_OF_REVENUE_BPS - and every value is integer basis points or integer cents, never a float. The downside scenario exists so scenario comparison and the cash-runway readout have two curves to contrast; a model with one scenario demonstrates neither.",
+
+  "model": {
+    "name": "Operating Model",
+    "description": "Three-statement model linked to posted actuals.",
+    "startsOnMonthOffset": -2,
+    "actualsThroughMonthOffset": -3,
+    "horizonMonths": 18
+  },
+
+  "scenarios": [
+    {
+      "key": "base",
+      "name": "Base",
+      "isDefault": true,
+      "comment": "modelService.createModel already creates a default scenario named Base. The seeder updates that scenario rather than creating a second one with the same name.",
+      "dsoDays": 38,
+      "dpoDays": 30,
+      "taxRateBps": 2100,
+      "assumptions": [
+        { "accountCode": "4100", "kind": "GROWTH_BPS", "growthBps": 180 },
+        { "accountCode": "4200", "kind": "GROWTH_BPS", "growthBps": 220 },
+        { "accountCode": "4300", "kind": "GROWTH_BPS", "growthBps": 300 },
+        { "accountCode": "4400", "kind": "GROWTH_BPS", "growthBps": 120 },
+        { "accountCode": "5200", "kind": "PERCENT_OF_REVENUE_BPS", "percentOfRevenueBps": 3500 },
+        { "accountCode": "6110", "kind": "FIXED_CENTS", "fixedCents": 910000 },
+        { "accountCode": "6120", "kind": "PERCENT_OF_REVENUE_BPS", "percentOfRevenueBps": 1400 },
+        { "accountCode": "6100", "kind": "FIXED_CENTS", "fixedCents": 3850000 },
+        { "accountCode": "6400", "kind": "FIXED_CENTS", "fixedCents": 950000 },
+        { "accountCode": "6200", "kind": "FIXED_CENTS", "fixedCents": 200000 }
+      ]
+    },
+    {
+      "key": "downside",
+      "name": "Downside",
+      "isDefault": false,
+      "comment": "Growth halved, delivery cost and collection period both worse. This is the scenario that makes the cash-runway number move.",
+      "dsoDays": 58,
+      "dpoDays": 24,
+      "taxRateBps": 2100,
+      "assumptions": [
+        { "accountCode": "4100", "kind": "GROWTH_BPS", "growthBps": 40 },
+        { "accountCode": "4200", "kind": "GROWTH_BPS", "growthBps": 60 },
+        { "accountCode": "4300", "kind": "GROWTH_BPS", "growthBps": 90 },
+        { "accountCode": "4400", "kind": "GROWTH_BPS", "growthBps": -80 },
+        { "accountCode": "5200", "kind": "PERCENT_OF_REVENUE_BPS", "percentOfRevenueBps": 4100 },
+        { "accountCode": "6110", "kind": "FIXED_CENTS", "fixedCents": 910000 },
+        { "accountCode": "6120", "kind": "PERCENT_OF_REVENUE_BPS", "percentOfRevenueBps": 1600 },
+        { "accountCode": "6100", "kind": "FIXED_CENTS", "fixedCents": 3850000 },
+        { "accountCode": "6400", "kind": "FIXED_CENTS", "fixedCents": 1150000 },
+        { "accountCode": "6200", "kind": "FIXED_CENTS", "fixedCents": 200000 }
+      ]
+    }
+  ]
+}

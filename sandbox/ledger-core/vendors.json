@@ -1,0 +1,120 @@
+{
+  "comment": "Six vendors with a monthly bill schedule. `monthly` runs from `startOffset` for as many months as the array is long. Bills go DRAFT -> AWAITING_APPROVAL -> APPROVED through the real FSM; the rows flagged `leaveUnapproved` stop at AWAITING_APPROVAL so the approval queue is not empty and so a BoardDeck close run can fail its NO_UNPOSTED_BILLS check. Expense accounts are spread across 5xxx cost of sales and 6xxx opex so the P&L has real structure and ForecasterPro's budget-vs-actual has more than one line to vary.",
+  "vendors": [
+    {
+      "key": "northgate-realty",
+      "name": "Northgate Realty",
+      "email": "billing@northgaterealty.example",
+      "phone": "+1-555-0411",
+      "address": "Suite 300, 1200 Commerce Blvd, Columbus, OH 43215",
+      "taxNumber": "US-31-5567201",
+      "expenseAccount": "6110",
+      "description": "Office rent and utilities",
+      "taxRateBp": 0,
+      "paysInDays": 5,
+      "startOffset": -23,
+      "monthly": [
+        "8500.00", "8500.00", "8500.00", "8500.00", "8500.00", "8500.00",
+        "8500.00", "8500.00", "8500.00", "8500.00", "8500.00", "8500.00",
+        "9100.00", "9100.00", "9100.00", "9100.00", "9100.00", "9100.00",
+        "9100.00", "9100.00", "9100.00", "9100.00", "9100.00", "9100.00"
+      ]
+    },
+    {
+      "key": "cloudspan",
+      "name": "Cloudspan Infrastructure",
+      "email": "ar@cloudspan.example",
+      "phone": "+1-555-0426",
+      "address": "500 Datacenter Road, Ashburn, VA 20147",
+      "taxNumber": "US-54-8830112",
+      "expenseAccount": "6120",
+      "description": "Cloud hosting and software",
+      "taxRateBp": 850,
+      "paysInDays": 14,
+      "startOffset": -23,
+      "monthly": [
+        "3100.00", "3200.00", "3300.00", "3400.00", "3600.00", "3700.00",
+        "3900.00", "4000.00", "4200.00", "4400.00", "4600.00", "4800.00",
+        "5100.00", "5300.00", "5600.00", "5800.00", "6100.00", "6400.00",
+        "6700.00", "7000.00", "7400.00", "7700.00", "8100.00", "8500.00"
+      ]
+    },
+    {
+      "key": "meridian-talent",
+      "name": "Meridian Talent Partners",
+      "email": "invoices@meridiantalent.example",
+      "phone": "+1-555-0448",
+      "address": "77 Pine Street, Boston, MA 02110",
+      "taxNumber": "US-04-2291776",
+      "expenseAccount": "5200",
+      "description": "Contract delivery staff",
+      "taxRateBp": 850,
+      "paysInDays": 30,
+      "startOffset": -21,
+      "monthly": [
+        "12000.00", "12000.00", "13500.00", "13500.00", "13500.00",
+        "14800.00", "14800.00", "14800.00", "16200.00", "16200.00",
+        "16200.00", "17500.00", "17500.00", "17500.00", "18900.00",
+        "18900.00", "18900.00", "20300.00", "20300.00", "20300.00",
+        "21600.00", "21600.00"
+      ]
+    },
+    {
+      "key": "ashfield-legal",
+      "name": "Ashfield Legal LLP",
+      "email": "accounts@ashfieldlegal.example",
+      "phone": "+1-555-0463",
+      "address": "9 Chancery Court, Chicago, IL 60602",
+      "taxNumber": "US-36-7712048",
+      "expenseAccount": "6200",
+      "description": "Professional and advisory fees",
+      "taxRateBp": 850,
+      "paysInDays": 45,
+      "startOffset": -20,
+      "monthly": [
+        "2400.00", "1800.00", "1800.00", "3600.00", "1800.00", "1800.00",
+        "1800.00", "4200.00", "1800.00", "1800.00", "2900.00", "1800.00",
+        "1800.00", "5100.00", "1800.00", "1800.00", "2400.00", "1800.00",
+        "1800.00", "3300.00", "1800.00"
+      ]
+    },
+    {
+      "key": "brightpath-media",
+      "name": "Brightpath Media",
+      "email": "billing@brightpathmedia.example",
+      "phone": "+1-555-0479",
+      "address": "220 Market Street, San Francisco, CA 94105",
+      "taxNumber": "US-94-3320915",
+      "expenseAccount": "6400",
+      "description": "Marketing and demand generation",
+      "taxRateBp": 850,
+      "paysInDays": 21,
+      "startOffset": -18,
+      "monthly": [
+        "4500.00", "4500.00", "6200.00", "6200.00", "6200.00", "8400.00",
+        "8400.00", "8400.00", "11000.00", "11000.00", "11000.00", "9200.00",
+        "9200.00", "9200.00", "7600.00", "7600.00", "7600.00", "6800.00",
+        "6800.00"
+      ]
+    },
+    {
+      "key": "quill-supply",
+      "name": "Quill Office Supply",
+      "email": "ar@quillsupply.example",
+      "phone": "+1-555-0492",
+      "address": "1450 Warehouse Drive, Indianapolis, IN 46201",
+      "taxNumber": "US-35-6640228",
+      "expenseAccount": "6130",
+      "description": "Office supplies and consumables",
+      "taxRateBp": 850,
+      "paysInDays": 20,
+      "startOffset": -16,
+      "leaveUnapprovedFromOffset": -1,
+      "monthly": [
+        "680.00", "720.00", "640.00", "810.00", "750.00", "690.00",
+        "880.00", "770.00", "810.00", "930.00", "840.00", "790.00",
+        "960.00", "880.00", "910.00", "1040.00", "970.00"
+      ]
+    }
+  ]
+}

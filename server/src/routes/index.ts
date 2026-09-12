@@ -8,6 +8,7 @@ import webhookRoutes from './webhooks.js';
 import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
+import sandboxRoutes from './sandbox.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 import apFlowRoutes from './ap-flow/index.js';
 import fpaEngineRoutes from './fpa-engine/index.js';
@@ -58,6 +59,10 @@ apiRouter.use('/onboarding', onboardingRoutes);
 // both apps talking to the platform, and `app_slug` on the link row carries
 // the namespace (guardrails rule 16), exactly as /audit-logs does.
 apiRouter.use('/documents', documentRoutes);
+
+// Phase 18 — the sandbox dataset. Platform-level: it orchestrates every
+// app's own seeder and owns no app's tables (guardrails rule 16).
+apiRouter.use('/sandbox', sandboxRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

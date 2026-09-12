@@ -42,7 +42,8 @@ export async function resetTables(): Promise<void> {
               forecaster_budget_versions, forecaster_budget_lines,
               unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines,
               boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks,
-              taxguard_corpus_documents, taxguard_chunks, taxguard_questions
+              taxguard_corpus_documents, taxguard_chunks, taxguard_questions,
+              sandbox_datasets
      RESTART IDENTITY CASCADE`,
   );
 }
