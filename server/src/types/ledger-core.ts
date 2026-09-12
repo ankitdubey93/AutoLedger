@@ -1029,6 +1029,33 @@ export interface MonthlyActualRow {
   creditCents: number;
 }
 
+/* ------------------------------------------------ Phase 14 — the UnitEcon sales bridge */
+
+/** Per-customer, per-month net (tax-exclusive) revenue in base currency,
+ *  from ISSUED invoices only. UnitEcon's cohort input (guardrails rule 16). */
+export interface CustomerRevenueRow {
+  customerId: string;
+  customerName: string;
+  month: string; // 'YYYY-MM-01'
+  netRevenueCents: number;
+}
+
+/** Per-revenue-account, per-month units sold and net revenue, from ISSUED
+ *  invoices in the organization's base currency only. UnitEcon's PVM input. */
+export interface ProductLineSalesRow {
+  accountId: string;
+  month: string; // 'YYYY-MM-01'
+  quantityMilli: number; // thousandths of a unit
+  netRevenueCents: number;
+}
+
+export interface ProductLineSalesResult {
+  rows: ProductLineSalesRow[];
+  /** ISSUED invoices in the window in a non-base currency, excluded because
+   *  invoice_lines carries no base-currency column. Never hidden. */
+  excludedForeignCurrencyInvoices: number;
+}
+
 /**
  * The three GL control accounts an FP&A model needs, resolved through
  * LedgerCore so no other app queries ledger_settings, ledger_invoice_settings

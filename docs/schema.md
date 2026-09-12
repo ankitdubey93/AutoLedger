@@ -11,7 +11,7 @@ Migrations live in `server/src/db/migrations/` **only**, applied in sorted filen
 All seven apps share one database and one migration sequence. Table names disambiguate which app owns them:
 
 - **LedgerCore is unprefixed** (`accounts`, `journal_entries`, `ledger_lines`) — it is the shared system of record every other app posts into, the same reason `organizations` and `users` are unprefixed platform tables.
-- **Every other app prefixes its own tables** with its slug: `ap_flow_invoices`, `fpa_scenarios`, `taxguard_documents`, `unitecon_cohorts`, `boarddeck_decks`, `forecaster_budgets`. An app's tables are never read by another app directly — cross-app effects go through LedgerCore's GL via `source_type` / `source_id`.
+- **Every other app prefixes its own tables** with its slug: `ap_flow_invoices`, `fpa_scenarios`, `taxguard_documents`, `unitecon_product_lines`, `boarddeck_decks`, `forecaster_budgets`. An app's tables are never read by another app directly — cross-app effects go through LedgerCore's GL via `source_type` / `source_id`. UnitEcon has no `unitecon_cohorts` table — a cohort matrix is derived on every request, never stored (see Phase 14 below).
 
 Migration filenames tag the app they belong to: `NNN_<app-slug>_<subject>.sql`, e.g. `002_ledger-core_accounts.sql`. Platform migrations (like `001`) carry no app tag.
 
@@ -509,6 +509,24 @@ See [api.md](api.md#fpa-engine--apiv1fpa-engine--phase-12) for the routes and [f
 No new table holds a forecast or a variance report. `GET /plans/:id/forecast` recomputes the whole build-up from `forecaster_driver_values`, `forecaster_forecast_lines` and `forecaster_headcount_roles` on every request; `GET /plans/:id/variance` recomputes from `forecaster_budget_lines` plus `reportService.monthlyActualsByAccount` on every request — the same "no summary table" discipline `reportService`'s own header states. The one deliberate exception is `budgetService.compileVersion`, which **does** materialize the build-up into `forecaster_budget_lines` rows — an approved budget must not silently change when a driver value is edited afterward.
 
 See [api.md](api.md#forecasterpro--apiv1forecaster--phase-13) for the routes and [forecaster.md](forecaster.md) for the full build-up arithmetic and the zero-based-budgeting/approval-freeze rulings.
+
+## Phase 14 — UnitEcon ✅ applied
+
+`040_unitecon_settings.sql` adds `unitecon_settings`/`unitecon_acquisition_accounts`; `041_unitecon_product_lines.sql` adds `unitecon_product_lines`. Three tables across two migrations. **There is no cohort table** — a cohort matrix is derived from `invoices`/`invoice_lines` on every request, never stored; see the "no summary table" note below.
+
+**`unitecon_settings`** — `org_id` UUID **PK**, FK → `organizations` ON DELETE CASCADE (one row per org, not a surrogate `id`) · `gross_margin_bps` INT NOT NULL DEFAULT `7000`, CHECK `0..10000` · `created_by` FK → `users` ON DELETE RESTRICT, NULL · `created_at`/`updated_at`. No row is written until the first `PATCH` — `settingsService.getSettings` returns the default in code rather than seeding a row on read.
+
+**`unitecon_acquisition_accounts`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `account_id` UUID NOT NULL (**no `REFERENCES`** — see below) · `created_at`. `ux_unitecon_acquisition_accounts` — `UNIQUE (org_id, account_id)`, so the same LedgerCore account may be configured once per org.
+
+**`unitecon_product_lines`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `revenue_account_id` UUID NOT NULL (**no `REFERENCES`**) · `name` TEXT NOT NULL, non-blank, `<= 120` chars · `unit_label` TEXT NOT NULL DEFAULT `''`, `<= 40` chars · `is_active` BOOLEAN NOT NULL DEFAULT `true` · `created_by` FK → `users` ON DELETE RESTRICT, NULL · `created_at`/`updated_at`. `ux_unitecon_product_lines_account` — `UNIQUE (org_id, revenue_account_id)`: one product line per revenue account, so PVM never double-counts a unit. `ux_unitecon_product_lines_name` — `UNIQUE (org_id, name)`.
+
+**Why `account_id`/`revenue_account_id` carry no `REFERENCES`** — the identical ruling migrations 032, 034, 037, 038, 039 already carry: rules 8 and 16 collide, and 16 wins. Validity is enforced at the service layer via `accountService.getAccountById`'s own cross-tenant `404`. The product dimension IS the revenue account — UnitEcon does not classify `invoice_lines.description`, which is free text and not a key; PVM decomposes at revenue-account grain and no finer.
+
+**No table in this phase carries an immutability trigger.** UnitEcon posts nothing to the general ledger, so rule 6 does not apply — `PATCH`/`DELETE` on `unitecon_settings` and `unitecon_product_lines` are correct, the identical ruling `fpa_models` and `forecaster_plans` carry. `unitecon_acquisition_accounts` has no `PATCH` route at all (its set is replaced wholesale by `PATCH /unitecon/settings`), so it needs no `updated_at` trigger either. All three tables **are** audited (`audit_row_change('unitecon')`).
+
+**No new table holds a cohort matrix, a CAC/LTV figure, or a PVM report.** `GET /unitecon/cohorts`, `GET /unitecon/unit-economics` and `GET /unitecon/pvm` all recompute from `invoices`/`invoice_lines` (via `reportService.customerRevenueByMonth`/`productLineSalesByMonth`) plus this phase's own configuration tables, on every request — the same "no summary table" discipline `reportService`'s own header states, and `forecaster`'s/`fpa-engine`'s for their own apps.
+
+See [api.md](api.md#unitecon--apiv1unitecon--phase-14) for the routes and [unitecon.md](unitecon.md) for the full cohort/CAC/LTV/PVM arithmetic and the LTV-is-observed and PVM-rounding-residual rulings.
 
 ## Phase 17 — target tables
 

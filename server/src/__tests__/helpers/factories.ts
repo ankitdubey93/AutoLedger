@@ -39,7 +39,8 @@ export async function resetTables(): Promise<void> {
               fpa_models, fpa_scenarios,
               forecaster_plans, forecaster_drivers, forecaster_driver_values,
               forecaster_headcount_roles, forecaster_forecast_lines,
-              forecaster_budget_versions, forecaster_budget_lines
+              forecaster_budget_versions, forecaster_budget_lines,
+              unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines
      RESTART IDENTITY CASCADE`,
   );
 }

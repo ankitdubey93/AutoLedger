@@ -56,7 +56,7 @@ export const APPS = [
     domain: 'Commercial Analytics',
     tagline: 'Cohort retention and unit economics at a glance.',
     skills: ['Cohort retention matrices', 'LTV/CAC ratios', 'Price-Volume-Mix variance'],
-    status: 'planned',
+    status: 'building',
   },
   {
     slug: 'boarddeck',

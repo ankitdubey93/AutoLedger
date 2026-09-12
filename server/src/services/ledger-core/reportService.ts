@@ -7,7 +7,9 @@ import {
   type BalanceSheet,
   type BankReconciliationReport,
   type ControlAccounts,
+  type CustomerRevenueRow,
   type MonthlyActualRow,
+  type ProductLineSalesResult,
   type ProfitAndLoss,
   type StatementRow,
   type StatementSection,
@@ -536,6 +538,140 @@ export async function monthlyActualsByAccount(
       creditCents: parseCents(row.credit_cents),
     };
   });
+}
+
+/* ------------------------------------------------ Phase 14 — the UnitEcon sales bridge */
+
+interface CustomerRevenueRowResult {
+  customer_id: string;
+  customer_name: string;
+  month: string;
+  net_revenue_cents: string;
+}
+
+interface ProductLineSalesRowResult {
+  account_id: string;
+  month: string;
+  quantity_milli: string;
+  net_revenue_cents: string;
+}
+
+/** A non-money BIGINT (a milli-unit quantity, a row count) returned by pg as
+ *  a string. Mirrors parseCents's range guard without claiming the Cents brand. */
+function parseUnits(value: string): number {
+  const trimmed = value.trim();
+  if (!/^-?\d+$/.test(trimmed)) {
+    throw new ApiError(500, 'Unparseable numeric value from database');
+  }
+  const exact = BigInt(trimmed);
+  if (exact > BigInt(Number.MAX_SAFE_INTEGER) || exact < BigInt(Number.MIN_SAFE_INTEGER)) {
+    throw new ApiError(500, 'Numeric value from database exceeds the safe integer range');
+  }
+  return Number(exact);
+}
+
+/**
+ * Per-customer, per-month net revenue, base currency, from ISSUED invoices
+ * only — DRAFT and VOID are excluded. UnitEcon's cohort-retention input
+ * (guardrails rule 16): this is the only route UnitEcon's services take into
+ * `invoices`/`customers`.
+ *
+ * Sums `base_subtotal_cents` — tax-exclusive and already base currency (an
+ * invoice's base columns are written at issue time regardless of its native
+ * currency), so this function needs no currency restriction, unlike
+ * `productLineSalesByMonth` below.
+ */
+export async function customerRevenueByMonth(
+  orgId: string,
+  from: string,
+  to: string,
+): Promise<CustomerRevenueRow[]> {
+  if (from > to) throw new ApiError(422, 'from must not be after to');
+
+  const { rows } = await pool.query<CustomerRevenueRowResult>(
+    `SELECT c.id AS customer_id, c.name AS customer_name,
+            date_trunc('month', i.issue_date)::date::text AS month,
+            COALESCE(SUM(i.base_subtotal_cents), 0)::text AS net_revenue_cents
+       FROM invoices i
+       JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
+      WHERE i.org_id = $1
+        AND i.status = 'ISSUED'
+        AND i.issue_date >= $2::date
+        AND i.issue_date <= $3::date
+      GROUP BY c.id, c.name, date_trunc('month', i.issue_date)
+      ORDER BY month ASC, c.name ASC, c.id ASC`,
+    [orgId, from, to],
+  );
+
+  return rows.map((row) => ({
+    customerId: row.customer_id,
+    customerName: row.customer_name,
+    month: row.month,
+    netRevenueCents: parseCents(row.net_revenue_cents),
+  }));
+}
+
+/**
+ * Per-revenue-account, per-month units sold and net revenue — UnitEcon's
+ * Price-Volume-Mix input (guardrails rule 16).
+ *
+ * Restricted to invoices in the organization's own base currency:
+ * `invoice_lines` carries no `base_*` column (unlike `invoices`/`bills`,
+ * which got base columns in migration 024), so a foreign-currency line
+ * cannot be converted at line grain without re-deriving the rate. Reporting
+ * the exclusion count is the honest alternative to a silent conversion.
+ */
+export async function productLineSalesByMonth(
+  orgId: string,
+  baseCurrency: string,
+  revenueAccountIds: readonly string[],
+  from: string,
+  to: string,
+): Promise<ProductLineSalesResult> {
+  if (from > to) throw new ApiError(422, 'from must not be after to');
+
+  if (revenueAccountIds.length === 0) {
+    return { rows: [], excludedForeignCurrencyInvoices: 0 };
+  }
+
+  const { rows } = await pool.query<ProductLineSalesRowResult>(
+    `SELECT l.revenue_account_id AS account_id,
+            date_trunc('month', i.issue_date)::date::text AS month,
+            COALESCE(SUM(l.quantity_milli), 0)::text AS quantity_milli,
+            COALESCE(SUM(l.net_cents), 0)::text AS net_revenue_cents
+       FROM invoice_lines l
+       JOIN invoices i ON i.id = l.invoice_id AND i.org_id = l.org_id
+      WHERE l.org_id = $1
+        AND i.status = 'ISSUED'
+        AND i.currency_code = $2
+        AND l.revenue_account_id = ANY($3::uuid[])
+        AND i.issue_date >= $4::date
+        AND i.issue_date <= $5::date
+      GROUP BY l.revenue_account_id, date_trunc('month', i.issue_date)
+      ORDER BY month ASC, l.revenue_account_id ASC`,
+    [orgId, baseCurrency, revenueAccountIds, from, to],
+  );
+
+  const { rows: excludedRows } = await pool.query<{ count: string }>(
+    `SELECT COUNT(*)::text AS count
+       FROM invoices
+      WHERE org_id = $1
+        AND status = 'ISSUED'
+        AND currency_code <> $2
+        AND issue_date >= $3::date
+        AND issue_date <= $4::date`,
+    [orgId, baseCurrency, from, to],
+  );
+
+  return {
+    rows: rows.map((row) => ({
+      accountId: row.account_id,
+      month: row.month,
+      quantityMilli: parseUnits(row.quantity_milli),
+      netRevenueCents: parseCents(row.net_revenue_cents),
+    })),
+    excludedForeignCurrencyInvoices: parseUnits(excludedRows[0]?.count ?? '0'),
+  };
 }
 
 /**

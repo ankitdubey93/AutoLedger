@@ -140,6 +140,31 @@ export function scaleCents(amount: Cents, numerator: number, denominator: number
 }
 
 /**
+ * Divides a money amount by a plain positive integer divisor, rounding half
+ * away from zero, in exact integer arithmetic.
+ *
+ * Not `scaleCents(amount, 1, divisor)`: `scaleCents` rejects a negative
+ * `numerator` and its `+ d/2n` bias rounds a **negative `amount`** toward
+ * zero rather than away from it, so it is wrong for the signed per-customer
+ * divisions UnitEcon performs (acquisition spend can be a net credit, making
+ * the numerator negative while the divisor — a customer count — stays
+ * positive). `divideCents` handles the sign explicitly instead.
+ */
+export function divideCents(amount: Cents, divisor: number): Cents {
+  if (!Number.isInteger(divisor) || divisor <= 0) {
+    throw new ApiError(400, 'Invalid divisor');
+  }
+
+  const n = BigInt(amount);
+  const d = BigInt(divisor);
+  const magnitude = (n < 0n ? -n : n) * 2n + d;
+  const half = (magnitude) / (2n * d);
+  const result = n < 0n ? -half : half;
+
+  return cents(Number(result));
+}
+
+/**
  * Parses money from untrusted text (a bank CSV export) into integer cents,
  * without ever producing an intermediate float. See toCents's comment on
  * why `1.005 * 100` is `100.49999999999999` — the same reasoning against a

@@ -3433,3 +3433,188 @@ export function getForecasterVariance(
   const suffix = query.toString() === '' ? '' : `?${query.toString()}`;
   return apiFetch(`/forecaster/plans/${planId}/variance${suffix}`, { signal: signal ?? null });
 }
+
+// --- UnitEcon (Phase 14) ---
+
+export interface UniteconCohortCell {
+  offset: number;
+  month: string;
+  activeCustomers: number;
+  netRevenueCents: number;
+  retentionBps: number;
+}
+
+export interface UniteconCohortRow {
+  cohortMonth: string;
+  cohortSize: number;
+  customerIds: string[];
+  cells: UniteconCohortCell[];
+}
+
+export interface UniteconCohortMatrix {
+  months: string[];
+  rows: UniteconCohortRow[];
+  totalNewCustomers: number;
+  excludedPriorCustomers: number;
+}
+
+export interface UniteconCohortResponse {
+  baseCurrency: string;
+  from: string;
+  to: string;
+  matrix: UniteconCohortMatrix;
+}
+
+export interface UniteconSettings {
+  grossMarginBps: number;
+  acquisitionAccountIds: string[];
+  updatedAt: string | null;
+}
+
+export interface UniteconUnitEconomicsRow {
+  cohortMonth: string;
+  newCustomers: number;
+  acquisitionSpendCents: number;
+  cacCents: number | null;
+  cumulativeRevenueCents: number;
+  cumulativeGrossMarginCents: number;
+  ltvCents: number | null;
+  ltvToCacBps: number | null;
+  paybackMonths: number | null;
+  observedMonths: number;
+}
+
+export interface UnitEconomicsReport {
+  baseCurrency: string;
+  from: string;
+  to: string;
+  grossMarginBps: number;
+  acquisitionAccountIds: string[];
+  rows: UniteconUnitEconomicsRow[];
+  totalNewCustomers: number;
+  totalAcquisitionSpendCents: number;
+  blendedCacCents: number | null;
+}
+
+export interface UniteconProductLine {
+  id: string;
+  revenueAccountId: string;
+  revenueAccountCode: string;
+  revenueAccountName: string;
+  name: string;
+  unitLabel: string;
+  isActive: boolean;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UniteconPvmRow {
+  productLineId: string;
+  productLineName: string;
+  unitLabel: string;
+  baseQuantityMilli: number;
+  compareQuantityMilli: number;
+  baseNetCents: number;
+  compareNetCents: number;
+  baseUnitPriceCents: number;
+  compareUnitPriceCents: number;
+  priceVarianceCents: number;
+  volumeVarianceCents: number;
+  mixVarianceCents: number;
+  totalVarianceCents: number;
+}
+
+export interface UniteconPvmTotals {
+  baseNetCents: number;
+  compareNetCents: number;
+  priceVarianceCents: number;
+  volumeVarianceCents: number;
+  mixVarianceCents: number;
+  totalVarianceCents: number;
+}
+
+export interface PvmResponse {
+  baseCurrency: string;
+  basePeriod: { from: string; to: string };
+  comparePeriod: { from: string; to: string };
+  report: { rows: UniteconPvmRow[]; totals: UniteconPvmTotals };
+  excludedForeignCurrencyInvoices: number;
+}
+
+/** GET /unitecon/cohorts */
+export function fetchUniteconCohorts(
+  from: string,
+  to: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; cohorts: UniteconCohortResponse }> {
+  const query = new URLSearchParams({ from, to });
+  return apiFetch(`/unitecon/cohorts?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** GET /unitecon/unit-economics */
+export function fetchUniteconUnitEconomics(
+  from: string,
+  to: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; unitEconomics: UnitEconomicsReport }> {
+  const query = new URLSearchParams({ from, to });
+  return apiFetch(`/unitecon/unit-economics?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** GET /unitecon/settings */
+export function fetchUniteconSettings(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; settings: UniteconSettings }> {
+  return apiFetch('/unitecon/settings', { signal: signal ?? null });
+}
+
+/** PATCH /unitecon/settings */
+export function updateUniteconSettings(
+  input: { grossMarginBps?: number; acquisitionAccountIds?: string[] },
+): Promise<{ success: boolean; settings: UniteconSettings }> {
+  return apiFetch('/unitecon/settings', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** GET /unitecon/product-lines */
+export function fetchUniteconProductLines(
+  includeInactive?: boolean,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; productLines: UniteconProductLine[]; count: number }> {
+  const suffix = includeInactive === true ? '?includeInactive=true' : '';
+  return apiFetch(`/unitecon/product-lines${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /unitecon/product-lines */
+export function createUniteconProductLine(input: {
+  revenueAccountId: string;
+  name: string;
+  unitLabel: string;
+}): Promise<{ success: boolean; productLine: UniteconProductLine }> {
+  return apiFetch('/unitecon/product-lines', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /unitecon/product-lines/:id */
+export function updateUniteconProductLine(
+  id: string,
+  input: Partial<{ name: string; unitLabel: string; isActive: boolean }>,
+): Promise<{ success: boolean; productLine: UniteconProductLine }> {
+  return apiFetch(`/unitecon/product-lines/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** DELETE /unitecon/product-lines/:id */
+export async function deleteUniteconProductLine(id: string): Promise<void> {
+  await apiFetch(`/unitecon/product-lines/${id}`, { method: 'DELETE' });
+}
+
+/** GET /unitecon/pvm */
+export function fetchUniteconPvm(
+  baseFrom: string,
+  baseTo: string,
+  compareFrom: string,
+  compareTo: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; pvm: PvmResponse }> {
+  const query = new URLSearchParams({ baseFrom, baseTo, compareFrom, compareTo });
+  return apiFetch(`/unitecon/pvm?${query.toString()}`, { signal: signal ?? null });
+}

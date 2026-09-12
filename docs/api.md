@@ -800,6 +800,28 @@ The **only** route into LedgerCore anywhere in this app is `reportService.monthl
 
 ---
 
+### UnitEcon — `/api/v1/unitecon` — Phase 14
+
+Full spec: [unitecon.md](unitecon.md). Read is open to every member including `VIEWER`. Writing settings and deleting a product line need `OWNER`/`ADMIN` only — both silently reprice or remove a dimension from every historical report. Creating/editing a product line needs `ACCOUNTANT` and above. Posts nothing to LedgerCore's GL — every route here is a read, or an edit to UnitEcon's own configuration tables.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/cohorts` | any member | `?from=`/`?to=` required, `YYYY-MM-01`. Cohort retention matrix; `excludedPriorCustomers` never hidden |
+| GET | `/settings` | any member | Returns defaults without writing a row if none exists yet |
+| PATCH | `/settings` | `OWNER`, `ADMIN` | `grossMarginBps` and/or `acquisitionAccountIds` (a **replace** set, not a merge — `[]` clears it) |
+| GET | `/unit-economics` | any member | `?from=`/`?to=` required, `YYYY-MM-01`. CAC, LTV (observed, not modelled), LTV:CAC, payback per cohort |
+| GET | `/product-lines` | any member | `?includeInactive=true` to include deactivated lines |
+| POST | `/product-lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `revenueAccountId` must be a postable Revenue account |
+| PATCH | `/product-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/unit label/`isActive` only — the account cannot be repointed after creation |
+| DELETE | `/product-lines/:id` | `OWNER`, `ADMIN` | Hard delete — legal, since nothing references this table and nothing here posts to the GL |
+| GET | `/pvm` | any member | `?baseFrom=`/`?baseTo=`/`?compareFrom=`/`?compareTo=` all required, `YYYY-MM-01`. `422` with no product lines configured |
+
+Failure paths: `400 from and to are required (YYYY-MM-01)` / `400 baseFrom, baseTo, compareFrom and compareTo are required (YYYY-MM-01)` · `400 from and to must be the first of a month (YYYY-MM-01)` / `400 Period bounds must be the first of a month (YYYY-MM-01)` · `400 Invalid request body` (schema — `grossMarginBps` outside `0`–`10000`, a non-UUID in `acquisitionAccountIds`, a blank or over-length product-line name/unit label) · `400 acquisitionAccountIds must not contain duplicates` · `400 At least one field must be provided` · `403` for a write below its role tier · `404 Account not found` (a cross-org acquisition or revenue account id) · `404 Product line not found` (also another org's) · `409 This revenue account already has a product line` / `409 A product line with this name already exists` · `422 from must not be after to` · `422 The cohort window may span at most 60 months` · `422 An acquisition account must be an Expense account` · `422 A product line must map to a Revenue account` / `a postable account, not a header account` · `422 Configure at least one product line before running a PVM report`.
+
+The **only** route into LedgerCore anywhere in this app is three `reportService` functions — `customerRevenueByMonth`, `productLineSalesByMonth`, `monthlyActualsByAccount` — plus `accountService.getAccountById` and `organizationService.getById`, proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_models|fpa_scenarios|fpa_assumptions|forecaster_)" server/src/services/unitecon/ server/src/controllers/unitecon/` returns nothing but two prose comments documenting the absence. The cohort and PVM engines (`utils/uniteconCohort.ts`, `utils/uniteconPvm.ts`) are both pure functions with no database import, unit-tested without Postgres. See [unitecon.md](unitecon.md) for the full arithmetic, the LTV-is-observed ruling, and the PVM rounding-residual ruling.
+
+---
+
 ## Planned surface — by app
 
 ### LedgerCore — remaining phases
@@ -812,4 +834,4 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 ### The other three apps
 
-TaxGuard AI, UnitEcon, and BoardDeck Automator have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.
+TaxGuard AI and BoardDeck Automator have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.

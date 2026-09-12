@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   addCents,
   cents,
+  divideCents,
   formatCents,
   parseCents,
   parseMoneyText,
@@ -154,6 +155,38 @@ describe('scaleCents', () => {
 
   it('rejects a negative numerator', () => {
     expect(() => scaleCents(cents(100), -1, 10)).toThrow(ApiError);
+  });
+});
+
+describe('divideCents', () => {
+  it('divides evenly', () => {
+    expect(divideCents(cents(1000), 4)).toBe(250);
+  });
+
+  it('rounds half away from zero, symmetrically for both signs', () => {
+    expect(divideCents(cents(5), 2)).toBe(3);
+    expect(divideCents(cents(-5), 2)).toBe(-3);
+  });
+
+  it('rounds a non-half fraction toward the nearer integer', () => {
+    expect(divideCents(cents(7), 3)).toBe(2);
+  });
+
+  it('divides zero', () => {
+    expect(divideCents(cents(0), 7)).toBe(0);
+  });
+
+  it('rejects a zero divisor', () => {
+    expect(() => divideCents(cents(100), 0)).toThrow(ApiError);
+    expect(() => divideCents(cents(100), 0)).toThrow('Invalid divisor');
+  });
+
+  it('rejects a negative divisor', () => {
+    expect(() => divideCents(cents(100), -2)).toThrow(ApiError);
+  });
+
+  it('rejects a non-integer divisor', () => {
+    expect(() => divideCents(cents(100), 2.5)).toThrow(ApiError);
   });
 });
 
