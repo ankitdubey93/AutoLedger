@@ -109,6 +109,29 @@ export function detectPii(text: string): PiiSpan[] {
 }
 
 /**
+ * Masks every detected PII span with a kind-labelled placeholder, e.g.
+ * `[REDACTED:CARD_NUMBER]`. Pure; the text counterpart of `redactPage`'s
+ * pixel compositing (Phase 10), and destructive in the same way — the
+ * original substring is gone, not recoverable from the output. Added for
+ * TaxGuard AI (Phase 16), which redacts a free-text question before it
+ * reaches any embeddings or answer provider.
+ */
+export function redactText(text: string): string {
+  const spans = detectPii(text);
+  if (spans.length === 0) return text;
+
+  let result = '';
+  let cursor = 0;
+  for (const span of spans) {
+    result += text.slice(cursor, span.start);
+    result += `[REDACTED:${span.kind.toUpperCase()}]`;
+    cursor = span.end;
+  }
+  result += text.slice(cursor);
+  return result;
+}
+
+/**
  * Maps detected spans back onto the OCR words they overlap and returns the
  * padded boxes to paint over.
  *

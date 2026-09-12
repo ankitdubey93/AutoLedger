@@ -219,3 +219,34 @@ export const AP_FLOW_CLASSIFY_MAX_TOKENS = 2048;
 
 /** Shorter than the vision timeout — no images in this call, so a slow answer is a service problem, not a large payload. */
 export const AP_FLOW_CLASSIFY_TIMEOUT_MS = 30_000;
+
+// ------------------------------------------------------------ taxguard (16)
+
+/** Voyage AI's embedding model. One place, so a change is one line. */
+export const TAXGUARD_EMBEDDING_MODEL = 'voyage-3.5';
+
+/** Fixed at 1024 in migration 045's vector(1024) column — changing this is a new migration and a full re-embed. */
+export const TAXGUARD_EMBEDDING_DIMENSIONS = 1024;
+
+export const TAXGUARD_EMBEDDING_URL = 'https://api.voyageai.com/v1/embeddings';
+
+/** An embedding call that has not answered in 60s is not going to. */
+export const TAXGUARD_EMBEDDING_TIMEOUT_MS = 60_000;
+
+/** Batch size per Voyage request during ingestion. */
+export const TAXGUARD_EMBEDDING_BATCH_SIZE = 64;
+
+/** Top-K chunks returned per retrieval. */
+export const TAXGUARD_RETRIEVAL_TOP_K = 8;
+
+/** Cosine-similarity floor below which a retrieved chunk is dropped as noise. */
+export const TAXGUARD_RETRIEVAL_MIN_SCORE = 0.25;
+
+/** The answer model TaxGuard cites with. Same model AP-Flow's classify step uses. */
+export const TAXGUARD_ANSWER_MODEL = 'claude-sonnet-5';
+
+/** Ceiling on one answer response. */
+export const TAXGUARD_ANSWER_MAX_TOKENS = 2048;
+
+/** An answer call that has not responded in 90s is not going to. */
+export const TAXGUARD_ANSWER_TIMEOUT_MS = 90_000;

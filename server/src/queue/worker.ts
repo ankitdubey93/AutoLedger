@@ -6,6 +6,7 @@ import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
 import { handleBoardDeckGenerate } from './handlers/boarddeckGenerateHandler.js';
+import { handleTaxGuardEmbed } from './handlers/taxguardEmbedHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   INTEGRITY_CHECK_CRON,
@@ -27,6 +28,7 @@ const HANDLERS: {
   'webhook-deliver': handleWebhookDeliver,
   'ap-flow-extract': handleApFlowExtract,
   'boarddeck-generate': handleBoardDeckGenerate,
+  'taxguard-embed': handleTaxGuardEmbed,
 };
 
 let workers: Worker[] = [];

@@ -857,6 +857,37 @@ Failure paths: `400 planId is required` · `400 from and to must be the first of
 
 The **only** routes into other apps anywhere in this app are `reportService.closeReadiness`/`profitAndLoss`/`balanceSheet`, `fiscalPeriodService.getPeriodById`/`closePeriod`, `varianceService.planVariance`, `planService.getPlanById`, and `organizationService.getById` — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fiscal_periods|fpa_|forecaster_|unitecon_)" server/src/services/boarddeck/ server/src/controllers/boarddeck/` returns nothing. `utils/boarddeckVariance.ts` is a pure function with no database import, unit-tested without Postgres. No REFERENCES on `fiscal_period_id`/`plan_id` (rules 8 and 16 collide, 16 wins). No outbox event, no webhook, from this phase — a deck finishing is a UI-polled status change, not a financial fact.
 
+### TaxGuard AI — `/api/v1/taxguard` — Phase 16
+
+Tax act parsing, RAG retrieval over `pgvector`, and cited answers. Reading the corpus and asking a question are open to every member including `VIEWER`. Adding/deleting a corpus document needs `ACCOUNTANT` and above for create, `OWNER`/`ADMIN` for delete. Deleting a question is `OWNER`/`ADMIN` only.
+
+**Corpus** — `taxguard_corpus_documents`/`taxguard_chunks`, ingested asynchronously by the `taxguard-embed` background job (Phase 7). A corpus document's tax act PDF is uploaded through the platform Document Vault (`POST /api/v1/documents`) first; its returned `document.id` is what `POST /corpus` takes:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/corpus` | any member | Every corpus document for the org, newest first |
+| GET | `/corpus/:id` | any member | One corpus document's status/metadata |
+| GET | `/corpus/:id/chunks` | any member | Its chunks in ordinal order, each with a `citation` and `heading`. Never carries an `embedding` vector |
+| POST | `/corpus` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ documentId, title, jurisdiction, actYear? }`. `documentId` must reference an already-uploaded PDF in the Document Vault. `201` with status `PENDING` — the row exists, the chunks don't yet |
+| DELETE | `/corpus/:id` | `OWNER`, `ADMIN` | Removes the corpus document and cascades its chunks |
+
+A corpus document moves `PENDING` → `PARSING` → `EMBEDDING` → `READY` or `FAILED`. Both `READY` and `FAILED` are terminal — there is no in-place re-ingest; re-adding the same `documentId` after a `FAILED` first attempt is refused with `409` (`ux_taxguard_corpus_document`), so retrying means deleting the failed row first.
+
+**Questions** — `taxguard_questions`, answered synchronously inside `POST /questions` (no queue — retrieval and answering are fast enough to run inline):
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/questions` | any member | The org's own question/answer history, newest first (default 50, max 200) |
+| GET | `/questions/:id` | any member | One question with its full answer and citations |
+| POST | `/questions` | any member | `{ questionText, jurisdiction }`. Redacts the question, retrieves the top matching chunks for that jurisdiction, and asks the answer model to cite them. `201` |
+| DELETE | `/questions/:id` | `OWNER`, `ADMIN` | Removes one question from the org's history |
+
+`POST /questions`'s pipeline, in order — **the order is the compliance claim**: (1) the raw `questionText` is redacted via `utils/pii.ts`'s `redactText`; (2) the **redacted** text alone is embedded and used for retrieval; (3) the **redacted** text alone, plus the retrieved chunks, is sent to the answer model. The raw `questionText` is stored in the row for the asker's own history and is never transmitted to either provider. `utils/pii.ts` reliably catches checksum-validated structured identifiers (card numbers, PAN, GSTIN, Aadhaar, SSN) but its name detection is a label-anchored heuristic — the honest claim is "the question is redacted before it leaves the process," not "no PII can reach the provider."
+
+Failure paths: `400 Corpus documents must be PDF` · `400 Invalid request body` (schema — includes a question under 3 characters) · `403` for a write below its role tier · `404 Corpus document not found` / `404 Question not found` (also another org's, or a malformed uuid) · `409 This document is already in the corpus` · `422 No relevant source material found` (retrieval returned zero chunks above the similarity floor for that jurisdiction) · `502 Embeddings provider returned an unexpected response` / `502 Answer model returned an unexpected response` · `503 Embeddings are not configured` / `503 Answering is not configured` (no `VOYAGE_API_KEY` / `ANTHROPIC_API_KEY`).
+
+The **only** route into the platform anywhere in this app is `documentService.getDocumentById`/`openDocumentStream` — `documents`/`document_links` are platform tables (migration 030), not another app's, so this is not a rule-16 violation. No route into any other app's own tables. `utils/taxActParse.ts` is a pure function with no database import, unit-tested without Postgres. No money column, no GL posting, no outbox event, no webhook from this phase.
+
 ---
 
 ## Planned surface — by app
@@ -869,6 +900,4 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-### TaxGuard AI
-
-TaxGuard AI has no routes yet — its surface gets documented here, under `/api/v1/taxguard/…`, when its first module lands. See [roadmap.md](roadmap.md) for phase order.
+TaxGuard AI, AP-Flow, FP&A Engine, ForecasterPro, UnitEcon, and BoardDeck Automator are all documented in the section above. LedgerCore's QuickBooks Online sync (Phase 17) is the only remaining unbuilt surface.

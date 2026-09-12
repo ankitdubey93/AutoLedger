@@ -3800,3 +3800,118 @@ export async function deleteBoardDeckDeck(id: string): Promise<void> {
 export function downloadBoardDeckDeck(id: string): Promise<{ blob: Blob; filename: string }> {
   return apiDownloadBlob(`/boarddeck/decks/${id}/download`);
 }
+
+/* ------------------------------------------------------------- TaxGuard AI */
+
+export type TaxGuardJurisdiction = 'IN' | 'US' | 'UK' | 'CA' | 'AU' | 'OTHER';
+
+export type TaxGuardCorpusStatus = 'PENDING' | 'PARSING' | 'EMBEDDING' | 'READY' | 'FAILED';
+
+export interface TaxGuardCorpusDocument {
+  id: string;
+  documentId: string;
+  title: string;
+  jurisdiction: TaxGuardJurisdiction;
+  actYear: number | null;
+  status: TaxGuardCorpusStatus;
+  chunkCount: number;
+  errorMessage: string | null;
+  ingestedAt: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface TaxGuardChunk {
+  id: string;
+  corpusDocumentId: string;
+  ordinal: number;
+  citation: string;
+  heading: string | null;
+  content: string;
+  tokenEstimate: number;
+}
+
+export interface TaxGuardCitation {
+  chunkId: string;
+  citation: string;
+  corpusDocumentTitle: string;
+  score: number;
+}
+
+export interface TaxGuardQuestion {
+  id: string;
+  questionText: string;
+  jurisdiction: TaxGuardJurisdiction;
+  answerText: string;
+  citations: TaxGuardCitation[];
+  model: string;
+  latencyMs: number;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+/** GET /taxguard/corpus */
+export function listCorpusDocuments(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; corpusDocuments: TaxGuardCorpusDocument[] }> {
+  return apiFetch('/taxguard/corpus', { signal: signal ?? null });
+}
+
+/** GET /taxguard/corpus/:id */
+export function getCorpusDocument(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; corpusDocument: TaxGuardCorpusDocument }> {
+  return apiFetch(`/taxguard/corpus/${id}`, { signal: signal ?? null });
+}
+
+/** GET /taxguard/corpus/:id/chunks */
+export function getCorpusChunks(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; chunks: TaxGuardChunk[] }> {
+  return apiFetch(`/taxguard/corpus/${id}/chunks`, { signal: signal ?? null });
+}
+
+/** POST /taxguard/corpus */
+export function createCorpusDocument(input: {
+  documentId: string;
+  title: string;
+  jurisdiction: TaxGuardJurisdiction;
+  actYear: number | null;
+}): Promise<{ success: boolean; corpusDocument: TaxGuardCorpusDocument }> {
+  return apiFetch('/taxguard/corpus', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** DELETE /taxguard/corpus/:id */
+export async function deleteCorpusDocument(id: string): Promise<void> {
+  await apiFetch(`/taxguard/corpus/${id}`, { method: 'DELETE' });
+}
+
+/** GET /taxguard/questions */
+export function listQuestions(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; questions: TaxGuardQuestion[] }> {
+  return apiFetch('/taxguard/questions', { signal: signal ?? null });
+}
+
+/** GET /taxguard/questions/:id */
+export function getQuestion(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; question: TaxGuardQuestion }> {
+  return apiFetch(`/taxguard/questions/${id}`, { signal: signal ?? null });
+}
+
+/** POST /taxguard/questions */
+export function askQuestion(input: {
+  questionText: string;
+  jurisdiction: TaxGuardJurisdiction;
+}): Promise<{ success: boolean; question: TaxGuardQuestion }> {
+  return apiFetch('/taxguard/questions', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** DELETE /taxguard/questions/:id */
+export async function deleteQuestion(id: string): Promise<void> {
+  await apiFetch(`/taxguard/questions/${id}`, { method: 'DELETE' });
+}

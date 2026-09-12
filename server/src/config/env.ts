@@ -117,6 +117,12 @@ const parsed = {
   // import.
   ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
 
+  // Phase 16 — TaxGuard AI's embeddings provider (Voyage AI). Optional by
+  // design, exactly as ANTHROPIC_API_KEY: the server and worker both boot
+  // without it, and embeddingService throws 503 only when an embedding is
+  // actually attempted.
+  VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),
+
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),

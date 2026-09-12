@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectPii, regionsForWords } from '../utils/pii.js';
+import { detectPii, redactText, regionsForWords } from '../utils/pii.js';
 import type { OcrWord } from '../types/ap-flow.js';
 
 function word(text: string, x0: number, x1: number, y0 = 0, y1 = 10): OcrWord {
@@ -37,6 +37,18 @@ describe('detectPii', () => {
   it('does not treat a capitalised line item as a name without a label', () => {
     const spans = detectPii('EC2 Compute Instances');
     expect(spans).toHaveLength(0);
+  });
+});
+
+describe('redactText', () => {
+  it('replaces a Luhn-valid card number with [REDACTED:CARD_NUMBER] and leaves surrounding words intact', () => {
+    const result = redactText('Card 4111 1111 1111 1111 paid');
+    expect(result).toBe('Card [REDACTED:CARD_NUMBER] paid');
+  });
+
+  it('returns the input unchanged when detectPii finds nothing', () => {
+    const text = 'Invoice for consulting services rendered in March';
+    expect(redactText(text)).toBe(text);
   });
 });
 

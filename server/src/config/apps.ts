@@ -27,7 +27,7 @@ export const APPS = [
     domain: 'Compliance & AI Workflows',
     tagline: 'RAG over tax law with PII-safe retrieval.',
     skills: ['RAG', 'Vector databases', 'PII redaction', 'Tax act parsing'],
-    status: 'planned',
+    status: 'building',
   },
   {
     slug: 'ap-flow',

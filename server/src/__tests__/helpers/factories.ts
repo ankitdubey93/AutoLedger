@@ -41,7 +41,8 @@ export async function resetTables(): Promise<void> {
               forecaster_headcount_roles, forecaster_forecast_lines,
               forecaster_budget_versions, forecaster_budget_lines,
               unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines,
-              boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks
+              boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks,
+              taxguard_corpus_documents, taxguard_chunks, taxguard_questions
      RESTART IDENTITY CASCADE`,
   );
 }
@@ -104,6 +105,56 @@ export async function clearStorage(): Promise<void> {
  * httpOnly-cookie flow testable at all — and it honours cookie `path`, so the
  * refresh cookie is correctly withheld from everything outside /api/v1/auth.
  */
+/**
+ * Builds a minimal, hand-constructed, single-page PDF whose content stream
+ * renders each string in `lines` on its own line — real extractable text,
+ * not a blank page. pdfjs recovers via its own object-indexing fallback
+ * when the xref table is imprecise (the same tolerance
+ * `redaction.test.ts`'s MINIMAL_PDF fixture relies on), so no precise xref
+ * table is built here either.
+ *
+ * A literal `(` or `)` inside a line must be escaped for the PDF string
+ * syntax, hence the replace below — none of TaxGuard's own fixtures need it
+ * but this keeps the helper honest for any caller that does.
+ */
+export function buildTestPdf(lines: string[]): Buffer {
+  const escaped = lines.map((line) => line.replace(/([()\\])/g, '\\$1'));
+  const commands: string[] = ['BT', '/F1 12 Tf', '10 700 Td'];
+  escaped.forEach((line, i) => {
+    if (i > 0) commands.push('0 -14 Td');
+    commands.push(`(${line}) Tj`);
+  });
+  commands.push('ET');
+  const content = commands.join('\n');
+
+  const pdf = [
+    '%PDF-1.4',
+    '1 0 obj',
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    'endobj',
+    '2 0 obj',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    'endobj',
+    '3 0 obj',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+    'endobj',
+    '4 0 obj',
+    `<< /Length ${String(content.length)} >>`,
+    'stream',
+    content,
+    'endstream',
+    'endobj',
+    '5 0 obj',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    'endobj',
+    'trailer',
+    '<< /Size 6 /Root 1 0 R >>',
+    '%%EOF',
+  ].join('\n');
+
+  return Buffer.from(pdf, 'latin1');
+}
+
 export async function loginAgent(app: Express, user: SeededUser) {
   const agent = request.agent(app);
   const response = await agent

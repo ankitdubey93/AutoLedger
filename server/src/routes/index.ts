@@ -14,6 +14,7 @@ import fpaEngineRoutes from './fpa-engine/index.js';
 import forecasterRoutes from './forecaster/index.js';
 import uniteconRoutes from './unitecon/index.js';
 import boarddeckRoutes from './boarddeck/index.js';
+import taxguardRoutes from './taxguard/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -79,5 +80,8 @@ apiRouter.use('/unitecon', uniteconRoutes);
 
 // Phase 15 — BoardDeck Automator, close automation and board reporting.
 apiRouter.use('/boarddeck', boarddeckRoutes);
+
+// Phase 16 — TaxGuard AI, tax act parsing and RAG over pgvector.
+apiRouter.use('/taxguard', taxguardRoutes);
 
 export default apiRouter;

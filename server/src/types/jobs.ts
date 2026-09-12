@@ -9,6 +9,7 @@ export const QUEUE_NAMES = [
   'integrity-check',
   'ap-flow-extract',
   'boarddeck-generate',
+  'taxguard-embed',
   'dead-letter',
 ] as const;
 
@@ -31,6 +32,7 @@ export interface JobPayloads {
   'integrity-check': Record<string, never>;
   'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
   'boarddeck-generate': { orgId: string; deckId: string };
+  'taxguard-embed': { orgId: string; corpusDocumentId: string };
   'dead-letter': {
     queue: QueueName;
     jobId: string;

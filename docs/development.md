@@ -113,7 +113,8 @@ No application secrets live here.
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
 | `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. The test suite pins itself to `storage-test` so `npm test` never touches your dev vault |
-| `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction. The server and worker both boot without it; `extractionService` throws `503` only when a real extraction is attempted with no key configured. Every test stubs the vision client, so the suite needs no key at all |
+| `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction, reused by Phase 16 — TaxGuard AI's cited answers. The server and worker both boot without it; `extractionService`/`answerService` throw `503` only when a real call is attempted with no key configured. Every test stubs the client, so the suite needs no key at all |
+| `VOYAGE_API_KEY` | no — defaults `''` | Phase 16 — TaxGuard AI's embeddings provider (Voyage AI, called over `fetch`, no SDK). The server and worker both boot without it; corpus ingestion and question answering return `503` only when actually attempted with no key configured. Every test stubs the embeddings client |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
 
@@ -141,8 +142,10 @@ Only `VITE_`-prefixed variables reach the bundle, and Vite **inlines them at bui
 
 | Service | Container | Host port | Healthcheck | Used by |
 |---|---|---|---|---|
-| PostgreSQL 16 | `autodb_postgres` | 5432 | `pg_isready` | The server |
+| PostgreSQL 16 (`pgvector/pgvector:pg16`, since Phase 16) | `autodb_postgres` | 5432 | `pg_isready` | The server |
 | Redis 7 | `autodb_redis` | 6379 | `redis-cli ping` | The background worker (`npm run worker`) — BullMQ's job queues and the webhook dispatcher (Phase 7) |
+
+**The Postgres image is `pgvector/pgvector:pg16`, not stock `postgres:16`.** It is `postgres:16` plus the `vector` extension, built `FROM postgres:16`, so the existing `postgres-data` volume is binary-compatible — no data is lost by the swap. Phase 16 (TaxGuard AI) needs `CREATE EXTENSION vector` for its RAG retrieval, and the stock image does not ship it.
 
 **Redis was provisioned since Phase 0 and wired up in Phase 7.** `bullmq` + `ioredis`, the worker process, the healthcheck, and `REDIS_HOST`/`REDIS_PORT`/`REDIS_DB` all landed together — shared infrastructure, not owned by any one app. The API server itself does not require Redis to be up (`GET /health` reports it degraded, not down) — only `npm run worker` does.
 
@@ -245,6 +248,17 @@ Added in Phase 15:
 
 No client-side dependency this phase — `BoardDeckCloseRunsPage`/`BoardDeckBvaPage`/`BoardDeckDecksPage` are hand-rolled components, matching every other app's pages.
 
+Added in Phase 16 — **zero new npm packages**, two infrastructure changes instead:
+
+| Change | Layer | Why |
+|---|---|---|
+| `docker-compose.yml`'s `postgres` image → `pgvector/pgvector:pg16` | infrastructure | TaxGuard AI's RAG retrieval needs `CREATE EXTENSION vector`; the stock `postgres:16` image does not ship it. The pgvector image is `postgres:16` plus the extension, built `FROM postgres:16`, so the existing `postgres-data` volume is binary-compatible |
+| Voyage AI embeddings via the platform's built-in `fetch` | server | Anthropic ships no embeddings endpoint; Voyage is its own documented recommendation. Called over `fetch` rather than an installed SDK — `services/taxguard/embeddingService.ts` exports an injectable `EmbeddingsClient` seam exactly as `extractionService.ts`'s `VisionClient` does, so no test reaches the network and adding an SDK later (if ever) touches only this one file |
+| `@anthropic-ai/sdk` (already installed, Phase 10) reused for `services/taxguard/answerService.ts` | server | The same forced-tool-call pattern AP-Flow's vision extraction established, this time for cited answers. No new dependency |
+| `pdfjs-dist` (already installed, Phase 10) reused for `queue/handlers/taxguardEmbedHandler.ts`'s text extraction | server | `getTextContent()` rather than the rasterize-to-canvas path AP-Flow uses. No new dependency |
+
+No client-side dependency this phase — `TaxGuardCorpusPage`/`TaxGuardCorpusDetailPage`/`TaxGuardAskPage` are hand-rolled components, matching every other app's pages.
+
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
@@ -252,8 +266,8 @@ Approved for later phases, add only when the app that needs it is being built:
 | ~~`csv-parse`~~ | LedgerCore's bank statement ingestion. **Approved but never installed** — Phase 6 hand-wrote `utils/csv.ts` (a two-pass state machine) instead, and the row is kept struck through rather than deleted so the reversal stays visible | ~~6~~ |
 | ~~`pptxgenjs` or similar~~ | BoardDeck Automator's `.pptx` generation. **Installed in Phase 15** — see the Phase 15 table above | ~~15~~ |
 | `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 17 |
-| `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
-| An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10, done) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
+| ~~`pgvector` (PG extension)~~ | TaxGuard AI's RAG retrieval. **Delivered in Phase 16** — the compose image swap above, not a package | ~~16~~ |
+| ~~An embeddings SDK~~ | TaxGuard AI's RAG. **Resolved in Phase 16 without one** — Voyage AI over plain `fetch`, see the Phase 16 table above | ~~16~~ |
 
 **Phase 9.5 also added a directory, not just a package.** The Document Vault stores uploads under `server/storage/`, which is gitignored (`server/storage-test/` too, for the test suite). Files are named by SHA-256 but the path is keyed by organization first — `server/storage/<org_id>/<ab>/<cd>/<sha256>` — so two tenants uploading identical bytes get two blobs. Global content addressing was rejected: it would let one tenant detect that another holds the same file, and it would make deleting a blob unsafe whenever two organizations shared it. It is deliberately the simplest thing that satisfies the audit requirement and does not survive a multi-instance deployment; `services/storageService.ts` keeps a narrow `put`/`get`/`stat` interface so object storage is a one-file swap later. This was Phase 10's, AP-Flow-owned, until 2026-09-10 — see [roadmap.md](roadmap.md#phase-renumbering--2026-09-10).
 
