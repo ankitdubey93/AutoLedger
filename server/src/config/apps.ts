@@ -64,7 +64,7 @@ export const APPS = [
     domain: 'Board Reporting & Close',
     tagline: 'Close the books, generate the board deck.',
     skills: ['Monthly close automation', 'BvA variance', 'Automated .pptx deck generation'],
-    status: 'planned',
+    status: 'building',
   },
   {
     slug: 'forecaster',

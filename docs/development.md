@@ -237,13 +237,21 @@ Added in Phase 10:
 
 No client-side dependency this phase — `ApFlowDocumentsPage`/`ApFlowDocumentDetailPage` are hand-rolled components, matching every other LedgerCore/AP-Flow page.
 
+Added in Phase 15:
+
+| Package | Layer | Why |
+|---|---|---|
+| `pptxgenjs` | server | BoardDeck Automator's `.pptx` deck generation, run in the worker process. Its own `.d.ts` (v4.0.1) declares a `declare class` + `declare namespace` merge that a `moduleResolution: "Bundler"` project resolves cleanly, but under this project's required `"module": "NodeNext"` (the only mode matching how Node actually resolves ESM at runtime) combined with TypeScript 7.0.2, the default-import binding resolves to the whole file's own top-level exports instead of the merged class+namespace type — verified independently against `moduleResolution: "Bundler"`, where the identical import typechecks cleanly. `services/boarddeck/deckBuilderService.ts` works around it with a narrow, hand-written interface for the exact API surface used (`addSlide`/`addText`/`addTable`/`write`) and one explicit type assertion, rather than `any`, `@ts-ignore`, or loosening the project's tsconfig |
+
+No client-side dependency this phase — `BoardDeckCloseRunsPage`/`BoardDeckBvaPage`/`BoardDeckDecksPage` are hand-rolled components, matching every other app's pages.
+
 Approved for later phases, add only when the app that needs it is being built:
 
 | Dependency | For | Phase |
 |---|---|---|
 | ~~`csv-parse`~~ | LedgerCore's bank statement ingestion. **Approved but never installed** — Phase 6 hand-wrote `utils/csv.ts` (a two-pass state machine) instead, and the row is kept struck through rather than deleted so the reversal stays visible | ~~6~~ |
+| ~~`pptxgenjs` or similar~~ | BoardDeck Automator's `.pptx` generation. **Installed in Phase 15** — see the Phase 15 table above | ~~15~~ |
 | `intuit-oauth` or hand-rolled `fetch` | LedgerCore's QuickBooks Online OAuth 2.0 flow | 17 |
-| `pptxgenjs` or similar | BoardDeck Automator's `.pptx` generation | 15 |
 | `pgvector` (PG extension) — **swaps the compose image to `pgvector/pgvector:pg16`** | TaxGuard AI's RAG retrieval | 16 |
 | An embeddings SDK | TaxGuard AI's RAG. The LLM carve-out covers exactly two apps — AP-Flow (10, done) and TaxGuard AI (16) — and nothing else; see [roadmap.md](roadmap.md#phase-renumbering--2026-09-01) | 16 |
 

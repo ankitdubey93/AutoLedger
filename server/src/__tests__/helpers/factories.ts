@@ -40,7 +40,8 @@ export async function resetTables(): Promise<void> {
               forecaster_plans, forecaster_drivers, forecaster_driver_values,
               forecaster_headcount_roles, forecaster_forecast_lines,
               forecaster_budget_versions, forecaster_budget_lines,
-              unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines
+              unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines,
+              boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks
      RESTART IDENTITY CASCADE`,
   );
 }

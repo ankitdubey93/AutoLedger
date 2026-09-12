@@ -9,12 +9,12 @@ AutoLedger is a suite, not one app: a shared identity/tenancy platform hosting *
 | AP-Flow | `ap-flow` | Operational Accounting | Multimodal OCR invoice parsing, PII pixel masking, history-driven COA mapping, human-in-the-loop review — [docs/ap-flow.md](docs/ap-flow.md) |
 | FP&A Engine | `fpa-engine` | Financial Modeling | 3-statement linking, scenario modeling, cash runway forecasting — [docs/fpa-engine.md](docs/fpa-engine.md) |
 | UnitEcon | `unitecon` | Commercial Analytics | Cohort retention matrices, LTV/CAC ratios, Price-Volume-Mix variance — [docs/unitecon.md](docs/unitecon.md) |
-| BoardDeck Automator | `boarddeck` | Board Reporting & Close | Monthly close automation, BvA variance, automated `.pptx` deck generation |
+| BoardDeck Automator | `boarddeck` | Board Reporting & Close | Monthly close automation, BvA variance, automated `.pptx` deck generation — [docs/boarddeck.md](docs/boarddeck.md) |
 | ForecasterPro | `forecaster` | Budgeting & Planning | Driver-based rolling forecasting, headcount planning, zero-based budgeting — [docs/forecaster.md](docs/forecaster.md) |
 
-LedgerCore, AP-Flow, FP&A Engine, ForecasterPro, and UnitEcon have real routes (`status: 'building'` in `server/src/config/apps.ts`); TaxGuard AI and BoardDeck Automator are `'planned'` — visible on the chooser, not yet built.
+LedgerCore, AP-Flow, FP&A Engine, ForecasterPro, UnitEcon, and BoardDeck Automator have real routes (`status: 'building'` in `server/src/config/apps.ts`); TaxGuard AI is `'planned'` — visible on the chooser, not yet built.
 
-## State: Phase 14 done — UnitEcon cohort retention, LTV/CAC, Price-Volume-Mix variance
+## State: Phase 15 done — BoardDeck Automator close checklist, BvA, .pptx deck generation
 
 On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, ~65 files) was **deleted deliberately** for a from-scratch rebuild. There is no legacy code to preserve, extend, or migrate. Do not reference old files by path — they do not exist.
 
@@ -40,9 +40,10 @@ On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, 
 - **Phase 11** — AP-Flow mapping, review & posting: history-first COA classification, tax split, one-click post into LedgerCore.
 - **Phase 12** — FP&A Engine's linked 3-statement model: scenarios, integer-basis-point assumptions, a pure projection engine.
 - **Phase 13** — ForecasterPro: driver-based rolling forecasts, headcount planning, zero-based budgeting with an approval freeze.
-- **Phase 14** — UnitEcon: cohort retention matrices, LTV/CAC from configured acquisition accounts, Price-Volume-Mix variance at revenue-account grain. **1273 server tests + 218 client tests** (current totals; see [docs/roadmap.md](docs/roadmap.md#phase-14-as-delivered)).
+- **Phase 14** — UnitEcon: cohort retention matrices, LTV/CAC from configured acquisition accounts, Price-Volume-Mix variance at revenue-account grain.
+- **Phase 15** — BoardDeck Automator: five-check monthly close readiness against a LedgerCore fiscal period, budget-vs-actual at board-section grain, background-job `.pptx` deck generation. **1323 server tests + 226 client tests** (current totals; see [docs/roadmap.md](docs/roadmap.md#phase-15-as-delivered)).
 
-**Not built** — QuickBooks sync (deferred from Phase 9 to 17), TaxGuard AI, BoardDeck Automator (no routes yet), and every deliberate scope gap each shipped phase carries (e.g. no credit notes/vendor credits/partial void, no year-end closing entry, no `audit_logs` retention, no Document Vault object storage, no AP-Flow 3-way matching, no FP&A scenario cloning, no ForecasterPro formula language, no UnitEcon SKU-level dimension or churn model). **None of this is summarized here** — each phase's own "Deliberately not built" note lives in [docs/roadmap.md](docs/roadmap.md), and each app's own gaps in its spec file ([ledger-core.md](docs/ledger-core.md), [ap-flow.md](docs/ap-flow.md), [fpa-engine.md](docs/fpa-engine.md), [forecaster.md](docs/forecaster.md), [unitecon.md](docs/unitecon.md)) — read the relevant section before claiming a capability exists or doesn't.
+**Not built** — QuickBooks sync (deferred from Phase 9 to 17), TaxGuard AI (no routes yet), and every deliberate scope gap each shipped phase carries (e.g. no credit notes/vendor credits/partial void, no year-end closing entry, no `audit_logs` retention, no Document Vault object storage, no AP-Flow 3-way matching, no FP&A scenario cloning, no ForecasterPro formula language, no UnitEcon SKU-level dimension or churn model, no BoardDeck deck template/branding, no PDF/XLSX export). **None of this is summarized here** — each phase's own "Deliberately not built" note lives in [docs/roadmap.md](docs/roadmap.md), and each app's own gaps in its spec file ([ledger-core.md](docs/ledger-core.md), [ap-flow.md](docs/ap-flow.md), [fpa-engine.md](docs/fpa-engine.md), [forecaster.md](docs/forecaster.md), [unitecon.md](docs/unitecon.md)) — read the relevant section before claiming a capability exists or doesn't.
 
 **Phases were renumbered twice** — 2026-09-01 (everything downstream of Phase 5 shifted) and 2026-09-10 (QuickBooks deferred 9→17, Phases 9/9.5 inserted, 10–16 untouched). Old phase numbers cited anywhere are stale. Full mapping: [docs/roadmap.md § renumbering — 2026-09-01](docs/roadmap.md#phase-renumbering--2026-09-01) and [§ 2026-09-10](docs/roadmap.md#phase-renumbering--2026-09-10).
 
@@ -93,6 +94,7 @@ Read the relevant file before working — they are not in context by default.
 | [docs/fpa-engine.md](docs/fpa-engine.md) | Building FP&A Engine (12) — the projection engine's arithmetic, assumption kinds, the rule-16 LedgerCore boundary |
 | [docs/forecaster.md](docs/forecaster.md) | Building ForecasterPro (13) — driver/line/headcount arithmetic, the rolling mechanism, zero-based budgeting and approval-freeze rulings, the rule-16 boundary |
 | [docs/unitecon.md](docs/unitecon.md) | Building UnitEcon (14) — cohort arithmetic, the LTV/CAC formulas, the PVM decomposition and its rounding ruling, the rule-16 boundary |
+| [docs/boarddeck.md](docs/boarddeck.md) | Building BoardDeck Automator (15) — the five close checks, the BvA section summarizer, the async deck-generation lifecycle, the rule-16 boundary |
 | [docs/guardrails.md](docs/guardrails.md) | Writing any server code; also holds why the old build was scrapped |
 | [docs/architecture.md](docs/architecture.md) | Touching auth, tenancy, RBAC, or the platform/app split; adding files (layer-first layout, module delivery order) |
 | [docs/schema.md](docs/schema.md) | Writing a migration or a query — table definitions, constraints, default chart of accounts |

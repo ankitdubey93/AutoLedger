@@ -5,6 +5,7 @@ import { handleIntegrityCheck } from './handlers/integrityCheckHandler.js';
 import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
+import { handleBoardDeckGenerate } from './handlers/boarddeckGenerateHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   INTEGRITY_CHECK_CRON,
@@ -25,6 +26,7 @@ const HANDLERS: {
   'outbox-drain': handleOutboxDrain,
   'webhook-deliver': handleWebhookDeliver,
   'ap-flow-extract': handleApFlowExtract,
+  'boarddeck-generate': handleBoardDeckGenerate,
 };
 
 let workers: Worker[] = [];

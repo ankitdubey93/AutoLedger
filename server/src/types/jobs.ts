@@ -8,6 +8,7 @@ export const QUEUE_NAMES = [
   'webhook-deliver',
   'integrity-check',
   'ap-flow-extract',
+  'boarddeck-generate',
   'dead-letter',
 ] as const;
 
@@ -29,6 +30,7 @@ export interface JobPayloads {
   'webhook-deliver': { deliveryId: string };
   'integrity-check': Record<string, never>;
   'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
+  'boarddeck-generate': { orgId: string; deckId: string };
   'dead-letter': {
     queue: QueueName;
     jobId: string;

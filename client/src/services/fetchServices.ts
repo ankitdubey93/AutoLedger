@@ -3618,3 +3618,185 @@ export function fetchUniteconPvm(
   const query = new URLSearchParams({ baseFrom, baseTo, compareFrom, compareTo });
   return apiFetch(`/unitecon/pvm?${query.toString()}`, { signal: signal ?? null });
 }
+
+/* ------------------------------------------------------------- BoardDeck */
+
+export type BoardDeckCloseRunStatus = 'IN_PROGRESS' | 'READY' | 'BLOCKED' | 'CLOSED';
+export type BoardDeckCheckKind =
+  | 'TRIAL_BALANCE_BALANCED'
+  | 'NO_DRAFT_INVOICES'
+  | 'NO_UNPOSTED_BILLS'
+  | 'NO_UNMATCHED_BANK_LINES'
+  | 'PERIOD_OPEN';
+export type BoardDeckCheckResult = 'PASS' | 'FAIL';
+
+export interface BoardDeckCloseCheck {
+  kind: BoardDeckCheckKind;
+  result: BoardDeckCheckResult;
+  detail: string;
+  observedCount: number;
+}
+
+export interface BoardDeckCloseRun {
+  id: string;
+  fiscalPeriodId: string;
+  status: BoardDeckCloseRunStatus;
+  periodStartsOn: string;
+  periodEndsOn: string;
+  ranAt: string;
+  ranByName: string | null;
+  closedAt: string | null;
+  closedByName: string | null;
+  createdAt: string;
+}
+
+export interface BoardDeckCloseRunDetail extends BoardDeckCloseRun {
+  checks: BoardDeckCloseCheck[];
+}
+
+/** GET /boarddeck/close-runs */
+export function listBoardDeckCloseRuns(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; closeRuns: BoardDeckCloseRun[] }> {
+  return apiFetch('/boarddeck/close-runs', { signal: signal ?? null });
+}
+
+/** GET /boarddeck/close-runs/:id */
+export function getBoardDeckCloseRun(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; closeRun: BoardDeckCloseRunDetail }> {
+  return apiFetch(`/boarddeck/close-runs/${id}`, { signal: signal ?? null });
+}
+
+/** POST /boarddeck/close-runs */
+export function createBoardDeckCloseRun(
+  fiscalPeriodId: string,
+): Promise<{ success: boolean; closeRun: BoardDeckCloseRunDetail }> {
+  return apiFetch('/boarddeck/close-runs', { method: 'POST', body: JSON.stringify({ fiscalPeriodId }) });
+}
+
+/** POST /boarddeck/close-runs/:id/rerun */
+export function rerunBoardDeckCloseRun(id: string): Promise<{ success: boolean; closeRun: BoardDeckCloseRunDetail }> {
+  return apiFetch(`/boarddeck/close-runs/${id}/rerun`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /boarddeck/close-runs/:id/close-period */
+export function closeBoardDeckPeriod(
+  id: string,
+): Promise<{ success: boolean; closeRun: BoardDeckCloseRunDetail }> {
+  return apiFetch(`/boarddeck/close-runs/${id}/close-period`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+export type BoardDeckSection = 'Revenue' | 'Cost of Sales' | 'Operating Expenses' | 'Other';
+
+export interface BoardDeckSectionVariance {
+  section: BoardDeckSection;
+  budgetCents: number;
+  actualCents: number;
+  varianceCents: number;
+  favourable: boolean;
+}
+
+export interface BoardDeckVarianceDriver {
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  section: BoardDeckSection;
+  budgetCents: number;
+  actualCents: number;
+  varianceCents: number;
+  favourable: boolean;
+}
+
+export interface BoardDeckSummarizedVariance {
+  sections: BoardDeckSectionVariance[];
+  drivers: BoardDeckVarianceDriver[];
+  totalBudgetCents: number;
+  totalActualCents: number;
+  totalVarianceCents: number;
+}
+
+export interface BoardDeckBva {
+  planId: string;
+  planName: string;
+  versionId: string;
+  versionLabel: string;
+  baseCurrency: string;
+  from: string;
+  to: string;
+  summary: BoardDeckSummarizedVariance;
+}
+
+/** GET /boarddeck/bva?planId=&from=&to=&topN= */
+export function fetchBoardDeckBva(
+  planId: string,
+  from?: string,
+  to?: string,
+  topN?: number,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; bva: BoardDeckBva }> {
+  const query = new URLSearchParams({ planId });
+  if (from !== undefined) query.set('from', from);
+  if (to !== undefined) query.set('to', to);
+  if (topN !== undefined) query.set('topN', String(topN));
+  return apiFetch(`/boarddeck/bva?${query.toString()}`, { signal: signal ?? null });
+}
+
+export type BoardDeckDeckStatus = 'PENDING' | 'GENERATING' | 'READY' | 'FAILED';
+
+export interface BoardDeckDeck {
+  id: string;
+  title: string;
+  fiscalPeriodId: string;
+  planId: string | null;
+  periodStartsOn: string;
+  periodEndsOn: string;
+  status: BoardDeckDeckStatus;
+  sha256: string | null;
+  byteSizeBytes: number | null;
+  slideCount: number | null;
+  errorMessage: string | null;
+  generatedAt: string | null;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+/** GET /boarddeck/decks */
+export function listBoardDeckDecks(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; decks: BoardDeckDeck[] }> {
+  return apiFetch('/boarddeck/decks', { signal: signal ?? null });
+}
+
+/** GET /boarddeck/decks/:id */
+export function getBoardDeckDeck(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; deck: BoardDeckDeck }> {
+  return apiFetch(`/boarddeck/decks/${id}`, { signal: signal ?? null });
+}
+
+/** POST /boarddeck/decks */
+export function createBoardDeckDeck(input: {
+  title: string;
+  fiscalPeriodId: string;
+  planId: string | null;
+}): Promise<{ success: boolean; deck: BoardDeckDeck }> {
+  return apiFetch('/boarddeck/decks', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /boarddeck/decks/:id/retry */
+export function retryBoardDeckDeck(id: string): Promise<{ success: boolean; deck: BoardDeckDeck }> {
+  return apiFetch(`/boarddeck/decks/${id}/retry`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** DELETE /boarddeck/decks/:id */
+export async function deleteBoardDeckDeck(id: string): Promise<void> {
+  await apiFetch(`/boarddeck/decks/${id}`, { method: 'DELETE' });
+}
+
+/** GET /boarddeck/decks/:id/download — the .pptx, streamed as a Blob. */
+export function downloadBoardDeckDeck(id: string): Promise<{ blob: Blob; filename: string }> {
+  return apiDownloadBlob(`/boarddeck/decks/${id}/download`);
+}

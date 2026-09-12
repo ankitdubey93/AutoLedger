@@ -820,6 +820,43 @@ Failure paths: `400 from and to are required (YYYY-MM-01)` / `400 baseFrom, base
 
 The **only** route into LedgerCore anywhere in this app is three `reportService` functions — `customerRevenueByMonth`, `productLineSalesByMonth`, `monthlyActualsByAccount` — plus `accountService.getAccountById` and `organizationService.getById`, proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_models|fpa_scenarios|fpa_assumptions|forecaster_)" server/src/services/unitecon/ server/src/controllers/unitecon/` returns nothing but two prose comments documenting the absence. The cohort and PVM engines (`utils/uniteconCohort.ts`, `utils/uniteconPvm.ts`) are both pure functions with no database import, unit-tested without Postgres. See [unitecon.md](unitecon.md) for the full arithmetic, the LTV-is-observed ruling, and the PVM rounding-residual ruling.
 
+### BoardDeck Automator — `/api/v1/boarddeck` — Phase 15
+
+Monthly close automation, budget-vs-actual variance at board grain, and automated `.pptx` deck generation. Reading is open to every member including `VIEWER`. Creating/re-running a close run and generating/retrying a deck need `ACCOUNTANT` and above. Closing the period and deleting a deck are `OWNER`/`ADMIN` only.
+
+**Close runs** — `boarddeck_close_runs`/`boarddeck_close_checks`, one run per fiscal period (re-running replaces the check rows in place):
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/close-runs` | any member | Every close run for the org, newest first |
+| GET | `/close-runs/:id` | any member | Includes the five check rows |
+| POST | `/close-runs` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ fiscalPeriodId }`. Runs five checks (`TRIAL_BALANCE_BALANCED`, `NO_DRAFT_INVOICES`, `NO_UNPOSTED_BILLS`, `NO_UNMATCHED_BANK_LINES`, `PERIOD_OPEN`) against `reportService.closeReadiness`; `201` with status `READY` if all pass, `BLOCKED` otherwise. `409` if a run already exists for this period |
+| POST | `/close-runs/:id/rerun` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Re-computes all five checks. `409` if the run is already `CLOSED` |
+| POST | `/close-runs/:id/close-period` | `OWNER`, `ADMIN` | Closes the underlying LedgerCore fiscal period via `fiscalPeriodService.closePeriod`. `409` unless the run is `READY` |
+
+**Budget vs Actual** — a thin summarizer over ForecasterPro's own variance:
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/bva?planId=&from=&to=&topN=` | any member | `planId` required. `from`/`to` optional, `YYYY-MM-01`. `topN` optional (default 5, `1`–`20`). Collapses `varianceService.planVariance`'s per-account-per-month rows into four sections (`Revenue`, `Cost of Sales`, `Operating Expenses`, `Other` — always all four) plus the top-N variance drivers by absolute variance |
+
+**Decks** — `boarddeck_decks`, generated asynchronously by the `boarddeck-generate` background job (Phase 7):
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/decks` | any member | Every deck for the org, newest first |
+| GET | `/decks/:id` | any member | One deck's status/metadata |
+| POST | `/decks` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ title, fiscalPeriodId, planId? }`. `202` with status `PENDING` — the row exists, the bytes don't yet |
+| POST | `/decks/:id/retry` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `202`. `409` unless the deck is `FAILED` |
+| GET | `/decks/:id/download` | any member | The `.pptx` bytes, `Content-Disposition: attachment`. `409` unless the deck is `READY` |
+| DELETE | `/decks/:id` | `OWNER`, `ADMIN` | Removes the row only — the stored blob is not deleted, the same accepted cost `documentService.uploadDocument`'s own rollback path carries |
+
+A deck has 4 slides (Title, P&L, Balance Sheet, Close Checklist) when created without a `planId`, or 6 (the same four plus Budget vs Actual and Top Variance Drivers) when a `planId` is given. A plan with no approved budget version does not fail the deck — it silently drops to the 4-slide shape.
+
+Failure paths: `400 planId is required` · `400 from and to must be the first of a month (YYYY-MM-01)` · `400 topN must be an integer between 1 and 20` · `400 Invalid request body` (schema) · `403` for a write below its role tier · `404 Close run not found` / `404 Deck not found` (also another org's, or a malformed uuid) · `409 A close run already exists for this period` · `409 This period has already been closed` · `409 Close run is not READY` · `409 Only a FAILED deck can be retried` · `409 Deck is not ready` · `422 This plan has no approved budget version` (from the plan's own variance route, propagated) · `422 from must not be after to`.
+
+The **only** routes into other apps anywhere in this app are `reportService.closeReadiness`/`profitAndLoss`/`balanceSheet`, `fiscalPeriodService.getPeriodById`/`closePeriod`, `varianceService.planVariance`, `planService.getPlanById`, and `organizationService.getById` — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fiscal_periods|fpa_|forecaster_|unitecon_)" server/src/services/boarddeck/ server/src/controllers/boarddeck/` returns nothing. `utils/boarddeckVariance.ts` is a pure function with no database import, unit-tested without Postgres. No REFERENCES on `fiscal_period_id`/`plan_id` (rules 8 and 16 collide, 16 wins). No outbox event, no webhook, from this phase — a deck finishing is a UI-polled status change, not a financial fact.
+
 ---
 
 ## Planned surface — by app
@@ -832,6 +869,6 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-### The other three apps
+### TaxGuard AI
 
-TaxGuard AI and BoardDeck Automator have no routes yet — their surfaces get documented here, under `/api/v1/<app-slug>/…`, when each one's first module lands. See [roadmap.md](roadmap.md) for phase order.
+TaxGuard AI has no routes yet — its surface gets documented here, under `/api/v1/taxguard/…`, when its first module lands. See [roadmap.md](roadmap.md) for phase order.

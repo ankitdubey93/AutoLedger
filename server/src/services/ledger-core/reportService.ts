@@ -711,3 +711,56 @@ export async function resolveControlAccounts(orgId: string): Promise<ControlAcco
 
   return { cashAccountId, receivableAccountId, payableAccountId };
 }
+
+/* ---------- Phase 15 — the BoardDeck close-readiness bridge */
+
+/** Phase 15 — BoardDeck's close-readiness bridge (guardrails rule 16): the only
+ *  route BoardDeck takes into invoices, bills and bank_transactions. */
+export interface CloseReadiness {
+  totalDebitCents: number;
+  totalCreditCents: number;
+  draftInvoiceCount: number;
+  unpostedBillCount: number;
+  unmatchedBankLineCount: number;
+}
+
+export async function closeReadiness(orgId: string, from: string, to: string): Promise<CloseReadiness> {
+  if (from > to) throw new ApiError(422, 'from must not be after to');
+
+  const [glRows, invoiceRows, billRows, bankRows] = await Promise.all([
+    pool.query<{ debit_cents: string; credit_cents: string }>(
+      `SELECT COALESCE(SUM(l.base_debit_cents),0)::text AS debit_cents,
+              COALESCE(SUM(l.base_credit_cents),0)::text AS credit_cents
+         FROM ledger_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+        WHERE l.org_id = $1 AND e.entry_date >= $2::date AND e.entry_date <= $3::date`,
+      [orgId, from, to],
+    ),
+    pool.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM invoices
+        WHERE org_id = $1 AND status = 'DRAFT' AND issue_date >= $2::date AND issue_date <= $3::date`,
+      [orgId, from, to],
+    ),
+    pool.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM bills
+        WHERE org_id = $1 AND status IN ('DRAFT','AWAITING_APPROVAL')
+          AND bill_date >= $2::date AND bill_date <= $3::date`,
+      [orgId, from, to],
+    ),
+    pool.query<{ n: string }>(
+      `SELECT COUNT(*)::text AS n FROM bank_transactions
+        WHERE org_id = $1 AND status = 'UNMATCHED' AND txn_date >= $2::date AND txn_date <= $3::date`,
+      [orgId, from, to],
+    ),
+  ]);
+
+  const gl = glRows.rows[0];
+
+  return {
+    totalDebitCents: parseCents(gl?.debit_cents ?? '0'),
+    totalCreditCents: parseCents(gl?.credit_cents ?? '0'),
+    draftInvoiceCount: parseUnits(invoiceRows.rows[0]?.n ?? '0'),
+    unpostedBillCount: parseUnits(billRows.rows[0]?.n ?? '0'),
+    unmatchedBankLineCount: parseUnits(bankRows.rows[0]?.n ?? '0'),
+  };
+}

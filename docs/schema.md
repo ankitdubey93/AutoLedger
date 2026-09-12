@@ -528,6 +528,26 @@ See [api.md](api.md#forecasterpro--apiv1forecaster--phase-13) for the routes and
 
 See [api.md](api.md#unitecon--apiv1unitecon--phase-14) for the routes and [unitecon.md](unitecon.md) for the full cohort/CAC/LTV/PVM arithmetic and the LTV-is-observed and PVM-rounding-residual rulings.
 
+## Phase 15 — BoardDeck Automator ✅ applied
+
+`042_boarddeck_close_runs.sql` adds `boarddeck_close_runs`/`boarddeck_close_checks`; `043_boarddeck_decks.sql` adds `boarddeck_decks`. Three tables across two migrations. **There is no report-output table** — a close run's checks and a deck's slide content are both computed on demand from other apps' data; only the run/deck rows and their status are stored.
+
+**`boarddeck_close_runs`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `fiscal_period_id` UUID NOT NULL (**no `REFERENCES`** — see below) · `status` TEXT NOT NULL DEFAULT `'IN_PROGRESS'`, CHECK IN (`IN_PROGRESS`,`READY`,`BLOCKED`,`CLOSED`) · `period_starts_on`/`period_ends_on` DATE NOT NULL · `ran_at` TIMESTAMPTZ NOT NULL DEFAULT `now()` · `ran_by`/`closed_by`/`created_by` FK → `users` ON DELETE RESTRICT, NULL · `closed_at` TIMESTAMPTZ NULL · `created_at`/`updated_at`. `chk_boarddeck_close_runs_closed_stamp` — CHECK: `CLOSED` has both `closed_at`/`closed_by` `NOT NULL`; anything else has both `NULL`. `ux_boarddeck_close_runs_period` — `UNIQUE (org_id, fiscal_period_id)`: one run per period, re-running replaces its check rows in place rather than creating a second run.
+
+**`boarddeck_close_checks`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `run_id` UUID NOT NULL, composite FK → `boarddeck_close_runs (org_id, id)` ON DELETE CASCADE · `kind` TEXT NOT NULL, CHECK IN (`TRIAL_BALANCE_BALANCED`,`NO_DRAFT_INVOICES`,`NO_UNPOSTED_BILLS`,`NO_UNMATCHED_BANK_LINES`,`PERIOD_OPEN`) · `result` TEXT NOT NULL, CHECK IN (`PASS`,`FAIL`) · `detail` TEXT NOT NULL DEFAULT `''`, `<= 400` chars · `observed_count` BIGINT NOT NULL DEFAULT `0` · `created_at`. `ux_boarddeck_close_checks_run_kind` — `UNIQUE (run_id, kind)`: exactly one row per check per run.
+
+**`boarddeck_decks`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `title` TEXT NOT NULL, non-blank, `<= 160` chars · `fiscal_period_id` UUID NOT NULL (**no `REFERENCES`**) · `plan_id` UUID NULL (**no `REFERENCES`**) · `period_starts_on`/`period_ends_on` DATE NOT NULL · `status` TEXT NOT NULL DEFAULT `'PENDING'`, CHECK IN (`PENDING`,`GENERATING`,`READY`,`FAILED`) · `sha256` TEXT NULL, CHECK matches `^[0-9a-f]{64}$` when present · `byte_size` BIGINT NULL · `slide_count` INTEGER NULL · `error_message` TEXT NULL, `<= 500` chars · `generated_at` TIMESTAMPTZ NULL · `created_by` FK → `users` ON DELETE RESTRICT, NULL · `created_at`/`updated_at`. `chk_boarddeck_decks_ready_artifact` — CHECK: `READY` has `sha256`/`byte_size`/`slide_count`/`generated_at` all `NOT NULL`; anything else has all four `NULL`. `chk_boarddeck_decks_failed_error` — CHECK: `FAILED` has `error_message` `NOT NULL`; anything else has it `NULL`. **No `UNIQUE (org_id, fiscal_period_id)`** — a period may be re-decked any number of times, and each deck is its own artifact.
+
+**The deck's bytes live in `storageService` (Phase 9.5's `put`/`get`), addressed by `sha256`, exactly as `ap_flow_pages.redacted_sha256` addresses its own blobs — deliberately NOT through the platform `documents`/Document Vault table.** A generated `.pptx` is server-produced trusted output, not an untrusted client upload, and `utils/mimeSniff.ts`'s allowlist (`application/pdf`, `image/png`, `image/jpeg`, `text/csv`) does not include it; widening a security-relevant allowlist for this case was rejected.
+
+**Why `fiscal_period_id`/`plan_id` carry no `REFERENCES`** — the identical ruling migrations 032, 034, 037–041 already carry: rules 8 and 16 collide, and 16 wins. Validity is enforced at the service layer via `fiscalPeriodService.getPeriodById` and `planService.getPlanById`, both of which already 404 a cross-tenant id.
+
+**No table in this phase carries an immutability trigger.** BoardDeck posts nothing to the general ledger, so rule 6 does not apply — the identical ruling `fpa_models`, `forecaster_plans` and `unitecon_product_lines` carry. All three tables **are** audited (`audit_row_change('boarddeck')`); `boarddeck_close_checks` has no `updated_at` trigger (its rows are replaced wholesale by `rerunChecks`, never patched in place).
+
+**No new table holds a computed report or a deck's slide content.** The five close checks are computed from `reportService.closeReadiness` (a new LedgerCore bridge summing `ledger_lines`/`invoices`/`bills`/`bank_transactions` inside a date window) on every `POST`/`rerun`; the BvA summary is computed from `varianceService.planVariance` on every `GET /bva`; a deck's slides are rendered once, at generation time, from both of those plus `reportService.profitAndLoss`/`balanceSheet`, and only the resulting `.pptx` bytes are persisted — the same "no summary table" discipline every other app in this suite follows.
+
+See [api.md](api.md#boarddeck-automator--apiv1boarddeck--phase-15) for the routes.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.
