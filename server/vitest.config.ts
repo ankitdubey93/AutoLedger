@@ -32,6 +32,18 @@ export default defineConfig({
       REDIS_DB: '1',
       // Never the dev store: the suite deletes this directory between files.
       STORAGE_ROOT: 'storage-test',
+      // AP-Flow's provider selection (Phase 19). Pinned to the unconfigured
+      // state for the same reason as the secrets above: a developer's local
+      // .env legitimately carries a real AP_FLOW_AI_PROVIDER=gemini plus a
+      // live GEMINI_API_KEY (needed to run the app), and without this pin
+      // that leaks into the suite — a few cases assert the behaviour of an
+      // UNCONFIGURED provider (e.g. extraction.test.ts's `returns 503 with
+      // no client and no ANTHROPIC_API_KEY`) and silently start making real
+      // network calls to a real model instead. Every case that wants a real
+      // provider injects its own stub client or fetchImpl; none needs a key.
+      AP_FLOW_AI_PROVIDER: 'anthropic',
+      ANTHROPIC_API_KEY: '',
+      GEMINI_API_KEY: '',
     },
 
     /**

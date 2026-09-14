@@ -3,6 +3,7 @@ import sharp from 'sharp';
 import {
   anthropicModelClient,
   geminiModelClient,
+  geminiThinkingConfig,
   resolveModelClient,
 } from '../../services/ap-flow/modelClient.js';
 import type { MessagesClient } from '../../services/ap-flow/modelClient.js';
@@ -50,7 +51,7 @@ describe('modelClient (Phase 19)', () => {
       );
     }) as unknown as typeof fetch;
 
-    const client = geminiModelClient({ apiKey: 'test-key', model: 'gemini-2.5-flash', fetchImpl });
+    const client = geminiModelClient({ apiKey: 'test-key', model: 'gemini-3.6-flash', fetchImpl });
     const png = fakePng();
     await client.generateStructured({
       images: [png],
@@ -60,11 +61,11 @@ describe('modelClient (Phase 19)', () => {
       timeoutMs: 1000,
     });
 
-    expect(capturedUrl).toContain('/models/gemini-2.5-flash:generateContent');
+    expect(capturedUrl).toContain('/models/gemini-3.6-flash:generateContent');
     expect((capturedInit?.headers as Record<string, string>)['x-goog-api-key']).toBe('test-key');
     const body = JSON.parse(capturedInit?.body as string) as {
       contents: { parts: { inline_data?: { mime_type: string; data: string }; text?: string }[] }[];
-      generationConfig: { responseMimeType: string; responseSchema: unknown };
+      generationConfig: { responseMimeType: string; responseSchema: unknown; thinkingConfig: unknown };
     };
     expect(body.contents[0]?.parts[0]?.inline_data).toEqual({
       mime_type: 'image/png',
@@ -73,6 +74,41 @@ describe('modelClient (Phase 19)', () => {
     expect(body.contents[0]?.parts[1]?.text).toBe('extract it');
     expect(body.generationConfig.responseMimeType).toBe('application/json');
     expect(body.generationConfig.responseSchema).toEqual(GEMINI_SCHEMA);
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: 'low' });
+  });
+
+  it('geminiModelClient sends thinkingBudget when configured with a 2.5 model', async () => {
+    let capturedInit: RequestInit | undefined;
+    const fetchImpl = vi.fn((_url: string | URL | Request, init?: RequestInit) => {
+      capturedInit = init;
+      return Promise.resolve(
+        jsonResponse({ candidates: [{ content: { parts: [{ text: '{}' }] } }] }),
+      );
+    }) as unknown as typeof fetch;
+
+    const client = geminiModelClient({ apiKey: 'k', model: 'gemini-2.5-flash', fetchImpl });
+    await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    const body = JSON.parse(capturedInit?.body as string) as {
+      generationConfig: { thinkingConfig: unknown };
+    };
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('geminiThinkingConfig uses thinkingBudget for the 2.5 family', () => {
+    expect(geminiThinkingConfig('gemini-2.5-flash')).toEqual({ thinkingBudget: 0 });
+  });
+
+  it('geminiThinkingConfig uses thinkingLevel for 3.x and anything newer', () => {
+    expect(geminiThinkingConfig('gemini-3.6-flash')).toEqual({ thinkingLevel: 'low' });
+    expect(geminiThinkingConfig('gemini-3.1-flash-lite')).toEqual({ thinkingLevel: 'low' });
+    expect(geminiThinkingConfig('gemini-flash-latest')).toEqual({ thinkingLevel: 'low' });
   });
 
   it('geminiModelClient parses the JSON text part', async () => {
@@ -153,6 +189,40 @@ describe('modelClient (Phase 19)', () => {
     }
   });
 
+  it('geminiModelClient appends the error status enum without echoing its message', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({ error: { status: 'NOT_FOUND', message: 'SECRET-ECHO' } }, 404),
+      ),
+    ) as unknown as typeof fetch;
+    const client = geminiModelClient({ apiKey: 'k', model: 'm', fetchImpl });
+
+    await expect(
+      client.generateStructured({
+        images: [],
+        prompt: 'x',
+        schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+        maxTokens: 1,
+        timeoutMs: 1000,
+      }),
+    ).rejects.toMatchObject({
+      status: 502,
+      message: 'Gemini request failed with status 404 (NOT_FOUND)',
+    });
+
+    try {
+      await client.generateStructured({
+        images: [],
+        prompt: 'x',
+        schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+        maxTokens: 1,
+        timeoutMs: 1000,
+      });
+    } catch (err) {
+      expect((err as Error).message).not.toContain('SECRET-ECHO');
+    }
+  });
+
   it('anthropicModelClient returns the tool_use input', async () => {
     const stub: MessagesClient = {
       messages: {
@@ -197,6 +267,11 @@ describe('modelClient (Phase 19)', () => {
   it.skipIf(process.env.AP_FLOW_GEMINI_E2E !== '1')(
     'live Gemini extraction of a generated invoice image',
     async () => {
+      // The suite-wide beforeEach stubs globalThis.fetch to throw for every
+      // case in this file, including this one — this is the ONE case that
+      // must reach the real network, so restore the real fetch first.
+      fetchSpy.mockRestore();
+
       const png = await sharp({
         create: { width: 400, height: 200, channels: 3, background: { r: 255, g: 255, b: 255 } },
       })
@@ -216,7 +291,7 @@ describe('modelClient (Phase 19)', () => {
         provider: 'gemini',
         anthropicApiKey: '',
         geminiApiKey: process.env.GEMINI_API_KEY ?? '',
-        geminiModel: process.env.AP_FLOW_GEMINI_MODEL ?? 'gemini-2.5-flash',
+        geminiModel: process.env.AP_FLOW_GEMINI_MODEL ?? 'gemini-3.6-flash',
       });
 
       const result = await extractFromPages([png], undefined, client);

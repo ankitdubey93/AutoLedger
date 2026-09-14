@@ -154,11 +154,52 @@ interface GeminiResponse {
 }
 
 /**
+ * Google's error `status` field is a fixed enum (e.g. `NOT_FOUND`,
+ * `INVALID_ARGUMENT`, `PERMISSION_DENIED`) — a vocabulary, not free text.
+ * Extracting only that field (never `error.message`) restores the
+ * actionable half of a failed-call diagnosis (a 404's status distinguishes
+ * "model retired" from any other reason a call can 404) without echoing
+ * provider-supplied prose. Any parse failure, missing field, or value
+ * outside the enum shape returns null and the caller falls back to its
+ * existing bare-status message.
+ */
+const GEMINI_ERROR_STATUS_PATTERN = /^[A-Z_]{1,40}$/;
+
+async function readGeminiErrorStatus(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { error?: { status?: unknown } };
+    const status = body.error?.status;
+    if (typeof status === 'string' && GEMINI_ERROR_STATUS_PATTERN.test(status)) {
+      return status;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export type GeminiThinkingConfig = { thinkingBudget: number } | { thinkingLevel: 'low' };
+
+/**
+ * Gemini 2.5 takes `thinkingBudget` (an integer token allowance, 0 = off);
+ * Gemini 3.x replaced it with `thinkingLevel` and REJECTS `thinkingBudget`
+ * with 400 INVALID_ARGUMENT on some models (verified: gemini-3.6-flash,
+ * 2026-09-14). Both branches express the same intent — structured
+ * extraction from an image is perception, not multi-step reasoning, so
+ * extended thinking buys nothing here.
+ */
+export function geminiThinkingConfig(model: string): GeminiThinkingConfig {
+  return model.startsWith('gemini-2.5') ? { thinkingBudget: 0 } : { thinkingLevel: 'low' };
+}
+
+/**
  * Gemini's structured-output path: `responseMimeType: 'application/json'` +
  * `responseSchema` (constrained decoding), rather than Anthropic's forced
- * tool call. `thinkingBudget: 0` disables extended thinking — this is a
- * structured extraction, not a reasoning task, and thinking tokens would
- * only add latency and cost here.
+ * tool call. Extended thinking is disabled for this call via
+ * `geminiThinkingConfig` — this is a structured extraction, not a
+ * reasoning task, and thinking tokens would only add latency and cost here.
+ * The shape of that config is chosen per model family — see
+ * `geminiThinkingConfig`'s own comment.
  */
 export function geminiModelClient(options: {
   apiKey: string;
@@ -189,7 +230,7 @@ export function geminiModelClient(options: {
           responseSchema: request.schema.geminiSchema,
           maxOutputTokens: request.maxTokens,
           temperature: 0,
-          thinkingConfig: { thinkingBudget: 0 },
+          thinkingConfig: geminiThinkingConfig(options.model),
         },
       };
 
@@ -202,8 +243,15 @@ export function geminiModelClient(options: {
 
       if (!response.ok) {
         // Never echo the response body — it is untrusted and may carry
-        // provider-side error detail we do not want surfaced to a caller.
-        throw new ApiError(502, `Gemini request failed with status ${String(response.status)}`);
+        // provider-side error detail (e.g. request content) we do not want
+        // surfaced to a caller. The one exception is Google's own error
+        // STATUS ENUM (e.g. NOT_FOUND, INVALID_ARGUMENT) — a fixed,
+        // small vocabulary, never free text — which is appended only when
+        // it matches that shape; anything else falls back to the bare
+        // status code exactly as before.
+        const enumStatus = await readGeminiErrorStatus(response);
+        const suffix = enumStatus === null ? '' : ` (${enumStatus})`;
+        throw new ApiError(502, `Gemini request failed with status ${String(response.status)}${suffix}`);
       }
 
       let json: GeminiResponse;

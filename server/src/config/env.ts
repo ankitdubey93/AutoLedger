@@ -137,7 +137,7 @@ const parsed = {
   // Google AI Studio / Gemini API key, called over fetch — no SDK (rule 14).
   // Optional by design, exactly as ANTHROPIC_API_KEY.
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
-  AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-2.5-flash'),
+  AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-3.6-flash'),
 
   // Phase 16 — TaxGuard AI's embeddings provider (Voyage AI). Optional by
   // design, exactly as ANTHROPIC_API_KEY: the server and worker both boot
