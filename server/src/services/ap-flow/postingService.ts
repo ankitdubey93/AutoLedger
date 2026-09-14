@@ -1,34 +1,52 @@
 import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { cents, parseCents, sumCents } from '../../utils/money.js';
-import * as journalService from '../ledger-core/journalService.js';
-import * as fxRateService from '../ledger-core/fxRateService.js';
-import { resolveApPostingAccountsOnClient } from '../ledger-core/settingsService.js';
+import { cents, allocateCents, parseCents, sumCents } from '../../utils/money.js';
+import { AP_FLOW_DEFAULT_DUE_DAYS } from '../../config/constants.js';
+import * as billService from '../ledger-core/billService.js';
+import * as vendorService from '../ledger-core/vendorService.js';
 import * as mappingService from './mappingService.js';
 import * as apFlowDocumentService from './apFlowDocumentService.js';
 import { canTransitionApFlowDocument } from '../../types/ap-flow.js';
 import type { ApFlowDocumentDetail, ApFlowDocumentStatus } from '../../types/ap-flow.js';
 
 /**
- * AP-Flow's one-click post into LedgerCore (Phase 11) — the app boundary in
- * practice. This file writes no GL entry row and no GL line row directly,
- * and queries none of LedgerCore's chart, settings, or exchange-rate
- * tables directly — every LedgerCore fact it needs arrives through an
- * exported LedgerCore service function on this file's own checked-out
- * transaction client (guardrails rules 5 and 16).
+ * AP-Flow's one-click post into LedgerCore (Phase 11, rewritten in Phase 19
+ * to post as a real bill rather than a raw journal entry) — the app
+ * boundary in practice. This file writes no GL entry row, no GL line row,
+ * no bill row and no vendor row directly, and queries none of LedgerCore's
+ * chart, settings, vendor, bill, or exchange-rate tables directly — every
+ * LedgerCore fact it needs arrives through an exported LedgerCore service
+ * function on this file's own checked-out transaction client (guardrails
+ * rules 5 and 16).
+ *
+ * Posting through a bill (`billService.createCapturedBillOnClient` +
+ * `approveBillOnClient`) rather than a raw `journalService.createEntryOnClient`
+ * call is the fix for a real bug Phase 11 left behind: a raw journal entry
+ * moved the AP control account with no subledger document behind it, so
+ * `agingService.apAging`'s reconciliation against the ledger went false the
+ * moment AP-Flow posted anything, and the payable could never be paid
+ * through /payments. A bill is a real subledger document, so both are
+ * fixed by construction.
  *
  * Everything below runs in one transaction: the FSM lock and check, the
- * refusal checks, the FX resolution, the posting, freezing this document's
- * own row, and the vendor-history upsert all commit together or not at
- * all. There is deliberately no work after COMMIT.
+ * refusal checks, the vendor find-or-create, the tax allocation, the bill
+ * creation and approval, freezing this document's own row, and the
+ * vendor-history upsert all commit together or not at all. There is
+ * deliberately no work after COMMIT.
  */
 
 const PG_RAISE_EXCEPTION = 'P0001';
+const PG_UNIQUE_VIOLATION = '23505';
 
 function pgErrorCode(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
   return typeof err.code === 'string' ? err.code : undefined;
+}
+
+function pgConstraint(err: unknown): string | undefined {
+  if (typeof err !== 'object' || err === null || !('constraint' in err)) return undefined;
+  return typeof err.constraint === 'string' ? err.constraint : undefined;
 }
 
 function pgErrorMessage(err: unknown): string {
@@ -38,13 +56,23 @@ function pgErrorMessage(err: unknown): string {
   return 'Database rejected the posting';
 }
 
+/** UTC date-only arithmetic — avoids local-timezone day drift around midnight. */
+function addDays(isoDate: string, days: number): string {
+  const date = new Date(`${isoDate}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 interface DocumentForPostingRow {
   id: string;
+  document_id: string;
   status: ApFlowDocumentStatus;
   sha256: string;
+  original_filename: string;
   vendor_name: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
+  due_date: string | null;
   currency: string | null;
   subtotal_cents: string | null;
   tax_cents: string | null;
@@ -54,6 +82,7 @@ interface DocumentForPostingRow {
 
 interface LineItemForPostingRow {
   line_index: number;
+  description: string;
   amount_cents: string;
   account_id: string | null;
 }
@@ -62,14 +91,15 @@ export async function postApFlowDocument(
   orgId: string,
   userId: string,
   id: string,
+  options?: { autoPosted?: boolean },
 ): Promise<ApFlowDocumentDetail> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
     const { rows: docRows } = await client.query<DocumentForPostingRow>(
-      `SELECT a.id, a.status, d.sha256,
-              x.vendor_name, x.invoice_number, x.invoice_date, x.currency,
+      `SELECT a.id, a.document_id, a.status, d.sha256, d.original_filename,
+              x.vendor_name, x.invoice_number, x.invoice_date, x.due_date, x.currency,
               x.subtotal_cents, x.tax_cents, x.total_cents, x.arithmetic_ok
          FROM ap_flow_documents a
          JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
@@ -98,10 +128,16 @@ export async function postApFlowDocument(
     if (totalCents === null || totalCents <= 0) {
       throw new ApiError(422, 'This document needs a positive total before it can be posted');
     }
+    if (doc.vendor_name === null || doc.vendor_name.trim() === '') {
+      throw new ApiError(422, 'This document needs a vendor name before it can be posted');
+    }
+    if (doc.invoice_number === null || doc.invoice_number.trim() === '') {
+      throw new ApiError(422, 'This document needs an invoice number before it can be posted');
+    }
     const taxCents = doc.tax_cents === null ? 0 : parseCents(doc.tax_cents);
 
     const { rows: lineItemRows } = await client.query<LineItemForPostingRow>(
-      `SELECT line_index, amount_cents, account_id
+      `SELECT line_index, description, amount_cents, account_id
          FROM ap_flow_line_items
         WHERE org_id = $1 AND ap_flow_document_id = $2
         ORDER BY line_index`,
@@ -113,10 +149,15 @@ export async function postApFlowDocument(
     if (lineItemRows.some((row) => row.account_id === null)) {
       throw new ApiError(422, 'Every line item needs an account before this document can be posted');
     }
+    if (lineItemRows.some((row) => parseCents(row.amount_cents) < 0)) {
+      throw new ApiError(422, 'A line item with a negative amount cannot be posted as a bill');
+    }
 
-    // FX at the invoice date — never the posting date, since AP-Flow has
-    // only one date. requireRateOnClient resolves the identity rate itself
-    // when the document currency already matches the base currency.
+    const lineAmountSum = sumCents(lineItemRows.map((row) => parseCents(row.amount_cents)));
+    if (lineAmountSum + taxCents !== totalCents) {
+      throw new ApiError(422, 'Extracted line items and tax do not sum to the document total');
+    }
+
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
       'SELECT base_currency FROM organizations WHERE id = $1',
       [orgId],
@@ -124,64 +165,62 @@ export async function postApFlowDocument(
     const baseCurrency = orgRows[0]?.base_currency.trim();
     if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
     const documentCurrency = (doc.currency ?? baseCurrency).trim();
-    const { rate: fxRate } = await fxRateService.requireRateOnClient(
-      client,
-      orgId,
-      documentCurrency,
-      baseCurrency,
-      doc.invoice_date,
-    );
 
-    const { payableAccountId, taxAccountId } = await resolveApPostingAccountsOnClient(
-      client,
-      orgId,
-      taxCents > 0,
-    );
+    const vendorId = await vendorService.findOrCreateVendorByNameOnClient(client, orgId, userId, doc.vendor_name);
 
-    // One debit line per distinct expense account — the expense total is
-    // the line items' own sum, never subtotal_cents, so a reviewer's
-    // account overrides can never change the money that posts.
-    const byAccount = new Map<string, number>();
-    for (const row of lineItemRows) {
-      const accountId = row.account_id;
-      if (accountId === null) continue; // unreachable — checked above
-      const amount = parseCents(row.amount_cents);
-      byAccount.set(accountId, (byAccount.get(accountId) ?? 0) + amount);
-    }
+    const lineTaxes: number[] =
+      taxCents > 0
+        ? allocateCents(
+            cents(taxCents),
+            lineItemRows.map((row) => cents(parseCents(row.amount_cents))),
+          )
+        : lineItemRows.map(() => 0);
 
-    const glLines = [
-      ...[...byAccount.entries()].map(([accountId, amountCents]) => ({
-        accountId,
-        debitCents: amountCents,
-        creditCents: 0,
+    const dueDate =
+      doc.due_date !== null && doc.due_date >= doc.invoice_date
+        ? doc.due_date
+        : addDays(doc.invoice_date, AP_FLOW_DEFAULT_DUE_DAYS);
+
+    let billId: string;
+    try {
+      billId = await billService.createCapturedBillOnClient(client, orgId, userId, {
+        vendorId,
+        vendorReference: doc.invoice_number.trim().slice(0, 100),
+        billDate: doc.invoice_date,
+        dueDate,
         currencyCode: documentCurrency,
-        fxRate,
-      })),
-      { accountId: payableAccountId, debitCents: 0, creditCents: totalCents, currencyCode: documentCurrency, fxRate },
-    ];
-    if (taxAccountId !== null && taxCents > 0) {
-      glLines.push({ accountId: taxAccountId, debitCents: taxCents, creditCents: 0, currencyCode: documentCurrency, fxRate });
+        notes: `Captured by AP-Flow from ${doc.original_filename}`.slice(0, 1000),
+        lines: lineItemRows.map((row, index) => ({
+          description: row.description.trim() === '' ? `Line ${String(row.line_index + 1)}` : row.description.slice(0, 500),
+          netCents: parseCents(row.amount_cents),
+          taxCents: lineTaxes[index] ?? 0,
+          // account_id === null is refused above; the non-null assertion here
+          // is safe by that check, not by TypeScript's own narrowing.
+          expenseAccountId: row.account_id as string,
+        })),
+      });
+    } catch (err) {
+      if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_bills_vendor_reference') {
+        throw new ApiError(409, 'A bill with this invoice number already exists for this vendor');
+      }
+      throw err;
     }
 
-    const debitTotal = sumCents(glLines.map((l) => cents(l.debitCents)));
-    const creditTotal = sumCents(glLines.map((l) => cents(l.creditCents)));
-    if (debitTotal !== creditTotal) {
-      throw new ApiError(422, 'Extracted line items and tax do not sum to the document total');
-    }
+    const { journalEntryId } = await billService.approveBillOnClient(client, orgId, userId, billId, null);
 
-    const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
-      entryDate: doc.invoice_date,
-      description: `AP-Flow ${doc.invoice_number ?? 'document'} — ${doc.vendor_name ?? 'Unknown vendor'}`,
-      sourceType: 'ap_flow',
-      sourceId: id,
-      lines: glLines,
-    });
+    await client.query(
+      `INSERT INTO document_links (org_id, document_id, app_slug, entity_type, entity_id, created_by)
+       VALUES ($1, $2, 'ledger-core', 'bill', $3, $4)
+       ON CONFLICT DO NOTHING`,
+      [orgId, doc.document_id, billId, userId],
+    );
 
     await client.query(
       `UPDATE ap_flow_documents
-          SET status = 'POSTED', journal_entry_id = $3, posted_sha256 = $4, posted_at = now(), posted_by = $5
+          SET status = 'POSTED', journal_entry_id = $3, bill_id = $4, posted_sha256 = $5,
+              posted_at = now(), posted_by = $6, auto_posted = $7
         WHERE org_id = $1 AND id = $2`,
-      [orgId, id, journalEntryId, doc.sha256, userId],
+      [orgId, id, journalEntryId, billId, doc.sha256, userId, options?.autoPosted === true],
     );
 
     const vendorKey = mappingService.vendorKeyOf(doc.vendor_name);

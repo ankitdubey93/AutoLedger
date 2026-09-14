@@ -165,6 +165,60 @@ export function divideCents(amount: Cents, divisor: number): Cents {
 }
 
 /**
+ * Splits `total` across `weights` in proportion, using the largest-remainder
+ * method in exact BigInt arithmetic. The parts always sum to exactly
+ * `total` — this is what per-line tax/discount allocation needs and
+ * `scaleCents` applied line-by-line cannot guarantee, because independent
+ * per-line roundings do not generally re-sum to the document-level total.
+ *
+ * Algorithm: give each weight its floor share (`floor(total * w_i / W)`),
+ * then hand out the leftover cents one at a time to the weights with the
+ * largest fractional remainder — ties broken by the lowest index, so the
+ * result is deterministic given the same input order.
+ */
+export function allocateCents(total: Cents, weights: readonly Cents[]): Cents[] {
+  if (total < 0 || weights.some((w) => w < 0)) {
+    throw new ApiError(400, 'Allocation amounts must not be negative');
+  }
+  const totalWeight = weights.reduce((sum, w) => sum + BigInt(w), 0n);
+  if (totalWeight === 0n) {
+    throw new ApiError(422, 'Cannot allocate across zero weights');
+  }
+
+  const totalBig = BigInt(total);
+  const bases: bigint[] = [];
+  const remainders: { index: number; remainder: bigint }[] = [];
+
+  for (const [index, weight] of weights.entries()) {
+    const w = BigInt(weight);
+    const product = totalBig * w;
+    const base = product / totalWeight;
+    const remainder = product % totalWeight;
+    bases.push(base);
+    remainders.push({ index, remainder });
+  }
+
+  const distributed = bases.reduce((sum, b) => sum + b, 0n);
+  let leftover = totalBig - distributed;
+
+  // Largest remainder first; lowest index breaks a tie, so the result is
+  // deterministic regardless of the weights' own ordering.
+  remainders.sort((a, b) => {
+    if (a.remainder > b.remainder) return -1;
+    if (a.remainder < b.remainder) return 1;
+    return a.index - b.index;
+  });
+
+  for (const { index } of remainders) {
+    if (leftover <= 0n) break;
+    bases[index] = (bases[index] ?? 0n) + 1n;
+    leftover -= 1n;
+  }
+
+  return bases.map((b) => cents(Number(b)));
+}
+
+/**
  * Parses money from untrusted text (a bank CSV export) into integer cents,
  * without ever producing an intermediate float. See toCents's comment on
  * why `1.005 * 100` is `100.49999999999999` — the same reasoning against a

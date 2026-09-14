@@ -220,6 +220,14 @@ export const AP_FLOW_CLASSIFY_MAX_TOKENS = 2048;
 /** Shorter than the vision timeout — no images in this call, so a slow answer is a service problem, not a large payload. */
 export const AP_FLOW_CLASSIFY_TIMEOUT_MS = 30_000;
 
+// ------------------------------------------------- ap-flow multi-provider (19)
+
+/** Gemini's REST base — no SDK, called over fetch (rule 14). */
+export const AP_FLOW_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+
+/** Fallback due date when AP-Flow extracted none: invoice date plus this many days. */
+export const AP_FLOW_DEFAULT_DUE_DAYS = 30;
+
 // ------------------------------------------------------------ taxguard (16)
 
 /** Voyage AI's embedding model. One place, so a change is one line. */

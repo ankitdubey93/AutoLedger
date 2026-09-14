@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as apFlowDocumentController from '../../controllers/ap-flow/apFlowDocumentController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requireRole } from '../../middleware/rbac.js';
+import { singleFileUpload } from '../../middleware/upload.js';
 
 /**
  * /api/v1/ap-flow/documents — see docs/api.md.
@@ -16,6 +17,15 @@ router.post(
   authenticate,
   requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
   apFlowDocumentController.create,
+);
+// singleFileUpload runs AFTER requireRole, matching routes/documents.ts —
+// a VIEWER's oversized body is rejected before it is ever buffered.
+router.post(
+  '/upload',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  singleFileUpload,
+  apFlowDocumentController.upload,
 );
 router.get('/', authenticate, apFlowDocumentController.list);
 router.get('/:id', authenticate, apFlowDocumentController.getOne);

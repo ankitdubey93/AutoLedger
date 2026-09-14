@@ -88,6 +88,20 @@ function nodeEnv(): NodeEnv {
   return value as NodeEnv;
 }
 
+/**
+ * Like `optional`, but the value must be one of a fixed set of literals.
+ * Phase 19 — AP-Flow's provider switch is the first user of this.
+ */
+function oneOf<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
+  const value = read(name);
+  if (value === undefined) return fallback;
+  if (!(allowed as readonly string[]).includes(value)) {
+    problems.push(`${name} must be one of ${allowed.join(' | ')}, got "${value}"`);
+    return fallback;
+  }
+  return value as T;
+}
+
 const parsed = {
   NODE_ENV: nodeEnv(),
   PORT: integer('PORT', 5000),
@@ -116,6 +130,14 @@ const parsed = {
   // when a real extraction is attempted with no key, rather than failing at
   // import.
   ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
+
+  // Phase 19 — which vision/classification provider AP-Flow uses. Optional;
+  // defaults to anthropic. Only the selected provider's key needs to be set.
+  AP_FLOW_AI_PROVIDER: oneOf('AP_FLOW_AI_PROVIDER', ['anthropic', 'gemini'] as const, 'anthropic'),
+  // Google AI Studio / Gemini API key, called over fetch — no SDK (rule 14).
+  // Optional by design, exactly as ANTHROPIC_API_KEY.
+  GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
+  AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-2.5-flash'),
 
   // Phase 16 — TaxGuard AI's embeddings provider (Voyage AI). Optional by
   // design, exactly as ANTHROPIC_API_KEY: the server and worker both boot

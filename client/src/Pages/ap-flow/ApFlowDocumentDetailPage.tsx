@@ -249,14 +249,25 @@ export default function ApFlowDocumentDetailPage() {
 
       {document.status === 'POSTED' && (
         <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-4 flex flex-col gap-2">
-          <p className="text-sm text-emerald-400 m-0 font-medium">Posted to the ledger</p>
-          {document.journalEntryId !== null && (
-            <p className="text-sm m-0">
-              <Link to={`/app/ledger-core/journals/${document.journalEntryId}`} className="underline">
-                View journal entry
-              </Link>
-            </p>
-          )}
+          <p className="text-sm text-emerald-400 m-0 font-medium">
+            {document.autoPosted ? 'Posted automatically' : 'Posted to the ledger'}
+          </p>
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {document.journalEntryId !== null && (
+              <p className="text-sm m-0">
+                <Link to={`/app/ledger-core/journals/${document.journalEntryId}`} className="underline">
+                  View journal entry
+                </Link>
+              </p>
+            )}
+            {document.billId !== null && (
+              <p className="text-sm m-0">
+                <Link to={`/app/ledger-core/bills/${document.billId}`} className="underline">
+                  View bill in LedgerCore
+                </Link>
+              </p>
+            )}
+          </div>
           {document.postedAt !== null && (
             <p className="text-sm text-[var(--muted)] m-0">
               Posted {new Date(document.postedAt).toLocaleString()}
@@ -268,6 +279,17 @@ export default function ApFlowDocumentDetailPage() {
               <p className="font-mono text-xs break-all m-0">{document.postedSha256}</p>
             </div>
           )}
+        </div>
+      )}
+
+      {canReview && document.autoPostBlockers.length > 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+          <p className="text-sm font-medium m-0">Why this wasn't posted automatically</p>
+          <ul className="text-sm text-[var(--muted)] m-0 mt-1 pl-4 list-disc">
+            {document.autoPostBlockers.map((blocker) => (
+              <li key={blocker.code}>{blocker.message}</li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -320,6 +342,7 @@ export default function ApFlowDocumentDetailPage() {
                   ['Vendor', extraction.vendorName, 'vendor_name'],
                   ['Invoice number', extraction.invoiceNumber, 'invoice_number'],
                   ['Invoice date', extraction.invoiceDate, 'invoice_date'],
+                  ['Due date', extraction.dueDate, 'due_date'],
                   ['Currency', extraction.currency, 'currency'],
                 ] as const
               ).map(([label, value, field]) => (

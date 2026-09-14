@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   addCents,
+  allocateCents,
   cents,
   divideCents,
   formatCents,
@@ -223,4 +224,42 @@ describe('parseMoneyText', () => {
       expect(() => parseMoneyText(input)).toThrow(ApiError);
     });
   }
+});
+
+describe('allocateCents', () => {
+  it('splits by largest remainder and sums to the total', () => {
+    expect(allocateCents(cents(1000), [cents(3333), cents(3333), cents(3334)])).toEqual([333, 333, 334]);
+  });
+
+  it('splits an amount not evenly divisible', () => {
+    expect(allocateCents(cents(100), [cents(1), cents(1), cents(1)])).toEqual([34, 33, 33]);
+  });
+
+  it('allocates zero across any weights as all zero', () => {
+    expect(allocateCents(cents(0), [cents(5), cents(5)])).toEqual([0, 0]);
+  });
+
+  it('gives everything to the only nonzero weight', () => {
+    expect(allocateCents(cents(7), [cents(0), cents(10)])).toEqual([0, 7]);
+  });
+
+  it('throws 422 when every weight is zero', () => {
+    expect(() => allocateCents(cents(10), [cents(0), cents(0)])).toThrow(ApiError);
+  });
+
+  it('throws 400 on a negative total', () => {
+    expect(() => allocateCents(cents(-10), [cents(1)])).toThrow(ApiError);
+  });
+
+  it('throws 400 on a negative weight', () => {
+    expect(() => allocateCents(cents(10), [cents(-1), cents(11)])).toThrow(ApiError);
+  });
+
+  it('always sums to the total across a range of totals and weights', () => {
+    const weights = [cents(17), cents(29), cents(54)];
+    for (const total of [1, 99, 12345]) {
+      const parts = allocateCents(cents(total), weights);
+      expect(parts.reduce((sum, p) => sum + p, 0)).toBe(total);
+    }
+  });
 });

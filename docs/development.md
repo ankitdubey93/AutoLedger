@@ -115,6 +115,9 @@ No application secrets live here.
 | `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
 | `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. The test suite pins itself to `storage-test` so `npm test` never touches your dev vault |
 | `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction, reused by Phase 16 — TaxGuard AI's cited answers. The server and worker both boot without it; `extractionService`/`answerService` throw `503` only when a real call is attempted with no key configured. Every test stubs the client, so the suite needs no key at all |
+| `AP_FLOW_AI_PROVIDER` | no — defaults `anthropic` | Phase 19 — which of `anthropic` \| `gemini` AP-Flow's extraction and classification use. Only the selected provider's key needs to be set |
+| `GEMINI_API_KEY` | no — defaults `''` | Phase 19 — AP-Flow's second extraction provider, called over `fetch` (no SDK — rule 14). Needed only when `AP_FLOW_AI_PROVIDER=gemini`. Note: on Google's free tier, prompt content may be used to improve Google's products — AP-Flow only ever sends already-redacted pages, but confirm which tier your key is on |
+| `AP_FLOW_GEMINI_MODEL` | no — defaults `gemini-2.5-flash` | Phase 19 |
 | `VOYAGE_API_KEY` | no — defaults `''` | Phase 16 — TaxGuard AI's embeddings provider (Voyage AI, called over `fetch`, no SDK). The server and worker both boot without it; corpus ingestion and question answering return `503` only when actually attempted with no key configured. Every test stubs the embeddings client |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
@@ -227,6 +230,8 @@ Added in Phase 9.5:
 | `@types/multer` | server, dev | Multer 2.x ships no types of its own |
 
 No client-side dependency this phase either — `DocumentsPage`/`AttachmentsPanel` use `FormData`/`Blob`/`URL.createObjectURL`, all browser built-ins.
+
+**Phase 19 added no dependency, server or client.** AP-Flow's second extraction provider (Gemini) is called over the built-in `fetch`, exactly like TaxGuard AI's Voyage embeddings client — no `@google/genai` or `googleapis` SDK. The multi-provider seam (`services/ap-flow/modelClient.ts`), the bill-posting rewrite, the auto-post gate, and the direct-upload route all reuse `@anthropic-ai/sdk`, `multer`, `zod` and hand-written utilities already in the tree.
 
 **`file-type` was considered and refused.** The Document Vault must decide a MIME type from magic bytes rather than the client's `Content-Type` header, but that is a small parser, so `utils/mimeSniff.ts` is hand-written instead — the same call made for `utils/csv.ts`, `utils/levenshtein.ts` and `utils/dateParse.ts`.
 

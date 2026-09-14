@@ -16,6 +16,7 @@ export const extractionToolInputSchema = z.object({
   vendor_name: z.string().nullable().optional(),
   invoice_number: z.string().nullable().optional(),
   invoice_date: z.string().nullable().optional(),
+  due_date: z.string().nullable().optional(),
   currency: z.string().nullable().optional(),
   subtotal: z.string().nullable().optional(),
   tax: z.string().nullable().optional(),

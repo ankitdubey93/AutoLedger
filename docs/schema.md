@@ -458,6 +458,24 @@ See [api.md](api.md#ap-flow--apiv1ap-flow--phases-1011) for the routes, [study/a
 
 See [api.md](api.md#ap-flow--apiv1ap-flow--phases-1011) for the routes.
 
+## Phase 19 — AP-Flow automated intake — applied
+
+`048_ap-flow_extraction_due_date.sql`, `049_ap-flow_bill_posting.sql`, `050_ap-flow_auto_post.sql`.
+
+**`ap_flow_extractions` gains one column**: `due_date` DATE NULL. `ADD COLUMN` with no `DEFAULT` and nullable adds no data and rewrites nothing on a populated table; this table is otherwise unchanged, including its update-immutability trigger from migration 031.
+
+**`ap_flow_documents` gains three columns**: `bill_id` UUID NULL (the LedgerCore bill this document posted as — **no `REFERENCES`**, the identical rule-16-over-rule-8 ruling `journal_entry_id` already carries) · `auto_posted` BOOLEAN NOT NULL DEFAULT `false` (true when auto-post, not a human, approved the posting) · `auto_post_blockers` JSONB NOT NULL DEFAULT `'[]'`, CHECK `jsonb_typeof(auto_post_blockers) = 'array'` (the exact reasons a clean-looking extraction did not auto-post — reset to `'[]'` on re-extraction and on reaching `EXTRACTED`). `idx_ap_flow_documents_bill` — a partial index `ON ap_flow_documents (org_id, bill_id) WHERE bill_id IS NOT NULL`. All three `ADD COLUMN`s use a constant or no default, so — per PostgreSQL 11+'s fast-default optimization — no row is rewritten and no `UPDATE` fires, meaning `trg_ap_flow_documents_posted_guard` (migration 032) never sees these columns land on an existing `POSTED` row; a real backfilling `UPDATE` would have been rejected by that trigger. Pre-Phase-19 `POSTED` rows legitimately keep `bill_id NULL` and `auto_posted false` — they posted a raw journal entry, not a bill.
+
+**`ap_flow_settings`** — this app's first per-org settings row, one per organization, mirroring `ledger_settings`'s shape. `id` UUID PK · `org_id` FK → `organizations` ON DELETE CASCADE · `auto_post_enabled` BOOLEAN NOT NULL DEFAULT `false` · `auto_post_min_confidence` NUMERIC(4,3) NOT NULL DEFAULT `0.900`, CHECK `0.500..1.000` · `auto_post_max_total_cents` BIGINT NULL, CHECK `> 0` when present (`NULL` = no limit) · `updated_by` UUID NULL FK → `users` ON DELETE RESTRICT · `created_at`/`updated_at`, bumped by `set_updated_at`. `ux_ap_flow_settings_org` — `UNIQUE (org_id)`, one settings row per organization. Audited (`trg_ap_flow_settings_audit`).
+
+**Why AP-Flow now posts a bill, not a raw journal entry.** Phase 11's `postingService.ts` credited the AP control account (`2100`) directly via `journalService.createEntryOnClient`, with no subledger document behind it. That broke `agingService.apAging`'s reconciliation (the subledger side sums open `bills`; the control-account side sums `ledger_lines` — the two diverged the moment AP-Flow posted anything) and meant an AP-Flow-originated payable could never be paid through `/payments`. Phase 19 reroutes posting through `billService`'s two newly-exported `*OnClient` functions (`createCapturedBillOnClient`, `approveBillOnClient`) called on `postingService`'s own transaction — the identical `*OnClient` pattern `journalService.createEntryOnClient` already established. `source_type` on the resulting `journal_entries` row is now `'bill'`, `source_id` the bill's id, exactly as if a human had entered and approved that bill directly. See [study/postgresql/subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md).
+
+**Tax allocation across lines** uses `utils/money.ts`'s new `allocateCents` (largest-remainder method, exact `BigInt` arithmetic) rather than `scaleCents` applied per line — independent per-line roundings do not generally re-sum to the document-level tax total, and `bills.chk_bills_total`-style invariants require them to.
+
+**Vendor resolution** (`vendorService.findOrCreateVendorByNameOnClient`) matches an existing active vendor by `normalizeForMatching`-equal name (same normalization `ap_flow_vendor_account_map.vendor_key` already uses) or creates one, serialized per `(org, normalized name)` by a transaction-scoped `pg_advisory_xact_lock` — `vendors.name` carries no `UNIQUE` constraint, so two concurrent captures of a brand-new vendor name would otherwise both pass a plain `SELECT` check and both `INSERT`.
+
+See [api.md](api.md#ap-flow--apiv1ap-flow--phases-1011-19) for the routes, and [ap-flow.md](ap-flow.md) for the auto-post gate list and the multi-provider extraction seam.
+
 ## Phase 12 — FP&A Engine linked model — applied
 
 `033_fpa-engine_models.sql` adds two tables; `034_fpa-engine_assumptions.sql` adds a third.

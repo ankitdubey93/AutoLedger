@@ -3,7 +3,7 @@
 > An AR/AP aging report buckets open documents by how far past due they are, and its grand total must equal the GL control account's own balance — two independently derived numbers that are supposed to agree by construction, and checking that they actually do is the report's real job.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports
+**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below
 **Verified against:** PostgreSQL 16
 
 ---
@@ -83,6 +83,14 @@ SELECT COALESCE(SUM(amount_cents) FILTER (WHERE status <> 'IGNORED'), 0)::text A
 ```
 
 AR aging's two sides — the subledger and the control account — are both derived from data the organization's *own* system produced end-to-end; a mismatch between them is unambiguous evidence of an internal bug, because both sides describe the same underlying reality by construction. Bank reconciliation's two sides describe two genuinely *different* realities that merely ought to agree: the GL side is everything this system believes was posted to the cash account, and the statement side is everything a **CSV file someone chose to upload** says the bank actually did. `reconciles = differenceCents === 0` is still integer equality with no epsilon, but a `false` here does not, on its own, mean either side is wrong — the far more common cause is simply that the statement import is incomplete (a month was never uploaded, or a transaction the bank shows hasn't been imported yet). AR aging's `reconciles` is a **correctness** claim about this system's own internal consistency; bank reconciliation's `reconciles` is a **completeness** claim about whether the statement history is fully caught up — the same boolean, the same comparison mechanics, a different question depending on whether both inputs originate inside the same system or one of them is an external document a human has to keep feeding in.
+
+### A real example of `reconciles` going false — and the fix that was rerouting, not adjusting the check
+
+Phase 11 gave AP-Flow a one-click "post to LedgerCore" button. Its first implementation posted a raw journal entry — a debit to an expense account, a credit to the AP control account (`2100`) — directly, with no `bills` row behind it. That is exactly the bug this file's own reconciliation is designed to catch: `apAging`'s subledger side sums open **bills**, but the money AP-Flow moved never became a bill, so the control-account side (`ledger_lines` summed for `2100`) grew while the subledger side didn't. `reconciles` would go `false` the moment AP-Flow posted anything — not because the check was wrong, but because the posting path had quietly created the exact kind of drift this report exists to surface. A symptom noticed only because the reconciliation was already there to notice it.
+
+**The fix was never to weaken or special-case the check.** Loosening `reconciles` to ignore AP-Flow-sourced postings, or excluding `2100` credits with `source_type = 'ap_flow'` from the control-account sum, would have hidden the drift instead of closing it — and it would have meant AP-Flow's payables could never be paid through `/payments`, since that flow works against `bills`, not raw journal entries. The real fix (Phase 19) was to reroute the posting itself: `postingService.ts` now calls `billService.createCapturedBillOnClient` + `approveBillOnClient` on its own transaction, so every AP-Flow posting **is** a bill from the moment it exists, and the two reconciliation sides are back to describing the same underlying reality by construction — exactly the property this file's "Why the subledger is derived from documents..." section above says the whole check depends on.
+
+This is the general lesson a reconciliation check earns its keep by teaching: when an independently-derived cross-check starts failing, the question is never "how do I make the check pass" — it's "what part of the system stopped producing the invariant the check assumes." Here that was a service writing to the ledger without writing to the subledger it claims to be part of.
 
 ---
 

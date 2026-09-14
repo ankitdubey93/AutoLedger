@@ -20,6 +20,19 @@ export const create: RequestHandler = async (req, res) => {
   res.status(201).json({ success: true, document });
 };
 
+/** POST /ap-flow/documents/upload — multipart, field "file". */
+export const upload: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  if (req.file === undefined) {
+    throw new ApiError(400, 'Send exactly one file in a field named "file"');
+  }
+  const { document, created } = await apFlowDocumentService.captureFile(user.orgId, user.id, {
+    buffer: req.file.buffer,
+    originalname: req.file.originalname,
+  });
+  res.status(created ? 201 : 200).json({ success: true, document, created });
+};
+
 /** GET /ap-flow/documents */
 export const list: RequestHandler = async (req, res) => {
   const user = requireUser(req);

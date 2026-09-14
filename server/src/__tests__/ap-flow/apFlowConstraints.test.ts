@@ -430,4 +430,38 @@ describe('ap-flow phase 11 database constraints', () => {
     );
     expect(code).toBe(FEATURE_NOT_SUPPORTED);
   });
+
+  // -------------------------------------------------- Phase 19 — auto-post
+
+  it('ap_flow_settings rejects a threshold above 1', async () => {
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_settings (org_id, auto_post_min_confidence) VALUES ($1, 1.5)`,
+        [orgA],
+      ),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it('ap_flow_settings allows one row per organization', async () => {
+    await pool.query('INSERT INTO ap_flow_settings (org_id) VALUES ($1)', [orgA]);
+    const code = await errorCode(() => pool.query('INSERT INTO ap_flow_settings (org_id) VALUES ($1)', [orgA]));
+    expect(code).toBe(UNIQUE_VIOLATION);
+  });
+
+  it('auto_post_blockers must be a JSON array', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+    await pool.query("UPDATE ap_flow_documents SET status = 'EXTRACTED' WHERE org_id = $1 AND id = $2", [
+      orgA,
+      apFlowDocId,
+    ]);
+
+    const code = await errorCode(() =>
+      pool.query(`UPDATE ap_flow_documents SET auto_post_blockers = '{}' WHERE org_id = $1 AND id = $2`, [
+        orgA,
+        apFlowDocId,
+      ]),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
 });

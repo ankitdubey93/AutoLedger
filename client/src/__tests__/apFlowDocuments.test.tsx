@@ -29,6 +29,9 @@ function doc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
     journalEntryId: null,
     postedSha256: null,
     postedAt: null,
+    billId: null,
+    autoPosted: false,
+    autoPostBlockers: [],
     ...overrides,
   };
 }
@@ -103,7 +106,7 @@ describe('ApFlowDocumentsPage', () => {
     mockListRoutes([]);
     renderList();
 
-    await screen.findByText(/No documents have been captured yet/);
+    await screen.findByText(/No documents yet/);
   });
 
   it('re-fetches with the status filter in the URL', async () => {
@@ -168,6 +171,7 @@ describe('ApFlowDocumentDetailPage', () => {
           vendorName: 'AWS Cloud Services',
           invoiceNumber: 'INV-1',
           invoiceDate: '2026-08-15',
+          dueDate: null,
           currency: 'USD',
           subtotalCents: 45000,
           taxCents: 0,
@@ -230,6 +234,7 @@ describe('ApFlowDocumentDetailPage', () => {
           vendorName: 'Vendor',
           invoiceNumber: null,
           invoiceDate: null,
+          dueDate: null,
           currency: null,
           subtotalCents: 35000,
           taxCents: null,

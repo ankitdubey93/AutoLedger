@@ -132,6 +132,57 @@ describe('extractionService', () => {
     expect(validateArithmetic([], null, null, null)).toEqual({ ok: true, errors: [] });
   });
 
+  it('a StructuredModelClient stub yields the same cents as the Anthropic path', async () => {
+    const modelClient = {
+      provider: 'gemini' as const,
+      model: 'gemini-test',
+      generateStructured: () =>
+        Promise.resolve({
+          vendor_name: 'AWS Cloud Services',
+          invoice_number: 'INV-2026-8901',
+          invoice_date: '2026-08-15',
+          currency: 'USD',
+          subtotal: '450.00',
+          tax: '0.00',
+          total: '450.00',
+          line_items: [
+            { description: 'EC2 Compute Instances', amount: '350.00' },
+            { description: 'S3 Storage Usage', amount: '100.00' },
+          ],
+          field_confidence: { total: 0.95 },
+        }),
+    };
+
+    const result = await extractFromPages([Buffer.from('fake-png')], undefined, modelClient);
+
+    expect(result.subtotalCents).toBe(45000);
+    expect(result.totalCents).toBe(45000);
+    expect(result.lineItems[0]?.amountCents).toBe(35000);
+    expect(result.arithmeticOk).toBe(true);
+    expect(result.model).toBe('gemini-test');
+  });
+
+  it('a malformed invoice_date is nulled and recorded, not thrown', async () => {
+    const client = stubClient({
+      invoice_date: '15/08/2026',
+      line_items: [],
+      field_confidence: {},
+    });
+    const result = await extractFromPages([Buffer.from('x')], client);
+    expect(result.invoiceDate).toBeNull();
+    expect(result.validationErrors).toContain('Could not parse invoice_date as a date');
+  });
+
+  it('due_date is extracted', async () => {
+    const client = stubClient({
+      due_date: '2026-09-14',
+      line_items: [],
+      field_confidence: {},
+    });
+    const result = await extractFromPages([Buffer.from('x')], client);
+    expect(result.dueDate).toBe('2026-09-14');
+  });
+
   it('performs no network request across this entire file', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });

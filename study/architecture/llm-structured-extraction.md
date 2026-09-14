@@ -3,8 +3,8 @@
 > Getting a reliable, typed JSON object out of a model — not by asking nicely, but by making a malformed answer literally impossible to submit.
 
 **Category:** Architecture
-**Introduced by:** Phase 10 — AP-Flow's vision extraction: turning a redacted receipt image into structured fields (vendor, amounts, line items) the rest of the pipeline can trust
-**Verified against:** `@anthropic-ai/sdk` 0.124.0
+**Introduced by:** Phase 10 — AP-Flow's vision extraction: turning a redacted receipt image into structured fields (vendor, amounts, line items) the rest of the pipeline can trust. Extended by Phase 19 — a second provider (Gemini) behind the same interface
+**Verified against:** `@anthropic-ai/sdk` 0.124.0. The Gemini REST shape (model id `gemini-2.5-flash`, `responseSchema`/`responseMimeType`, `thinkingConfig.thinkingBudget`) is **unverified against Google's current docs** — confirm before relying on it; the gated live test in `modelClient.test.ts` (`AP_FLOW_GEMINI_E2E=1`) is the check.
 
 ---
 
@@ -30,6 +30,21 @@ The tool schema declares every amount field (`subtotal`, `tax`, `total`, each li
 
 `field_confidence` is a `Record<string, number>` the model itself produces, self-reporting how sure it is about each field. It's clamped to `[0, 1]` and non-numeric entries are dropped, but it is never treated as ground truth about correctness — it exists purely to route a human reviewer's attention (Phase 11's review queue colours low-confidence fields) toward the fields most likely to be wrong. A model can be confidently wrong; the value of self-reported confidence is statistical (low-confidence fields are wrong more often, in aggregate) not individually authoritative.
 
+### Two providers, one seam (Phase 19)
+
+`modelClient.ts` introduces `StructuredModelClient` — one interface (`generateStructured({ images, prompt, schema, maxTokens, timeoutMs })`) that both `extractionService.ts` and `mappingService.ts` call, with a concrete adapter per provider:
+
+- **Anthropic** keeps the forced-tool-call shape described above: `tool_choice: { type: 'tool', name }`, and the schema is passed as JSON Schema (`input_schema`).
+- **Gemini** has no tool-forcing primitive in the same sense; its equivalent is `generationConfig.responseMimeType: 'application/json'` plus `responseSchema` — a JSON-Schema-like but distinct **OpenAPI-subset** dialect (uppercase type names — `STRING`/`OBJECT`/`ARRAY` — and, critically, **no `additionalProperties`**). This is *constrained decoding*: the model's token sampling is restricted at generation time to only produce tokens consistent with the schema, which is a different mechanism from Anthropic's "validate the tool call after the fact," but gives the same practical guarantee — the response is guaranteed schema-shaped JSON, not merely prose that's hopefully parseable.
+
+Both adapters are constructed from the same `StructuredSchema` value (`{ name, description, jsonSchema, geminiSchema }`) — one schema is authored twice, once per dialect, because the two providers' schema languages are incompatible (Anthropic's `additionalProperties: { type: 'number' }` open map for `field_confidence` has no Gemini equivalent, which is why the Gemini schema pins `field_confidence` to a fixed set of named properties instead of an open map).
+
+Money stays a decimal string on both paths — the boundary rule above doesn't change because the provider changed; only the transport dialect for the schema differs, not the discipline for what crosses it.
+
+`thinkingConfig: { thinkingBudget: 0 }` explicitly disables Gemini's extended-thinking mode for this call: structured extraction from an image is a perception-and-formatting task, not a multi-step reasoning task, so paying thinking-token latency/cost here buys nothing.
+
+**The seam is provider selection, not a runtime negotiation** — `AP_FLOW_AI_PROVIDER` is one env var, read once at startup via `resolveModelClient(purpose)`, not a per-request fallback chain. A Gemini outage doesn't automatically retry on Anthropic; that would double the number of code paths that need testing for one operational convenience this project doesn't need.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -38,13 +53,18 @@ The tool schema declares every amount field (`subtotal`, `tax`, `total`, each li
 | Free-form prompt + `JSON.parse` | Simple to write; fails unpredictably whenever the model adds any surrounding text, which happens often enough in practice to be a real reliability problem | Rejected |
 | Amounts as JSON numbers | One less parsing step; but reintroduces float imprecision at the exact boundary rule 3 exists to close | Rejected — decimal strings instead |
 | Trusting `field_confidence` as ground truth | Would let a "high confidence" field skip review entirely | Rejected — it's a routing signal for Phase 11's reviewer UI, never an automatic accept/reject gate |
+| A per-org provider choice (stored in the database) | Lets each tenant pick their own model | Rejected — an env var is one config surface, not a tenant-row secret-management problem; nothing in this app's design needs per-tenant model choice |
+| Automatic fallback from one provider to the other on failure | Resilience against a single provider outage | Rejected — doubles the paths needing tests for an operational convenience a portfolio app doesn't need; a failed extraction already has a manual retry (`POST /:id/reextract`) |
+| A third-party abstraction library (e.g. LangChain) over both providers | Less bespoke glue code | Rejected by rule 14 — no dependency before the phase that needs it, and the actual adapter code here is under 250 lines |
 
 ## Where it lives in this codebase
 
-- `server/src/services/ap-flow/extractionService.ts` — `EXTRACTION_TOOL`, `extractFromPages`, `validateArithmetic`
-- `server/src/schemas/ap-flow/extractionSchema.ts` — the zod re-parse of the model's `tool_use.input`
+- `server/src/services/ap-flow/extractionService.ts` — `EXTRACTION_TOOL`, `GEMINI_EXTRACTION_SCHEMA`, `extractFromPages`, `validateArithmetic`
+- `server/src/services/ap-flow/mappingService.ts` — `CLASSIFICATION_TOOL`, `GEMINI_CLASSIFICATION_SCHEMA`, `classifyWithModel`
+- `server/src/services/ap-flow/modelClient.ts` — the provider seam: `StructuredModelClient`, `anthropicModelClient`, `geminiModelClient`, `resolveModelClient`
+- `server/src/schemas/ap-flow/extractionSchema.ts` — the zod re-parse of the model's structured output, provider-agnostic
 - `server/src/utils/money.ts` — `parseMoneyText`, the chokepoint every extracted amount passes through
-- `server/src/__tests__/ap-flow/extraction.test.ts` — every case here injects a stub `VisionClient`; none reach the network
+- `server/src/__tests__/ap-flow/extraction.test.ts`, `modelClient.test.ts` — every case here injects a stub client or a fake `fetchImpl`; none reach the network
 
 ## Gotchas
 
@@ -52,6 +72,20 @@ The tool schema declares every amount field (`subtotal`, `tax`, `total`, each li
 - **`extractFromPages` throwing `503` when unconfigured is a deliberate, non-obvious choice.** `ANTHROPIC_API_KEY` is optional at the environment level (the server and worker both have to boot without it, for the Docker-less local dev flow) — the alternative of making it required would break every existing test run and the whole dev setup. The tradeoff is that the "not configured" failure only surfaces when someone actually tries to extract, not at boot.
 - **Money-as-string is only safe if *every* consumer respects it.** A well-intentioned refactor that changes a field from `string` to `number` "for convenience" reintroduces exactly the float bug this design closes — the type discipline (`amount: string` in the tool schema, never `number`) is load-bearing, not stylistic.
 - **`validateArithmetic` flags, it never rejects.** A line-item sum that doesn't match the subtotal sets `arithmeticOk: false` and records a human-readable error, but the document still reaches `EXTRACTED` — Phase 10 posts nothing to the ledger, so there's nothing yet to protect by refusing the extraction outright; the contradiction is surfaced for a reviewer instead.
+
+## Interview Q&A (Phase 19 additions)
+
+**Q: You added a second LLM provider. What had to change, and what stayed the same?**
+A: The interface each caller uses (`generateStructured`) and everything downstream of it — the zod re-parse, the decimal-string money discipline, `validateArithmetic` — stayed identical. What changed is a new adapter (`geminiModelClient`) implementing that interface over Gemini's REST API instead of Anthropic's SDK, plus a second copy of each schema written in Gemini's OpenAPI-subset dialect. The provider is chosen once, by an env var, at the point a client is constructed — nothing downstream knows or cares which provider produced the object it's holding.
+
+**Q: Anthropic has forced tool use. Does Gemini have an equivalent, and if not, how do you get the same guarantee?**
+A: Gemini's mechanism is different but achieves the same practical result through constrained decoding: `responseMimeType: 'application/json'` plus a `responseSchema` restricts what tokens the model can sample at generation time, so the output is guaranteed to conform to the schema rather than being validated after the fact. The user-visible guarantee — "this is schema-shaped JSON, not a rejected or malformed response" — is the same; the underlying mechanism (constrain-during-generation vs. validate-after-generation) differs.
+
+**Q: Why does the Gemini schema define `field_confidence` as a fixed set of named fields instead of an open map, when the Anthropic version uses `additionalProperties`?**
+A: Because Gemini's schema dialect (an OpenAPI subset) doesn't support `additionalProperties` at all — there's no way to say "any number of string keys, each mapping to a number." The two providers' schema languages aren't interchangeable even though both are loosely "JSON Schema-like," so the same logical shape has to be authored twice, once per dialect, and the Gemini version necessarily lists every field it wants a confidence score for by name.
+
+**Q: Would you build automatic failover between the two providers?**
+A: No, deliberately not for this project. Automatic failover roughly doubles the number of runtime paths that need testing (provider A fails mid-request → does the failover call use the same schema dialect correctly? what happens if both fail?) for a resilience property nothing here actually needs — a failed extraction already has a safe, visible failure mode (the document lands in `FAILED` with the error recorded, and `POST /:id/reextract` is the retry). If this were a production system serving real uninterruptible traffic, failover would be worth the complexity; as a single-tenant-at-a-time capture pipeline behind a job queue with retries, it isn't.
 
 ## Interview Q&A
 

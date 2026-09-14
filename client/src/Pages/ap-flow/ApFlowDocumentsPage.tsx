@@ -9,15 +9,18 @@ import {
   type VaultDocument,
 } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import ApFlowUploadPanel from './ApFlowUploadPanel';
 
 /**
- * AP-Flow's capture register (Phase 10). Deliberately thin — the review
- * queue with side-by-side confidence colouring and per-line account
- * override is Phase 11.
+ * AP-Flow's capture register (Phase 10; direct upload and auto-post status
+ * added in Phase 19). The review queue with side-by-side confidence
+ * colouring and per-line account override is Phase 11.
  */
 
-const STATUS_OPTIONS: ApFlowDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED'];
+const STATUS_OPTIONS: ApFlowDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED'];
 const SCANNABLE_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg']);
+const IN_FLIGHT_STATUSES = new Set<ApFlowDocumentStatus>(['PENDING', 'PROCESSING']);
+const POLL_INTERVAL_MS = 5000;
 
 function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
   if (status === 'PENDING') {
@@ -34,6 +37,13 @@ function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
     return (
       <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
         Extracted
+      </span>
+    );
+  }
+  if (status === 'POSTED') {
+    return (
+      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 ring-1 ring-inset ring-violet-500/20">
+        Posted
       </span>
     );
   }
@@ -79,6 +89,15 @@ export default function ApFlowDocumentsPage() {
     };
   }, [statusFilter, currentPage, reloadToken]);
 
+  // Auto-refresh while anything is still processing, so a capture posted
+  // automatically (or one that finishes extraction) shows up without a
+  // manual reload.
+  useEffect(() => {
+    if (documents === null || !documents.some((d) => IN_FLIGHT_STATUSES.has(d.status))) return;
+    const timer = setInterval(() => setReloadToken((t) => t + 1), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [documents]);
+
   useEffect(() => {
     let ignore = false;
     listDocuments({ limit: 100 })
@@ -119,10 +138,17 @@ export default function ApFlowDocumentsPage() {
             Capture a vendor bill or receipt and extract it into a structured draft.
           </p>
         </div>
-        <Link to={`${base}/review`} className="btn btn--ghost">
-          Review queue
-        </Link>
+        <div className="flex gap-2">
+          <Link to={`${base}/settings`} className="btn btn--ghost">
+            Settings
+          </Link>
+          <Link to={`${base}/review`} className="btn btn--ghost">
+            Review queue
+          </Link>
+        </div>
       </header>
+
+      <ApFlowUploadPanel onUploaded={() => setReloadToken((t) => t + 1)} />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
@@ -145,7 +171,7 @@ export default function ApFlowDocumentsPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Capture a document</span>
+          <span className="text-[var(--muted)]">Or capture from the Document Vault</span>
           <div className="flex items-center gap-2">
             <select
               value={captureSelection}
@@ -172,29 +198,13 @@ export default function ApFlowDocumentsPage() {
         </label>
       </div>
 
-      {captureCandidates.length === 0 && (
-        <p className="text-sm text-[var(--muted)] m-0">
-          No PDF, PNG or JPEG documents are in the{' '}
-          <Link to="/documents" className="underline">
-            Document Vault
-          </Link>{' '}
-          yet — upload one there first.
-        </p>
-      )}
-
       {error !== null && <p className="status status--bad">{error}</p>}
 
       {documents === null && error === null && <p className="muted">Loading…</p>}
 
       {documents !== null && documents.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center">
-          <p className="text-sm text-[var(--muted)] m-0">
-            No documents have been captured yet. Upload one to the{' '}
-            <Link to="/documents" className="underline">
-              Document Vault
-            </Link>{' '}
-            and capture it above.
-          </p>
+          <p className="text-sm text-[var(--muted)] m-0">No documents yet — drop one above.</p>
         </div>
       )}
 
@@ -205,6 +215,7 @@ export default function ApFlowDocumentsPage() {
               <tr>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Filename</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Status</th>
+                <th className="text-left px-3 py-2 border-b border-[var(--border)]">Posting</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Pages</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Captured</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Actions</th>
@@ -216,6 +227,9 @@ export default function ApFlowDocumentsPage() {
                   <td className="px-3 py-2 border-b border-[var(--border)]">{doc.originalFilename}</td>
                   <td className="px-3 py-2 border-b border-[var(--border)]">
                     <StatusPill status={doc.status} />
+                  </td>
+                  <td className="px-3 py-2 border-b border-[var(--border)] text-[var(--muted)]">
+                    {doc.autoPosted ? 'Auto' : doc.status === 'POSTED' ? 'Manual' : '—'}
                   </td>
                   <td className="px-3 py-2 border-b border-[var(--border)]">{doc.pageCount ?? '—'}</td>
                   <td className="px-3 py-2 border-b border-[var(--border)]">

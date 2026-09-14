@@ -113,6 +113,8 @@ export interface ApFlowReviewQueueEntry {
   unmappedLineCount: number;
   lowestConfidence: number | null;
   createdAt: string;
+  /** Phase 19. */
+  autoPostBlockers: ApFlowAutoPostBlocker[];
 }
 
 export interface ApFlowExtraction {
@@ -120,6 +122,8 @@ export interface ApFlowExtraction {
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null; // 'YYYY-MM-DD'
+  /** Phase 19. 'YYYY-MM-DD'. */
+  dueDate: string | null;
   currency: string | null;
   subtotalCents: number | null;
   taxCents: number | null;
@@ -164,6 +168,12 @@ export interface ApFlowDocumentRecord {
   /** Phase 11. The vault document's sha256 at the moment this was posted. */
   postedSha256: string | null;
   postedAt: string | null;
+  /** Phase 19. The LedgerCore bill this document posted as. No REFERENCES — rule 16. */
+  billId: string | null;
+  /** Phase 19. True when auto-post — not a human — approved this posting. */
+  autoPosted: boolean;
+  /** Phase 19. Why an EXTRACTED document has not auto-posted. Empty once POSTED. */
+  autoPostBlockers: ApFlowAutoPostBlocker[];
 }
 
 export interface ApFlowDocumentDetail extends ApFlowDocumentRecord {
@@ -181,3 +191,50 @@ export interface ApFlowDocumentListFilters {
   page: number;
   limit: number;
 }
+
+// ---------------------------------------------------------- auto-post (19)
+
+/**
+ * Every reason a clean-looking extraction did NOT auto-post. `evaluateAutoPost`
+ * (autoPostPolicy.ts) checks every gate rather than stopping at the first
+ * failure — except AUTO_POST_DISABLED, which is exclusive — so a reviewer
+ * sees the complete picture in one read.
+ */
+export const AP_FLOW_AUTO_POST_BLOCKER_CODES = [
+  'AUTO_POST_DISABLED',
+  'ARITHMETIC_MISMATCH',
+  'MISSING_VENDOR_NAME',
+  'MISSING_INVOICE_NUMBER',
+  'MISSING_INVOICE_DATE',
+  'NON_POSITIVE_TOTAL',
+  'NO_LINE_ITEMS',
+  'UNMAPPED_LINE',
+  'NEGATIVE_LINE_AMOUNT',
+  'LOW_FIELD_CONFIDENCE',
+  'LOW_MAPPING_CONFIDENCE',
+  'ABOVE_AMOUNT_LIMIT',
+  'FOREIGN_CURRENCY_WITH_LIMIT',
+  'POSTING_REJECTED',
+] as const;
+export type ApFlowAutoPostBlockerCode = (typeof AP_FLOW_AUTO_POST_BLOCKER_CODES)[number];
+
+export interface ApFlowAutoPostBlocker {
+  code: ApFlowAutoPostBlockerCode;
+  message: string;
+}
+
+export interface ApFlowSettings {
+  autoPostEnabled: boolean;
+  /** 0.5-1, 3 decimal places. */
+  autoPostMinConfidence: number;
+  autoPostMaxTotalCents: number | null;
+  /** null when no settings row has ever been saved — the defaults are in force. */
+  updatedAt: string | null;
+}
+
+export const AP_FLOW_AUTO_POST_DEFAULTS: ApFlowSettings = {
+  autoPostEnabled: false,
+  autoPostMinConfidence: 0.9,
+  autoPostMaxTotalCents: null,
+  updatedAt: null,
+};

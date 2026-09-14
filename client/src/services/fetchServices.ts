@@ -2538,6 +2538,8 @@ export interface ApFlowExtraction {
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
+  /** Phase 19. 'YYYY-MM-DD'. */
+  dueDate: string | null;
   currency: string | null;
   subtotalCents: number | null;
   taxCents: number | null;
@@ -2576,6 +2578,23 @@ export interface ApFlowDocument {
   journalEntryId: string | null;
   postedSha256: string | null;
   postedAt: string | null;
+  /** Phase 19. The LedgerCore bill this document posted as. */
+  billId: string | null;
+  autoPosted: boolean;
+  autoPostBlockers: ApFlowAutoPostBlocker[];
+}
+
+/** Mirrors server/src/types/ap-flow.ts's ApFlowAutoPostBlockerCode. */
+export interface ApFlowAutoPostBlocker {
+  code: string;
+  message: string;
+}
+
+export interface ApFlowSettings {
+  autoPostEnabled: boolean;
+  autoPostMinConfidence: number;
+  autoPostMaxTotalCents: number | null;
+  updatedAt: string | null;
 }
 
 /** Mirrors server/src/types/ap-flow.ts's ApFlowMappingSource. */
@@ -2608,6 +2627,7 @@ export interface ApFlowReviewQueueEntry {
   unmappedLineCount: number;
   lowestConfidence: number | null;
   createdAt: string;
+  autoPostBlockers: ApFlowAutoPostBlocker[];
 }
 
 export interface ApFlowDocumentDetail extends ApFlowDocument {
@@ -2625,6 +2645,17 @@ export interface ApFlowDocumentFilters {
 /** POST /ap-flow/documents — registers an already-vaulted document. */
 export function createApFlowDocument(documentId: string): Promise<{ success: boolean; document: ApFlowDocument }> {
   return apiFetch('/ap-flow/documents', { method: 'POST', body: JSON.stringify({ documentId }) });
+}
+
+/** POST /ap-flow/documents/upload — multipart, field "file". Vaults and registers in one call. */
+export function uploadApFlowDocument(
+  file: File,
+): Promise<{ success: boolean; document: ApFlowDocument; created: boolean }> {
+  return apiUpload('/ap-flow/documents/upload', () => {
+    const body = new FormData();
+    body.append('file', file);
+    return body;
+  });
 }
 
 /** GET /ap-flow/documents */
@@ -2703,6 +2734,22 @@ export function updateApFlowLineItem(
 /** POST /ap-flow/documents/:id/post — one-click approve & post into LedgerCore. No request body. */
 export function postApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
   return apiFetch(`/ap-flow/documents/${id}/post`, { method: 'POST' });
+}
+
+// ---------------------------------------------------------- ap-flow (19)
+
+/** GET /ap-flow/settings */
+export function getApFlowSettings(): Promise<{ success: boolean; settings: ApFlowSettings }> {
+  return apiFetch('/ap-flow/settings');
+}
+
+/** PUT /ap-flow/settings */
+export function updateApFlowSettings(body: {
+  autoPostEnabled: boolean;
+  autoPostMinConfidence: number;
+  autoPostMaxTotalCents: number | null;
+}): Promise<{ success: boolean; settings: ApFlowSettings }> {
+  return apiFetch('/ap-flow/settings', { method: 'PUT', body: JSON.stringify(body) });
 }
 
 // ---------------------------------------------------------- fpa-engine (12)

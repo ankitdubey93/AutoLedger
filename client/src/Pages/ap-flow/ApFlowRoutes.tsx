@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import ApFlowDocumentsPage from './ApFlowDocumentsPage';
 import ApFlowDocumentDetailPage from './ApFlowDocumentDetailPage';
 import ApFlowReviewQueuePage from './ApFlowReviewQueuePage';
+import ApFlowSettingsPage from './ApFlowSettingsPage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -12,8 +13,8 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * No onboarding gate here, unlike LedgerCore's: Phase 10 has no setup
  * wizard for AP-Flow.
  *
- * "review" is a literal path and must come before ":id" — a sibling param
- * route would otherwise swallow it as an id.
+ * "review" and "settings" are literal paths and must come before ":id" — a
+ * sibling param route would otherwise swallow either as an id.
  */
 export default function ApFlowRoutes() {
   const base = useAppBasePath();
@@ -23,6 +24,7 @@ export default function ApFlowRoutes() {
       <Routes>
         <Route index element={<ApFlowDocumentsPage />} />
         <Route path="review" element={<ApFlowReviewQueuePage />} />
+        <Route path="settings" element={<ApFlowSettingsPage />} />
         <Route path=":id" element={<ApFlowDocumentDetailPage />} />
         <Route path="*" element={<Navigate to={base} replace />} />
       </Routes>

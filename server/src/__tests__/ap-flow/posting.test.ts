@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
+import * as vendorService from '../../services/ledger-core/vendorService.js';
 import {
   addMember,
   clearStorage,
@@ -11,13 +12,14 @@ import {
 import type { SeededUser } from '../helpers/factories.js';
 
 /**
- * AP-Flow's one-click post into LedgerCore (Phase 11). Integration tier,
- * real PostgreSQL. Proves the phase's own acceptance criteria: a two-line
- * receipt posts one balanced entry debiting two different accounts,
- * re-posting is a no-op (409, no second entry), and the posted entry's
- * source_id resolves back to a document whose stored bytes still hash to
- * the recorded sha256. Includes this module's own cross-tenant isolation
- * case (rule 15).
+ * AP-Flow's one-click post into LedgerCore (Phase 11; rewritten in Phase 19
+ * to post as a real LedgerCore bill rather than a raw journal entry — see
+ * postingService.ts's header comment). Integration tier, real PostgreSQL.
+ * Proves the phase's own acceptance criteria: a two-line receipt posts one
+ * balanced entry debiting two different accounts, re-posting is a no-op
+ * (409, no second entry), and the posted bill resolves back to a document
+ * whose stored bytes still hash to the recorded sha256. Includes this
+ * module's own cross-tenant isolation case (rule 15).
  */
 
 const app = createApp();
@@ -61,7 +63,9 @@ async function seedExtractedDocument(
   createdBy: string,
   options: {
     vendorName?: string | null;
+    invoiceNumber?: string | null;
     invoiceDate?: string | null;
+    dueDate?: string | null;
     currency?: string;
     subtotalCents?: number;
     taxCents?: number;
@@ -91,14 +95,19 @@ async function seedExtractedDocument(
 
   await pool.query(
     `INSERT INTO ap_flow_extractions
-       (org_id, ap_flow_document_id, vendor_name, invoice_number, invoice_date, currency,
+       (org_id, ap_flow_document_id, vendor_name, invoice_number, invoice_date, due_date, currency,
         subtotal_cents, tax_cents, total_cents, arithmetic_ok, model)
-     VALUES ($1, $2, $3, 'INV-1', $4, $5, $6, $7, $8, $9, 'claude-sonnet-5')`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'claude-sonnet-5')`,
     [
       orgId,
       apFlowDocId,
       options.vendorName === undefined ? 'Acme Vendor' : options.vendorName,
+      // A unique default per call (keyed off this fixture's own sha256) — two
+      // documents for the same vendor sharing 'INV-1' would collide on
+      // ux_bills_vendor_reference the moment both post.
+      options.invoiceNumber === undefined ? `INV-${sha256.slice(0, 8)}` : options.invoiceNumber,
       options.invoiceDate === undefined ? '2026-08-15' : options.invoiceDate,
+      options.dueDate === undefined ? null : options.dueDate,
       options.currency ?? 'USD',
       options.subtotalCents ?? 20000,
       options.taxCents ?? 0,
@@ -160,11 +169,13 @@ describe('ap-flow posting API', () => {
 
     expect(res.status).toBe(200);
     const journalEntryId = res.body.document.journalEntryId as string;
+    const billId = res.body.document.billId as string;
     expect(journalEntryId).toBeTruthy();
+    expect(billId).toBeTruthy();
 
     const { rows: entryRows } = await pool.query(
-      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'ap_flow' AND source_id = $2",
-      [orgA, apFlowDocId],
+      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'bill' AND source_id = $2",
+      [orgA, billId],
     );
     expect(entryRows).toHaveLength(1);
 
@@ -194,19 +205,20 @@ describe('ap-flow posting API', () => {
     const agent = await loginAgent(app, userA);
     const first = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
     expect(first.status).toBe(200);
+    const billId = first.body.document.billId as string;
 
     const second = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
     expect(second.status).toBe(409);
     expect(second.body.error).toContain('POSTED');
 
     const { rows } = await pool.query(
-      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'ap_flow' AND source_id = $2",
-      [orgA, apFlowDocId],
+      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'bill' AND source_id = $2",
+      [orgA, billId],
     );
     expect(rows).toHaveLength(1);
   });
 
-  it("the posted entry's source_id resolves back to the document's stored hash", async () => {
+  it("the posted bill resolves back to the document's stored hash", async () => {
     const account = await accountIdByCode(orgA, '6130');
     const { apFlowDocId, sha256 } = await seedExtractedDocument(orgA, userA.id, {
       subtotalCents: 5000,
@@ -217,14 +229,22 @@ describe('ap-flow posting API', () => {
     const agent = await loginAgent(app, userA);
     const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
     expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+    const journalEntryId = res.body.document.journalEntryId as string;
 
     const getRes = await agent.get(`${AP_FLOW_BASE}/${apFlowDocId}`);
     expect(getRes.body.document.postedSha256).toBe(sha256);
 
+    const { rows: entryRows } = await pool.query<{ source_id: string }>(
+      'SELECT source_id FROM journal_entries WHERE org_id = $1 AND id = $2',
+      [orgA, journalEntryId],
+    );
+    expect(entryRows[0]?.source_id).toBe(billId);
+
     const { rows } = await pool.query<{ sha256: string }>(
       `SELECT d.sha256 FROM ap_flow_documents a JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
-        WHERE a.org_id = $1 AND a.id = $2`,
-      [orgA, apFlowDocId],
+        WHERE a.org_id = $1 AND a.bill_id = $2`,
+      [orgA, billId],
     );
     expect(rows[0]?.sha256).toBe(sha256);
   });
@@ -326,10 +346,7 @@ describe('ap-flow posting API', () => {
     expect(res.status).toBe(422);
     expect(res.body.error).toContain('reconcile');
 
-    const { rows } = await pool.query(
-      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'ap_flow' AND source_id = $2",
-      [orgA, apFlowDocId],
-    );
+    const { rows } = await pool.query('SELECT id FROM journal_entries WHERE org_id = $1', [orgA]);
     expect(rows).toHaveLength(0);
   });
 
@@ -396,16 +413,14 @@ describe('ap-flow posting API', () => {
     const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
     expect(res.status).toBe(422);
 
-    const { rows } = await pool.query(
-      "SELECT id FROM journal_entries WHERE org_id = $1 AND source_type = 'ap_flow' AND source_id = $2",
-      [orgA, apFlowDocId],
-    );
+    const { rows } = await pool.query('SELECT id FROM journal_entries WHERE org_id = $1', [orgA]);
     expect(rows).toHaveLength(0);
   });
 
   it('a failed post leaves the document EXTRACTED and the ledger untouched', async () => {
     const { rows: beforeLines } = await pool.query('SELECT id FROM ledger_lines');
     const beforeCount = beforeLines.length;
+    const { rows: beforeBills } = await pool.query('SELECT id FROM bills WHERE org_id = $1', [orgA]);
 
     const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
       arithmeticOk: false,
@@ -419,9 +434,13 @@ describe('ap-flow posting API', () => {
     const getRes = await agent.get(`${AP_FLOW_BASE}/${apFlowDocId}`);
     expect(getRes.body.document.status).toBe('EXTRACTED');
     expect(getRes.body.document.journalEntryId).toBeNull();
+    expect(getRes.body.document.billId).toBeNull();
 
     const { rows: afterLines } = await pool.query('SELECT id FROM ledger_lines');
     expect(afterLines).toHaveLength(beforeCount);
+
+    const { rows: afterBills } = await pool.query('SELECT id FROM bills WHERE org_id = $1', [orgA]);
+    expect(afterBills).toHaveLength(beforeBills.length);
   });
 
   it('two lines on the same account merge into one ledger line', async () => {
@@ -525,5 +544,216 @@ describe('ap-flow posting API', () => {
     await agent.post('/api/v1/auth/switch-org').send({ orgId: orgA });
     const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
     expect(res.status).toBe(200);
+  });
+
+  it('posting creates a POSTED bill and AP aging reconciles', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      subtotalCents: 20000,
+      totalCents: 20000,
+      lineItems: [{ description: 'Office supplies', amountCents: 20000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+
+    const { rows } = await pool.query<{ status: string; total_cents: string }>(
+      'SELECT status, total_cents FROM bills WHERE org_id = $1 AND id = $2',
+      [orgA, billId],
+    );
+    expect(rows[0]?.status).toBe('POSTED');
+    expect(rows[0]?.total_cents).toBe('20000');
+
+    const agingRes = await agent.get('/api/v1/ledger-core/reports/ap-aging');
+    expect(agingRes.status).toBe(200);
+    expect(agingRes.body.reconciles).toBe(true);
+  });
+
+  it('posting reuses an existing vendor whose name normalizes equal', async () => {
+    const vendorRes = await vendorService.createVendor(orgA, userA.id, {
+      name: 'ACME VENDOR',
+      email: null,
+      phone: null,
+      billingAddress: null,
+      taxNumber: null,
+      paymentTerms: null,
+      notes: null,
+    });
+
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      vendorName: 'Acme Vendor.',
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+
+    const { rows } = await pool.query<{ vendor_id: string }>('SELECT vendor_id FROM bills WHERE org_id = $1 AND id = $2', [
+      orgA,
+      billId,
+    ]);
+    expect(rows[0]?.vendor_id).toBe(vendorRes.id);
+
+    const { rows: vendorCount } = await pool.query('SELECT id FROM vendors WHERE org_id = $1', [orgA]);
+    expect(vendorCount).toHaveLength(1);
+  });
+
+  it('posting a duplicate invoice number for the same vendor returns 409 and leaves the second document EXTRACTED', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const first = await seedExtractedDocument(orgA, userA.id, {
+      vendorName: 'Dup Vendor',
+      invoiceNumber: 'DUP-1',
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+    const second = await seedExtractedDocument(orgA, userA.id, {
+      vendorName: 'Dup Vendor',
+      invoiceNumber: 'DUP-1',
+      subtotalCents: 2000,
+      totalCents: 2000,
+      lineItems: [{ description: 'y', amountCents: 2000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const firstRes = await agent.post(`${AP_FLOW_BASE}/${first.apFlowDocId}/post`);
+    expect(firstRes.status).toBe(200);
+
+    const secondRes = await agent.post(`${AP_FLOW_BASE}/${second.apFlowDocId}/post`);
+    expect(secondRes.status).toBe(409);
+    expect(secondRes.body.error).toContain('already exists');
+
+    const getRes = await agent.get(`${AP_FLOW_BASE}/${second.apFlowDocId}`);
+    expect(getRes.body.document.status).toBe('EXTRACTED');
+
+    const { rows } = await pool.query('SELECT id FROM bills WHERE org_id = $1', [orgA]);
+    expect(rows).toHaveLength(1);
+  });
+
+  it('document tax is allocated across bill lines and sums exactly', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      subtotalCents: 10000,
+      taxCents: 1000,
+      totalCents: 11000,
+      lineItems: [
+        { description: 'a', amountCents: 3333, accountId: account },
+        { description: 'b', amountCents: 3333, accountId: account },
+        { description: 'c', amountCents: 3334, accountId: account },
+      ],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+
+    const { rows: billRows } = await pool.query<{ tax_cents: string; total_cents: string }>(
+      'SELECT tax_cents, total_cents FROM bills WHERE org_id = $1 AND id = $2',
+      [orgA, billId],
+    );
+    expect(billRows[0]?.tax_cents).toBe('1000');
+    expect(billRows[0]?.total_cents).toBe('11000');
+
+    const { rows: lineRows } = await pool.query<{ tax_cents: string }>(
+      'SELECT tax_cents FROM bill_lines WHERE org_id = $1 AND bill_id = $2 ORDER BY line_number',
+      [orgA, billId],
+    );
+    expect(lineRows.map((r) => r.tax_cents)).toEqual(['333', '333', '334']);
+  });
+
+  it('posting refuses a negative line item', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      subtotalCents: 500,
+      totalCents: 500,
+      lineItems: [
+        { description: 'a', amountCents: 1000, accountId: account },
+        { description: 'refund', amountCents: -500, accountId: account },
+      ],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('negative amount');
+  });
+
+  it('posting refuses a document with no invoice number', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      invoiceNumber: null,
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toContain('invoice number');
+  });
+
+  it('the vault document is linked to the posted bill', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+
+    const { rows } = await pool.query(
+      "SELECT id FROM document_links WHERE org_id = $1 AND app_slug = 'ledger-core' AND entity_type = 'bill' AND entity_id = $2",
+      [orgA, billId],
+    );
+    expect(rows).toHaveLength(1);
+  });
+
+  it('a missing due date defaults to invoice date plus 30 days', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      invoiceDate: '2026-08-15',
+      dueDate: null,
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    const billId = res.body.document.billId as string;
+
+    const { rows } = await pool.query<{ due_date: string }>('SELECT due_date::text FROM bills WHERE org_id = $1 AND id = $2', [
+      orgA,
+      billId,
+    ]);
+    expect(rows[0]?.due_date).toBe('2026-09-14');
+  });
+
+  it('a manual post records auto_posted false', async () => {
+    const account = await accountIdByCode(orgA, '6130');
+    const { apFlowDocId } = await seedExtractedDocument(orgA, userA.id, {
+      subtotalCents: 1000,
+      totalCents: 1000,
+      lineItems: [{ description: 'x', amountCents: 1000, accountId: account }],
+    });
+
+    const agent = await loginAgent(app, userA);
+    const res = await agent.post(`${AP_FLOW_BASE}/${apFlowDocId}/post`);
+    expect(res.status).toBe(200);
+    expect(res.body.document.autoPosted).toBe(false);
   });
 });

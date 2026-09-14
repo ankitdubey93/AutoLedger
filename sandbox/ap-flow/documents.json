@@ -14,7 +14,7 @@
       "monthOffset": -1,
       "day": 6,
       "outcome": "POSTED",
-      "outcomeComment": "Posted through postingService so the AP-Flow -> LedgerCore link is visible end to end: the journal entry carries source_type 'ap_flow' and the source document's SHA-256, so an auditor can walk from a ledger line back to the original image.",
+      "outcomeComment": "Posted through postingService as a LedgerCore bill, so it appears in AP aging and can be paid; the bill links back to this AP-Flow document and its SHA-256.",
       "extraction": {
         "vendorName": "Cloudspan Infrastructure",
         "invoiceNumber": "CS-8841",

@@ -1,18 +1,19 @@
 import type { PoolClient } from 'pg';
-import Anthropic from '@anthropic-ai/sdk';
 import { pool } from '../../db/connect.js';
-import { env } from '../../config/env.js';
-import {
-  AP_FLOW_CLASSIFY_MAX_TOKENS,
-  AP_FLOW_CLASSIFY_MODEL,
-  AP_FLOW_CLASSIFY_TIMEOUT_MS,
-} from '../../config/constants.js';
+import { AP_FLOW_CLASSIFY_MAX_TOKENS, AP_FLOW_CLASSIFY_TIMEOUT_MS } from '../../config/constants.js';
 import { normalizeForMatching } from '../../utils/matchScore.js';
 import { similarity } from '../../utils/levenshtein.js';
 import * as accountService from '../ledger-core/accountService.js';
 import { classificationToolInputSchema } from '../../schemas/ap-flow/mappingSchema.js';
 import type { ApFlowLineItem, ApFlowMappingSource } from '../../types/ap-flow.js';
 import type { Account } from '../../types/ledger-core.js';
+import {
+  anthropicModelClient,
+  isModelConfigured,
+  resolveModelClient,
+  type MessagesClient,
+  type StructuredModelClient,
+} from './modelClient.js';
 
 /**
  * AP-Flow's account classification (Phase 11) — GL coding inferred in a
@@ -38,11 +39,8 @@ export interface LineItemClassification {
   mappingConfidence: number | null;
 }
 
-export interface ClassificationClient {
-  messages: {
-    create(body: unknown, options?: { timeout?: number }): Promise<unknown>;
-  };
-}
+/** Kept as an alias so every existing test-stub import keeps compiling unchanged. */
+export type ClassificationClient = MessagesClient;
 
 /**
  * The model is forced into a tool call, never asked for free-form JSON —
@@ -73,40 +71,25 @@ export const CLASSIFICATION_TOOL = {
   },
 } as const;
 
-function realClassifierClient(): ClassificationClient {
-  const anthropic = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-  return {
-    messages: {
-      create: (body, options) =>
-        anthropic.messages.create(
-          body as Anthropic.Messages.MessageCreateParamsNonStreaming,
-          options,
-        ),
+/** Gemini's responseSchema mirror of CLASSIFICATION_TOOL — see extractionService.GEMINI_EXTRACTION_SCHEMA for the "why" of this shape. */
+export const GEMINI_CLASSIFICATION_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    assignments: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          line_index: { type: 'INTEGER' },
+          account_code: { type: 'STRING' },
+          confidence: { type: 'NUMBER' },
+        },
+        required: ['line_index', 'account_code', 'confidence'],
+      },
     },
-  };
-}
-
-interface ToolUseBlockLike {
-  type: 'tool_use';
-  input: unknown;
-}
-
-function findToolUseBlock(response: unknown): ToolUseBlockLike | null {
-  if (typeof response !== 'object' || response === null || !('content' in response)) return null;
-  const content = (response as { content: unknown }).content;
-  if (!Array.isArray(content)) return null;
-  for (const block of content) {
-    if (
-      typeof block === 'object' &&
-      block !== null &&
-      'type' in block &&
-      (block as { type: unknown }).type === 'tool_use'
-    ) {
-      return block as ToolUseBlockLike;
-    }
-  }
-  return null;
-}
+  },
+  required: ['assignments'],
+} as const;
 
 /** normalizeForMatching(vendorName), truncated to 200 chars — this table's key length. '' when the name is null or blank. */
 export function vendorKeyOf(vendorName: string | null): string {
@@ -129,7 +112,7 @@ function round3(value: number): number {
 export async function classifyLineItems(
   orgId: string,
   input: { vendorName: string | null; lineItems: ApFlowLineItem[] },
-  deps?: { classifier?: ClassificationClient },
+  deps?: { classifier?: ClassificationClient; modelClient?: StructuredModelClient },
 ): Promise<LineItemClassification[]> {
   const vendorKey = vendorKeyOf(input.vendorName);
 
@@ -199,7 +182,7 @@ export async function classifyLineItems(
   const unmapped = classifications.filter((c) => c.mappingSource === 'NONE');
   if (unmapped.length === 0) return classifications;
 
-  const modelResults = await classifyWithModel(unmapped, expenseAccounts, deps?.classifier);
+  const modelResults = await classifyWithModel(unmapped, expenseAccounts, deps);
   for (const classification of classifications) {
     const result = modelResults.get(classification.lineIndex);
     if (result === undefined) continue;
@@ -220,45 +203,43 @@ export async function classifyLineItems(
 async function classifyWithModel(
   unmapped: LineItemClassification[],
   candidates: Account[],
-  client?: ClassificationClient,
+  deps?: { classifier?: ClassificationClient; modelClient?: StructuredModelClient },
 ): Promise<Map<number, { accountId: string; confidence: number }>> {
   const results = new Map<number, { accountId: string; confidence: number }>();
 
-  if (client === undefined && env.ANTHROPIC_API_KEY === '') {
-    console.warn('[ap-flow] account classification unavailable: ANTHROPIC_API_KEY is unset');
+  let effectiveClient: StructuredModelClient;
+  if (deps?.modelClient !== undefined) {
+    effectiveClient = deps.modelClient;
+  } else if (deps?.classifier !== undefined) {
+    effectiveClient = anthropicModelClient('classify', deps.classifier);
+  } else if (isModelConfigured()) {
+    effectiveClient = resolveModelClient('classify');
+  } else {
+    console.warn('[ap-flow] account classification unavailable: no AI provider key is configured');
     return results;
   }
 
   try {
-    const effectiveClient = client ?? realClassifierClient();
     const codeToId = new Map(candidates.map((account) => [account.code, account.id]));
 
     const chartLines = candidates.map((account) => `${account.code} — ${account.name}`).join('\n');
     const lineLines = unmapped.map((item) => `${String(item.lineIndex)}: ${item.description}`).join('\n');
 
-    const body = {
-      model: AP_FLOW_CLASSIFY_MODEL,
-      max_tokens: AP_FLOW_CLASSIFY_MAX_TOKENS,
-      tools: [CLASSIFICATION_TOOL],
-      tool_choice: { type: 'tool', name: 'suggest_accounts' },
-      messages: [
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'text',
-              text: `Chart of accounts:\n${chartLines}\n\nUnmapped line items:\n${lineLines}\n\nAssign each line item to the single best-fitting account code from the chart above using the suggest_accounts tool.`,
-            },
-          ],
-        },
-      ],
-    };
+    const raw = await effectiveClient.generateStructured({
+      images: [],
+      prompt: `Chart of accounts:\n${chartLines}\n\nUnmapped line items:\n${lineLines}\n\nAssign each line item to the single best-fitting account code from the chart above using the suggest_accounts tool.`,
+      schema: {
+        name: CLASSIFICATION_TOOL.name,
+        description: CLASSIFICATION_TOOL.description,
+        jsonSchema: CLASSIFICATION_TOOL.input_schema,
+        geminiSchema: GEMINI_CLASSIFICATION_SCHEMA,
+      },
+      maxTokens: AP_FLOW_CLASSIFY_MAX_TOKENS,
+      timeoutMs: AP_FLOW_CLASSIFY_TIMEOUT_MS,
+    });
+    if (raw === null) return results;
 
-    const response = await effectiveClient.messages.create(body, { timeout: AP_FLOW_CLASSIFY_TIMEOUT_MS });
-    const toolUse = findToolUseBlock(response);
-    if (toolUse === null) return results;
-
-    const parsed = classificationToolInputSchema.parse(toolUse.input);
+    const parsed = classificationToolInputSchema.parse(raw);
     for (const assignment of parsed.assignments) {
       // A model-named account code outside the candidate list is discarded
       // — the model naming an account that does not exist must not

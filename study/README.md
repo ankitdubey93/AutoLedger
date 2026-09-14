@@ -238,6 +238,9 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Transactional outbox: the dual-write problem, at-least-once delivery | 7 (webhook events) | ✅ |
 | Realized/unrealized FX gain-loss: the imbalance-as-plug technique, direction-agnostic sign, period-end revaluation with an automatic reversal | 8 (FX engine) | ✅ |
 | Deterministic demo/fixture generation: seeding through real services vs raw SQL | 18 (the sandbox dataset) | ✅ |
+| Multi-provider LLM seam: one `StructuredModelClient` interface over forced-tool-call (Anthropic) vs constrained-JSON-output (Gemini) | 19 (AP-Flow automated intake) | ⬜ — **debt**, explicitly skipped at the user's direction mid-execution; see [roadmap.md](../docs/roadmap.md#phase-19-as-delivered) |
+| A real subledger-reconciliation bug found and fixed: posting to a control account with no document behind it | 19 (AP-Flow automated intake) | ⬜ — **debt**, same skip. `subledger-reconciliation-and-aging.md` already has one paragraph on this from before the skip instruction landed; the rest (largest-remainder tax allocation, advisory-lock find-or-create, PG11+ fast-default columns next to a posted-row guard trigger) is unwritten |
+| Confidence-gated automation: pure policy function, straight-through processing, why every gate is checked rather than short-circuited | 19 (AP-Flow automated intake) | ⬜ — **debt**, same skip |
 
 ### Security & auth
 

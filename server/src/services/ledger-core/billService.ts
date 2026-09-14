@@ -471,6 +471,93 @@ async function insertBillLines(
   );
 }
 
+/**
+ * The body of `createBill`, extracted so `postingService.ts` (Phase 19) can
+ * insert a DRAFT bill on its own already-open transaction. Every statement
+ * runs on `client` (rule 5) — no BEGIN/COMMIT/ROLLBACK/release here, and no
+ * error mapping either; the caller owns both.
+ */
+async function insertBillOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  header: Omit<CreateBillInput, 'lines'>,
+  totals: LineTotal[],
+): Promise<string> {
+  const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
+  const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
+  const totalCents = subtotalCents + taxCents;
+
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+  const currencyCode = header.currencyCode ?? baseCurrency;
+
+  const { rows: vendorRows } = await client.query<{
+    name: string;
+    billing_address: string | null;
+    tax_number: string | null;
+  }>(
+    'SELECT name, billing_address, tax_number FROM vendors WHERE id = $1 AND org_id = $2 AND is_active = true',
+    [header.vendorId, orgId],
+  );
+  const vendor = vendorRows[0];
+  if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
+
+  await assertExpenseAccounts(
+    client,
+    orgId,
+    totals.map((t) => t.input.expenseAccountId),
+  );
+
+  // Resolved on every draft save so the draft always displays an honest
+  // base-currency total; frozen for good at approveBill.
+  const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, header.billDate);
+  const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+  const baseTaxCents = convertToBase(taxCents, fxRate);
+  const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
+  const { rows: billRows } = await client.query<{ id: string }>(
+    `INSERT INTO bills
+       (org_id, vendor_id, vendor_reference, bill_date, due_date, currency_code,
+        vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
+        notes, payment_terms, subtotal_cents, tax_cents, total_cents,
+        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     RETURNING id`,
+    [
+      orgId,
+      header.vendorId,
+      header.vendorReference,
+      header.billDate,
+      header.dueDate,
+      currencyCode,
+      vendor.name,
+      vendor.billing_address,
+      vendor.tax_number,
+      header.notes,
+      header.paymentTerms,
+      subtotalCents,
+      taxCents,
+      totalCents,
+      fxRate,
+      baseSubtotalCents,
+      baseTaxCents,
+      baseTotalCents,
+      createdBy,
+    ],
+  );
+  const billId = billRows[0]?.id;
+  if (billId === undefined) throw new Error('INSERT ... RETURNING produced no row');
+
+  await insertBillLines(client, orgId, billId, totals);
+
+  return billId;
+}
+
 export async function createBill(
   orgId: string,
   createdBy: string,
@@ -478,80 +565,12 @@ export async function createBill(
 ): Promise<Bill> {
   validateBillInput(input);
   const totals = computeLineTotals(input.lines);
-  const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
-  const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
-  const totalCents = subtotalCents + taxCents;
 
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
-      [orgId],
-    );
-    const baseCurrency = orgRows[0]?.base_currency.trim();
-    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-    const currencyCode = input.currencyCode ?? baseCurrency;
-
-    const { rows: vendorRows } = await client.query<{
-      name: string;
-      billing_address: string | null;
-      tax_number: string | null;
-    }>(
-      'SELECT name, billing_address, tax_number FROM vendors WHERE id = $1 AND org_id = $2 AND is_active = true',
-      [input.vendorId, orgId],
-    );
-    const vendor = vendorRows[0];
-    if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
-
-    await assertExpenseAccounts(
-      client,
-      orgId,
-      totals.map((t) => t.input.expenseAccountId),
-    );
-
-    // Resolved on every draft save so the draft always displays an honest
-    // base-currency total; frozen for good at approveBill.
-    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.billDate);
-    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
-    const baseTaxCents = convertToBase(taxCents, fxRate);
-    const baseTotalCents = baseSubtotalCents + baseTaxCents;
-
-    const { rows: billRows } = await client.query<{ id: string }>(
-      `INSERT INTO bills
-         (org_id, vendor_id, vendor_reference, bill_date, due_date, currency_code,
-          vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
-          notes, payment_terms, subtotal_cents, tax_cents, total_cents,
-          fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-       RETURNING id`,
-      [
-        orgId,
-        input.vendorId,
-        input.vendorReference,
-        input.billDate,
-        input.dueDate,
-        currencyCode,
-        vendor.name,
-        vendor.billing_address,
-        vendor.tax_number,
-        input.notes,
-        input.paymentTerms,
-        subtotalCents,
-        taxCents,
-        totalCents,
-        fxRate,
-        baseSubtotalCents,
-        baseTaxCents,
-        baseTotalCents,
-        createdBy,
-      ],
-    );
-    const billId = billRows[0]?.id;
-    if (billId === undefined) throw new Error('INSERT ... RETURNING produced no row');
-
-    await insertBillLines(client, orgId, billId, totals);
+    const billId = await insertBillOnClient(client, orgId, createdBy, input, totals);
 
     await client.query('COMMIT');
     return await getBillById(orgId, billId);
@@ -568,6 +587,78 @@ export async function createBill(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Phase 19 — AP-Flow's captured-bill posting. A DRAFT bill with explicit
+ * per-line net/tax cents (already allocated by the caller — see
+ * `utils/money.ts`'s `allocateCents`), inserted on the caller's own
+ * transaction. Reuses `insertBillOnClient` by building an equivalent
+ * `CreateBillInput` shape from `CapturedBillInput`'s pre-computed totals —
+ * `computeLineTotals` is not called here, because a captured line's net/tax
+ * are already final cents, not a quantity*price computation.
+ */
+export interface CapturedBillLineInput {
+  description: string;
+  netCents: number;
+  taxCents: number;
+  expenseAccountId: string;
+}
+
+export interface CapturedBillInput {
+  vendorId: string;
+  vendorReference: string;
+  billDate: string;
+  dueDate: string;
+  currencyCode: string;
+  notes: string | null;
+  lines: CapturedBillLineInput[];
+}
+
+export async function createCapturedBillOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  input: CapturedBillInput,
+): Promise<string> {
+  const totals: LineTotal[] = input.lines.map((line) => ({
+    input: {
+      description: line.description,
+      quantityMilli: 1000,
+      unitPriceCents: line.netCents,
+      expenseAccountId: line.expenseAccountId,
+      taxRateBp: line.netCents === 0 ? 0 : Math.min(10000, Number(scaleCents(cents(line.taxCents), 10000, line.netCents))),
+    },
+    netCents: line.netCents,
+    taxCents: line.taxCents,
+  }));
+
+  validateBillInput({
+    vendorId: input.vendorId,
+    vendorReference: input.vendorReference,
+    billDate: input.billDate,
+    dueDate: input.dueDate,
+    currencyCode: input.currencyCode,
+    notes: input.notes,
+    paymentTerms: null,
+    lines: totals.map((t) => t.input),
+  });
+
+  return insertBillOnClient(
+    client,
+    orgId,
+    createdBy,
+    {
+      vendorId: input.vendorId,
+      vendorReference: input.vendorReference,
+      billDate: input.billDate,
+      dueDate: input.dueDate,
+      currencyCode: input.currencyCode,
+      notes: input.notes,
+      paymentTerms: null,
+    },
+    totals,
+  );
 }
 
 /** A draft/in-review edit replaces the whole document — the document is small and the client carries no line identity to diff against. */
@@ -731,6 +822,158 @@ export async function submitBill(orgId: string, id: string): Promise<Bill> {
 
 // ---------------------------------------------------------- approve and void
 
+/**
+ * The body of `approveBill`, extracted so `postingService.ts` (Phase 19)
+ * can approve a bill it just created on the same already-open transaction.
+ * Every statement runs on `client` (rule 5) — no BEGIN/COMMIT/ROLLBACK/
+ * release here, and no error mapping either; the caller owns both.
+ */
+export async function approveBillOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  id: string,
+  entryDate: string | null,
+): Promise<{ journalEntryId: string }> {
+  const { rows: billRows } = await client.query<{
+    id: string;
+    status: string;
+    bill_date: string;
+    due_date: string;
+    vendor_id: string;
+    vendor_name_snapshot: string;
+    vendor_reference: string;
+    currency_code: string;
+    subtotal_cents: string;
+    total_cents: string;
+    tax_cents: string;
+  }>(
+    `SELECT id, status, bill_date, due_date, vendor_id, vendor_name_snapshot, vendor_reference,
+            currency_code, subtotal_cents, total_cents, tax_cents
+       FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+    [id, orgId],
+  );
+  const billRow = billRows[0];
+  if (billRow === undefined) throw new ApiError(404, 'Bill not found');
+  if (!isBillStatus(billRow.status)) {
+    throw new Error(`Unknown bill status "${billRow.status}" on bill ${id}`);
+  }
+  if (!canTransitionBill(billRow.status, 'POSTED')) {
+    throw new ApiError(409, `A bill that is ${billRow.status} cannot be approved`);
+  }
+
+  const { rows: lineRows } = await client.query<{
+    expense_account_id: string;
+    net_cents: string;
+  }>(
+    'SELECT expense_account_id, net_cents FROM bill_lines WHERE bill_id = $1 AND org_id = $2',
+    [id, orgId],
+  );
+  if (lineRows.length === 0) {
+    throw new ApiError(422, 'A bill needs at least one line before it can be approved');
+  }
+
+  const totalCents = parseCents(billRow.total_cents);
+  const subtotalCents = parseCents(billRow.subtotal_cents);
+  const taxTotalCents = parseCents(billRow.tax_cents);
+  const documentCurrency = billRow.currency_code.trim();
+  const postingDate = entryDate ?? billRow.bill_date;
+
+  // The rate is frozen HERE, at posting, re-resolved for the posting date
+  // rather than trusting whatever the draft last saved for bill_date —
+  // entryDate can differ from bill_date. Once approved this never changes
+  // again; every later settlement compares its own rate against this one.
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+  const fxRate = await resolveDocumentFxRate(client, orgId, documentCurrency, baseCurrency, postingDate);
+  const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+  const baseTaxCents = convertToBase(taxTotalCents, fxRate);
+  const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
+  const { payableAccountId, taxAccountId } = await resolveApPostingAccountsOnClient(
+    client,
+    orgId,
+    taxTotalCents > 0,
+  );
+
+  // One debit line per distinct expense account — two bill lines on the
+  // same account merge into a single ledger line.
+  const expenseByAccount = new Map<string, number>();
+  for (const line of lineRows) {
+    const net = parseCents(line.net_cents);
+    expenseByAccount.set(
+      line.expense_account_id,
+      (expenseByAccount.get(line.expense_account_id) ?? 0) + net,
+    );
+  }
+
+  const glLines = [
+    ...[...expenseByAccount.entries()].map(([accountId, netCents]) => ({
+      accountId,
+      debitCents: netCents,
+      creditCents: 0,
+      currencyCode: documentCurrency,
+      fxRate,
+    })),
+    { accountId: payableAccountId, debitCents: 0, creditCents: totalCents, currencyCode: documentCurrency, fxRate },
+  ];
+  if (taxAccountId !== null && taxTotalCents > 0) {
+    glLines.push({
+      accountId: taxAccountId,
+      debitCents: taxTotalCents,
+      creditCents: 0,
+      currencyCode: documentCurrency,
+      fxRate,
+    });
+  }
+
+  const debitTotal = sumCents(glLines.map((l) => cents(l.debitCents)));
+  const creditTotal = sumCents(glLines.map((l) => cents(l.creditCents)));
+  if (debitTotal !== creditTotal) {
+    // A bug, not user input — the invariant that totalCents = subtotal + tax
+    // and that line net/tax sum to those totals should make this impossible.
+    throw new Error('Bill posting is unbalanced');
+  }
+
+  const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
+    entryDate: postingDate,
+    description: `Bill ${billRow.vendor_reference} — ${billRow.vendor_name_snapshot}`,
+    sourceType: 'bill',
+    sourceId: id,
+    lines: glLines,
+  });
+
+  await client.query(
+    `UPDATE bills
+        SET status = 'POSTED', journal_entry_id = $1, posted_at = now(), approved_by = $2,
+            fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6
+      WHERE id = $7 AND org_id = $8`,
+    [journalEntryId, userId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId],
+  );
+
+  await emitEvent(client, orgId, 'ledger-core', 'bill.approved', {
+    billId: billRow.id,
+    vendorId: billRow.vendor_id,
+    vendorName: billRow.vendor_name_snapshot,
+    vendorReference: billRow.vendor_reference,
+    billDate: billRow.bill_date,
+    dueDate: billRow.due_date,
+    currencyCode: billRow.currency_code,
+    subtotalCents: parseCents(billRow.subtotal_cents),
+    taxCents: taxTotalCents,
+    totalCents: totalCents,
+    fxRate,
+    baseTotalCents,
+    journalEntryId,
+  });
+
+  return { journalEntryId };
+}
+
 export async function approveBill(
   orgId: string,
   userId: string,
@@ -740,143 +983,7 @@ export async function approveBill(
   const client = await pool.connect();
   try {
     await beginTransaction(client);
-
-    const { rows: billRows } = await client.query<{
-      id: string;
-      status: string;
-      bill_date: string;
-      due_date: string;
-      vendor_id: string;
-      vendor_name_snapshot: string;
-      vendor_reference: string;
-      currency_code: string;
-      subtotal_cents: string;
-      total_cents: string;
-      tax_cents: string;
-    }>(
-      `SELECT id, status, bill_date, due_date, vendor_id, vendor_name_snapshot, vendor_reference,
-              currency_code, subtotal_cents, total_cents, tax_cents
-         FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE`,
-      [id, orgId],
-    );
-    const billRow = billRows[0];
-    if (billRow === undefined) throw new ApiError(404, 'Bill not found');
-    if (!isBillStatus(billRow.status)) {
-      throw new Error(`Unknown bill status "${billRow.status}" on bill ${id}`);
-    }
-    if (!canTransitionBill(billRow.status, 'POSTED')) {
-      throw new ApiError(409, `A bill that is ${billRow.status} cannot be approved`);
-    }
-
-    const { rows: lineRows } = await client.query<{
-      expense_account_id: string;
-      net_cents: string;
-    }>(
-      'SELECT expense_account_id, net_cents FROM bill_lines WHERE bill_id = $1 AND org_id = $2',
-      [id, orgId],
-    );
-    if (lineRows.length === 0) {
-      throw new ApiError(422, 'A bill needs at least one line before it can be approved');
-    }
-
-    const totalCents = parseCents(billRow.total_cents);
-    const subtotalCents = parseCents(billRow.subtotal_cents);
-    const taxTotalCents = parseCents(billRow.tax_cents);
-    const documentCurrency = billRow.currency_code.trim();
-    const postingDate = entryDate ?? billRow.bill_date;
-
-    // The rate is frozen HERE, at posting, re-resolved for the posting date
-    // rather than trusting whatever the draft last saved for bill_date —
-    // entryDate can differ from bill_date. Once approved this never changes
-    // again; every later settlement compares its own rate against this one.
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
-      [orgId],
-    );
-    const baseCurrency = orgRows[0]?.base_currency.trim();
-    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-    const fxRate = await resolveDocumentFxRate(client, orgId, documentCurrency, baseCurrency, postingDate);
-    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
-    const baseTaxCents = convertToBase(taxTotalCents, fxRate);
-    const baseTotalCents = baseSubtotalCents + baseTaxCents;
-
-    const { payableAccountId, taxAccountId } = await resolveApPostingAccountsOnClient(
-      client,
-      orgId,
-      taxTotalCents > 0,
-    );
-
-    // One debit line per distinct expense account — two bill lines on the
-    // same account merge into a single ledger line.
-    const expenseByAccount = new Map<string, number>();
-    for (const line of lineRows) {
-      const net = parseCents(line.net_cents);
-      expenseByAccount.set(
-        line.expense_account_id,
-        (expenseByAccount.get(line.expense_account_id) ?? 0) + net,
-      );
-    }
-
-    const glLines = [
-      ...[...expenseByAccount.entries()].map(([accountId, netCents]) => ({
-        accountId,
-        debitCents: netCents,
-        creditCents: 0,
-        currencyCode: documentCurrency,
-        fxRate,
-      })),
-      { accountId: payableAccountId, debitCents: 0, creditCents: totalCents, currencyCode: documentCurrency, fxRate },
-    ];
-    if (taxAccountId !== null && taxTotalCents > 0) {
-      glLines.push({
-        accountId: taxAccountId,
-        debitCents: taxTotalCents,
-        creditCents: 0,
-        currencyCode: documentCurrency,
-        fxRate,
-      });
-    }
-
-    const debitTotal = sumCents(glLines.map((l) => cents(l.debitCents)));
-    const creditTotal = sumCents(glLines.map((l) => cents(l.creditCents)));
-    if (debitTotal !== creditTotal) {
-      // A bug, not user input — the invariant that totalCents = subtotal + tax
-      // and that line net/tax sum to those totals should make this impossible.
-      throw new Error('Bill posting is unbalanced');
-    }
-
-    const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
-      entryDate: postingDate,
-      description: `Bill ${billRow.vendor_reference} — ${billRow.vendor_name_snapshot}`,
-      sourceType: 'bill',
-      sourceId: id,
-      lines: glLines,
-    });
-
-    await client.query(
-      `UPDATE bills
-          SET status = 'POSTED', journal_entry_id = $1, posted_at = now(), approved_by = $2,
-              fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6
-        WHERE id = $7 AND org_id = $8`,
-      [journalEntryId, userId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId],
-    );
-
-    await emitEvent(client, orgId, 'ledger-core', 'bill.approved', {
-      billId: billRow.id,
-      vendorId: billRow.vendor_id,
-      vendorName: billRow.vendor_name_snapshot,
-      vendorReference: billRow.vendor_reference,
-      billDate: billRow.bill_date,
-      dueDate: billRow.due_date,
-      currencyCode: billRow.currency_code,
-      subtotalCents: parseCents(billRow.subtotal_cents),
-      taxCents: taxTotalCents,
-      totalCents: totalCents,
-      fxRate,
-      baseTotalCents,
-      journalEntryId,
-    });
-
+    await approveBillOnClient(client, orgId, userId, id, entryDate);
     await client.query('COMMIT');
     return await getBillById(orgId, id);
   } catch (err) {

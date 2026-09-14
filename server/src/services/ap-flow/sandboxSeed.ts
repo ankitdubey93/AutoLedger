@@ -72,6 +72,7 @@ export async function seedSandbox(
       vendorName: doc.extraction.vendorName,
       invoiceNumber: doc.extraction.invoiceNumber,
       invoiceDate,
+      dueDate: null,
       currency: doc.extraction.currency,
       subtotalCents,
       taxCents,

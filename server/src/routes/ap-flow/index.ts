@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import documentRoutes from './documentRoutes.js';
 import reviewRoutes from './reviewRoutes.js';
+import settingsRoutes from './settingsRoutes.js';
 
 /**
  * AP-Flow's router, mounted at /api/v1/ap-flow by routes/index.ts.
@@ -10,6 +11,7 @@ import reviewRoutes from './reviewRoutes.js';
  */
 const router = Router();
 
+router.use('/settings', settingsRoutes);
 router.use('/review-queue', reviewRoutes);
 router.use('/documents', documentRoutes);
 

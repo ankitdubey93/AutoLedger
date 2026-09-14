@@ -1,6 +1,8 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
+import { normalizeForMatching } from '../../utils/matchScore.js';
 import type { Vendor } from '../../types/ledger-core.js';
 
 /**
@@ -177,4 +179,48 @@ export async function updateVendor(
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Vendor not found');
   return toVendor(row);
+}
+
+/**
+ * Phase 19 — AP-Flow's captured-bill posting needs a vendor id from an
+ * extracted name, with no reviewer in the loop to pick one. Returns the id
+ * of this org's active vendor whose name normalizes equal to `name`,
+ * creating one if none exists.
+ *
+ * `vendors.name` has no UNIQUE constraint (unlike `ap_flow_vendor_account_map
+ * .vendor_key`), so two concurrent captures for a brand-new vendor name
+ * could otherwise both pass the SELECT and both INSERT. A transaction-scoped
+ * advisory lock keyed on (org, normalized name) serializes exactly that
+ * race — `pg_advisory_xact_lock` blocks a second caller with the same key
+ * until this transaction commits or rolls back, and releases automatically
+ * either way.
+ */
+export async function findOrCreateVendorByNameOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  name: string,
+): Promise<string> {
+  const trimmed = name.trim();
+  if (trimmed === '') throw new ApiError(422, 'A vendor name is required');
+  const normalized = normalizeForMatching(trimmed);
+
+  await client.query('SELECT pg_advisory_xact_lock(hashtext($1 || \':\' || $2))', [orgId, normalized]);
+
+  const { rows } = await client.query<{ id: string; name: string }>(
+    'SELECT id, name FROM vendors WHERE org_id = $1 AND is_active = true ORDER BY created_at ASC, id ASC',
+    [orgId],
+  );
+  const existing = rows.find((row) => normalizeForMatching(row.name) === normalized);
+  if (existing !== undefined) return existing.id;
+
+  const { rows: inserted } = await client.query<{ id: string }>(
+    `INSERT INTO vendors (org_id, created_by, name)
+     VALUES ($1, $2, $3)
+     RETURNING id`,
+    [orgId, createdBy, trimmed.slice(0, 200)],
+  );
+  const id = inserted[0]?.id;
+  if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
+  return id;
 }

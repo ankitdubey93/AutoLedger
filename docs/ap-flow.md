@@ -1,9 +1,9 @@
 # AP-Flow — App Spec & Build Ladder
 
-**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11
-**Status: Phases 10 and 11 done.** `config/apps.ts` marks it `'building'`. Every checkbox below is ticked — see [roadmap.md](roadmap.md#phase-10-as-delivered) and [roadmap.md](roadmap.md#phase-11-as-delivered) for what was actually delivered, including the deliberate deviations from this ladder and its own two scope corrections (recorded in the Phase 11 section: input tax goes to `1180` only, and 3-way matching/COGS tracking were never in this ladder's own acceptance criteria and were not built).
+**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19
+**Status: Phases 10, 11 and 19 done** (19 partially — Google Drive intake deferred, not dropped). `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered) and [roadmap.md](roadmap.md#phase-19-as-delivered) for what was actually delivered.
 
-AP-Flow turns a photograph of a receipt into a balanced, auditable journal entry. It keeps no ledger of its own — it posts into LedgerCore via `source_type = 'ap_flow'` and `source_id` pointing at its own document row ([guardrails.md](guardrails.md) rule 16).
+AP-Flow turns a photograph of a receipt into a balanced, auditable bill in LedgerCore. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
 
 **Gated on LedgerCore.** It needs `journalService` to post (Phase 3), the `fx_rates` table for historical rate lookup at invoice date (Phase 8), the audit trail its provenance claims depend on (Phase 5), and the job queue, because OCR and a vision call are far too slow to run inside a request (Phase 7).
 
@@ -138,11 +138,27 @@ Produces a draft. Posts nothing to the ledger.
 
 **Acceptance ✅ — verified.** A two-line receipt posts one balanced entry debiting two different accounts (`posting.test.ts`). Re-approving the same document returns `409` and creates no second entry. The posted entry's `source_id` resolves back to a document whose stored bytes still hash to the recorded SHA-256.
 
+### Phase 19 — automated intake
+
+- [x] A second extraction/classification provider (Gemini), env-selected via `AP_FLOW_AI_PROVIDER`, behind one `StructuredModelClient` seam — no new dependency, `fetch` only
+- [x] Posting rewritten onto a real LedgerCore bill (`createCapturedBillOnClient` + `approveBillOnClient`), fixing AP aging's reconciliation and making AP-Flow payables payable through `/payments`
+- [x] Vendor find-or-create by normalized name, race-safe via a transaction-scoped advisory lock
+- [x] Tax allocated across bill lines by the largest-remainder method (`utils/money.ts`'s `allocateCents`), exact to the cent
+- [x] Duplicate-invoice detection, for free, via `ux_bills_vendor_reference`
+- [x] `due_date` extracted, defaulting to invoice date + 30 days when absent
+- [x] Confidence-gated auto-post, off by default per organization, every gate reported at once
+- [x] Direct upload from AP-Flow's own page (`POST /documents/upload`), vaulting and registering in one call
+- [ ] Google Drive folder intake — **deferred**, not built (see [roadmap.md](roadmap.md#phase-19-as-delivered))
+
+**Acceptance ✅ — verified.** The full server suite (1451 tests) and client suite (247 tests) pass with zero regressions. `npm run verify:integrity` and a full 24-month sandbox reseed both pass green against the rewritten posting path.
+
 ---
 
 ## Not built
 
 Not built, and deliberately out of scope for Phase 11 despite appearing elsewhere as a one-line mention — corrected in [roadmap.md](roadmap.md#phase-11-as-delivered) once the discrepancy was noticed: **3-way matching and COGS tracking.** Neither is in this file's own Phase 11 ladder or acceptance criteria above, which are what this doc treats as authoritative.
+
+Phase 19 left one item of its own original scope unbuilt: **Google Drive folder intake** — a per-org OAuth2/PKCE-authenticated Drive connection, polled for new files. This is a deferred follow-up, not a dropped idea; see [roadmap.md](roadmap.md#phase-19-as-delivered) for what it would take. Also not built by Phase 19: per-org AI provider choice (one server-wide env var selects the provider for every organization); auto-post re-evaluation after a manual line-item edit; posting or auto-posting a negative line item (a credit note); an outbox event or webhook on an auto-post.
 
 Also not built: editing an extracted amount (only the account per line is editable — a wrong number is fixed by re-extracting, which discards prior overrides); un-posting or reversing from AP-Flow's own side (correction is LedgerCore's `POST /journals/:id/reverse`, reached from the linked journal entry — `POSTED` has no outbound edge in AP-Flow's own FSM); an outbox event or webhook firing on a posting; open-item or partial-document posting; duplicate-invoice detection; a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above); handwriting or non-English OCR; multi-document PDF splitting; and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`, and now also its materialized line items; only `audit_logs` remembers either existed).
 

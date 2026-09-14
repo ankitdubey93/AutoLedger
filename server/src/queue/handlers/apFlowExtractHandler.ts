@@ -1,4 +1,5 @@
 import * as apFlowDocumentService from '../../services/ap-flow/apFlowDocumentService.js';
+import * as autoPostService from '../../services/ap-flow/autoPostService.js';
 import * as storageService from '../../services/storageService.js';
 import { rasterize, redactPage, tesseractOcr } from '../../services/redactionService.js';
 import type { OcrAdapter } from '../../services/redactionService.js';
@@ -6,6 +7,7 @@ import { extractFromPages } from '../../services/ap-flow/extractionService.js';
 import type { VisionClient } from '../../services/ap-flow/extractionService.js';
 import * as mappingService from '../../services/ap-flow/mappingService.js';
 import type { ClassificationClient } from '../../services/ap-flow/mappingService.js';
+import type { StructuredModelClient } from '../../services/ap-flow/modelClient.js';
 import type { JobPayloads } from '../../types/jobs.js';
 import type { RedactedRegion } from '../../types/ap-flow.js';
 
@@ -27,7 +29,12 @@ async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
 
 export async function handleApFlowExtract(
   payload: JobPayloads['ap-flow-extract'],
-  deps?: { ocr?: OcrAdapter; vision?: VisionClient; classifier?: ClassificationClient },
+  deps?: {
+    ocr?: OcrAdapter;
+    vision?: VisionClient;
+    classifier?: ClassificationClient;
+    modelClient?: StructuredModelClient;
+  },
 ): Promise<void> {
   const { orgId, apFlowDocumentId } = payload;
   const ocr = deps?.ocr ?? tesseractOcr;
@@ -79,12 +86,17 @@ export async function handleApFlowExtract(
     // Only now — redacted buffers ONLY. Passing page.png (the unredacted
     // raster) here is the one bug that would make this app's central claim
     // false: that PII is masked before any image leaves the machine.
-    const extraction = await extractFromPages(redactedBuffers, deps?.vision);
+    const extraction = await extractFromPages(redactedBuffers, deps?.vision, deps?.modelClient);
 
     const classifications = await mappingService.classifyLineItems(
       orgId,
       { vendorName: extraction.vendorName, lineItems: extraction.lineItems },
-      deps?.classifier === undefined ? undefined : { classifier: deps.classifier },
+      deps?.classifier === undefined && deps?.modelClient === undefined
+        ? undefined
+        : {
+            ...(deps.classifier === undefined ? {} : { classifier: deps.classifier }),
+            ...(deps.modelClient === undefined ? {} : { modelClient: deps.modelClient }),
+          },
     );
 
     await apFlowDocumentService.savePipelineResult(
@@ -94,6 +106,10 @@ export async function handleApFlowExtract(
       extraction,
       classifications,
     );
+
+    // Never throws — an auto-post refusal must never mark an extracted
+    // document FAILED (see autoPostService.attemptAutoPost's own comment).
+    await autoPostService.attemptAutoPost(orgId, apFlowDocumentId);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     await apFlowDocumentService.markFailed(orgId, apFlowDocumentId, message);

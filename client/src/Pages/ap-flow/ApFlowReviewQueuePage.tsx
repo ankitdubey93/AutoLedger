@@ -93,6 +93,7 @@ export default function ApFlowReviewQueuePage() {
                 <th className="text-right px-3 py-2 border-b border-[var(--border)]">Total</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Lines</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Confidence</th>
+                <th className="text-left px-3 py-2 border-b border-[var(--border)]">Auto-post</th>
                 <th className="text-left px-3 py-2 border-b border-[var(--border)]">Review</th>
               </tr>
             </thead>
@@ -113,6 +114,9 @@ export default function ApFlowReviewQueuePage() {
                   <td className="px-3 py-2 border-b border-[var(--border)]">{entry.lineItemCount}</td>
                   <td className={`px-3 py-2 border-b border-[var(--border)] ${confidenceClass(entry.lowestConfidence)}`}>
                     {entry.lowestConfidence === null ? '—' : `${String(Math.round(entry.lowestConfidence * 100))}%`}
+                  </td>
+                  <td className="px-3 py-2 border-b border-[var(--border)] text-[var(--muted)]">
+                    {entry.autoPostBlockers[0]?.message ?? '—'}
                   </td>
                   <td className="px-3 py-2 border-b border-[var(--border)]">
                     <Link to={`${base}/${entry.id}`} className="btn btn--ghost">

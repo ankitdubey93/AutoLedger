@@ -4,10 +4,13 @@ import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import * as storageService from '../storageService.js';
+import * as documentService from '../documentService.js';
+import { sniffMimeType } from '../../utils/mimeSniff.js';
 import { enqueue } from '../../queue/queues.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../config/constants.js';
 import { canTransitionApFlowDocument } from '../../types/ap-flow.js';
 import type {
+  ApFlowAutoPostBlocker,
   ApFlowDocumentDetail,
   ApFlowDocumentListFilters,
   ApFlowDocumentRecord,
@@ -58,6 +61,9 @@ interface DocumentRow {
   journal_entry_id: string | null;
   posted_sha256: string | null;
   posted_at: Date | null;
+  bill_id: string | null;
+  auto_posted: boolean;
+  auto_post_blockers: ApFlowAutoPostBlocker[];
 }
 
 interface LineItemRow {
@@ -85,6 +91,7 @@ interface ExtractionRow {
   vendor_name: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
+  due_date: string | null;
   currency: string | null;
   subtotal_cents: string | null;
   tax_cents: string | null;
@@ -104,7 +111,8 @@ interface ExtractionRow {
 const DOCUMENT_SELECT = `SELECT a.id, a.document_id, d.original_filename, d.mime_type, d.sha256,
                                 a.status, a.page_count, a.failure_reason, a.processed_at,
                                 a.created_by, u.name AS created_by_name, a.created_at,
-                                a.journal_entry_id, a.posted_sha256, a.posted_at
+                                a.journal_entry_id, a.posted_sha256, a.posted_at,
+                                a.bill_id, a.auto_posted, a.auto_post_blockers
                            FROM ap_flow_documents a
                            JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
                            LEFT JOIN users u ON u.id = a.created_by`;
@@ -126,6 +134,9 @@ function toDocument(row: DocumentRow): ApFlowDocumentRecord {
     journalEntryId: row.journal_entry_id,
     postedSha256: row.posted_sha256,
     postedAt: row.posted_at === null ? null : row.posted_at.toISOString(),
+    billId: row.bill_id,
+    autoPosted: row.auto_posted,
+    autoPostBlockers: row.auto_post_blockers,
   };
 }
 
@@ -146,6 +157,7 @@ function toExtraction(row: ExtractionRow): ApFlowExtraction {
     vendorName: row.vendor_name,
     invoiceNumber: row.invoice_number,
     invoiceDate: row.invoice_date,
+    dueDate: row.due_date,
     currency: row.currency,
     // BIGINT arrives from `pg` as a string; Number() is exact under 2^53.
     subtotalCents: row.subtotal_cents === null ? null : Number(row.subtotal_cents),
@@ -192,6 +204,60 @@ async function loadDocument(orgId: string, id: string): Promise<ApFlowDocumentRe
   } catch (err) {
     if (pgErrorCode(err) === PG_INVALID_TEXT_REPRESENTATION) {
       throw new ApiError(404, 'AP-Flow document not found');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Phase 19 — uploads straight into AP-Flow's own page, in one call: vault
+ * the bytes, then register them, mirroring the two-step flow
+ * `documentService.uploadDocument` + `createApFlowDocument` that
+ * `ApFlowDocumentsPage`'s vault-picker already does client-side. Content
+ * addressing makes the vault upload idempotent; if this org already
+ * registered those bytes with AP-Flow, that existing registration is
+ * returned rather than raising the "already registered" 409
+ * `createApFlowDocument` would otherwise throw.
+ */
+export async function captureFile(
+  orgId: string,
+  createdBy: string,
+  file: { buffer: Buffer; originalname: string },
+): Promise<{ document: ApFlowDocumentRecord; created: boolean }> {
+  const mimeType = sniffMimeType(file.buffer, file.originalname);
+  if (mimeType === null) {
+    throw new ApiError(415, 'Unsupported file type. Allowed: PDF, PNG, JPEG');
+  }
+  if (!SCANNABLE_MIME_TYPES.has(mimeType)) {
+    throw new ApiError(422, 'AP-Flow can only process PDF, PNG and JPEG documents');
+  }
+
+  const { document: vaultDoc } = await documentService.uploadDocument(orgId, createdBy, file);
+
+  const { rows } = await pool.query<{ id: string }>(
+    'SELECT id FROM ap_flow_documents WHERE org_id = $1 AND document_id = $2',
+    [orgId, vaultDoc.id],
+  );
+  const existingId = rows[0]?.id;
+  if (existingId !== undefined) {
+    return { document: await loadDocument(orgId, existingId), created: false };
+  }
+
+  try {
+    const document = await createApFlowDocument(orgId, createdBy, { documentId: vaultDoc.id });
+    return { document, created: true };
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) {
+      // A concurrent capture of the same bytes won the race between our
+      // SELECT and this INSERT — the row now exists; return it.
+      const { rows: raceRows } = await pool.query<{ id: string }>(
+        'SELECT id FROM ap_flow_documents WHERE org_id = $1 AND document_id = $2',
+        [orgId, vaultDoc.id],
+      );
+      const raceId = raceRows[0]?.id;
+      if (raceId !== undefined) {
+        return { document: await loadDocument(orgId, raceId), created: false };
+      }
     }
     throw err;
   }
@@ -346,6 +412,7 @@ interface ReviewQueueRow {
   unmapped_line_count: string;
   lowest_confidence: string | null;
   created_at: Date;
+  auto_post_blockers: ApFlowAutoPostBlocker[];
 }
 
 function toReviewQueueEntry(row: ReviewQueueRow): ApFlowReviewQueueEntry {
@@ -363,6 +430,7 @@ function toReviewQueueEntry(row: ReviewQueueRow): ApFlowReviewQueueEntry {
     unmappedLineCount: Number(row.unmapped_line_count),
     lowestConfidence: row.lowest_confidence === null ? null : Number(row.lowest_confidence),
     createdAt: row.created_at.toISOString(),
+    autoPostBlockers: row.auto_post_blockers,
   };
 }
 
@@ -397,7 +465,7 @@ export async function listReviewQueue(
 
   const { rows } = await pool.query<ReviewQueueRow>(
     `SELECT a.id, d.original_filename, x.vendor_name, x.invoice_number, x.invoice_date,
-            x.currency, x.total_cents, x.arithmetic_ok, a.created_at,
+            x.currency, x.total_cents, x.arithmetic_ok, a.created_at, a.auto_post_blockers,
             coalesce(l.line_item_count, 0) AS line_item_count,
             coalesce(l.unmapped_line_count, 0) AS unmapped_line_count,
             c.lowest AS lowest_confidence
@@ -447,7 +515,7 @@ export async function getApFlowDocumentById(orgId: string, id: string): Promise<
   );
 
   const { rows: extractionRows } = await pool.query<ExtractionRow>(
-    `SELECT id, vendor_name, invoice_number, invoice_date, currency,
+    `SELECT id, vendor_name, invoice_number, invoice_date, due_date, currency,
             subtotal_cents, tax_cents, total_cents, line_items, field_confidence,
             arithmetic_ok, validation_errors, model, created_at
        FROM ap_flow_extractions
@@ -529,7 +597,7 @@ export async function requestReextraction(orgId: string, id: string): Promise<Ap
     await client.query(
       `UPDATE ap_flow_documents
           SET status = 'PENDING', failure_reason = NULL,
-              processing_started_at = NULL, processed_at = NULL
+              processing_started_at = NULL, processed_at = NULL, auto_post_blockers = '[]'::jsonb
         WHERE org_id = $1 AND id = $2`,
       [orgId, id],
     );
@@ -695,16 +763,17 @@ export async function savePipelineResult(
 
     await client.query(
       `INSERT INTO ap_flow_extractions
-         (org_id, ap_flow_document_id, vendor_name, invoice_number, invoice_date, currency,
+         (org_id, ap_flow_document_id, vendor_name, invoice_number, invoice_date, due_date, currency,
           subtotal_cents, tax_cents, total_cents, line_items, field_confidence,
           arithmetic_ok, validation_errors, model)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13::jsonb, $14)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14::jsonb, $15)`,
       [
         orgId,
         id,
         extraction.vendorName,
         extraction.invoiceNumber,
         extraction.invoiceDate,
+        extraction.dueDate,
         extraction.currency,
         extraction.subtotalCents,
         extraction.taxCents,
@@ -734,9 +803,32 @@ export async function savePipelineResult(
 
     await client.query(
       `UPDATE ap_flow_documents
-          SET status = 'EXTRACTED', page_count = $3, processed_at = now(), failure_reason = NULL
+          SET status = 'EXTRACTED', page_count = $3, processed_at = now(), failure_reason = NULL,
+              auto_post_blockers = '[]'::jsonb
         WHERE org_id = $1 AND id = $2`,
       [orgId, id, pages.length],
+    );
+  });
+}
+
+/**
+ * Records the exact reasons auto-post declined a clean-looking extraction —
+ * Phase 19. `status = 'EXTRACTED'` in the WHERE is load-bearing: a document
+ * that has concurrently moved to POSTED is filtered out before the UPDATE
+ * runs, so `trg_ap_flow_documents_posted_guard` (migration 032) never fires
+ * here — an unconditional UPDATE would have raised on a posted row.
+ */
+export async function recordAutoPostBlockers(
+  orgId: string,
+  id: string,
+  blockers: ApFlowAutoPostBlocker[],
+): Promise<void> {
+  await withTransaction(async (client) => {
+    await client.query(
+      `UPDATE ap_flow_documents
+          SET auto_post_blockers = $3::jsonb
+        WHERE org_id = $1 AND id = $2 AND status = 'EXTRACTED'`,
+      [orgId, id, JSON.stringify(blockers)],
     );
   });
 }

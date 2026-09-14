@@ -34,6 +34,7 @@ function reviewEntry(overrides: Partial<ApFlowReviewQueueEntry> = {}): ApFlowRev
     unmappedLineCount: 0,
     lowestConfidence: 0.9,
     createdAt: new Date('2026-08-15').toISOString(),
+    autoPostBlockers: [],
     ...overrides,
   };
 }
@@ -71,12 +72,16 @@ function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDe
     journalEntryId: null,
     postedSha256: null,
     postedAt: null,
+    billId: null,
+    autoPosted: false,
+    autoPostBlockers: [],
     pages: [],
     extraction: {
       id: 'ext-1',
       vendorName: 'Acme Vendor',
       invoiceNumber: 'INV-1',
       invoiceDate: '2026-08-15',
+      dueDate: null,
       currency: 'USD',
       subtotalCents: 45000,
       taxCents: 0,
