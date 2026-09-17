@@ -9,6 +9,7 @@ import RegisterPage from './Pages/auth/RegisterPage';
 import AppChooserPage from './Pages/AppChooserPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
+import IntegrationsPage from './Pages/IntegrationsPage';
 import NotFoundPage from './Pages/NotFoundPage';
 import ActiveAppRoutes from './apps/ActiveAppRoutes';
 
@@ -45,6 +46,7 @@ export default function App() {
                 <Route path="/" element={<AppChooserPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
+                <Route path="/integrations" element={<IntegrationsPage />} />
                 <Route path="/dashboard" element={<Navigate to="/account" replace />} />
               </Route>
 

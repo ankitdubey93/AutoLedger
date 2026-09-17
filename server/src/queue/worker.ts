@@ -1,17 +1,17 @@
-import { Worker, type Job } from 'bullmq';
+import { Queue, Worker, type Job } from 'bullmq';
 import { createRedisConnection } from './connection.js';
 import { enqueue, closeQueues, queues } from './queues.js';
 import { handleIntegrityCheck } from './handlers/integrityCheckHandler.js';
 import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
-import { handleApFlowDriveSweep } from './handlers/apFlowDriveSweepHandler.js';
-import { handleApFlowDriveSync } from './handlers/apFlowDriveSyncHandler.js';
+import { handleIntegrationDriveSweep } from './handlers/integrationDriveSweepHandler.js';
+import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandler.js';
 import { handleBoardDeckGenerate } from './handlers/boarddeckGenerateHandler.js';
 import { handleTaxGuardEmbed } from './handlers/taxguardEmbedHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
-  AP_FLOW_DRIVE_POLL_INTERVAL_MS,
+  INTEGRATION_DRIVE_POLL_INTERVAL_MS,
   INTEGRITY_CHECK_CRON,
   JOB_ATTEMPTS,
   OUTBOX_DRAIN_INTERVAL_MS,
@@ -30,8 +30,8 @@ const HANDLERS: {
   'outbox-drain': handleOutboxDrain,
   'webhook-deliver': handleWebhookDeliver,
   'ap-flow-extract': handleApFlowExtract,
-  'ap-flow-drive-sweep': handleApFlowDriveSweep,
-  'ap-flow-drive-sync': handleApFlowDriveSync,
+  'integration-drive-sweep': handleIntegrationDriveSweep,
+  'integration-drive-sync': handleIntegrationDriveSync,
   'boarddeck-generate': handleBoardDeckGenerate,
   'taxguard-embed': handleTaxGuardEmbed,
 };
@@ -110,14 +110,24 @@ export async function startWorkers(): Promise<void> {
     { name: 'outbox-drain', data: {}, opts: { attempts: 1 } },
   );
 
-  // Phase 19.2 — Google Drive folder intake's poll. attempts: 1, same
-  // reasoning as the outbox drain: the sweep itself is idempotent and the
-  // next tick will re-check anyway.
-  await queues['ap-flow-drive-sweep'].upsertJobScheduler(
-    'ap-flow-drive-sweep-tick',
-    { every: AP_FLOW_DRIVE_POLL_INTERVAL_MS },
-    { name: 'ap-flow-drive-sweep', data: {}, opts: { attempts: 1 } },
+  // Phase 19.3 — the Drive integration's poll. attempts: 1, same reasoning as
+  // the outbox drain: the sweep itself is idempotent and the next tick will
+  // re-check anyway.
+  await queues['integration-drive-sweep'].upsertJobScheduler(
+    'integration-drive-sweep-tick',
+    { every: INTEGRATION_DRIVE_POLL_INTERVAL_MS },
+    { name: 'integration-drive-sweep', data: {}, opts: { attempts: 1 } },
   );
+
+  // Phase 19.3 — 19.2's scheduler lives in Redis independently of this code,
+  // under the queue name Drive intake used before it moved off AP-Flow. A
+  // rename of QUEUE_NAMES does not touch what is already sitting in Redis:
+  // without this, 'ap-flow-drive-sweep-tick' would keep firing forever
+  // against a queue no worker consumes. Removing it by id is idempotent — a
+  // no-op once removed, and a no-op on a fresh Redis that never had it.
+  await new Queue('ap-flow-drive-sweep', { connection: createRedisConnection() })
+    .removeJobScheduler('ap-flow-drive-sweep-tick')
+    .catch(() => undefined);
 }
 
 export async function stopWorkers(): Promise<void> {

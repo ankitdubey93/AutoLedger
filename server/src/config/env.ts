@@ -145,14 +145,47 @@ const parsed = {
   // actually attempted.
   VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),
 
-  // Phase 19.2 — AP-Flow's Google Drive folder intake. All four optional:
-  // the server and worker both boot without them, and driveConnectionService
-  // throws 503 only when a real Drive action is attempted with any unset.
+  // Phase 19.3 — the Drive integration's service account, the recommended way
+  // to connect. The tenant shares a folder with GOOGLE_SERVICE_ACCOUNT_EMAIL
+  // and no consent screen, no Google app verification and no refresh token are
+  // involved. Optional, exactly as ANTHROPIC_API_KEY: the server and worker
+  // both boot without them and driveConnectionService throws 503 only when a
+  // real Drive action is attempted.
+  //
+  // The address is NOT a secret — it is published to the tenant so they know
+  // who to share with, and GET /integrations/drive returns it. The private key
+  // is, and is never written to a table, never logged, and never returned by
+  // any route. It stays a plain env var for the same reason GEMINI_API_KEY and
+  // VOYAGE_API_KEY do: encrypting a server-wide secret in the database would
+  // still leave INTEGRATION_ENCRYPTION_KEY sitting in plaintext env, so the
+  // ciphertext would protect nothing the env var did not already protect.
+  GOOGLE_SERVICE_ACCOUNT_EMAIL: optional('GOOGLE_SERVICE_ACCOUNT_EMAIL', ''),
+  // Google's downloaded JSON key carries a PEM with real newlines; a .env file
+  // cannot hold them. Accept the conventional \n-escaped single line and
+  // unescape here — this is the one place that reads process.env, so it is the
+  // one place the unescaping belongs.
+  GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY: optional('GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY', '').replace(
+    /\\n/g,
+    '\n',
+  ),
+
+  // Phase 19.2 — the Drive integration's OAuth mode, retained as the secondary
+  // path. All optional, same reasoning as above.
+  //
+  // NOTE: an external OAuth app whose Google publishing status is "Testing" is
+  // issued refresh tokens that expire after 7 days, so an OAUTH connection on
+  // an unverified app dies weekly. That is why the service account above is the
+  // recommended path and this one is the fallback.
   GOOGLE_OAUTH_CLIENT_ID: optional('GOOGLE_OAUTH_CLIENT_ID', ''),
   GOOGLE_OAUTH_CLIENT_SECRET: optional('GOOGLE_OAUTH_CLIENT_SECRET', ''),
+  // CHANGED IN 19.3: the callback moved with the integration, from
+  // /api/v1/ap-flow/drive to /api/v1/integrations/drive. A .env still naming
+  // the old path keeps working — routes/ap-flow/driveRoutes.ts retains that one
+  // route as a legacy alias, because the redirect URI is also registered in an
+  // operator's Google Cloud Console, outside this repo.
   GOOGLE_OAUTH_REDIRECT_URI: optional(
     'GOOGLE_OAUTH_REDIRECT_URI',
-    'http://localhost:5000/api/v1/ap-flow/drive/oauth/callback',
+    'http://localhost:5000/api/v1/integrations/drive/oauth/callback',
   ),
   // AES-256-GCM key for refresh tokens and PKCE verifiers at rest
   // (utils/secretBox.ts) — NOT a JWT secret (rule 11), a separate concern.
@@ -174,6 +207,23 @@ if (
   problems.push(
     'INTEGRATION_ENCRYPTION_KEY must be 64 hex characters (32 bytes). ' +
       'Generate one with: openssl rand -hex 32',
+  );
+}
+
+// A service-account key that is set but malformed is a misconfiguration worth
+// failing loudly on, the same posture the hex check above takes. The common
+// mistake is pasting the JSON key's `private_key` field with its \n escapes
+// already collapsed, or pasting the whole JSON object instead of the one field;
+// both produce something node:crypto rejects only at first signing, which would
+// otherwise surface as a confusing 502 during a folder sync hours later.
+if (
+  parsed.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY !== '' &&
+  !parsed.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY.startsWith('-----BEGIN PRIVATE KEY-----')
+) {
+  problems.push(
+    'GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY must be a PKCS#8 PEM beginning with ' +
+      '-----BEGIN PRIVATE KEY-----. Copy the `private_key` field from the ' +
+      'service account JSON key, keeping its \\n escapes.',
   );
 }
 

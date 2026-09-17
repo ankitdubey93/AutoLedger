@@ -10,6 +10,7 @@ import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
 import sandboxRoutes from './sandbox.js';
+import integrationRoutes from './integrations/index.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 import apFlowRoutes from './ap-flow/index.js';
 import fpaEngineRoutes from './fpa-engine/index.js';
@@ -69,6 +70,11 @@ apiRouter.use('/sandbox', sandboxRoutes);
 // calls a model records here, and `app_slug` on the row carries the
 // namespace (guardrails rule 16), exactly as /audit-logs does.
 apiRouter.use('/ai-usage', aiUsageRoutes);
+
+// Phase 19.3 — Drive folder intake. Platform-level: a folder's purpose
+// routes its files to the owning app through that app's own service
+// (guardrails rule 16), so this belongs to no single app slug.
+apiRouter.use('/integrations', integrationRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

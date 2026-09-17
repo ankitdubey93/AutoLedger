@@ -7,12 +7,12 @@ import {
   listFolderFiles,
   parseFolderInput,
   refreshAccessToken,
-} from '../../services/ap-flow/googleDriveClient.js';
-import type { FetchLike, GoogleOAuthConfig } from '../../services/ap-flow/googleDriveClient.js';
+} from '../../services/integrations/googleDriveClient.js';
+import type { FetchLike, GoogleOAuthConfig } from '../../services/integrations/googleDriveClient.js';
 
 /**
- * Google Drive OAuth + REST adapter (Phase 19.2). Every case injects a fake
- * `fetchImpl`; none reaches the network.
+ * Google Drive OAuth + REST adapter. Every case injects a fake `fetchImpl`;
+ * none reaches the network.
  */
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -20,6 +20,9 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 const CONFIG: GoogleOAuthConfig = { clientId: 'cid', clientSecret: 'csecret', redirectUri: 'http://localhost/cb' };
+
+/** The mime filter every case that doesn't test mime validation itself uses. */
+const PDF_ONLY = { mimeTypes: ['application/pdf'], limit: 100 };
 
 describe('googleDriveClient', () => {
   it('authorization URL requests offline drive.readonly access with S256 PKCE', () => {
@@ -85,15 +88,93 @@ describe('googleDriveClient', () => {
       );
     }) as unknown as FetchLike;
 
-    const files = await listFolderFiles('at', '1AbCdEfGhIjKlMn', fetchImpl);
+    const files = await listFolderFiles('at', '1AbCdEfGhIjKlMn', PDF_ONLY, fetchImpl);
     expect(files).toHaveLength(3);
     expect(files.every((f) => typeof f.sizeBytes === 'number')).toBe(true);
   });
 
   it('listFolderFiles rejects a q-injection folder id before fetching', async () => {
     const fetchImpl = vi.fn() as unknown as FetchLike;
-    await expect(listFolderFiles('at', "abcdefghij' or '1'='1", fetchImpl)).rejects.toThrow(GoogleDriveError);
+    await expect(
+      listFolderFiles('at', "abcdefghij' or '1'='1", PDF_ONLY, fetchImpl),
+    ).rejects.toThrow(GoogleDriveError);
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('listFolderFiles rejects a q-injection mime type before fetching', async () => {
+    const fetchImpl = vi.fn() as unknown as FetchLike;
+    await expect(
+      listFolderFiles('at', '1AbCdEfGhIjKlMn', { mimeTypes: ["image/png' or name = 'x"], limit: 100 }, fetchImpl),
+    ).rejects.toThrow(GoogleDriveError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('listFolderFiles rejects a malformed cursor before fetching', async () => {
+    const fetchImpl = vi.fn() as unknown as FetchLike;
+    await expect(
+      listFolderFiles(
+        'at',
+        '1AbCdEfGhIjKlMn',
+        { mimeTypes: ['application/pdf'], modifiedSince: '2026-01-01', limit: 100 },
+        fetchImpl,
+      ),
+    ).rejects.toThrow(GoogleDriveError);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it('listFolderFiles sends the cursor as a modifiedTime >= clause', async () => {
+    let capturedUrl = '';
+    const fetchImpl = vi.fn((url: string | URL | Request) => {
+      capturedUrl = String(url);
+      return Promise.resolve(jsonResponse(200, { files: [] }));
+    }) as unknown as FetchLike;
+
+    await listFolderFiles(
+      'at',
+      '1AbCdEfGhIjKlMn',
+      { mimeTypes: ['application/pdf'], modifiedSince: '2026-09-17T10:00:00Z', limit: 100 },
+      fetchImpl,
+    );
+
+    const q = new URL(capturedUrl).searchParams.get('q') ?? '';
+    expect(q).toContain("modifiedTime >= '2026-09-17T10:00:00Z'");
+  });
+
+  it('listFolderFiles orders by modifiedTime, not createdTime', async () => {
+    let capturedUrl = '';
+    const fetchImpl = vi.fn((url: string | URL | Request) => {
+      capturedUrl = String(url);
+      return Promise.resolve(jsonResponse(200, { files: [] }));
+    }) as unknown as FetchLike;
+
+    await listFolderFiles('at', '1AbCdEfGhIjKlMn', PDF_ONLY, fetchImpl);
+
+    expect(new URL(capturedUrl).searchParams.get('orderBy')).toBe('modifiedTime');
+  });
+
+  it('listFolderFiles stops paging once the limit is met', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse(200, {
+          nextPageToken: 'page2',
+          files: Array.from({ length: 100 }, (_, i) => ({
+            id: `f${String(i)}`,
+            name: `${String(i)}.pdf`,
+            mimeType: 'application/pdf',
+          })),
+        }),
+      ),
+    ) as unknown as FetchLike;
+
+    const files = await listFolderFiles(
+      'at',
+      '1AbCdEfGhIjKlMn',
+      { mimeTypes: ['application/pdf'], limit: 25 },
+      fetchImpl,
+    );
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(files).toHaveLength(100); // one page's worth — the cap only stops further PAGING, not truncate this page
   });
 
   it('downloadFile refuses a Content-Length above the limit', async () => {

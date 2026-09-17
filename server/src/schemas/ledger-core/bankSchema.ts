@@ -9,26 +9,32 @@ import { MAX_CSV_CHARS } from '../../config/constants.js';
  * a client-supplied hash would let a caller suppress or forge deduplication).
  */
 
+/**
+ * Shared with `schemas/integrations/driveSchema.ts`'s BANK_STATEMENT folder
+ * config — one definition, imported in both places, so a column-map change
+ * cannot drift between the manual import route and a Drive folder's stored
+ * configuration.
+ */
+export const columnMapSchema = z
+  .object({
+    date: z.string().trim().min(1).max(100),
+    description: z.string().trim().min(1).max(100),
+    amount: z.string().trim().max(100).nullable().default(null),
+    debit: z.string().trim().max(100).nullable().default(null),
+    credit: z.string().trim().max(100).nullable().default(null),
+    reference: z.string().trim().max(100).nullable().default(null),
+  })
+  .refine((v) => v.amount !== null || (v.debit !== null && v.credit !== null), {
+    message: 'columnMap needs either an amount column or both a debit and a credit column',
+  });
+
 export const importStatementSchema = z
   .object({
     accountId: z.uuid(),
     fileName: z.string().trim().min(1).max(200),
     content: z.string().min(1).max(MAX_CSV_CHARS),
     dateFormat: z.enum(['ISO', 'DMY', 'MDY']).default('ISO'),
-    columnMap: z
-      .object({
-        date: z.string().trim().min(1).max(100),
-        description: z.string().trim().min(1).max(100),
-        amount: z.string().trim().max(100).nullable().default(null),
-        debit: z.string().trim().max(100).nullable().default(null),
-        credit: z.string().trim().max(100).nullable().default(null),
-        reference: z.string().trim().max(100).nullable().default(null),
-      })
-      .refine((v) => v.amount !== null || (v.debit !== null && v.credit !== null), {
-        message: 'columnMap needs either an amount column or both a debit and a credit column',
-      })
-      .nullable()
-      .default(null),
+    columnMap: columnMapSchema.nullable().default(null),
     closingBalanceCents: z.int().min(-1_000_000_000_000).max(1_000_000_000_000).nullable().default(null),
     closingBalanceOn: z.iso.date().nullable().default(null),
   })

@@ -1,4 +1,5 @@
 import { env } from './env.js';
+import type { DriveFolderPurpose } from '../types/integrations.js';
 
 /**
  * Values referenced from more than one layer. Kept out of `routes/` and
@@ -228,16 +229,58 @@ export const AP_FLOW_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.co
 /** Fallback due date when AP-Flow extracted none: invoice date plus this many days. */
 export const AP_FLOW_DEFAULT_DUE_DAYS = 30;
 
-// ---------------------------------------------------- ap-flow drive intake (19.2)
+// ------------------------------------------------- drive folder intake (19.3)
 
-/** How often the Drive sweep checks every connected org for new files. */
-export const AP_FLOW_DRIVE_POLL_INTERVAL_MS = 300_000;
+/**
+ * How often the sweep checks every active folder for new files. Tightened from
+ * 19.2's 300_000 so an uploaded file is picked up within about a minute rather
+ * than five.
+ *
+ * A shorter interval is only affordable because 19.3 made the poll incremental:
+ * the sweep's due query now filters on `last_synced_at` (19.2's did not, despite
+ * the column existing), and each folder carries a `drive_cursor` high-water mark
+ * so a tick lists only what changed instead of re-listing the whole folder.
+ */
+export const INTEGRATION_DRIVE_POLL_INTERVAL_MS = 60_000;
 
 /** Ceiling per sync run — a runaway folder must not stall the worker. */
-export const AP_FLOW_DRIVE_MAX_FILES_PER_SYNC = 25;
+export const INTEGRATION_DRIVE_MAX_FILES_PER_SYNC = 25;
 
 /** How long an OAuth `state` stays valid between redirect and callback. */
-export const AP_FLOW_DRIVE_OAUTH_STATE_TTL_MINUTES = 10;
+export const INTEGRATION_DRIVE_OAUTH_STATE_TTL_MINUTES = 10;
+
+/**
+ * How far back the stored cursor is set from the newest `modifiedTime` seen.
+ *
+ * `files.list` is not a snapshot and Drive's timestamps come from Google's
+ * clock, not ours, so a file can surface with a timestamp slightly behind one
+ * already observed. Rewinding the cursor by a minute re-lists a small overlap
+ * each tick — which the once-per-org unique index absorbs for free — rather
+ * than stepping over a file that arrived late.
+ */
+export const INTEGRATION_DRIVE_CURSOR_LAG_MS = 60_000;
+
+/** Mint a new service-account token this long before the current one expires. */
+export const SERVICE_ACCOUNT_TOKEN_SKEW_MS = 60_000;
+
+/**
+ * Which Drive mimeTypes each folder purpose lists. A map rather than a branch
+ * in the sync loop, so adding a purpose is one entry here and a compile error
+ * in the dispatcher until its seam is wired.
+ *
+ * Drive's reported mimeType is a hint only — the destination re-sniffs magic
+ * bytes (documentService.uploadDocument) or re-parses (parseCsv), so a
+ * mislabelled file is skipped rather than trusted. `text/plain` and
+ * `application/vnd.ms-excel` are listed because Drive reports a plain .csv as
+ * either one often enough to matter.
+ *
+ * Google-native Sheets are deliberately absent: they need files/export, not
+ * alt=media, so a Sheet dropped in a folder is never listed.
+ */
+export const DRIVE_MIME_TYPES_BY_PURPOSE = {
+  VENDOR_BILL: ['application/pdf', 'image/png', 'image/jpeg'],
+  BANK_STATEMENT: ['text/csv', 'text/plain', 'application/vnd.ms-excel'],
+} as const satisfies Record<DriveFolderPurpose, readonly string[]>;
 
 export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';

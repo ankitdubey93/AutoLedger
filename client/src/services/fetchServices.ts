@@ -2754,53 +2754,116 @@ export function updateApFlowSettings(body: {
   return apiFetch('/ap-flow/settings', { method: 'PUT', body: JSON.stringify(body) });
 }
 
-// ------------------------------------------------------- ap-flow drive (19.2)
+// -------------------------------------------------- integrations drive (19.3)
 
-/** Mirrors server/src/types/ap-flow.ts's ApFlowDriveConnectionStatus. */
-export type ApFlowDriveConnectionStatus = 'PENDING_AUTH' | 'CONNECTED' | 'NEEDS_REAUTH';
+/** Mirrors server/src/types/integrations.ts's DriveAuthMode/DriveConnectionStatus. */
+export type DriveAuthMode = 'OAUTH' | 'SERVICE_ACCOUNT';
+export type DriveConnectionStatus = 'PENDING_AUTH' | 'CONNECTED' | 'NEEDS_REAUTH';
+export type DriveFolderPurpose = 'VENDOR_BILL' | 'BANK_STATEMENT';
 
-export interface ApFlowDriveConnection {
+export interface DriveConnection {
   id: string;
-  status: ApFlowDriveConnectionStatus;
+  status: DriveConnectionStatus;
+  authMode: DriveAuthMode;
   googleAccountEmail: string | null;
-  folderId: string | null;
-  folderName: string | null;
-  lastSyncedAt: string | null;
-  lastSyncError: string | null;
-  importedFileCount: number;
-  skippedFileCount: number;
   connectedBy: string;
   createdAt: string;
   updatedAt: string;
 }
 
-/** GET /ap-flow/drive */
-export function getApFlowDriveConnection(): Promise<{
+export interface DriveColumnMap {
+  date: string;
+  description: string;
+  amount: string | null;
+  debit: string | null;
+  credit: string | null;
+  reference: string | null;
+}
+
+export interface DriveFolder {
+  id: string;
+  purpose: DriveFolderPurpose;
+  folderId: string;
+  folderName: string;
+  isActive: boolean;
+  ledgerAccountId: string | null;
+  ledgerAccountCode: string | null;
+  dateFormat: 'ISO' | 'DMY' | 'MDY' | null;
+  columnMap: DriveColumnMap | null;
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  importedFileCount: number;
+  skippedFileCount: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DriveModes {
+  oauth: boolean;
+  serviceAccount: boolean;
+  serviceAccountEmail: string | null;
+}
+
+/** GET /integrations/drive */
+export function getDriveIntegration(): Promise<{
   success: boolean;
-  connection: ApFlowDriveConnection | null;
-  configured: boolean;
+  connection: DriveConnection | null;
+  folders: DriveFolder[];
+  modes: DriveModes;
 }> {
-  return apiFetch('/ap-flow/drive');
+  return apiFetch('/integrations/drive');
 }
 
-/** POST /ap-flow/drive/connect */
-export function startApFlowDriveConnect(): Promise<{ success: boolean; authorizationUrl: string }> {
-  return apiFetch('/ap-flow/drive/connect', { method: 'POST' });
+/** POST /integrations/drive/connect */
+export function startDriveConnect(): Promise<{ success: boolean; authorizationUrl: string }> {
+  return apiFetch('/integrations/drive/connect', { method: 'POST' });
 }
 
-/** PUT /ap-flow/drive/folder */
-export function setApFlowDriveFolder(folder: string): Promise<{ success: boolean; connection: ApFlowDriveConnection }> {
-  return apiFetch('/ap-flow/drive/folder', { method: 'PUT', body: JSON.stringify({ folder }) });
+/** POST /integrations/drive/connect/service-account */
+export function connectDriveServiceAccount(): Promise<{ success: boolean; connection: DriveConnection }> {
+  return apiFetch('/integrations/drive/connect/service-account', { method: 'POST' });
 }
 
-/** POST /ap-flow/drive/sync */
-export function syncApFlowDrive(): Promise<{ success: boolean; queued: boolean }> {
-  return apiFetch('/ap-flow/drive/sync', { method: 'POST' });
+/** DELETE /integrations/drive */
+export async function disconnectDrive(): Promise<void> {
+  await apiFetch('/integrations/drive', { method: 'DELETE' });
 }
 
-/** DELETE /ap-flow/drive */
-export async function disconnectApFlowDrive(): Promise<void> {
-  await apiFetch('/ap-flow/drive', { method: 'DELETE' });
+/** GET /integrations/drive/folders */
+export function listDriveFolders(): Promise<{ success: boolean; folders: DriveFolder[] }> {
+  return apiFetch('/integrations/drive/folders');
+}
+
+export interface CreateDriveFolderInput {
+  purpose: DriveFolderPurpose;
+  folder: string;
+  ledgerAccountId: string | null;
+  dateFormat: 'ISO' | 'DMY' | 'MDY' | null;
+  columnMap: DriveColumnMap | null;
+}
+
+/** POST /integrations/drive/folders */
+export function createDriveFolder(body: CreateDriveFolderInput): Promise<{ success: boolean; folder: DriveFolder }> {
+  return apiFetch('/integrations/drive/folders', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /integrations/drive/folders/:id */
+export function updateDriveFolder(
+  id: string,
+  body: Partial<CreateDriveFolderInput> & { isActive?: boolean },
+): Promise<{ success: boolean; folder: DriveFolder }> {
+  return apiFetch(`/integrations/drive/folders/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /integrations/drive/folders/:id */
+export async function deleteDriveFolder(id: string): Promise<void> {
+  await apiFetch(`/integrations/drive/folders/${id}`, { method: 'DELETE' });
+}
+
+/** POST /integrations/drive/folders/:id/sync */
+export function syncDriveFolder(id: string): Promise<{ success: boolean; queued: boolean }> {
+  return apiFetch(`/integrations/drive/folders/${id}/sync`, { method: 'POST' });
 }
 
 // ---------------------------------------------------------- ai-usage (19.1)

@@ -106,6 +106,37 @@ Two facts that make this cheaper on PostgreSQL:
 - **`ADD COLUMN … DEFAULT` is metadata-only since PG 11.** It used to rewrite the entire table; now the default is stored in the catalog and materialised on read. Adding a defaulted column to a huge table is instant.
 - **Lock levels vary enormously.** `ADD COLUMN` takes a brief `ACCESS EXCLUSIVE`; `ALTER COLUMN TYPE` rewrites the table and holds it throughout. `CREATE INDEX` blocks writes — `CREATE INDEX CONCURRENTLY` does not, but cannot run inside a transaction, so it needs its own migration path outside the per-file `BEGIN`. Worth knowing before it bites in production.
 
+### Renaming a table, in a new migration, without ever touching the old one
+
+Rule 13 says an applied migration is frozen. That rule does not say a table's *name* is frozen — it says the *file that created it* is. When Phase 19.3 promoted Drive folder intake off AP-Flow's own tables (`ap_flow_drive_connections` → `integration_drive_connections`), the rename itself is `ALTER TABLE ... RENAME`, written in a brand-new migration (053), leaving 052's `CREATE TABLE ap_flow_drive_connections (...)` exactly as it was written and exactly as it was checksummed.
+
+Two mechanical traps sit underneath that one-line description:
+
+**`ALTER TABLE ... RENAME` has no `IF NOT EXISTS` on the target.** Every other idempotent form in this file's own idiom — `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` — has a form that makes re-running it a safe no-op. A rename has nothing equivalent; running it twice against the same database throws `relation "ap_flow_drive_connections" does not exist` the second time, because after the first run there's nothing left with the old name to rename. The idiom this file already uses for `ADD CONSTRAINT` (a catalog check via `to_regclass`/`pg_constraint` inside a `DO` block) extends directly:
+
+```sql
+DO $$
+BEGIN
+  IF to_regclass('public.ap_flow_drive_connections') IS NOT NULL
+     AND to_regclass('public.integration_drive_connections') IS NULL THEN
+    ALTER TABLE ap_flow_drive_connections RENAME TO integration_drive_connections;
+  END IF;
+END $$;
+```
+
+`to_regclass` returns `NULL` for a name that doesn't resolve to a relation, silently — unlike a bare `SELECT` against the table, which would throw if the table were already gone. The guard reads as "if the old name exists and the new one doesn't yet, do the rename" — true exactly once, ever, regardless of how many times the file runs. That is what "idempotent" actually has to mean for a statement with no built-in idempotent form: hand-roll the check the missing keyword would have done.
+
+**PostgreSQL renames the table and nothing else.** Every constraint, every index, and every trigger the table carries keeps its **old** name after `RENAME TO` completes — `chk_ap_flow_drive_connections_state_complete` stays spelled that way, still attached to the newly-renamed table, forever, unless something explicitly renames it too. Leave that alone and `docs/schema.md` starts describing constraints under names that no longer match the table they're actually on — the exact kind of drift this project's own guardrails doc says killed the build that preceded this one. `ALTER TABLE ... RENAME CONSTRAINT ... TO ...` and `ALTER INDEX ... RENAME TO ...` are the (separately idempotent-unfriendly) fixes, one call per object, each needing the same existence-check treatment as the table rename itself.
+
+A third, smaller pattern rides along with the same "additive, guarded" discipline: swapping a `CHECK` constraint's *definition* rather than its name. Postgres has no `ALTER CONSTRAINT ... USING (...)` for a `CHECK` the way some other clauses support an in-place rewrite — the idiom is drop-then-add, each half individually idempotent:
+
+```sql
+ALTER TABLE integration_drive_connections DROP CONSTRAINT IF EXISTS chk_..._connected_token;
+ALTER TABLE integration_drive_connections ADD  CONSTRAINT chk_..._auth_payload CHECK (...);
+```
+
+`DROP CONSTRAINT IF EXISTS` tolerates the constraint already being gone (a second run of this same migration); the `ADD` is guarded separately if there's any chance of colliding with a constraint of the same new name already present. Two statements, two independent existence checks, rather than one statement trying to be both at once.
+
 ---
 
 ## Why we chose it here
@@ -123,6 +154,7 @@ Two facts that make this cheaper on PostgreSQL:
 - `server/src/db/migrate.ts` — the runner: validation, advisory lock, ledger, checksums
 - `server/src/db/reset.ts` — dev-only `DROP SCHEMA public CASCADE`, refuses under `NODE_ENV=production`
 - `server/src/db/migrations/001_organizations_and_users.sql`
+- `server/src/db/migrations/053_platform_drive_integration.sql` — the guarded `ALTER TABLE ... RENAME`, driven from `pg_constraint`/`pg_index` catalog loops so every auto-generated constraint and index name is renamed without being hand-listed and risking a guessed name being wrong
 - `server/src/__tests__/migrations.test.ts` — idempotency, the checksum guard, and every constraint the migration claims to create
 - `server/package.json` — `migrate`, `db:reset`, and the `.sql` copy step in `build`
 
@@ -133,6 +165,8 @@ Two facts that make this cheaper on PostgreSQL:
 - **`gen_random_uuid()` is built in since PG 13.** No `pgcrypto` extension; adding one is needless privilege.
 - **`CREATE DATABASE` cannot run inside a transaction**, which is why the test `globalSetup` uses a bare `Client` against the `postgres` maintenance database rather than a pooled connection.
 - **Sequential prefixes conflict across branches, on purpose.** Two people adding `002_` get a merge conflict instead of a silently misordered schema.
+- **A table rename leaves every constraint and index behind under its old name.** `ALTER TABLE x RENAME TO y` renames exactly the table — nothing attached to it is touched. Forgetting the follow-up `RENAME CONSTRAINT` / `ALTER INDEX ... RENAME` calls means the schema doc and the actual catalog silently disagree about names the moment anyone goes looking.
+- **A destructive statement — including a rename — still needs explicit sign-off under rule 13**, even when it's additive in the sense of "no data is lost." The migration's own header comment records who signed off and when, so the decision is traceable in the file itself rather than only in a chat log or a PR description.
 
 ## Interview Q&A
 
@@ -153,6 +187,9 @@ A: Three deploys, expand-and-contract. Add the new column nullable — old code 
 
 **Q: Tell me about a migration that bit you.**
 A: The first run of migration 001 failed with `column "expires_at" does not exist`, which made no sense for a table I was creating in the same file. The cause was that the Docker volume had outlived a full code reset — the project had been rebuilt from scratch months earlier, but `docker compose down` doesn't delete the volume, so the database still had the old build's `refresh_tokens` table. `CREATE TABLE IF NOT EXISTS` matches on the *name*, so it silently no-op'd against the stale table with a different shape, and the next statement failed. I dumped a backup, ran the reset, and it applied cleanly. The lesson I keep: `IF NOT EXISTS` checks existence, not agreement — and infrastructure state has its own lifecycle independent of your repository.
+
+**Q: How do you rename a table under a rule that says an applied migration can never be edited?**
+A: The rule protects the *file*, not the table's name forever — you write the rename in a brand-new migration, as `ALTER TABLE ... RENAME`, and leave the original `CREATE TABLE` migration untouched and still checksum-valid. Two things need explicit handling that are easy to miss. First, `RENAME` has no `IF NOT EXISTS` form, so making it idempotent means hand-rolling the guard with `to_regclass` — check the old name still resolves and the new one doesn't yet, inside a `DO` block, so a second run of the same migration file is a no-op instead of an error. Second, and the one that actually causes drift if you skip it: Postgres renames *only* the table. Every constraint, index and trigger it carries keeps its old name, still attached, forever, unless you rename those explicitly too — I drove that from a catalog query (`pg_constraint`/`pg_index` filtered by the old name pattern) rather than hand-listing names, because several of them were Postgres-auto-generated (`..._pkey`, `..._check`) and guessing one wrong fails the whole migration.
 
 ## Follow-ups they'll dig into
 

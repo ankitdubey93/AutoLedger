@@ -139,7 +139,11 @@ export default function BankImportPage() {
         <h2 className="text-lg font-semibold m-0">Import bank statement</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Upload a CSV export from your bank. Re-importing the same statement is safe — duplicate
-          lines are skipped automatically.
+          lines are skipped automatically. Or{' '}
+          <Link to="/integrations" className="underline">
+            import automatically from a Drive folder
+          </Link>
+          .
         </p>
       </header>
 

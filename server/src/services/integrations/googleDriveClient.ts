@@ -232,20 +232,47 @@ interface GoogleFileListResponse {
   }[];
 }
 
+/** Only a bare mime type like `application/pdf` — no wildcards, no query operators. */
+const DRIVE_MIME_PATTERN = /^[a-z]+\/[A-Za-z0-9.+-]+$/;
+
+/** An RFC-3339 UTC instant, the shape Drive's own `modifiedTime` field uses. */
+const RFC3339_UTC_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$/;
+
+export interface ListFolderOptions {
+  /** Drive mimeTypes to include. Purpose-dependent — the caller decides (see DRIVE_MIME_TYPES_BY_PURPOSE). */
+  mimeTypes: readonly string[];
+  /** RFC-3339 UTC floor, inclusive. Omit for a full listing. */
+  modifiedSince?: string;
+  /** Stop paging once this many files are collected. */
+  limit: number;
+}
+
 export async function listFolderFiles(
   accessToken: string,
   folderId: string,
+  options: ListFolderOptions,
   fetchImpl: FetchLike = fetch,
 ): Promise<DriveFile[]> {
+  // The `q` string below has NO bind parameters — Drive's query language has
+  // none to offer — so every fragment interpolated into it is whitelisted
+  // BEFORE any fetch. This is the parameterization equivalent for a query
+  // language that has no bind parameters (guardrails rule 4's spirit).
   if (!DRIVE_ID_PATTERN.test(folderId)) {
-    // The id is interpolated into the `q` query string below — refusing
-    // anything outside the whitelist BEFORE any fetch is the
-    // parameterization equivalent for a query language that has no bind
-    // parameters (guardrails rule 4's spirit).
     throw new GoogleDriveError('HTTP_ERROR', 'Invalid Drive folder id');
   }
+  for (const mimeType of options.mimeTypes) {
+    if (!DRIVE_MIME_PATTERN.test(mimeType)) {
+      throw new GoogleDriveError('HTTP_ERROR', 'Invalid Drive mime type');
+    }
+  }
+  if (options.modifiedSince !== undefined && !RFC3339_UTC_PATTERN.test(options.modifiedSince)) {
+    throw new GoogleDriveError('HTTP_ERROR', 'Invalid Drive cursor');
+  }
 
-  const q = `'${folderId}' in parents and trashed = false and (mimeType = 'application/pdf' or mimeType = 'image/png' or mimeType = 'image/jpeg')`;
+  const mimeClause = options.mimeTypes.map((mimeType) => `mimeType = '${mimeType}'`).join(' or ');
+  const q =
+    `'${folderId}' in parents and trashed = false and (${mimeClause})` +
+    (options.modifiedSince === undefined ? '' : ` and modifiedTime >= '${options.modifiedSince}'`);
 
   const files: DriveFile[] = [];
   let pageToken: string | undefined;
@@ -254,7 +281,12 @@ export async function listFolderFiles(
     const params = new URLSearchParams({
       q,
       fields: 'nextPageToken,files(id,name,mimeType,size,md5Checksum,modifiedTime)',
-      orderBy: 'createdTime',
+      // Ascending modifiedTime, not createdTime: with a modifiedTime cursor
+      // and a capped page, this ordering makes the processed prefix
+      // contiguous, so the caller's cursor can safely advance past exactly
+      // what this call returned. Ordering by createdTime while cursoring on
+      // modifiedTime would strand files between the two orderings.
+      orderBy: 'modifiedTime',
       pageSize: '100',
       supportsAllDrives: 'true',
       includeItemsFromAllDrives: 'true',
@@ -283,7 +315,10 @@ export async function listFolderFiles(
       });
     }
     pageToken = json.nextPageToken;
-  } while (pageToken !== undefined);
+    // Stop paging once the cap is met rather than walking the entire folder
+    // and slicing afterward — on a large folder that is the difference
+    // between one API call and fifty.
+  } while (pageToken !== undefined && files.length < options.limit);
 
   return files;
 }

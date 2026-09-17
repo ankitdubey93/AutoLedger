@@ -70,6 +70,47 @@ The first call's `jobId` is deterministic from the document's own id — BullMQ 
 
 The reason this isn't routed through the outbox is what's actually at stake on either side of that gap. The outbox exists because losing a *financial* event silently — a webhook nobody gets told about, a payment notification that vanishes — is unacceptable, and the cost of the mechanism (a durable event row, a drain process, `FOR UPDATE SKIP LOCKED` claiming) is worth paying for that guarantee. Here, the entire phase posts nothing to the ledger — the worst case of the gap is a document visibly stuck at `PENDING` with no job ever queued for it, which is both visible (the status says so) and repairable by the user themselves (`POST /:id/reextract`, which enqueues fresh). Reaching for the outbox pattern everywhere a Postgres write and a Redis write are adjacent — rather than only where losing the second write silently is genuinely costly — would be solving a problem this phase doesn't have at the price of a mechanism it doesn't need.
 
+### Polling with a high-water mark, and why the mark can only move on a clean pass
+
+Phase 19.3's Drive folder sweep is this codebase's first **incremental poller** — every tick re-checks an external system (Google Drive) for what changed since last time, rather than reacting to an event that's already durable in Postgres the way `webhook-deliver` does. The naive version re-lists everything, every tick, forever; the cheap fix Drive's own API offers is a `modifiedTime >= <cursor>` filter, storing the newest timestamp seen as the floor for next time.
+
+The trap is *when* that floor is allowed to move. A tick that only partially processed what it saw — because a per-file cap truncated the listing, or because one file's download genuinely failed and needs a retry — must **not** advance the cursor past the unprocessed item, or that item is gone forever: the next tick's floor is now *after* it, and nothing will ever list it again.
+
+```ts
+const canAdvance = files.length < INTEGRATION_DRIVE_MAX_FILES_PER_SYNC && lastError === null;
+const nextCursor = canAdvance ? nextCursorFrom(files) : null;   // null -> COALESCE keeps the old value
+```
+
+Both halves of that condition matter for a different reason. `files.length < cap` is the *completeness* check — a raw count at or above the cap means the underlying page might have been cut off before it was exhausted, so there's no way to know whether something newer-but-unlisted exists beyond what was fetched. `lastError === null` is the *cleanliness* check — a transient per-file failure (a flaky download) is deliberately left **unrecorded** rather than marked permanently skipped, specifically so the next tick retries it; advancing the cursor past that tick would silently defeat that retry, since the file would no longer fall inside the next listing's floor. A poller with a cursor is only as correct as its rule for when the cursor is allowed to move, and "only on a batch that was both complete and error-free" is that rule stated precisely.
+
+This differs from a **change-feed** design (Drive's own `changes.list` + a `start_page_token`, or Postgres logical replication) in a way worth being able to name: a change feed hands you *exactly* what changed since a checkpoint, with no re-fetching of the unchanged — genuinely more efficient at scale — but it demands infrastructure the high-water-mark approach doesn't: a durable checkpoint token whose semantics the *provider* defines and can invalidate out from under you, and (for Drive specifically) a feed that is scoped to an entire account rather than one folder, which would mean fetching every change anywhere and filtering client-side — more calls for this specific shape of problem, not fewer. The high-water mark is the right tool exactly when what you're watching is one narrow, filterable slice of a larger system.
+
+### Claim-at-start vs mark-at-end, when polls can overlap
+
+Every scheduled job before Phase 19.3 either ran fast enough that overlap was never a realistic concern (`outbox-drain` every 5s doing simple row-claims) or was naturally self-limiting (`integrity-check` daily). A 60-second poll across many folders, each doing real network I/O, is the first case here where a single sync run can plausibly still be in flight when the *next* tick's sweep would otherwise enqueue the same folder again.
+
+The fix is ordering the "am I allowed to run" check as the **first write**, not a check followed by a write, and not a flag flipped only on success:
+
+```sql
+UPDATE integration_drive_folders SET last_synced_at = now()
+ WHERE org_id = $1 AND id = $2 AND is_active
+   AND (last_synced_at IS NULL OR last_synced_at < now() - make_interval(secs => $3))
+```
+
+`rowCount === 0` means either the folder wasn't due yet, or another worker already claimed it this window — both are "nothing to do," indistinguishable and both handled the same way, by returning early before any listing happens. This is a **claim-at-start**, not a **mark-at-end**: the alternative — do the work, then stamp `last_synced_at = now()` only once it succeeds — leaves the entire duration of a slow sync unprotected, since nothing has recorded "already claimed" until the work is already done. The single `UPDATE ... WHERE ...` is also why no explicit lock is needed: the row's own `WHERE` predicate, re-evaluated atomically against the current row by Postgres, *is* the lock, in exactly the same "the constraint that would normally require a lock is itself atomic" shape the job-queue's own `wait`-to-`active` transition uses.
+
+### A scheduler's identity lives in Redis, independent of the code that created it
+
+`upsertJobScheduler(schedulerId, ...)` is idempotent *by that id* — restart the worker with the same `schedulerId` and it updates the existing scheduler rather than creating a second one. The corollary, easy to miss, is that renaming the schedule in code (a new `schedulerId` string, or dropping the call to `upsertJobScheduler` entirely because the queue itself got renamed) does **nothing** to the *old* `schedulerId` still sitting in Redis — it has no relationship to the source file that created it beyond having once been written by code that no longer exists. Phase 19.3's queue rename (`ap-flow-drive-sweep` → `integration-drive-sweep`) left exactly this behind: the old scheduler ticks forever, enqueueing jobs onto a queue no worker is listening to, until something explicitly calls `removeJobScheduler` with the old id:
+
+```ts
+await new Queue('ap-flow-drive-sweep', { connection: createRedisConnection() })
+  .removeJobScheduler('ap-flow-drive-sweep-tick')
+  .catch(() => undefined);
+```
+
+The general lesson: **a repeatable job's state is data, not code.** Deleting or renaming the code that manages a scheduler is not the same operation as deleting the scheduler — those live in different places, updated by different mechanisms, and a rename migration that only touches TypeScript source has to remember to also clean up the Redis-resident state the old code left behind.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -96,6 +137,8 @@ The reason this isn't routed through the outbox is what's actually at stake on e
 - **`queue.add({ repeat })` on every process start.** Without `upsertJobScheduler`'s idempotency, each restart can add a competing scheduler.
 - **Trusting the job payload as data.** A payload is a hint about *what* to process, not a cache of *what it contained* — always re-read from Postgres, both for correctness (data may have changed) and for the tenant-safety property described in `webhookDeliveryService`'s worker-side reads.
 - **Forgetting to close `Queue`/`Worker` instances in tests.** Vitest hangs for ~10s reporting a vague "something prevents Vite server from exiting" — the real cause is an open Redis connection.
+- **Advancing a poll cursor past a batch that wasn't fully or cleanly processed.** A cap-truncated listing or one file's transient failure both mean "don't move the floor" — moving it anyway makes the unprocessed item permanently invisible to every future tick, not just delayed.
+- **A queue or scheduler rename in source code is not a rename in Redis.** The old `schedulerId` keeps firing against whatever queue it always targeted until something explicitly calls `removeJobScheduler` on it — renaming the TypeScript constant is necessary but not sufficient.
 
 ## Interview Q&A
 
@@ -122,6 +165,15 @@ A: Structurally, yes — a Postgres commit and a Redis write are two separate sy
 
 **Q: You use two different `jobId` strategies for the same queue — a deterministic id for registration, a timestamp-suffixed one for re-extraction. Why not just always use a fresh id?**
 A: Because the deterministic id on registration is doing real work: BullMQ silently drops a second `add()` sharing a `jobId` already present in the queue, so a duplicate registration request (a double-click, a client retry after a slow response) can never fan out two extraction jobs for the same document — that's a feature, not friction. Re-extraction is different in kind, not degree: it's a *new*, deliberate unit of work the user explicitly asked for, and reusing the original deterministic id there would mean BullMQ treats it as the same job already seen and drops it — permanently breaking the re-extract feature the moment someone tried to use it twice. Same dedup primitive, applied deliberately in opposite directions depending on whether "this is the same request" or "this is a new request" is actually true.
+
+**Q: You added a poller with an incremental cursor. What's the actual rule for when the cursor is allowed to advance, and why?**
+A: Only on a batch that was both complete and error-free. Complete means the raw count returned was under whatever page cap was requested — if it hit the cap, there might be more beyond what was fetched, and advancing past that boundary could skip something that exists but was never listed. Error-free means no individual item in the batch failed in a way that left it unrecorded — a transient failure is deliberately not marked done, specifically so the next poll retries it, and moving the cursor forward would push that retry's floor past the very item it's supposed to catch. Get either half wrong and the failure mode isn't a delay, it's silent, permanent data loss — the item just never gets looked at again.
+
+**Q: How is "claim the work" different from "mark the work done," and why does the order matter at a short poll interval?**
+A: Claim-at-start means the very first thing that happens is a write that says "I'm taking this," gating everything else on whether that write actually landed. Mark-at-end means the record of having done the work only appears once the work is finished — which leaves the entire duration of the task unprotected, since nothing has claimed it yet. At a slow poll interval that gap never matters because nothing finishes another run's work before the next one starts. Shrink the interval relative to how long the work actually takes, and two runs can genuinely overlap — the second one has no way to know the first is already in flight unless the claim happened before either did any real work. I implemented the claim as one conditional `UPDATE` whose `WHERE` clause encodes "not already claimed this window" — if it updates zero rows, someone else got there first, full stop, no separate check-then-write race to get wrong.
+
+**Q: If you rename a queue in your code, is the old scheduled job actually gone?**
+A: No, and that surprised me the first time I hit it. A repeatable job scheduler lives entirely in Redis, identified by a string id you chose — it has no ongoing relationship to the source file that created it. Rename the queue, delete the old handler, ship the change: none of that touches the scheduler already sitting in Redis under its old id. It keeps firing, forever, enqueueing jobs onto a queue nothing consumes anymore, until something explicitly calls `removeJobScheduler` with that exact old id. The lesson is that a scheduler's identity is data, not code — a migration of the code has to remember to also clean up the state the old code left behind, the same way a database migration has to handle existing rows, not just the schema going forward.
 
 ## Follow-ups they'll dig into
 

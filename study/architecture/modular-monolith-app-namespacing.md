@@ -35,6 +35,33 @@ It would be a mistake to treat `/<app-slug>/` as if it were doing the job `org_i
 
 The routing convention has a data-layer counterpart: LedgerCore's tables stay unprefixed (`accounts`, `journal_entries`, `ledger_lines`) because it plays the same "shared system of record" role that `organizations` and `users` play for the platform layer — every other app's tables carry an app prefix (`ap_flow_invoices`, `fpa_scenarios`). This is purely a naming convention with no database-level enforcement (Postgres doesn't know or care that `ap_flow_invoices` "belongs" to a particular router), but it makes cross-app leakage visible at the SQL level the same way the URL convention makes it visible at the routing level: a query against a table with the wrong prefix, inside a service file under the wrong app folder, is a pattern a reviewer — or eventually a lint rule — can catch mechanically.
 
+### A second integration point, materialized: the Drive intake dispatcher
+
+Phase 19.3 gave this pattern its first concrete second instance. Drive folder intake is **platform-level** infrastructure (`server/src/services/integrations/`) that must hand a downloaded file to one of two apps — AP-Flow for a vendor bill, LedgerCore for a bank statement — depending on a folder's configured purpose. The naive approach would have the platform service `SELECT`/`INSERT` directly against `ap_flow_documents` or `bank_transactions`, exactly the violation guardrail 16 exists to prevent, just with the platform layer as the offender instead of one app reaching into another.
+
+`driveIntakeDispatcher.ts` is the "one narrow, named door" for this case, and it is deliberately thin — a `switch` on `purpose` calling exactly one function per branch, each an app's own public service function, never its tables:
+
+```ts
+switch (target.purpose) {
+  case 'VENDOR_BILL':
+    return await dispatchVendorBill(target);      // -> apFlowDocumentService.captureFile(...)
+  case 'BANK_STATEMENT':
+    return await dispatchBankStatement(target);   // -> bankImportService.importStatement(...)
+  default: {
+    const _never: never = target.purpose;         // adding a purpose is a compile error until handled
+    throw new Error(`Unhandled Drive folder purpose ${String(_never)}`);
+  }
+}
+```
+
+Grepping the file for `pool.query` or `client.query` returns zero matches — the file is proof-by-construction that it cannot violate the boundary it exists to respect, and that grep is literally the file's own build-verification step.
+
+### When the "no FK into an app's table" trade gets real teeth
+
+The routing decision above raised a schema question the earlier text of this note only described in the abstract: the ingestion log (`integration_drive_files`) has to record *which* document a file became, for an operator to trace history — but that document could live in either `ap_flow_documents` or `bank_transactions`, and a platform table hard-wiring a `REFERENCES` into either one would mean adding a new nullable FK column, into a new app's schema, every time a third purpose is added. The resolution is the same `source_type`/`source_id` shape LedgerCore's own GL posting already uses for the identical reason: a generic `(result_app, result_entity_id)` pair, `result_app` a string CHECK-constrained to the known app slugs, `result_entity_id` a bare `UUID` with no `REFERENCES` at all.
+
+**The cost is concrete, not theoretical, and worth being able to name unprompted:** the 052 migration's original design used a real composite FK from the ingestion log into `ap_flow_documents`, with a PG15+ column-list `ON DELETE SET NULL (ap_flow_document_id)` — deleting the AP-Flow document automatically nulled the reference and nothing else. The generic pair gives that up: deleting a document now leaves a `result_entity_id` that points at nothing, silently. That's accepted here specifically because this is an *append-only ingestion log* — the id is a breadcrumb an operator reads, never a value a later query joins against — but it would be the wrong trade for a table where dangling references actually mattered.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -53,7 +80,8 @@ The deciding factor is what actually varies across the seven apps here: not thei
 - `docs/architecture.md#suite-structure` — the platform-layer/app-layer split stated as a rule
 - `docs/guardrails.md` rule 16 — "app boundaries are namespaces, not tenancy," the concrete enforcement rule
 - `docs/schema.md#table-naming-across-apps` — the unprefixed-LedgerCore / prefixed-everyone-else convention
-- Nothing yet demonstrates the cross-app integration point in code — LedgerCore's `journalService` and the first app that posts into it via `source_type`/`source_id` land together in a later phase
+- `server/src/services/integrations/driveIntakeDispatcher.ts` (Phase 19.3) — the cross-app integration point materialized: a platform service routing to app services by purpose, zero SQL of its own
+- `server/src/db/migrations/053_platform_drive_integration.sql` — the generic `(result_app, result_entity_id)` pair and its documented `ON DELETE SET NULL` trade-off
 
 ## Gotchas
 
@@ -78,6 +106,9 @@ A: Ask whether it's identity/tenancy-shaped (true for every app, doesn't vary by
 
 **Q: Tell me about a boundary you had to design without the runtime enforcing it for you.**
 A: The app-to-app boundary here. Seven portfolio apps share one server process and one database — nothing at the network layer stops AP-Flow's code from querying LedgerCore's `journal_entries` table directly. So the boundary had to be made *legible* instead of *impossible*: one registry file is the single source of truth for which apps exist, the URL and table-naming conventions both encode which app owns what so a violation is visible in a diff, and the guardrail review process has an explicit detector for a service in one app's folder querying another app's tables. It's a weaker guarantee than a network boundary gives you, and I'd say that plainly if asked — the trade only makes sense because none of the seven apps need independent scaling or deployment yet, and the moment one does, it's a specific, well-scoped extraction rather than a rewrite.
+
+**Q: You said apps integrate through one narrow door, not by reaching into each other's tables. Give a concrete example, and what did it cost you?**
+A: Phase 19.3's Drive folder intake — a platform-level service that has to route a downloaded file to either AP-Flow or LedgerCore depending on what a folder is configured for. The dispatcher that does this calls exactly one function per case, always an app's own public service (`apFlowDocumentService.captureFile`, `bankImportService.importStatement`), and contains no SQL of its own at all — I can grep the file for `pool.query` and get zero matches, which is the actual proof rather than a comment claiming it. The real cost showed up in the schema: the ingestion log needs to record which document a file became, but that document can live in either app's table, and a real foreign key would mean adding a new nullable column for every future destination app. I used the same generic `(result_app, result_entity_id)` pattern the GL's own `source_type`/`source_id` posting already uses instead — and that gave up a `PG15+` `ON DELETE SET NULL` trick the original single-destination design had, so deleting a document now leaves a dangling id in the log rather than an automatically-nulled one. I accepted that because the log is append-only and the id is an operator breadcrumb, never a join key — but I'd say plainly in an interview that it's a real trade-off, not a free win.
 
 ## Follow-ups they'll dig into
 

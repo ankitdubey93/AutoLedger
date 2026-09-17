@@ -8,8 +8,8 @@ export const QUEUE_NAMES = [
   'webhook-deliver',
   'integrity-check',
   'ap-flow-extract',
-  'ap-flow-drive-sweep',
-  'ap-flow-drive-sync',
+  'integration-drive-sweep',
+  'integration-drive-sync',
   'boarddeck-generate',
   'taxguard-embed',
   'dead-letter',
@@ -33,8 +33,8 @@ export interface JobPayloads {
   'webhook-deliver': { deliveryId: string };
   'integrity-check': Record<string, never>;
   'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
-  'ap-flow-drive-sweep': Record<string, never>;
-  'ap-flow-drive-sync': { orgId: string; connectionId: string };
+  'integration-drive-sweep': Record<string, never>;
+  'integration-drive-sync': { orgId: string; folderId: string };
   'boarddeck-generate': { orgId: string; deckId: string };
   'taxguard-embed': { orgId: string; corpusDocumentId: string };
   'dead-letter': {

@@ -43,7 +43,8 @@ export async function resetTables(): Promise<void> {
               unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines,
               boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks,
               taxguard_corpus_documents, taxguard_chunks, taxguard_questions,
-              sandbox_datasets
+              sandbox_datasets,
+              integration_drive_connections, integration_drive_folders, integration_drive_files
      RESTART IDENTITY CASCADE`,
   );
 }
