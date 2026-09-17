@@ -3,6 +3,7 @@ import { ApiError } from '../../utils/apiError.js';
 import { parseMoneyText } from '../../utils/money.js';
 import { extractionToolInputSchema } from '../../schemas/ap-flow/extractionSchema.js';
 import type { ApFlowLineItem } from '../../types/ap-flow.js';
+import type { ModelCallRecord } from '../../types/aiUsage.js';
 import {
   anthropicModelClient,
   resolveModelClient,
@@ -19,6 +20,24 @@ import {
 
 /** Kept as an alias so every existing test-stub import keeps compiling unchanged. */
 export type VisionClient = MessagesClient;
+
+/**
+ * Phase 19.1's metering seam. This file must never import `db/connect.js`
+ * (see the file-level comment above) — a callback lets it report a call it
+ * cannot record itself, including one that failed, without acquiring a
+ * database dependency.
+ */
+export type OnModelCall = (record: ModelCallRecord) => void;
+
+/**
+ * `err.status` when `err` is an `ApiError` (e.g. '502'), else the error's
+ * constructor name, truncated to 100 chars. Never the error message — a
+ * provider-supplied message must not reach a stored column.
+ */
+function errorCodeOf(err: unknown): string {
+  const code = err instanceof ApiError ? String(err.status) : (err as { constructor: { name: string } }).constructor.name;
+  return code.slice(0, 100);
+}
 
 /**
  * The model is forced into a tool call, never asked for free-form JSON — a
@@ -220,10 +239,13 @@ export async function extractFromPages(
   pages: Buffer[],
   client?: VisionClient,
   modelClient?: StructuredModelClient,
+  onModelCall?: OnModelCall,
 ): Promise<ExtractionResult> {
+  // Resolved BEFORE the timer starts: a 503 "not configured" throws here,
+  // before any HTTP request, and must record no call (decision D5).
   const effectiveClient = modelClient ?? (client !== undefined ? anthropicModelClient('extract', client) : resolveModelClient('extract'));
 
-  const raw = await effectiveClient.generateStructured({
+  const request = {
     images: pages,
     prompt:
       'Extract the vendor, invoice number, invoice date, due date, currency, subtotal, tax, total and line items from this document using the record_invoice tool. Report field_confidence keys using the same snake_case field names.',
@@ -235,15 +257,49 @@ export async function extractFromPages(
     },
     maxTokens: AP_FLOW_VISION_MAX_TOKENS,
     timeoutMs: AP_FLOW_VISION_TIMEOUT_MS,
+  };
+
+  const startedAt = Date.now();
+  let raw: Awaited<ReturnType<StructuredModelClient['generateStructured']>>;
+  try {
+    raw = await effectiveClient.generateStructured(request);
+  } catch (err) {
+    onModelCall?.({
+      appSlug: 'ap-flow',
+      purpose: 'EXTRACT',
+      provider: effectiveClient.provider,
+      model: effectiveClient.model,
+      entityType: null,
+      entityId: null,
+      usage: null,
+      status: 'ERROR',
+      errorCode: errorCodeOf(err),
+      latencyMs: Date.now() - startedAt,
+      createdBy: null,
+    });
+    throw err;
+  }
+  onModelCall?.({
+    appSlug: 'ap-flow',
+    purpose: 'EXTRACT',
+    provider: effectiveClient.provider,
+    model: effectiveClient.model,
+    entityType: null,
+    entityId: null,
+    usage: raw.usage,
+    status: 'OK',
+    errorCode: null,
+    latencyMs: Date.now() - startedAt,
+    createdBy: null,
   });
 
-  if (raw === null) {
+  if (raw.value === null) {
     throw new ApiError(502, 'Vision model returned no structured result');
   }
 
   // The model's output is untrusted input — parsed exactly as a request
   // body is parsed, never spread into a query.
-  const parsed = extractionToolInputSchema.parse(raw);
+  const parsed = extractionToolInputSchema.parse(raw.value);
 
   const errors: string[] = [];
   const subtotalCents = tryParseAmount(parsed.subtotal, 'subtotal', errors);

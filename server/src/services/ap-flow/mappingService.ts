@@ -1,5 +1,6 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
+import { ApiError } from '../../utils/apiError.js';
 import { AP_FLOW_CLASSIFY_MAX_TOKENS, AP_FLOW_CLASSIFY_TIMEOUT_MS } from '../../config/constants.js';
 import { normalizeForMatching } from '../../utils/matchScore.js';
 import { similarity } from '../../utils/levenshtein.js';
@@ -14,6 +15,7 @@ import {
   type MessagesClient,
   type StructuredModelClient,
 } from './modelClient.js';
+import type { OnModelCall } from './extractionService.js';
 
 /**
  * AP-Flow's account classification (Phase 11) — GL coding inferred in a
@@ -112,7 +114,12 @@ function round3(value: number): number {
 export async function classifyLineItems(
   orgId: string,
   input: { vendorName: string | null; lineItems: ApFlowLineItem[] },
-  deps?: { classifier?: ClassificationClient; modelClient?: StructuredModelClient },
+  deps?: {
+    classifier?: ClassificationClient;
+    modelClient?: StructuredModelClient;
+    onModelCall?: OnModelCall;
+    apFlowDocumentId?: string;
+  },
 ): Promise<LineItemClassification[]> {
   const vendorKey = vendorKeyOf(input.vendorName);
 
@@ -203,7 +210,12 @@ export async function classifyLineItems(
 async function classifyWithModel(
   unmapped: LineItemClassification[],
   candidates: Account[],
-  deps?: { classifier?: ClassificationClient; modelClient?: StructuredModelClient },
+  deps?: {
+    classifier?: ClassificationClient;
+    modelClient?: StructuredModelClient;
+    onModelCall?: OnModelCall;
+    apFlowDocumentId?: string;
+  },
 ): Promise<Map<number, { accountId: string; confidence: number }>> {
   const results = new Map<number, { accountId: string; confidence: number }>();
 
@@ -218,6 +230,10 @@ async function classifyWithModel(
     console.warn('[ap-flow] account classification unavailable: no AI provider key is configured');
     return results;
   }
+
+  const entityType = deps?.apFlowDocumentId === undefined ? null : 'ap_flow_document';
+  const entityId = deps?.apFlowDocumentId ?? null;
+  const startedAt = Date.now();
 
   try {
     const codeToId = new Map(candidates.map((account) => [account.code, account.id]));
@@ -237,9 +253,24 @@ async function classifyWithModel(
       maxTokens: AP_FLOW_CLASSIFY_MAX_TOKENS,
       timeoutMs: AP_FLOW_CLASSIFY_TIMEOUT_MS,
     });
-    if (raw === null) return results;
 
-    const parsed = classificationToolInputSchema.parse(raw);
+    deps?.onModelCall?.({
+      appSlug: 'ap-flow',
+      purpose: 'CLASSIFY',
+      provider: effectiveClient.provider,
+      model: effectiveClient.model,
+      entityType,
+      entityId,
+      usage: raw.usage,
+      status: 'OK',
+      errorCode: null,
+      latencyMs: Date.now() - startedAt,
+      createdBy: null,
+    });
+
+    if (raw.value === null) return results;
+
+    const parsed = classificationToolInputSchema.parse(raw.value);
     for (const assignment of parsed.assignments) {
       // A model-named account code outside the candidate list is discarded
       // — the model naming an account that does not exist must not
@@ -249,6 +280,19 @@ async function classifyWithModel(
       results.set(assignment.line_index, { accountId, confidence: round3(assignment.confidence) });
     }
   } catch (err) {
+    deps?.onModelCall?.({
+      appSlug: 'ap-flow',
+      purpose: 'CLASSIFY',
+      provider: effectiveClient.provider,
+      model: effectiveClient.model,
+      entityType,
+      entityId,
+      usage: null,
+      status: 'ERROR',
+      errorCode: err instanceof ApiError ? String(err.status) : (err as { constructor: { name: string } }).constructor.name,
+      latencyMs: Date.now() - startedAt,
+      createdBy: null,
+    });
     const message = err instanceof Error ? err.message : 'unknown error';
     console.warn(`[ap-flow] account classification unavailable: ${message}`);
   }

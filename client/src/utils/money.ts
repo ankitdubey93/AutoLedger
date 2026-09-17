@@ -18,6 +18,18 @@ export function formatCents(value: number): string {
 }
 
 /**
+ * Micro-USD (millionths of a dollar) -> a display string. AI spend, never
+ * ledger money — see server/src/utils/microUsd.ts. Four decimals, because a
+ * single model call routinely costs well under one cent.
+ */
+export function formatMicroUsd(value: number): string {
+  const magnitude = Math.abs(value);
+  const dollars = Math.trunc(magnitude / 1_000_000);
+  const fraction = Math.round((magnitude % 1_000_000) / 100); // micro -> 4-decimal fraction
+  return `${value < 0 ? '-' : ''}${String(dollars)}.${String(fraction).padStart(4, '0')}`;
+}
+
+/**
  * Parses a typed amount into integer cents. Returns `null` for anything that is
  * not a non-negative money value, so a caller can show a field-level error
  * rather than silently posting a zero.

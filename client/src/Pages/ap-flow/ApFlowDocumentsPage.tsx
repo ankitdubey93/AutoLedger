@@ -139,6 +139,9 @@ export default function ApFlowDocumentsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Link to={`${base}/usage`} className="btn btn--ghost">
+            AI usage
+          </Link>
           <Link to={`${base}/settings`} className="btn btn--ghost">
             Settings
           </Link>

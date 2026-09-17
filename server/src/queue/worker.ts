@@ -5,10 +5,13 @@ import { handleIntegrityCheck } from './handlers/integrityCheckHandler.js';
 import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
+import { handleApFlowDriveSweep } from './handlers/apFlowDriveSweepHandler.js';
+import { handleApFlowDriveSync } from './handlers/apFlowDriveSyncHandler.js';
 import { handleBoardDeckGenerate } from './handlers/boarddeckGenerateHandler.js';
 import { handleTaxGuardEmbed } from './handlers/taxguardEmbedHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
+  AP_FLOW_DRIVE_POLL_INTERVAL_MS,
   INTEGRITY_CHECK_CRON,
   JOB_ATTEMPTS,
   OUTBOX_DRAIN_INTERVAL_MS,
@@ -27,6 +30,8 @@ const HANDLERS: {
   'outbox-drain': handleOutboxDrain,
   'webhook-deliver': handleWebhookDeliver,
   'ap-flow-extract': handleApFlowExtract,
+  'ap-flow-drive-sweep': handleApFlowDriveSweep,
+  'ap-flow-drive-sync': handleApFlowDriveSync,
   'boarddeck-generate': handleBoardDeckGenerate,
   'taxguard-embed': handleTaxGuardEmbed,
 };
@@ -103,6 +108,15 @@ export async function startWorkers(): Promise<void> {
     'outbox-drain-tick',
     { every: OUTBOX_DRAIN_INTERVAL_MS },
     { name: 'outbox-drain', data: {}, opts: { attempts: 1 } },
+  );
+
+  // Phase 19.2 — Google Drive folder intake's poll. attempts: 1, same
+  // reasoning as the outbox drain: the sweep itself is idempotent and the
+  // next tick will re-check anyway.
+  await queues['ap-flow-drive-sweep'].upsertJobScheduler(
+    'ap-flow-drive-sweep-tick',
+    { every: AP_FLOW_DRIVE_POLL_INTERVAL_MS },
+    { name: 'ap-flow-drive-sweep', data: {}, opts: { attempts: 1 } },
   );
 }
 

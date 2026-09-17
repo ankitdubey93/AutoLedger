@@ -3,6 +3,7 @@ import { env } from '../../config/env.js';
 import { AP_FLOW_GEMINI_BASE_URL } from '../../config/constants.js';
 import { AP_FLOW_VISION_MODEL, AP_FLOW_CLASSIFY_MODEL } from '../../config/constants.js';
 import { ApiError } from '../../utils/apiError.js';
+import type { ModelUsage } from '../../types/aiUsage.js';
 
 /**
  * AP-Flow's multi-provider structured-model seam (Phase 19). Extraction and
@@ -47,11 +48,17 @@ export interface StructuredRequest {
   timeoutMs: number;
 }
 
+export interface StructuredResult {
+  /** The structured object, or null when the model produced none. */
+  value: unknown;
+  /** null when the provider returned no usage block. */
+  usage: ModelUsage | null;
+}
+
 export interface StructuredModelClient {
   readonly provider: ApFlowAiProvider;
   readonly model: string;
-  /** The structured object, or null when the model produced none. */
-  generateStructured(request: StructuredRequest): Promise<unknown>;
+  generateStructured(request: StructuredRequest): Promise<StructuredResult>;
 }
 
 export interface ModelConfig {
@@ -84,6 +91,37 @@ export function findToolUseInput(response: unknown): unknown {
   return null;
 }
 
+/**
+ * Reads `response.usage` and normalizes it. `null` when the response carries
+ * no usage block at all. Anthropic already counts thinking tokens inside
+ * `output_tokens`, so `reasoningTokens` is always 0 here. A cache WRITE
+ * (`cache_creation_input_tokens`) is billed as input, so it is folded into
+ * `inputTokens`; a cache READ (`cache_read_input_tokens`) is reported
+ * separately in `cachedInputTokens`. Every field is read defensively —
+ * non-numeric becomes 0 — so a changed provider shape degrades to "tokens
+ * unknown" rather than throwing.
+ */
+export function normalizeAnthropicUsage(response: unknown): ModelUsage | null {
+  if (typeof response !== 'object' || response === null || !('usage' in response)) return null;
+  const usage = (response as { usage: unknown }).usage;
+  if (typeof usage !== 'object' || usage === null) return null;
+
+  const u = usage as Record<string, unknown>;
+  const numberOr0 = (value: unknown): number => (typeof value === 'number' ? value : 0);
+
+  const inputTokens = numberOr0(u.input_tokens) + numberOr0(u.cache_creation_input_tokens);
+  const outputTokens = numberOr0(u.output_tokens);
+  const cachedInputTokens = numberOr0(u.cache_read_input_tokens);
+
+  return {
+    inputTokens,
+    outputTokens,
+    cachedInputTokens,
+    reasoningTokens: 0,
+    totalTokens: inputTokens + outputTokens + cachedInputTokens,
+  };
+}
+
 function realAnthropicClient(apiKey: string): MessagesClient {
   const anthropic = new Anthropic({ apiKey });
   return {
@@ -113,7 +151,7 @@ export function anthropicModelClient(
   return {
     provider: 'anthropic',
     model,
-    async generateStructured(request: StructuredRequest): Promise<unknown> {
+    async generateStructured(request: StructuredRequest): Promise<StructuredResult> {
       const body = {
         model,
         max_tokens: request.maxTokens,
@@ -140,7 +178,7 @@ export function anthropicModelClient(
       };
 
       const response = await effectiveMessages.messages.create(body, { timeout: request.timeoutMs });
-      return findToolUseInput(response);
+      return { value: findToolUseInput(response), usage: normalizeAnthropicUsage(response) };
     },
   };
 }
@@ -149,8 +187,47 @@ interface GeminiPart {
   text?: string;
 }
 
+interface GeminiUsageMetadata {
+  promptTokenCount?: number;
+  candidatesTokenCount?: number;
+  thoughtsTokenCount?: number;
+  cachedContentTokenCount?: number;
+  totalTokenCount?: number;
+}
+
 interface GeminiResponse {
   candidates?: { content?: { parts?: GeminiPart[] } }[];
+  usageMetadata?: GeminiUsageMetadata;
+}
+
+/**
+ * Reads `json.usageMetadata` and normalizes it. `null` when the response
+ * carries no usage block at all. Gemini bills `thoughtsTokenCount` as
+ * OUTPUT, so it is folded into `outputTokens` here AND reported separately
+ * in `reasoningTokens` for visibility — never add `reasoningTokens` to a
+ * cost a second time. Field names verified against Google's
+ * `generateContent` reference, 2026-09-17. Every field read defensively —
+ * non-numeric becomes 0 — so a changed provider shape degrades to "tokens
+ * unknown" rather than throwing.
+ */
+export function normalizeGeminiUsage(json: unknown): ModelUsage | null {
+  if (typeof json !== 'object' || json === null || !('usageMetadata' in json)) return null;
+  const usage = (json as { usageMetadata: unknown }).usageMetadata;
+  if (typeof usage !== 'object' || usage === null) return null;
+
+  const u = usage as GeminiUsageMetadata;
+  const numberOr0 = (value: number | undefined): number => (typeof value === 'number' ? value : 0);
+
+  const inputTokens = numberOr0(u.promptTokenCount);
+  const reasoningTokens = numberOr0(u.thoughtsTokenCount);
+  const outputTokens = numberOr0(u.candidatesTokenCount) + reasoningTokens;
+  const cachedInputTokens = numberOr0(u.cachedContentTokenCount);
+  const totalTokens =
+    typeof u.totalTokenCount === 'number'
+      ? u.totalTokenCount
+      : inputTokens + outputTokens + cachedInputTokens;
+
+  return { inputTokens, outputTokens, cachedInputTokens, reasoningTokens, totalTokens };
 }
 
 /**
@@ -211,7 +288,7 @@ export function geminiModelClient(options: {
   return {
     provider: 'gemini',
     model: options.model,
-    async generateStructured(request: StructuredRequest): Promise<unknown> {
+    async generateStructured(request: StructuredRequest): Promise<StructuredResult> {
       const url = `${AP_FLOW_GEMINI_BASE_URL}/models/${options.model}:generateContent`;
       const body = {
         contents: [
@@ -258,18 +335,20 @@ export function geminiModelClient(options: {
       try {
         json = (await response.json()) as GeminiResponse;
       } catch {
-        return null;
+        return { value: null, usage: null };
       }
 
+      const usage = normalizeGeminiUsage(json);
+
       const parts = json.candidates?.[0]?.content?.parts;
-      if (!Array.isArray(parts)) return null;
+      if (!Array.isArray(parts)) return { value: null, usage };
       const textPart = parts.find((part) => typeof part.text === 'string');
-      if (textPart?.text === undefined) return null;
+      if (textPart?.text === undefined) return { value: null, usage };
 
       try {
-        return JSON.parse(textPart.text) as unknown;
+        return { value: JSON.parse(textPart.text) as unknown, usage };
       } catch {
-        return null;
+        return { value: null, usage };
       }
     },
   };

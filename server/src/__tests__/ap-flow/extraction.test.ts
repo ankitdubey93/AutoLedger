@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { extractFromPages, validateArithmetic } from '../../services/ap-flow/extractionService.js';
-import type { VisionClient } from '../../services/ap-flow/extractionService.js';
+import type { OnModelCall, VisionClient } from '../../services/ap-flow/extractionService.js';
 import { env } from '../../config/env.js';
+import { ApiError } from '../../utils/apiError.js';
 
 /**
  * Fully stubbed — no case in this file reaches the network or needs
@@ -138,18 +139,21 @@ describe('extractionService', () => {
       model: 'gemini-test',
       generateStructured: () =>
         Promise.resolve({
-          vendor_name: 'AWS Cloud Services',
-          invoice_number: 'INV-2026-8901',
-          invoice_date: '2026-08-15',
-          currency: 'USD',
-          subtotal: '450.00',
-          tax: '0.00',
-          total: '450.00',
-          line_items: [
-            { description: 'EC2 Compute Instances', amount: '350.00' },
-            { description: 'S3 Storage Usage', amount: '100.00' },
-          ],
-          field_confidence: { total: 0.95 },
+          value: {
+            vendor_name: 'AWS Cloud Services',
+            invoice_number: 'INV-2026-8901',
+            invoice_date: '2026-08-15',
+            currency: 'USD',
+            subtotal: '450.00',
+            tax: '0.00',
+            total: '450.00',
+            line_items: [
+              { description: 'EC2 Compute Instances', amount: '350.00' },
+              { description: 'S3 Storage Usage', amount: '100.00' },
+            ],
+            field_confidence: { total: 0.95 },
+          },
+          usage: null,
         }),
     };
 
@@ -185,5 +189,55 @@ describe('extractionService', () => {
 
   it('performs no network request across this entire file', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('a successful extraction reports one OK model call', async () => {
+    const modelClient = {
+      provider: 'gemini' as const,
+      model: 'gemini-test',
+      generateStructured: () =>
+        Promise.resolve({ value: { line_items: [], field_confidence: {} }, usage: null }),
+    };
+    const onModelCall: OnModelCall = vi.fn();
+
+    await extractFromPages([Buffer.from('x')], undefined, modelClient, onModelCall);
+
+    expect(onModelCall).toHaveBeenCalledTimes(1);
+    expect(onModelCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appSlug: 'ap-flow',
+        purpose: 'EXTRACT',
+        provider: 'gemini',
+        model: 'gemini-test',
+        status: 'OK',
+        errorCode: null,
+      }),
+    );
+  });
+
+  it('a provider failure reports an ERROR model call and rethrows', async () => {
+    const modelClient = {
+      provider: 'gemini' as const,
+      model: 'gemini-test',
+      generateStructured: () => Promise.reject(new ApiError(502, 'boom')),
+    };
+    const onModelCall: OnModelCall = vi.fn();
+
+    await expect(extractFromPages([Buffer.from('x')], undefined, modelClient, onModelCall)).rejects.toMatchObject({
+      status: 502,
+    });
+
+    expect(onModelCall).toHaveBeenCalledTimes(1);
+    expect(onModelCall).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'ERROR', errorCode: '502' }),
+    );
+  });
+
+  it('an unconfigured provider reports no model call at all', async () => {
+    const onModelCall: OnModelCall = vi.fn();
+    await expect(extractFromPages([Buffer.from('x')], undefined, undefined, onModelCall)).rejects.toMatchObject({
+      status: 503,
+    });
+    expect(onModelCall).not.toHaveBeenCalled();
   });
 });

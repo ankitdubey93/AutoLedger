@@ -145,11 +145,37 @@ const parsed = {
   // actually attempted.
   VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),
 
+  // Phase 19.2 — AP-Flow's Google Drive folder intake. All four optional:
+  // the server and worker both boot without them, and driveConnectionService
+  // throws 503 only when a real Drive action is attempted with any unset.
+  GOOGLE_OAUTH_CLIENT_ID: optional('GOOGLE_OAUTH_CLIENT_ID', ''),
+  GOOGLE_OAUTH_CLIENT_SECRET: optional('GOOGLE_OAUTH_CLIENT_SECRET', ''),
+  GOOGLE_OAUTH_REDIRECT_URI: optional(
+    'GOOGLE_OAUTH_REDIRECT_URI',
+    'http://localhost:5000/api/v1/ap-flow/drive/oauth/callback',
+  ),
+  // AES-256-GCM key for refresh tokens and PKCE verifiers at rest
+  // (utils/secretBox.ts) — NOT a JWT secret (rule 11), a separate concern.
+  INTEGRATION_ENCRYPTION_KEY: optional('INTEGRATION_ENCRYPTION_KEY', ''),
+
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),
   REFRESH_TOKEN_SECRET: secret('REFRESH_TOKEN_SECRET'),
 } as const;
+
+// A key that is set but the wrong length is a misconfiguration worth
+// failing loudly on, the same posture ACCESS_TOKEN_SECRET's length check
+// takes — a silently-truncated or padded key would decrypt nothing later.
+if (
+  parsed.INTEGRATION_ENCRYPTION_KEY !== '' &&
+  !/^[0-9a-fA-F]{64}$/.test(parsed.INTEGRATION_ENCRYPTION_KEY)
+) {
+  problems.push(
+    'INTEGRATION_ENCRYPTION_KEY must be 64 hex characters (32 bytes). ' +
+      'Generate one with: openssl rand -hex 32',
+  );
+}
 
 // If the two keys are equal, a refresh token verifies as an access token: a
 // stolen 7-day refresh cookie would become an unlimited-lifetime credential,

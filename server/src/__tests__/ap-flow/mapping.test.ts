@@ -9,6 +9,7 @@ import {
   CHART_MATCH_MIN_SIMILARITY,
 } from '../../services/ap-flow/mappingService.js';
 import type { ClassificationClient } from '../../services/ap-flow/mappingService.js';
+import type { OnModelCall } from '../../services/ap-flow/extractionService.js';
 import { withTransaction } from '../../db/transaction.js';
 
 /**
@@ -208,6 +209,60 @@ describe('mappingService.classifyLineItems', () => {
     for (const r of results) {
       expect(r.mappingSource).not.toBe('HISTORY');
     }
+  });
+
+  it('a model classification reports one CLASSIFY call carrying the document id', async () => {
+    const classifier = stubClassifier([{ line_index: 0, account_code: '6120', confidence: 0.7 }]);
+    const onModelCall: OnModelCall = vi.fn();
+
+    await classifyLineItems(
+      orgA,
+      { vendorName: 'Some New Vendor', lineItems: [{ description: 'zzzzzzzz qqqq', amountCents: 1000 }] },
+      { classifier, onModelCall, apFlowDocumentId: 'doc-123' },
+    );
+
+    expect(onModelCall).toHaveBeenCalledTimes(1);
+    expect(onModelCall).toHaveBeenCalledWith(
+      expect.objectContaining({
+        appSlug: 'ap-flow',
+        purpose: 'CLASSIFY',
+        entityType: 'ap_flow_document',
+        entityId: 'doc-123',
+        status: 'OK',
+      }),
+    );
+  });
+
+  it('a classification failure reports an ERROR call and still degrades to NONE', async () => {
+    const classifier = throwingClassifier();
+    const onModelCall: OnModelCall = vi.fn();
+
+    const [result] = await classifyLineItems(
+      orgA,
+      { vendorName: 'Some New Vendor', lineItems: [{ description: 'zzzzzzzz qqqq', amountCents: 1000 }] },
+      { classifier, onModelCall },
+    );
+
+    expect(result?.mappingSource).toBe('NONE');
+    expect(onModelCall).toHaveBeenCalledTimes(1);
+    expect(onModelCall).toHaveBeenCalledWith(expect.objectContaining({ status: 'ERROR' }));
+  });
+
+  it('a HISTORY-tier hit reports no model call', async () => {
+    const accountId = await accountIdByCode(orgA, '6120');
+    await pool.query(
+      'INSERT INTO ap_flow_vendor_account_map (org_id, vendor_key, account_id, hit_count) VALUES ($1, $2, $3, 1)',
+      [orgA, 'aws cloud services', accountId],
+    );
+    const onModelCall: OnModelCall = vi.fn();
+
+    await classifyLineItems(
+      orgA,
+      { vendorName: 'AWS Cloud Services', lineItems: [{ description: 'x', amountCents: 100 }] },
+      { onModelCall },
+    );
+
+    expect(onModelCall).not.toHaveBeenCalled();
   });
 
   it('saveLineItemsOnClient replaces prior rows', async () => {

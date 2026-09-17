@@ -42,6 +42,7 @@ function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDe
     pages: [],
     extraction: null,
     lineItems: [],
+    modelCalls: [],
     ...overrides,
   };
 }

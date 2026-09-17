@@ -1,7 +1,7 @@
 # AP-Flow — App Spec & Build Ladder
 
-**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19
-**Status: Phases 10, 11 and 19 done** (19 partially — Google Drive intake deferred, not dropped). `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered) and [roadmap.md](roadmap.md#phase-19-as-delivered) for what was actually delivered.
+**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2
+**Status: Phases 10, 11, 19, 19.1 and 19.2 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2. `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
 
 AP-Flow turns a photograph of a receipt into a balanced, auditable bill in LedgerCore. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
 
@@ -148,9 +148,34 @@ Produces a draft. Posts nothing to the ledger.
 - [x] `due_date` extracted, defaulting to invoice date + 30 days when absent
 - [x] Confidence-gated auto-post, off by default per organization, every gate reported at once
 - [x] Direct upload from AP-Flow's own page (`POST /documents/upload`), vaulting and registering in one call
-- [ ] Google Drive folder intake — **deferred**, not built (see [roadmap.md](roadmap.md#phase-19-as-delivered))
+- [x] Google Drive folder intake — **delivered in Phase 19.2** (see [roadmap.md](roadmap.md#phase-192-as-delivered))
 
 **Acceptance ✅ — verified.** The full server suite (1451 tests) and client suite (247 tests) pass with zero regressions. `npm run verify:integrity` and a full 24-month sandbox reseed both pass green against the rewritten posting path.
+
+---
+
+### Phase 19.1 — AI token/cost metering
+
+- [x] Every extraction and classification call recorded to the platform's `ai_model_calls` table — tokens, latency, outcome, and cost when the model carries a verified price
+- [x] `costMicroUsd` in millionths of a US dollar (`utils/microUsd.ts`), never `Cents`, never reaching the GL
+- [x] A model with no verified price records its real tokens with `cost_micro_usd NULL`, surfaced to the reader as `unpricedCallCount` rather than silently omitted
+- [x] Recording through an injected callback so `extractionService.ts`/`mappingService.ts` stay database-free; a metering failure never fails a document
+- [x] Per-document cost visible on the document detail page; an AP-Flow "AI usage" page with totals and per-model/per-purpose/per-day breakdowns
+
+**Acceptance ✅ — verified.** See [roadmap.md](roadmap.md#phase-191-as-delivered).
+
+---
+
+### Phase 19.2 — Google Drive folder intake
+
+- [x] Per-org OAuth 2.0 + PKCE Drive connection (`drive.readonly`), hand-rolled `fetch`, no `googleapis` SDK
+- [x] Refresh token and PKCE verifier AES-256-GCM encrypted at rest (`INTEGRATION_ENCRYPTION_KEY`)
+- [x] A background sweep polls every connected organization every 5 minutes; `POST /drive/sync` for an immediate check
+- [x] A file is imported at most once per organization, even across a reconnect (`ap_flow_drive_files`, keyed by Drive file id)
+- [x] Imported files flow through the same `captureFile` path direct upload uses — metered, extracted, classified, and auto-posted (if enabled) with no special case
+- [x] `invalid_grant` on refresh moves the connection to `NEEDS_REAUTH` rather than failing the sync loudly
+
+**Acceptance ✅ — verified.** See [roadmap.md](roadmap.md#phase-192-as-delivered).
 
 ---
 
@@ -158,7 +183,9 @@ Produces a draft. Posts nothing to the ledger.
 
 Not built, and deliberately out of scope for Phase 11 despite appearing elsewhere as a one-line mention — corrected in [roadmap.md](roadmap.md#phase-11-as-delivered) once the discrepancy was noticed: **3-way matching and COGS tracking.** Neither is in this file's own Phase 11 ladder or acceptance criteria above, which are what this doc treats as authoritative.
 
-Phase 19 left one item of its own original scope unbuilt: **Google Drive folder intake** — a per-org OAuth2/PKCE-authenticated Drive connection, polled for new files. This is a deferred follow-up, not a dropped idea; see [roadmap.md](roadmap.md#phase-19-as-delivered) for what it would take. Also not built by Phase 19: per-org AI provider choice (one server-wide env var selects the provider for every organization); auto-post re-evaluation after a manual line-item edit; posting or auto-posting a negative line item (a credit note); an outbox event or webhook on an auto-post.
+Phase 19 left one item of its own original scope unbuilt — **Google Drive folder intake** — and Phase 19.2 built it; see [roadmap.md](roadmap.md#phase-192-as-delivered). Also not built by Phase 19: per-org AI provider choice (one server-wide env var selects the provider for every organization); auto-post re-evaluation after a manual line-item edit; posting or auto-posting a negative line item (a credit note); an outbox event or webhook on an auto-post.
+
+Not built by Phase 19.2: per-org AI provider choice, still — Drive-imported files use the same one server-wide `AP_FLOW_AI_PROVIDER`; a second Drive folder or a second connected Google account per organization (`ux_ap_flow_drive_connections_org` is `UNIQUE (org_id)`); OAuth application verification with Google (an unverified app shows Google's own warning screen and is capped at a small number of test users, accepted for a portfolio build); Drive push notifications (polling only, no public HTTPS endpoint exists for this dev setup to receive one); an outbox event or webhook firing on an import. Not built by Phase 19.1: retention or partitioning on `ai_model_calls` despite unbounded growth (the same accepted posture `audit_logs` already carries); a cached-input pricing rate distinct from the plain input rate (irrelevant today since AP-Flow sends no `cache_control`, but a real over-estimate the moment prompt caching is introduced — `config/aiPricing.ts` says so).
 
 Also not built: editing an extracted amount (only the account per line is editable — a wrong number is fixed by re-extracting, which discards prior overrides); un-posting or reversing from AP-Flow's own side (correction is LedgerCore's `POST /journals/:id/reverse`, reached from the linked journal entry — `POSTED` has no outbound edge in AP-Flow's own FSM); an outbox event or webhook firing on a posting; open-item or partial-document posting; duplicate-invoice detection; a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above); handwriting or non-English OCR; multi-document PDF splitting; and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`, and now also its materialized line items; only `audit_logs` remembers either existed).
 

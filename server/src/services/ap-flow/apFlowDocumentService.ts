@@ -5,6 +5,7 @@ import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import * as storageService from '../storageService.js';
 import * as documentService from '../documentService.js';
+import * as aiUsageService from '../aiUsageService.js';
 import { sniffMimeType } from '../../utils/mimeSniff.js';
 import { enqueue } from '../../queue/queues.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../../config/constants.js';
@@ -545,11 +546,18 @@ export async function getApFlowDocumentById(orgId: string, id: string): Promise<
           ]),
         );
 
+  // ai_model_calls is a platform table, not another app's — reading it here
+  // is the same shape as reading `documents` for the filename, and does not
+  // violate rule 16. It is reached through aiUsageService, never by joining
+  // the table into this file's own query.
+  const modelCalls = await aiUsageService.listCallsForEntity(orgId, 'ap_flow_document', id);
+
   return {
     ...document,
     pages: pageRows.map(toPage),
     extraction: extractionRows[0] === undefined ? null : toExtraction(extractionRows[0]),
     lineItems: lineItemRows.map((row) => toLineItem(row, accountsById)),
+    modelCalls,
   };
 }
 
@@ -672,10 +680,15 @@ export async function updateLineItemAccount(
 export async function loadForProcessing(
   orgId: string,
   id: string,
-): Promise<{ status: ApFlowDocumentStatus; sha256: string; mimeType: string } | null> {
+): Promise<{ status: ApFlowDocumentStatus; sha256: string; mimeType: string; createdBy: string } | null> {
   try {
-    const { rows } = await pool.query<{ status: ApFlowDocumentStatus; sha256: string; mime_type: string }>(
-      `SELECT a.status, d.sha256, d.mime_type
+    const { rows } = await pool.query<{
+      status: ApFlowDocumentStatus;
+      sha256: string;
+      mime_type: string;
+      created_by: string;
+    }>(
+      `SELECT a.status, d.sha256, d.mime_type, a.created_by
          FROM ap_flow_documents a
          JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
         WHERE a.org_id = $1 AND a.id = $2`,
@@ -683,7 +696,7 @@ export async function loadForProcessing(
     );
     const row = rows[0];
     if (row === undefined) return null;
-    return { status: row.status, sha256: row.sha256, mimeType: row.mime_type };
+    return { status: row.status, sha256: row.sha256, mimeType: row.mime_type, createdBy: row.created_by };
   } catch (err) {
     if (pgErrorCode(err) === PG_INVALID_TEXT_REPRESENTATION) return null;
     throw err;

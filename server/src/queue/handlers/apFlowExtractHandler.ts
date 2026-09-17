@@ -1,10 +1,11 @@
 import * as apFlowDocumentService from '../../services/ap-flow/apFlowDocumentService.js';
 import * as autoPostService from '../../services/ap-flow/autoPostService.js';
+import * as aiUsageService from '../../services/aiUsageService.js';
 import * as storageService from '../../services/storageService.js';
 import { rasterize, redactPage, tesseractOcr } from '../../services/redactionService.js';
 import type { OcrAdapter } from '../../services/redactionService.js';
 import { extractFromPages } from '../../services/ap-flow/extractionService.js';
-import type { VisionClient } from '../../services/ap-flow/extractionService.js';
+import type { OnModelCall, VisionClient } from '../../services/ap-flow/extractionService.js';
 import * as mappingService from '../../services/ap-flow/mappingService.js';
 import type { ClassificationClient } from '../../services/ap-flow/mappingService.js';
 import type { StructuredModelClient } from '../../services/ap-flow/modelClient.js';
@@ -83,20 +84,37 @@ export async function handleApFlowExtract(
       });
     }
 
+    // Phase 19.1 — reports every metered call this pipeline run causes,
+    // attributed to this document and its uploader. `recordCall` never
+    // throws and is deliberately not awaited — metering is observability,
+    // and a metering failure must never mark a document FAILED. `createdBy`
+    // is the document's uploader: the worker runs outside the request, so
+    // the AsyncLocalStorage audit actor does not cross the process boundary
+    // (the same accepted behaviour this file's own header already
+    // documents).
+    const onModelCall: OnModelCall = (record) => {
+      void aiUsageService.recordCall(orgId, {
+        ...record,
+        entityType: 'ap_flow_document',
+        entityId: apFlowDocumentId,
+        createdBy: doc.createdBy,
+      });
+    };
+
     // Only now — redacted buffers ONLY. Passing page.png (the unredacted
     // raster) here is the one bug that would make this app's central claim
     // false: that PII is masked before any image leaves the machine.
-    const extraction = await extractFromPages(redactedBuffers, deps?.vision, deps?.modelClient);
+    const extraction = await extractFromPages(redactedBuffers, deps?.vision, deps?.modelClient, onModelCall);
 
     const classifications = await mappingService.classifyLineItems(
       orgId,
       { vendorName: extraction.vendorName, lineItems: extraction.lineItems },
-      deps?.classifier === undefined && deps?.modelClient === undefined
-        ? undefined
-        : {
-            ...(deps.classifier === undefined ? {} : { classifier: deps.classifier }),
-            ...(deps.modelClient === undefined ? {} : { modelClient: deps.modelClient }),
-          },
+      {
+        ...(deps?.classifier === undefined ? {} : { classifier: deps.classifier }),
+        ...(deps?.modelClient === undefined ? {} : { modelClient: deps.modelClient }),
+        onModelCall,
+        apFlowDocumentId,
+      },
     );
 
     await apFlowDocumentService.savePipelineResult(

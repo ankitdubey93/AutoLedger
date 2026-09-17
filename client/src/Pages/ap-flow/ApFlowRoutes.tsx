@@ -3,6 +3,7 @@ import ApFlowDocumentsPage from './ApFlowDocumentsPage';
 import ApFlowDocumentDetailPage from './ApFlowDocumentDetailPage';
 import ApFlowReviewQueuePage from './ApFlowReviewQueuePage';
 import ApFlowSettingsPage from './ApFlowSettingsPage';
+import ApFlowUsagePage from './ApFlowUsagePage';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -13,8 +14,8 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
  * No onboarding gate here, unlike LedgerCore's: Phase 10 has no setup
  * wizard for AP-Flow.
  *
- * "review" and "settings" are literal paths and must come before ":id" — a
- * sibling param route would otherwise swallow either as an id.
+ * "review", "settings" and "usage" are literal paths and must come before
+ * ":id" — a sibling param route would otherwise swallow any of them as an id.
  */
 export default function ApFlowRoutes() {
   const base = useAppBasePath();
@@ -25,6 +26,7 @@ export default function ApFlowRoutes() {
         <Route index element={<ApFlowDocumentsPage />} />
         <Route path="review" element={<ApFlowReviewQueuePage />} />
         <Route path="settings" element={<ApFlowSettingsPage />} />
+        <Route path="usage" element={<ApFlowUsagePage />} />
         <Route path=":id" element={<ApFlowDocumentDetailPage />} />
         <Route path="*" element={<Navigate to={base} replace />} />
       </Routes>

@@ -13,7 +13,7 @@ import {
   type ApFlowDocumentStatus,
   type ApFlowMappingSource,
 } from '../../services/fetchServices';
-import { formatCents } from '../../utils/money';
+import { formatCents, formatMicroUsd } from '../../utils/money';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -432,6 +432,45 @@ export default function ApFlowDocumentDetailPage() {
           </div>
         )}
       </div>
+
+      {document.modelCalls.length > 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3">
+          <p className="text-sm font-medium m-0">AI usage for this document</p>
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Purpose</th>
+                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Model</th>
+                <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Tokens</th>
+                <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
+              </tr>
+            </thead>
+            <tbody>
+              {document.modelCalls.map((call) => (
+                <tr key={call.id}>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                    {call.purpose}
+                    {call.status === 'ERROR' && (
+                      <span className="ml-1.5 text-[11px] uppercase tracking-wide text-red-400">Failed</span>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)]">{call.model}</td>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{call.totalTokens}</td>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                    {call.costMicroUsd === null ? '—' : `$${formatMicroUsd(call.costMicroUsd)}`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-sm text-[var(--muted)] m-0">
+            Total: $
+            {formatMicroUsd(
+              document.modelCalls.reduce((sum, call) => sum + (call.costMicroUsd ?? 0), 0),
+            )}
+          </p>
+        </div>
+      )}
 
       {confirmingReextract && (
         <ConfirmDialog

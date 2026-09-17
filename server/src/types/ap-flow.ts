@@ -1,3 +1,5 @@
+import type { AiModelCall } from './aiUsage.js';
+
 /**
  * AP-Flow (Phase 10) — capture & extraction. This file mirrors
  * `types/ledger-core.ts`'s FSM-table shape: one transition table in code,
@@ -180,6 +182,8 @@ export interface ApFlowDocumentDetail extends ApFlowDocumentRecord {
   pages: ApFlowPage[];
   extraction: ApFlowExtraction | null;
   lineItems: ApFlowLineItemRecord[];
+  /** Phase 19.1. Every metered model call this document caused, newest first. */
+  modelCalls: AiModelCall[];
 }
 
 /**
@@ -238,3 +242,47 @@ export const AP_FLOW_AUTO_POST_DEFAULTS: ApFlowSettings = {
   autoPostMaxTotalCents: null,
   updatedAt: null,
 };
+
+// ------------------------------------------------------- drive intake (19.2)
+
+/**
+ * PENDING_AUTH -> CONNECTED is the normal OAuth completion. CONNECTED ->
+ * NEEDS_REAUTH happens when a refresh fails with invalid_grant (the user
+ * revoked access at Google's end). Either non-PENDING_AUTH state can
+ * restart the flow, back to PENDING_AUTH. No terminal state: a connection
+ * only ever leaves this table via disconnect (a DELETE), never a status.
+ */
+export const AP_FLOW_DRIVE_CONNECTION_STATUSES = ['PENDING_AUTH', 'CONNECTED', 'NEEDS_REAUTH'] as const;
+export type ApFlowDriveConnectionStatus = (typeof AP_FLOW_DRIVE_CONNECTION_STATUSES)[number];
+
+export function isApFlowDriveConnectionStatus(value: string): value is ApFlowDriveConnectionStatus {
+  return (AP_FLOW_DRIVE_CONNECTION_STATUSES as readonly string[]).includes(value);
+}
+
+export const AP_FLOW_DRIVE_CONNECTION_TRANSITIONS = {
+  PENDING_AUTH: ['PENDING_AUTH', 'CONNECTED'],
+  CONNECTED: ['PENDING_AUTH', 'NEEDS_REAUTH'],
+  NEEDS_REAUTH: ['PENDING_AUTH'],
+} as const satisfies Record<ApFlowDriveConnectionStatus, readonly ApFlowDriveConnectionStatus[]>;
+
+export function canTransitionApFlowDriveConnection(
+  from: ApFlowDriveConnectionStatus,
+  to: ApFlowDriveConnectionStatus,
+): boolean {
+  return (AP_FLOW_DRIVE_CONNECTION_TRANSITIONS[from] as readonly ApFlowDriveConnectionStatus[]).includes(to);
+}
+
+export interface ApFlowDriveConnection {
+  id: string;
+  status: ApFlowDriveConnectionStatus;
+  googleAccountEmail: string | null;
+  folderId: string | null;
+  folderName: string | null;
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  importedFileCount: number;
+  skippedFileCount: number;
+  connectedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}

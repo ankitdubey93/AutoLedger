@@ -2634,6 +2634,8 @@ export interface ApFlowDocumentDetail extends ApFlowDocument {
   pages: ApFlowPage[];
   extraction: ApFlowExtraction | null;
   lineItems: ApFlowLineItemRecord[];
+  /** Phase 19.1. Every metered model call this document caused, newest first. */
+  modelCalls: AiModelCall[];
 }
 
 export interface ApFlowDocumentFilters {
@@ -2750,6 +2752,125 @@ export function updateApFlowSettings(body: {
   autoPostMaxTotalCents: number | null;
 }): Promise<{ success: boolean; settings: ApFlowSettings }> {
   return apiFetch('/ap-flow/settings', { method: 'PUT', body: JSON.stringify(body) });
+}
+
+// ------------------------------------------------------- ap-flow drive (19.2)
+
+/** Mirrors server/src/types/ap-flow.ts's ApFlowDriveConnectionStatus. */
+export type ApFlowDriveConnectionStatus = 'PENDING_AUTH' | 'CONNECTED' | 'NEEDS_REAUTH';
+
+export interface ApFlowDriveConnection {
+  id: string;
+  status: ApFlowDriveConnectionStatus;
+  googleAccountEmail: string | null;
+  folderId: string | null;
+  folderName: string | null;
+  lastSyncedAt: string | null;
+  lastSyncError: string | null;
+  importedFileCount: number;
+  skippedFileCount: number;
+  connectedBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /ap-flow/drive */
+export function getApFlowDriveConnection(): Promise<{
+  success: boolean;
+  connection: ApFlowDriveConnection | null;
+  configured: boolean;
+}> {
+  return apiFetch('/ap-flow/drive');
+}
+
+/** POST /ap-flow/drive/connect */
+export function startApFlowDriveConnect(): Promise<{ success: boolean; authorizationUrl: string }> {
+  return apiFetch('/ap-flow/drive/connect', { method: 'POST' });
+}
+
+/** PUT /ap-flow/drive/folder */
+export function setApFlowDriveFolder(folder: string): Promise<{ success: boolean; connection: ApFlowDriveConnection }> {
+  return apiFetch('/ap-flow/drive/folder', { method: 'PUT', body: JSON.stringify({ folder }) });
+}
+
+/** POST /ap-flow/drive/sync */
+export function syncApFlowDrive(): Promise<{ success: boolean; queued: boolean }> {
+  return apiFetch('/ap-flow/drive/sync', { method: 'POST' });
+}
+
+/** DELETE /ap-flow/drive */
+export async function disconnectApFlowDrive(): Promise<void> {
+  await apiFetch('/ap-flow/drive', { method: 'DELETE' });
+}
+
+// ---------------------------------------------------------- ai-usage (19.1)
+
+/** Mirrors server/src/types/aiUsage.ts. */
+export type AiCallPurpose = 'EXTRACT' | 'CLASSIFY' | 'ANSWER' | 'EMBED';
+export type AiCallStatus = 'OK' | 'ERROR';
+
+export interface AiModelCall {
+  id: string;
+  appSlug: string;
+  purpose: AiCallPurpose;
+  provider: string;
+  model: string;
+  entityType: string | null;
+  entityId: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number;
+  reasoningTokens: number;
+  totalTokens: number;
+  costMicroUsd: number | null;
+  pricingVersion: string | null;
+  status: AiCallStatus;
+  errorCode: string | null;
+  latencyMs: number;
+  createdAt: string;
+}
+
+export interface AiUsageTotals {
+  callCount: number;
+  okCount: number;
+  errorCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costMicroUsd: number;
+  unpricedCallCount: number;
+}
+
+export interface AiUsageGroup extends AiUsageTotals {
+  key: string;
+  provider: string | null;
+}
+
+export interface AiUsageDay extends AiUsageTotals {
+  date: string;
+}
+
+export interface AiUsageSummary {
+  totals: AiUsageTotals;
+  byModel: AiUsageGroup[];
+  byApp: AiUsageGroup[];
+  byPurpose: AiUsageGroup[];
+  byDay: AiUsageDay[];
+  pricingVersion: string;
+}
+
+/** GET /ai-usage */
+export function getAiUsage(
+  params: { from?: string; to?: string; appSlug?: string } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; usage: AiUsageSummary }> {
+  const query = new URLSearchParams();
+  if (params.from !== undefined) query.set('from', params.from);
+  if (params.to !== undefined) query.set('to', params.to);
+  if (params.appSlug !== undefined) query.set('appSlug', params.appSlug);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/ai-usage${suffix}`, { signal: signal ?? null });
 }
 
 // ---------------------------------------------------------- fpa-engine (12)

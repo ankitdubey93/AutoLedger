@@ -464,4 +464,74 @@ describe('ap-flow phase 11 database constraints', () => {
     );
     expect(code).toBe(CHECK_VIOLATION);
   });
+
+  // ----------------------------------------------- Phase 19.2 — drive intake
+
+  it('a CONNECTED drive connection without a refresh token is rejected', async () => {
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_drive_connections (org_id, status, connected_by) VALUES ($1, 'CONNECTED', $2)`,
+        [orgA, userA.id],
+      ),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it("a drive file cannot reference another organization's AP-Flow document", async () => {
+    const { apFlowDocId: orgBDocId } = await (async () => {
+      const { rows: vaultRows } = await pool.query<{ id: string }>(
+        `INSERT INTO documents (org_id, sha256, byte_size, mime_type, original_filename, uploaded_by)
+         VALUES ($1, $2, 10, 'application/pdf', 'invoice.pdf', $3) RETURNING id`,
+        [orgB, 'c'.repeat(64), userB.id],
+      );
+      const { rows: apRows } = await pool.query<{ id: string }>(
+        `INSERT INTO ap_flow_documents (org_id, document_id, created_by) VALUES ($1, $2, $3) RETURNING id`,
+        [orgB, vaultRows[0]?.id, userB.id],
+      );
+      return { apFlowDocId: apRows[0]?.id as string };
+    })();
+
+    const { rows: connRows } = await pool.query<{ id: string }>(
+      `INSERT INTO ap_flow_drive_connections (org_id, status, refresh_token_ciphertext, connected_by)
+       VALUES ($1, 'CONNECTED', 'v1.x.x.x', $2) RETURNING id`,
+      [orgA, userA.id],
+    );
+    const connectionId = connRows[0]?.id;
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_drive_files (org_id, connection_id, drive_file_id, name, mime_type, status, ap_flow_document_id)
+         VALUES ($1, $2, 'drivefile01', 'x.pdf', 'application/pdf', 'IMPORTED', $3)`,
+        [orgA, connectionId, orgBDocId],
+      ),
+    );
+    expect(code).toBe(FOREIGN_KEY_VIOLATION);
+  });
+
+  it('deleting an AP-Flow document nulls only ap_flow_document_id on its drive file', async () => {
+    const { apFlowDocId } = await seedApFlowDocument();
+
+    const { rows: connRows } = await pool.query<{ id: string }>(
+      `INSERT INTO ap_flow_drive_connections (org_id, status, refresh_token_ciphertext, connected_by)
+       VALUES ($1, 'CONNECTED', 'v1.x.x.x', $2) RETURNING id`,
+      [orgA, userA.id],
+    );
+    const connectionId = connRows[0]?.id;
+
+    const { rows: fileRows } = await pool.query<{ id: string }>(
+      `INSERT INTO ap_flow_drive_files (org_id, connection_id, drive_file_id, name, mime_type, status, ap_flow_document_id)
+       VALUES ($1, $2, 'drivefile02', 'x.pdf', 'application/pdf', 'IMPORTED', $3) RETURNING id`,
+      [orgA, connectionId, apFlowDocId],
+    );
+    const driveFileId = fileRows[0]?.id;
+
+    await pool.query('DELETE FROM ap_flow_documents WHERE org_id = $1 AND id = $2', [orgA, apFlowDocId]);
+
+    const { rows } = await pool.query<{ org_id: string; ap_flow_document_id: string | null }>(
+      'SELECT org_id, ap_flow_document_id FROM ap_flow_drive_files WHERE id = $1',
+      [driveFileId],
+    );
+    expect(rows[0]?.org_id).toBe(orgA);
+    expect(rows[0]?.ap_flow_document_id).toBeNull();
+  });
 });

@@ -4,6 +4,7 @@ import authRoutes from './auth.js';
 import organizationRoutes from './organizations.js';
 import appRoutes from './apps.js';
 import auditRoutes from './auditLogs.js';
+import aiUsageRoutes from './aiUsage.js';
 import webhookRoutes from './webhooks.js';
 import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
@@ -63,6 +64,11 @@ apiRouter.use('/documents', documentRoutes);
 // Phase 18 — the sandbox dataset. Platform-level: it orchestrates every
 // app's own seeder and owns no app's tables (guardrails rule 16).
 apiRouter.use('/sandbox', sandboxRoutes);
+
+// Phase 19.1 — AI token and cost metering. Platform-level: every app that
+// calls a model records here, and `app_slug` on the row carries the
+// namespace (guardrails rule 16), exactly as /audit-logs does.
+apiRouter.use('/ai-usage', aiUsageRoutes);
 
 // --- App routers ---
 // One apiRouter.use('/<slug>', <app>Routes) line per app, added when that

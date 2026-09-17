@@ -107,6 +107,7 @@ function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDe
         mappingConfidence: 0.65,
       },
     ],
+    modelCalls: [],
     ...overrides,
   };
 }

@@ -5,6 +5,7 @@ import { closePool, pool } from '../../db/connect.js';
 import { closeQueues, queues } from '../../queue/queues.js';
 import { handleApFlowExtract } from '../../queue/handlers/apFlowExtractHandler.js';
 import { getApFlowDocumentById } from '../../services/ap-flow/apFlowDocumentService.js';
+import { getUsageSummary, listCallsForEntity } from '../../services/aiUsageService.js';
 import type { OcrAdapter } from '../../services/redactionService.js';
 import type { VisionClient } from '../../services/ap-flow/extractionService.js';
 import type { OcrPageResult } from '../../types/ap-flow.js';
@@ -299,6 +300,40 @@ describe('ap-flow extraction pipeline', () => {
     expect(detail.status).toBe('PENDING');
     expect(detail.pages).toHaveLength(0);
     expect(detail.extraction).toBeNull();
+  });
+
+  it('the pipeline records model calls against the document it processed', async () => {
+    const { apFlowDocId } = await registerDocument();
+    await handleApFlowExtract(
+      { orgId: orgA, apFlowDocumentId: apFlowDocId },
+      { ocr: ordinaryOcr(), vision: stubVisionClient() },
+    );
+
+    const calls = await listCallsForEntity(orgA, 'ap_flow_document', apFlowDocId);
+    expect(calls.length).toBeGreaterThan(0);
+    const extractCall = calls.find((c) => c.purpose === 'EXTRACT');
+    expect(extractCall).toBeDefined();
+    expect(extractCall?.appSlug).toBe('ap-flow');
+
+    // createdBy is not part of AiModelCall's public shape (it is storage
+    // detail, not something a usage page displays per-call) — verified
+    // directly against the row instead.
+    const { rows } = await pool.query<{ created_by: string }>(
+      'SELECT created_by FROM ai_model_calls WHERE org_id = $1 AND entity_id = $2 AND purpose = $3',
+      [orgA, apFlowDocId, 'EXTRACT'],
+    );
+    expect(rows[0]?.created_by).toBe(userA.id);
+  });
+
+  it('another organization sees none of those calls', async () => {
+    const { apFlowDocId } = await registerDocument();
+    await handleApFlowExtract(
+      { orgId: orgA, apFlowDocumentId: apFlowDocId },
+      { ocr: ordinaryOcr(), vision: stubVisionClient() },
+    );
+
+    const orgBSummary = await getUsageSummary(orgB, { from: null, to: null, appSlug: null });
+    expect(orgBSummary.totals.callCount).toBe(0);
   });
 
   it('performs no direct network request — every case here injects a stub vision client', () => {

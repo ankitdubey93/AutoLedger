@@ -228,6 +228,24 @@ export const AP_FLOW_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.co
 /** Fallback due date when AP-Flow extracted none: invoice date plus this many days. */
 export const AP_FLOW_DEFAULT_DUE_DAYS = 30;
 
+// ---------------------------------------------------- ap-flow drive intake (19.2)
+
+/** How often the Drive sweep checks every connected org for new files. */
+export const AP_FLOW_DRIVE_POLL_INTERVAL_MS = 300_000;
+
+/** Ceiling per sync run — a runaway folder must not stall the worker. */
+export const AP_FLOW_DRIVE_MAX_FILES_PER_SYNC = 25;
+
+/** How long an OAuth `state` stays valid between redirect and callback. */
+export const AP_FLOW_DRIVE_OAUTH_STATE_TTL_MINUTES = 10;
+
+export const GOOGLE_DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
+export const GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth';
+export const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
+export const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
+export const GOOGLE_HTTP_TIMEOUT_MS = 30_000;
+
 // ------------------------------------------------------------ taxguard (16)
 
 /** Voyage AI's embedding model. One place, so a change is one line. */

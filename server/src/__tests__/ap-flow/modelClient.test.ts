@@ -4,6 +4,8 @@ import {
   anthropicModelClient,
   geminiModelClient,
   geminiThinkingConfig,
+  normalizeAnthropicUsage,
+  normalizeGeminiUsage,
   resolveModelClient,
 } from '../../services/ap-flow/modelClient.js';
 import type { MessagesClient } from '../../services/ap-flow/modelClient.js';
@@ -125,7 +127,7 @@ describe('modelClient (Phase 19)', () => {
       timeoutMs: 1000,
     });
 
-    expect(result).toEqual({ a: 1 });
+    expect(result.value).toEqual({ a: 1 });
   });
 
   it('geminiModelClient returns null when there are no candidates', async () => {
@@ -140,7 +142,7 @@ describe('modelClient (Phase 19)', () => {
       timeoutMs: 1000,
     });
 
-    expect(result).toBeNull();
+    expect(result.value).toBeNull();
   });
 
   it('geminiModelClient returns null for non-JSON text', async () => {
@@ -157,7 +159,7 @@ describe('modelClient (Phase 19)', () => {
       timeoutMs: 1000,
     });
 
-    expect(result).toBeNull();
+    expect(result.value).toBeNull();
   });
 
   it('geminiModelClient throws 502 without echoing the response body', async () => {
@@ -239,7 +241,166 @@ describe('modelClient (Phase 19)', () => {
       timeoutMs: 1000,
     });
 
-    expect(result).toEqual({ x: 1 });
+    expect(result.value).toEqual({ x: 1 });
+  });
+
+  it('geminiModelClient reports usageMetadata as normalized usage', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(
+        jsonResponse({
+          candidates: [{ content: { parts: [{ text: '{}' }] } }],
+          usageMetadata: {
+            promptTokenCount: 1000,
+            candidatesTokenCount: 200,
+            thoughtsTokenCount: 50,
+            totalTokenCount: 1250,
+          },
+        }),
+      ),
+    ) as unknown as typeof fetch;
+    const client = geminiModelClient({ apiKey: 'k', model: 'm', fetchImpl });
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    // thoughtsTokenCount is folded INTO outputTokens (Gemini bills it as
+    // output) and reported separately as reasoningTokens.
+    expect(result.usage).toEqual({
+      inputTokens: 1000,
+      outputTokens: 250,
+      cachedInputTokens: 0,
+      reasoningTokens: 50,
+      totalTokens: 1250,
+    });
+  });
+
+  it('geminiModelClient reports null usage when usageMetadata is absent', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse({ candidates: [{ content: { parts: [{ text: '{}' }] } }] })),
+    ) as unknown as typeof fetch;
+    const client = geminiModelClient({ apiKey: 'k', model: 'm', fetchImpl });
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result.usage).toBeNull();
+  });
+
+  it('geminiModelClient still reports usage when there are no candidates', async () => {
+    const fetchImpl = vi.fn(() =>
+      Promise.resolve(jsonResponse({ usageMetadata: { promptTokenCount: 10 } })),
+    ) as unknown as typeof fetch;
+    const client = geminiModelClient({ apiKey: 'k', model: 'm', fetchImpl });
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'n', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result.value).toBeNull();
+    expect(result.usage?.inputTokens).toBe(10);
+  });
+
+  it('anthropicModelClient reports usage from the response', async () => {
+    const stub: MessagesClient = {
+      messages: {
+        create: () =>
+          Promise.resolve({
+            content: [{ type: 'tool_use', input: { x: 1 } }],
+            usage: {
+              input_tokens: 800,
+              output_tokens: 120,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 0,
+            },
+          }),
+      },
+    };
+    const client = anthropicModelClient('extract', stub);
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'record_invoice', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result.usage).toEqual({
+      inputTokens: 800,
+      outputTokens: 120,
+      cachedInputTokens: 0,
+      reasoningTokens: 0,
+      totalTokens: 920,
+    });
+  });
+
+  it('anthropicModelClient counts a cache write as input', async () => {
+    const stub: MessagesClient = {
+      messages: {
+        create: () =>
+          Promise.resolve({
+            content: [{ type: 'tool_use', input: { x: 1 } }],
+            usage: {
+              input_tokens: 800,
+              output_tokens: 0,
+              cache_read_input_tokens: 0,
+              cache_creation_input_tokens: 40,
+            },
+          }),
+      },
+    };
+    const client = anthropicModelClient('extract', stub);
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'record_invoice', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result.usage?.inputTokens).toBe(840);
+  });
+
+  it('anthropicModelClient reports null usage when the response carries none', async () => {
+    const stub: MessagesClient = {
+      messages: {
+        create: () => Promise.resolve({ content: [{ type: 'tool_use', input: { x: 1 } }] }),
+      },
+    };
+    const client = anthropicModelClient('extract', stub);
+
+    const result = await client.generateStructured({
+      images: [],
+      prompt: 'x',
+      schema: { name: 'record_invoice', description: 'd', jsonSchema: {}, geminiSchema: GEMINI_SCHEMA },
+      maxTokens: 1,
+      timeoutMs: 1000,
+    });
+
+    expect(result.usage).toBeNull();
+  });
+
+  it('normalizeAnthropicUsage returns null for a response with no usage block', () => {
+    expect(normalizeAnthropicUsage({ content: [] })).toBeNull();
+  });
+
+  it('normalizeGeminiUsage returns null for a response with no usageMetadata', () => {
+    expect(normalizeGeminiUsage({ candidates: [] })).toBeNull();
   });
 
   it('resolveModelClient throws 503 for gemini with no key', () => {

@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`, `/ap-flow`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ai-usage`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`, `/ap-flow`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -223,6 +223,49 @@ Deliberately narrower than every other read endpoint in this codebase (`/reports
 Failure paths: `400 operation must be one of INSERT, UPDATE, DELETE` · `403` for any role other than `OWNER`/`ADMIN` · `404 Audit log entry not found`.
 
 `npm run verify:integrity` (not an HTTP route — a CLI script) independently re-derives three ledger-wide invariants — total debits equal total credits, every entry balances individually, no orphaned ledger line — and exits non-zero if any fails. See [study/postgresql/integrity-checking-a-ledger.md](../study/postgresql/integrity-checking-a-ledger.md). From Phase 7 this also runs on a daily schedule via the background worker, not only on demand.
+
+---
+
+### AI usage — `/api/v1/ai-usage` — Phase 19.1
+
+Platform-level, not namespaced under any app slug — every app that calls a model records here (`app_slug` on the row carries the namespace, guardrails rule 16), the same convention `/audit-logs` uses. Unlike the audit trail, this is **open to every member**, `VIEWER` included: token spend is operational telemetry about the organization's own processing, the same class of thing `/ledger-core/reports` is, not a control surface. There is no write route on this resource, now or ever — rows are written only by `aiUsageService.recordCall`, called from inside a service (currently AP-Flow's extraction/classification pipeline).
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | any member | Aggregate token/cost usage — totals, and grouped by model, by app, by purpose, and by day |
+
+`GET /` query parameters, all optional: `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD` · `appSlug` (an app slug from `config/apps.ts`).
+
+```json
+{
+  "success": true,
+  "usage": {
+    "totals": {
+      "callCount": 42,
+      "okCount": 40,
+      "errorCount": 2,
+      "inputTokens": 51000,
+      "outputTokens": 9800,
+      "totalTokens": 60800,
+      "costMicroUsd": 200400,
+      "unpricedCallCount": 3
+    },
+    "byModel": [{ "key": "claude-sonnet-5", "provider": "anthropic", "callCount": 39, "...": "..." }],
+    "byApp": [{ "key": "ap-flow", "provider": null, "callCount": 42, "...": "..." }],
+    "byPurpose": [{ "key": "EXTRACT", "provider": null, "callCount": 30, "...": "..." }],
+    "byDay": [{ "date": "2026-09-17", "callCount": 12, "...": "..." }],
+    "pricingVersion": "2026-06-24"
+  }
+}
+```
+
+`costMicroUsd` is millionths of one US dollar (see `utils/microUsd.ts`) — operational AI spend, never ledger money, and never in `utils/money.ts`'s `Cents`. `totals.costMicroUsd` sums only rows whose model carried a verified price in `config/aiPricing.ts` at the time of the call; `unpricedCallCount` is how many rows were excluded from that sum, so a client can say plainly that some spend is not represented in the total rather than silently understating it. A model with no verified price still contributes its real token counts to `inputTokens`/`outputTokens`/`totalTokens`.
+
+Failure paths: `400 from must be a date in YYYY-MM-DD format` · `400 to must be a date in YYYY-MM-DD format` · `400 appSlug must be at most 50 characters` · `401`.
+
+`GET /ap-flow/documents/:id` (below) also carries `modelCalls: AiModelCall[]` — every metered call attributed to that one document, via `aiUsageService.listCallsForEntity`, never a direct join into `ai_model_calls` from AP-Flow's own query (rule 16).
+
+See [study/architecture/metering-and-cost-attribution.md](../study/architecture/metering-and-cost-attribution.md).
 
 ---
 
@@ -706,16 +749,16 @@ Storage is org-keyed and content-addressed (`server/storage/<org_id>/<ab>/<cd>/<
 
 ---
 
-### AP-Flow — `/api/v1/ap-flow` — Phases 10–11, 19
+### AP-Flow — `/api/v1/ap-flow` — Phases 10–11, 19, 19.1, 19.2
 
-Full spec: [ap-flow.md](ap-flow.md). A document reaches AP-Flow either by uploading to `/api/v1/documents` first and registering it here by id, or — since Phase 19 — via `/documents/upload`, which does both in one call. Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into LedgerCore; Phase 19 adds a second extraction provider (Gemini), rewrites posting onto a real LedgerCore bill, and adds a confidence-gated auto-post.
+Full spec: [ap-flow.md](ap-flow.md). A document reaches AP-Flow by uploading to `/api/v1/documents` first and registering it here by id, via `/documents/upload` (both in one call, Phase 19), or by a connected Google Drive folder (Phase 19.2). Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into LedgerCore; Phase 19 adds a second extraction provider (Gemini), rewrites posting onto a real LedgerCore bill, and adds a confidence-gated auto-post; Phase 19.1 adds AI token/cost visibility per document (see `/api/v1/ai-usage` above); Phase 19.2 adds the Google Drive folder connection below.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/documents` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Registers an already-vaulted PDF/PNG/JPEG document for extraction. `201`, status `PENDING`. Enqueues a background job — the response returns before extraction runs |
 | POST | `/documents/upload` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Phase 19. Multipart, field `file`. Vaults the bytes and registers them with AP-Flow in one call. `201` new, `200` when this org already captured identical bytes (`created: false`) |
 | GET | `/documents` | any member | Paginated, optional `?status=PENDING\|PROCESSING\|EXTRACTED\|FAILED\|POSTED` |
-| GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`), its extraction if any (now including `dueDate`), and its line items (each carrying `accountId`/`accountCode`/`accountName`, `mappingSource`, `mappingConfidence`). Also carries `billId`, `autoPosted`, and `autoPostBlockers` (Phase 19) |
+| GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`), its extraction if any (now including `dueDate`), and its line items (each carrying `accountId`/`accountCode`/`accountName`, `mappingSource`, `mappingConfidence`). Also carries `billId`, `autoPosted`, `autoPostBlockers` (Phase 19), and `modelCalls` — every metered AI call this document caused (Phase 19.1) |
 | GET | `/documents/:id/pages/:pageNumber/image` | any member | The **redacted** page image — PII pixels painted over, this is what was sent to the vision model, never the original |
 | POST | `/documents/:id/reextract` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Resets to `PENDING` and re-enqueues, discarding any line items, account overrides and `autoPostBlockers` from the prior run. `409` unless the document is `EXTRACTED` or `FAILED` |
 | GET | `/review-queue` | any member | Documents with `status = EXTRACTED`, ordered arithmetic failure first, then any unmapped line, then lowest model confidence, then newest. Each entry carries `autoPostBlockers` |
@@ -723,14 +766,24 @@ Full spec: [ap-flow.md](ap-flow.md). A document reaches AP-Flow either by upload
 | POST | `/documents/:id/post` | `OWNER`, `ADMIN`, `ACCOUNTANT` | One-click approve & post. Phase 19: this now finds-or-creates the vendor and posts a real LedgerCore **bill** (`createCapturedBillOnClient` + `approveBillOnClient`), not a raw journal entry — `source_type = 'bill'`, `source_id` = the bill's id — freezing `journalEntryId`/`billId`/`postedSha256`/`postedAt`/`autoPosted` on this row. No request body. `EXTRACTED → POSTED` only; `POSTED` is terminal, so re-posting is `409`, not a second entry |
 | GET | `/settings` | any member | Phase 19. This org's auto-post gates — `autoPostEnabled`, `autoPostMinConfidence` (0.5–1), `autoPostMaxTotalCents` (`null` = no limit), `updatedAt`. Defaults (`false`, `0.9`, `null`, `null`) when never saved |
 | PUT | `/settings` | `OWNER`, `ADMIN` | Phase 19. Replaces the auto-post gates. `400` on a bad body (schema) |
+| GET | `/drive` | any member | Phase 19.2. This org's Google Drive connection (`null` if none) plus `configured` — whether the server has Google OAuth credentials and an encryption key set at all |
+| POST | `/drive/connect` | `OWNER`, `ADMIN` | Phase 19.2. Starts (or restarts) the OAuth 2.0 + PKCE flow. Returns `{ authorizationUrl }` for the client to navigate to. `503` when the server has no Google OAuth credentials configured |
+| GET | `/drive/oauth/callback` | none (no session) | Phase 19.2. Google's OAuth redirect target. The `state` value alone is the credential — it was bound to exactly one organization when `/drive/connect` was called. Always `302`s back to `<FRONTEND_URL>/app/ap-flow/settings?drive=connected` or `...?drive=error`; never returns JSON |
+| PUT | `/drive/folder` | `OWNER`, `ADMIN` | Phase 19.2. Sets the Drive folder to poll, from a pasted folder link or bare id |
+| POST | `/drive/sync` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Phase 19.2. Queues an immediate sync outside the normal 5-minute poll. `202 { queued: true }` |
+| DELETE | `/drive` | `OWNER`, `ADMIN` | Phase 19.2. Disconnects Drive — deletes the connection row and best-effort revokes the refresh token at Google. Documents already imported are untouched. `204` |
 
-Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `400 accountId must be a UUID` · `400 Send exactly one file in a field named "file"` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `404 Line item not found` (also another document's) · `409 This document is already registered with AP-Flow` · `409 Cannot re-extract a document in status <status>` · `409 Cannot edit line items on a document in status <status>` · `409 Cannot post a document in status <status>` · `409 A bill with this invoice number already exists for this vendor` (Phase 19 — duplicate-invoice detection, via `ux_bills_vendor_reference`) · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG` · `422 AP-Flow can only process PDF, PNG and JPEG documents` · `422 Account is a header and cannot be posted to` · `422 Account is inactive` · `422 This document has no extraction to post` · `422 Extraction totals do not reconcile — re-extract before posting` · `422 This document needs an invoice date before it can be posted` · `422 This document needs a positive total before it can be posted` · `422 This document needs a vendor name before it can be posted` (Phase 19) · `422 This document needs an invoice number before it can be posted` (Phase 19) · `422 This document needs at least one line item before it can be posted` · `422 Every line item needs an account before this document can be posted` · `422 A line item with a negative amount cannot be posted as a bill` (Phase 19) · `422 Extracted line items and tax do not sum to the document total` · `422 No exchange rate for <from> to <to> on or before <date>`.
+Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `400 accountId must be a UUID` · `400 Send exactly one file in a field named "file"` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `404 Line item not found` (also another document's) · `409 This document is already registered with AP-Flow` · `409 Cannot re-extract a document in status <status>` · `409 Cannot edit line items on a document in status <status>` · `409 Cannot post a document in status <status>` · `409 A bill with this invoice number already exists for this vendor` (Phase 19 — duplicate-invoice detection, via `ux_bills_vendor_reference`) · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG` · `422 AP-Flow can only process PDF, PNG and JPEG documents` · `422 Account is a header and cannot be posted to` · `422 Account is inactive` · `422 This document has no extraction to post` · `422 Extraction totals do not reconcile — re-extract before posting` · `422 This document needs an invoice date before it can be posted` · `422 This document needs a positive total before it can be posted` · `422 This document needs a vendor name before it can be posted` (Phase 19) · `422 This document needs an invoice number before it can be posted` (Phase 19) · `422 This document needs at least one line item before it can be posted` · `422 Every line item needs an account before this document can be posted` · `422 A line item with a negative amount cannot be posted as a bill` (Phase 19) · `422 Extracted line items and tax do not sum to the document total` · `422 No exchange rate for <from> to <to> on or before <date>` · `503 Google Drive is not configured on this server` · `400 Invalid or expired authorization state` · `502 Google rejected the authorization` · `400 Enter a Google Drive folder link or ID` · `404 Drive folder not found or not shared with the connected account` · `422 That Drive item is not a folder` · `409 Connect Google Drive before choosing a folder` · `409 Google Drive access was revoked — reconnect` · `409 Connect Google Drive before syncing` · `409 Choose a Drive folder before syncing` · `404 Google Drive is not connected`.
 
 The capture pipeline (rasterize → local OCR → PII-mask → vision extraction → account classification → persist → attempt auto-post) runs entirely inside the background job, never inside the request. Extraction and classification run against whichever provider `AP_FLOW_AI_PROVIDER` selects — `anthropic` (Claude, `claude-sonnet-5`, the SDK) or `gemini` (`gemini-3.6-flash` by default, plain `fetch`, no SDK) — behind one `StructuredModelClient` seam (`services/ap-flow/modelClient.ts`). A server with no key configured for the selected provider processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` (or `GEMINI_API_KEY`) — nothing else in the app degrades. Account classification degrades quietly instead: a missing key or a model error leaves any still-unmapped line `NONE` rather than failing the document, since the extraction already succeeded. A Gemini call that itself fails (non-2xx) surfaces as `FAILED` / `"Gemini request failed with status <code>"`, with Google's error `status` enum appended in parentheses when the response carries one (e.g. `"... status 404 (NOT_FOUND)"`) — never the provider's free-text error message, which is never echoed.
 
 GL coding is inferred in a fixed order, cheapest and most explainable first, and each tier that hits skips the ones after it: (1) the organization's own posting history for this vendor (`ap_flow_vendor_account_map`, keyed by a normalized vendor-name string, never LedgerCore's `vendors` table — rule 16), (2) a name-similarity match against the org's own postable expense accounts, (3) the model, given only the line descriptions and the chart's account codes, forced into a tool call (or, on Gemini, constrained JSON output) so a code outside the chart is structurally discarded rather than becoming a suggestion. Posting itself finds-or-creates the vendor by normalized name (`vendorService.findOrCreateVendorByNameOnClient`), allocates any tax across the line items by the largest-remainder method (`utils/money.ts`'s `allocateCents`, exact to the cent), and creates + approves a LedgerCore bill in one transaction — debiting the line items' own summed amount per account (never `subtotal_cents`, so a reviewer's override can never silently change the money), crediting the AP control account, splitting input tax to `1180 GST/VAT Input Credit` when present (never `2140`), and resolving its exchange rate at the **invoice date** via LedgerCore's `fx_rates`. The due date is the extracted one when present and not before the invoice date, else invoice date + 30 days.
 
 **Auto-posting (Phase 19).** Off by default, per organization. When enabled, the worker calls `evaluateAutoPost` (pure, `services/ap-flow/autoPostPolicy.ts`) directly after an extraction saves; every gate is checked (not just the first), and a document that fails any of them is left `EXTRACTED` with the reasons recorded in `autoPostBlockers` (`ap_flow_documents.auto_post_blockers`) for the review queue to show. A document that clears every gate is posted with `autoPosted: true` by the worker itself — the actor recorded is the document's original uploader. A posting-time rejection (duplicate invoice, locked fiscal period, missing FX rate) degrades to a `POSTING_REJECTED` blocker rather than failing the document. See [ap-flow.md](ap-flow.md) for the full gate list. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
+
+**AI usage metering (Phase 19.1).** Every extraction and classification call — success or failure, whichever provider `AP_FLOW_AI_PROVIDER` selects — is recorded to the platform's `ai_model_calls` table (see `/api/v1/ai-usage` above) with its token counts, latency, and cost when the model carries a verified price. Recording happens through an injected callback so `extractionService.ts`/`mappingService.ts` stay database-free; a metering failure is logged and swallowed, never surfaced to the pipeline — a spend-tracking bug must not be able to fail a document that extracted fine. Only calls that actually reached a provider are recorded — a `503 "... is not configured"` throws before any request and records nothing.
+
+**Google Drive folder intake (Phase 19.2).** An `OWNER`/`ADMIN` connects Google Drive via OAuth 2.0 + PKCE (`drive.readonly` scope, hand-rolled `fetch`, no `googleapis` SDK — rule 14) and picks one folder to poll. A background sweep checks every connected organization every 5 minutes (`AP_FLOW_DRIVE_POLL_INTERVAL_MS`) and queues a sync for any that are due; `POST /drive/sync` queues one immediately outside that schedule. A sync lists the folder's PDF/PNG/JPEG files, skips any already seen (`ap_flow_drive_files`, keyed by Drive file id per organization — one file is imported at most once, even across a reconnect), and imports up to `AP_FLOW_DRIVE_MAX_FILES_PER_SYNC` (25) new ones per run through the same `captureFile` path direct upload uses — so an imported file is metered, extracted, classified and (if enabled) auto-posted exactly like any other AP-Flow document, with no special case. The refresh token and PKCE verifier are AES-256-GCM encrypted at rest (`utils/secretBox.ts`, `INTEGRATION_ENCRYPTION_KEY`) and never appear in a log line, error message, or API response — `GET /drive` returns only the connection's status, email, folder, and counts. A refresh that fails with Google's `invalid_grant` (the user revoked access at Google's end) moves the connection to `NEEDS_REAUTH` rather than failing the sync loudly; `PUT /drive/folder` and future syncs both surface it as a `409` prompting reconnection. See [study/security-auth/oauth2-pkce-and-secrets-at-rest.md](../study/security-auth/oauth2-pkce-and-secrets-at-rest.md).
 
 ---
 

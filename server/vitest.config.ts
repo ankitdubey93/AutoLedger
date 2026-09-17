@@ -44,6 +44,13 @@ export default defineConfig({
       AP_FLOW_AI_PROVIDER: 'anthropic',
       ANTHROPIC_API_KEY: '',
       GEMINI_API_KEY: '',
+      // Phase 19.2 — the identical pin, same reason: a developer's local
+      // .env may carry real Google OAuth credentials and encryption key
+      // (needed to run Drive intake locally). Every Drive test that wants a
+      // real provider injects its own `deps` object; none needs these.
+      GOOGLE_OAUTH_CLIENT_ID: '',
+      GOOGLE_OAUTH_CLIENT_SECRET: '',
+      INTEGRATION_ENCRYPTION_KEY: '',
     },
 
     /**
