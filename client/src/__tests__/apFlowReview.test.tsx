@@ -75,6 +75,8 @@ function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDe
     billId: null,
     autoPosted: false,
     autoPostBlockers: [],
+    duplicateOfId: null,
+    duplicateOfFilename: null,
     pages: [],
     extraction: {
       id: 'ext-1',

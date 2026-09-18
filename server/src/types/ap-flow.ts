@@ -6,7 +6,7 @@ import type { AiModelCall } from './aiUsage.js';
  * a matching CHECK constraint in the migration.
  */
 
-export const AP_FLOW_DOCUMENT_STATUSES = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED'] as const;
+export const AP_FLOW_DOCUMENT_STATUSES = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED', 'DUPLICATE'] as const;
 export type ApFlowDocumentStatus = (typeof AP_FLOW_DOCUMENT_STATUSES)[number];
 
 export function isApFlowDocumentStatus(value: string): value is ApFlowDocumentStatus {
@@ -24,6 +24,15 @@ export function isApFlowDocumentStatus(value: string): value is ApFlowDocumentSt
  * construction (POSTED has no outbound edge to PENDING), and the database's
  * own trg_ap_flow_documents_posted_guard trigger (migration 032) refuses any
  * UPDATE once status = 'POSTED' regardless of what this table says.
+ *
+ * DUPLICATE is a second legal BIRTH state, alongside PENDING — `captureFile`
+ * sets it directly on INSERT when the uploaded bytes already match an
+ * existing document for this org, never via an UPDATE, so it has no inbound
+ * edge in this table. Its one outbound edge, DUPLICATE -> PENDING, is
+ * deliberately identical in shape to FAILED -> PENDING: a human decided the
+ * flagged capture is legitimate after all, and "process it anyway" is
+ * `requestReextraction` re-entering the ordinary pipeline — no separate
+ * endpoint or transition needed for the "push it through" action.
  */
 export const AP_FLOW_DOCUMENT_TRANSITIONS = {
   PENDING: ['PROCESSING'],
@@ -31,6 +40,7 @@ export const AP_FLOW_DOCUMENT_TRANSITIONS = {
   EXTRACTED: ['PENDING', 'POSTED'],
   FAILED: ['PENDING'],
   POSTED: [],
+  DUPLICATE: ['PENDING'],
 } as const satisfies Record<ApFlowDocumentStatus, readonly ApFlowDocumentStatus[]>;
 
 export function canTransitionApFlowDocument(
@@ -176,6 +186,10 @@ export interface ApFlowDocumentRecord {
   autoPosted: boolean;
   /** Phase 19. Why an EXTRACTED document has not auto-posted. Empty once POSTED. */
   autoPostBlockers: ApFlowAutoPostBlocker[];
+  /** Non-null only when status is DUPLICATE — the earlier document this capture's bytes match. */
+  duplicateOfId: string | null;
+  /** The matched document's own original filename, for "duplicate of <name>" without a second round trip. Null unless duplicateOfId is set. */
+  duplicateOfFilename: string | null;
 }
 
 export interface ApFlowDocumentDetail extends ApFlowDocumentRecord {

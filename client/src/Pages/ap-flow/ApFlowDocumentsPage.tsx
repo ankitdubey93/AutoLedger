@@ -17,7 +17,7 @@ import ApFlowUploadPanel from './ApFlowUploadPanel';
  * colouring and per-line account override is Phase 11.
  */
 
-const STATUS_OPTIONS: ApFlowDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED'];
+const STATUS_OPTIONS: ApFlowDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED', 'DUPLICATE'];
 const SCANNABLE_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg']);
 const IN_FLIGHT_STATUSES = new Set<ApFlowDocumentStatus>(['PENDING', 'PROCESSING']);
 const POLL_INTERVAL_MS = 5000;
@@ -44,6 +44,13 @@ function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
     return (
       <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 ring-1 ring-inset ring-violet-500/20">
         Posted
+      </span>
+    );
+  }
+  if (status === 'DUPLICATE') {
+    return (
+      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">
+        Possible duplicate
       </span>
     );
   }

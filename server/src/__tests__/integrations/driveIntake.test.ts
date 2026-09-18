@@ -166,13 +166,21 @@ describe('Google Drive folder intake', () => {
 
   // ---------------------------------------------------------- connection
 
-  it('GET /integrations/drive returns no connection and both modes unconfigured on a fresh organization', async () => {
+  it('GET /integrations/drive returns no connection or folders for a fresh organization', async () => {
+    // `modes` is deliberately NOT asserted here — driveModes() reads
+    // server-wide env config (GOOGLE_SERVICE_ACCOUNT_EMAIL etc.), not
+    // anything org-scoped, so its value depends on whichever machine runs
+    // this test, not on this org being fresh. Asserting a literal value
+    // here would make the suite fail on any developer's machine that has
+    // real Drive credentials configured in server/.env for manual testing
+    // — a real, once-observed failure, not a hypothetical one. The
+    // service-account-specific cases below use an explicit `deps` override
+    // instead, which is the only way to make this deterministic.
     const agent = await loginAgent(app, userA);
     const res = await agent.get(BASE);
     expect(res.status).toBe(200);
     expect(res.body.connection).toBeNull();
     expect(res.body.folders).toEqual([]);
-    expect(res.body.modes).toEqual({ oauth: false, serviceAccount: false, serviceAccountEmail: null });
   });
 
   it('POST /connect returns 503 when Google Drive is not configured', async () => {

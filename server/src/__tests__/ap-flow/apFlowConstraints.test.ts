@@ -468,4 +468,112 @@ describe('ap-flow phase 11 database constraints', () => {
   // Drive intake's own constraint proofs moved to
   // __tests__/integrations/driveConstraints.test.ts in Phase 19.3 — the
   // integration is platform-level now, not AP-Flow's.
+
+  // ------------------------------------------------- duplicate capture
+
+  // A DUPLICATE row is only ever created by apFlowDocumentService.captureFile,
+  // which always supplies duplicate_of_id when it does — that invariant is a
+  // service-layer guarantee, not a DB one (see migration 056). A DB-level
+  // CHECK for the pairing was tried and dropped: fk_ap_flow_documents_
+  // duplicate_of's ON DELETE SET NULL can null duplicate_of_id on a row that
+  // is still DUPLICATE (its primary was deleted), and Postgres re-validates
+  // every CHECK against the row a cascade produces — so the check and the FK
+  // action were mutually incompatible for a state the database itself can
+  // legitimately produce. This test documents the trade-off rather than
+  // asserting a guarantee the schema no longer makes.
+  it('the database does not itself forbid a DUPLICATE row with no duplicate_of_id (a service-layer invariant only)', async () => {
+    const { vaultDocId } = await seedApFlowDocument();
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_documents (org_id, document_id, created_by, status)
+         VALUES ($1, $2, $3, 'DUPLICATE')`,
+        [orgA, vaultDocId, userA.id],
+      ),
+    );
+    expect(code).toBeUndefined();
+  });
+
+  it('a non-DUPLICATE row may still carry duplicate_of_id, as history after being pushed through', async () => {
+    const { apFlowDocId: primaryId, vaultDocId: primaryVaultId } = await seedApFlowDocument();
+    const { rows: vaultRows } = await pool.query<{ id: string }>(
+      `INSERT INTO documents (org_id, sha256, byte_size, mime_type, original_filename, uploaded_by)
+       VALUES ($1, $2, 10, 'application/pdf', 'invoice2.pdf', $3) RETURNING id`,
+      [orgA, 'd'.repeat(64), userA.id],
+    );
+    const secondVaultId = vaultRows[0]?.id;
+    expect(secondVaultId).not.toBe(primaryVaultId);
+
+    // Born DUPLICATE, then confirmed legitimate — duplicate_of_id survives
+    // the move to PENDING, exactly what requestReextraction relies on.
+    const { rows } = await pool.query<{ id: string }>(
+      `INSERT INTO ap_flow_documents (org_id, document_id, created_by, status, duplicate_of_id)
+       VALUES ($1, $2, $3, 'DUPLICATE', $4) RETURNING id`,
+      [orgA, secondVaultId, userA.id, primaryId],
+    );
+    const dupId = rows[0]?.id;
+
+    const code = await errorCode(() =>
+      pool.query(`UPDATE ap_flow_documents SET status = 'PENDING' WHERE org_id = $1 AND id = $2`, [orgA, dupId]),
+    );
+    expect(code).toBeUndefined();
+  });
+
+  it("duplicate_of_id cannot reference another organization's document", async () => {
+    const { apFlowDocId: apFlowDocIdB } = await (async () => {
+      const { rows: vaultRows } = await pool.query<{ id: string }>(
+        `INSERT INTO documents (org_id, sha256, byte_size, mime_type, original_filename, uploaded_by)
+         VALUES ($1, $2, 10, 'application/pdf', 'invoice.pdf', $3) RETURNING id`,
+        [orgB, 'e'.repeat(64), userB.id],
+      );
+      const { rows: apRows } = await pool.query<{ id: string }>(
+        `INSERT INTO ap_flow_documents (org_id, document_id, created_by) VALUES ($1, $2, $3) RETURNING id`,
+        [orgB, vaultRows[0]?.id, userB.id],
+      );
+      return { apFlowDocId: apRows[0]?.id as string };
+    })();
+
+    const { rows: vaultRowsA } = await pool.query<{ id: string }>(
+      `INSERT INTO documents (org_id, sha256, byte_size, mime_type, original_filename, uploaded_by)
+       VALUES ($1, $2, 10, 'application/pdf', 'invoice3.pdf', $3) RETURNING id`,
+      [orgA, 'f'.repeat(64), userA.id],
+    );
+
+    const code = await errorCode(() =>
+      pool.query(
+        `INSERT INTO ap_flow_documents (org_id, document_id, created_by, status, duplicate_of_id)
+         VALUES ($1, $2, $3, 'DUPLICATE', $4)`,
+        [orgA, vaultRowsA[0]?.id, userA.id, apFlowDocIdB],
+      ),
+    );
+    expect(code).toBe(FOREIGN_KEY_VIOLATION);
+  });
+
+  it('deleting the primary document nulls only duplicate_of_id on the duplicate row', async () => {
+    const { apFlowDocId: primaryId } = await seedApFlowDocument();
+    const { rows: vaultRows } = await pool.query<{ id: string }>(
+      `INSERT INTO documents (org_id, sha256, byte_size, mime_type, original_filename, uploaded_by)
+       VALUES ($1, $2, 10, 'application/pdf', 'invoice4.pdf', $3) RETURNING id`,
+      [orgA, '1'.repeat(64), userA.id],
+    );
+    const { rows: dupRows } = await pool.query<{ id: string }>(
+      `INSERT INTO ap_flow_documents (org_id, document_id, created_by, status, duplicate_of_id)
+       VALUES ($1, $2, $3, 'DUPLICATE', $4) RETURNING id`,
+      [orgA, vaultRows[0]?.id, userA.id, primaryId],
+    );
+    const dupId = dupRows[0]?.id;
+
+    await pool.query('DELETE FROM ap_flow_documents WHERE org_id = $1 AND id = $2', [orgA, primaryId]);
+
+    const { rows } = await pool.query<{ org_id: string; duplicate_of_id: string | null; status: string }>(
+      'SELECT org_id, duplicate_of_id, status FROM ap_flow_documents WHERE id = $1',
+      [dupId],
+    );
+    expect(rows[0]?.org_id).toBe(orgA);
+    expect(rows[0]?.duplicate_of_id).toBeNull();
+    // The row itself, and its DUPLICATE status, survive — only the
+    // now-dangling pointer is cleared. (A stale-forever DUPLICATE with no
+    // duplicateOfId is a known, accepted display gap: the client's "View
+    // the earlier capture" link simply doesn't render without one.)
+    expect(rows[0]?.status).toBe('DUPLICATE');
+  });
 });

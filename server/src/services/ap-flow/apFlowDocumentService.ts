@@ -65,6 +65,8 @@ interface DocumentRow {
   bill_id: string | null;
   auto_posted: boolean;
   auto_post_blockers: ApFlowAutoPostBlocker[];
+  duplicate_of_id: string | null;
+  duplicate_of_filename: string | null;
 }
 
 interface LineItemRow {
@@ -113,10 +115,15 @@ const DOCUMENT_SELECT = `SELECT a.id, a.document_id, d.original_filename, d.mime
                                 a.status, a.page_count, a.failure_reason, a.processed_at,
                                 a.created_by, u.name AS created_by_name, a.created_at,
                                 a.journal_entry_id, a.posted_sha256, a.posted_at,
-                                a.bill_id, a.auto_posted, a.auto_post_blockers
+                                a.bill_id, a.auto_posted, a.auto_post_blockers,
+                                a.duplicate_of_id, dup_d.original_filename AS duplicate_of_filename
                            FROM ap_flow_documents a
                            JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
-                           LEFT JOIN users u ON u.id = a.created_by`;
+                           LEFT JOIN users u ON u.id = a.created_by
+                           LEFT JOIN ap_flow_documents dup
+                             ON dup.org_id = a.org_id AND dup.id = a.duplicate_of_id
+                           LEFT JOIN documents dup_d
+                             ON dup_d.org_id = dup.org_id AND dup_d.id = dup.document_id`;
 
 function toDocument(row: DocumentRow): ApFlowDocumentRecord {
   return {
@@ -138,6 +145,8 @@ function toDocument(row: DocumentRow): ApFlowDocumentRecord {
     billId: row.bill_id,
     autoPosted: row.auto_posted,
     autoPostBlockers: row.auto_post_blockers,
+    duplicateOfId: row.duplicate_of_id,
+    duplicateOfFilename: row.duplicate_of_filename,
   };
 }
 
@@ -214,11 +223,27 @@ async function loadDocument(orgId: string, id: string): Promise<ApFlowDocumentRe
  * Phase 19 — uploads straight into AP-Flow's own page, in one call: vault
  * the bytes, then register them, mirroring the two-step flow
  * `documentService.uploadDocument` + `createApFlowDocument` that
- * `ApFlowDocumentsPage`'s vault-picker already does client-side. Content
- * addressing makes the vault upload idempotent; if this org already
- * registered those bytes with AP-Flow, that existing registration is
- * returned rather than raising the "already registered" 409
- * `createApFlowDocument` would otherwise throw.
+ * `ApFlowDocumentsPage`'s vault-picker already does client-side. Shared by
+ * both direct upload and Drive folder intake (Phase 19.3) — a fix here
+ * covers both entry points.
+ *
+ * Content addressing makes the vault upload idempotent — re-uploading
+ * identical bytes always resolves to the same vault row — but a *second*
+ * AP-Flow capture of that vault row is a real, visible event now, not a
+ * silent merge into the first: `createApFlowDocument` (below) detects it and
+ * creates a NEW `ap_flow_documents` row, status `DUPLICATE`, `duplicateOfId`
+ * pointing at the earlier one, with no extraction enqueued (no AI spend on a
+ * capture nobody has confirmed is worth processing). This is deliberately
+ * not the old behaviour — returning the pre-existing registration untouched
+ * — because that left a genuine re-submission (a renamed file re-uploaded,
+ * or the same physical invoice arriving through two different Drive files)
+ * invisible: nothing appeared anywhere for the uploader to act on. A human
+ * decides from here, via the document's own page: dismiss it, or "Not a
+ * duplicate — process it" (`requestReextraction`, DUPLICATE -> PENDING,
+ * identical to un-failing a FAILED document).
+ *
+ * `created` is `true` on every call now — a genuinely new row is always
+ * made, whether it lands PENDING or DUPLICATE.
  */
 export async function captureFile(
   orgId: string,
@@ -234,34 +259,8 @@ export async function captureFile(
   }
 
   const { document: vaultDoc } = await documentService.uploadDocument(orgId, createdBy, file);
-
-  const { rows } = await pool.query<{ id: string }>(
-    'SELECT id FROM ap_flow_documents WHERE org_id = $1 AND document_id = $2',
-    [orgId, vaultDoc.id],
-  );
-  const existingId = rows[0]?.id;
-  if (existingId !== undefined) {
-    return { document: await loadDocument(orgId, existingId), created: false };
-  }
-
-  try {
-    const document = await createApFlowDocument(orgId, createdBy, { documentId: vaultDoc.id });
-    return { document, created: true };
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 409) {
-      // A concurrent capture of the same bytes won the race between our
-      // SELECT and this INSERT — the row now exists; return it.
-      const { rows: raceRows } = await pool.query<{ id: string }>(
-        'SELECT id FROM ap_flow_documents WHERE org_id = $1 AND document_id = $2',
-        [orgId, vaultDoc.id],
-      );
-      const raceId = raceRows[0]?.id;
-      if (raceId !== undefined) {
-        return { document: await loadDocument(orgId, raceId), created: false };
-      }
-    }
-    throw err;
-  }
+  const document = await createApFlowDocument(orgId, createdBy, { documentId: vaultDoc.id });
+  return { document, created: true };
 }
 
 export async function createApFlowDocument(
@@ -281,7 +280,7 @@ export async function createApFlowDocument(
   // uploads are unaffected.
   options?: { skipEnqueue?: boolean },
 ): Promise<ApFlowDocumentRecord> {
-  const id = await withTransaction(async (client) => {
+  const { id, isDuplicate } = await withTransaction(async (client) => {
     const vaultDoc = await client.query<{ id: string; mime_type: string }>(
       'SELECT id, mime_type FROM documents WHERE org_id = $1 AND id = $2',
       [orgId, input.documentId],
@@ -292,13 +291,30 @@ export async function createApFlowDocument(
       throw new ApiError(422, 'AP-Flow can only process PDF, PNG and JPEG documents');
     }
 
+    // The one place "is this content already registered?" is decided — every
+    // caller (captureFile's direct-upload/Drive path, and this function's
+    // own two-step vault-picker route) goes through here, so the answer is
+    // never scattered or inconsistent between entry points. The "primary"
+    // record for this content is the earliest non-DUPLICATE row; a DUPLICATE
+    // is deliberately excluded as a lookup target — it is only ever a leaf,
+    // never something a new capture gets flagged against.
+    const { rows: primaryRows } = await client.query<{ id: string }>(
+      `SELECT id FROM ap_flow_documents
+        WHERE org_id = $1 AND document_id = $2 AND status <> 'DUPLICATE'
+        ORDER BY created_at ASC
+        LIMIT 1`,
+      [orgId, input.documentId],
+    );
+    const primaryId = primaryRows[0]?.id;
+    const isDuplicate = primaryId !== undefined;
+
     let inserted: { id: string };
     try {
       const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO ap_flow_documents (org_id, document_id, created_by)
-         VALUES ($1, $2, $3)
+        `INSERT INTO ap_flow_documents (org_id, document_id, created_by, status, duplicate_of_id)
+         VALUES ($1, $2, $3, $4, $5)
          RETURNING id`,
-        [orgId, input.documentId, createdBy],
+        [orgId, input.documentId, createdBy, isDuplicate ? 'DUPLICATE' : 'PENDING', primaryId ?? null],
       );
       const row = rows[0];
       if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
@@ -320,7 +336,7 @@ export async function createApFlowDocument(
       [orgId, input.documentId, inserted.id, createdBy],
     );
 
-    return inserted;
+    return { id: inserted.id, isDuplicate };
   });
 
   // Enqueued only after withTransaction has returned, i.e. after COMMIT —
@@ -331,15 +347,18 @@ export async function createApFlowDocument(
   // stuck at PENDING). That gap is accepted: nothing financial is at stake,
   // the document is visibly PENDING, and POST /:id/reextract is the
   // user-visible repair — this is not the outbox case rule 5 exists for.
-  if (options?.skipEnqueue !== true) {
-    await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id.id }, {
+  //
+  // A DUPLICATE row never enqueues here regardless of `skipEnqueue` — no AI
+  // cost is spent on a capture nobody has confirmed is worth extracting yet.
+  if (options?.skipEnqueue !== true && !isDuplicate) {
+    await enqueue('ap-flow-extract', { orgId, apFlowDocumentId: id }, {
       // BullMQ rejects ':' in a custom jobId — '-' is the safe delimiter (see
       // outboxDrainHandler.ts and webhookDeliveryController.ts).
-      jobId: `ap-flow-extract-${id.id}`,
+      jobId: `ap-flow-extract-${id}`,
     });
   }
 
-  return loadDocument(orgId, id.id);
+  return loadDocument(orgId, id);
 }
 
 /**

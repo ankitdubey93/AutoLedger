@@ -31,6 +31,7 @@ function statusLabel(status: ApFlowDocumentStatus): string {
   if (status === 'PROCESSING') return 'Processing';
   if (status === 'EXTRACTED') return 'Extracted';
   if (status === 'POSTED') return 'Posted';
+  if (status === 'DUPLICATE') return 'Possible duplicate';
   return 'Failed';
 }
 
@@ -187,8 +188,12 @@ export default function ApFlowDocumentDetailPage() {
   }
 
   const extraction = document.extraction;
-  // POSTED is terminal — neither Re-extract nor Post appears for it.
-  const canReextract = document.status === 'EXTRACTED' || document.status === 'FAILED';
+  const isDuplicate = document.status === 'DUPLICATE';
+  // POSTED is terminal — neither Re-extract nor Post appears for it. DUPLICATE
+  // reuses the same action (DUPLICATE -> PENDING is the same edge FAILED -> PENDING
+  // is), just relabelled: "push it through" is un-flagging it, not re-running
+  // a prior attempt.
+  const canReextract = document.status === 'EXTRACTED' || document.status === 'FAILED' || isDuplicate;
   const canReview = document.status === 'EXTRACTED';
   const hasUnmappedLine = document.lineItems.some((item) => item.accountId === null);
   const canPost = canReview && (extraction?.arithmeticOk ?? false) && !hasUnmappedLine && document.lineItems.length > 0;
@@ -218,7 +223,7 @@ export default function ApFlowDocumentDetailPage() {
         <div className="flex items-center gap-2">
           {canReextract && (
             <button type="button" className="btn btn--ghost" onClick={() => setConfirmingReextract(true)}>
-              Re-extract
+              {isDuplicate ? 'Not a duplicate — process it' : 'Re-extract'}
             </button>
           )}
           {canReview && (
@@ -244,6 +249,24 @@ export default function ApFlowDocumentDetailPage() {
         <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-4">
           <p className="text-sm text-red-400 m-0 font-medium">Extraction failed</p>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{document.failureReason}</p>
+        </div>
+      )}
+
+      {isDuplicate && (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 p-4 flex flex-col gap-2">
+          <p className="text-sm text-amber-400 m-0 font-medium">This file's content matches an earlier capture</p>
+          <p className="text-sm text-[var(--muted)] m-0">
+            No extraction has run yet — nothing was spent processing it. If this is genuinely a new invoice that
+            happens to share identical bytes with the one below (or a legitimate re-submission), click{' '}
+            <strong>Not a duplicate — process it</strong> above.
+          </p>
+          {document.duplicateOfId !== null && (
+            <p className="text-sm m-0">
+              <Link to={`${base}/${document.duplicateOfId}`} className="underline">
+                View the earlier capture{document.duplicateOfFilename !== null ? ` (${document.duplicateOfFilename})` : ''}
+              </Link>
+            </p>
+          )}
         </div>
       )}
 
@@ -474,9 +497,13 @@ export default function ApFlowDocumentDetailPage() {
 
       {confirmingReextract && (
         <ConfirmDialog
-          title="Re-extract this document?"
-          body="The current extraction, including any account overrides, will be replaced. This cannot be undone."
-          confirmLabel="Re-extract"
+          title={isDuplicate ? 'Process this document?' : 'Re-extract this document?'}
+          body={
+            isDuplicate
+              ? 'It will move into the normal pipeline and be extracted like any other capture. Do this only if you\'ve confirmed it is not actually the same submission as the earlier one.'
+              : 'The current extraction, including any account overrides, will be replaced. This cannot be undone.'
+          }
+          confirmLabel={isDuplicate ? 'Process it' : 'Re-extract'}
           busy={busy}
           onConfirm={() => void handleReextract()}
           onCancel={() => setConfirmingReextract(false)}

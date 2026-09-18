@@ -36,6 +36,8 @@ function apFlowDoc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
     billId: null,
     autoPosted: false,
     autoPostBlockers: [],
+    duplicateOfId: null,
+    duplicateOfFilename: null,
     ...overrides,
   };
 }

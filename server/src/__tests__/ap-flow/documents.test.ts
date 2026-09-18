@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../../app.js';
-import { closePool } from '../../db/connect.js';
+import { closePool, pool } from '../../db/connect.js';
 import {
   addMember,
   clearStorage,
@@ -74,14 +74,21 @@ describe('ap-flow documents API', () => {
     expect(res.body.document.pageCount).toBe(null);
   });
 
-  it('registering the same document twice returns 409 the second time', async () => {
+  it('registering the same vault document twice creates a second, DUPLICATE row rather than 409ing', async () => {
     const documentId = await uploadPdfAsA();
     const agent = await loginAgent(app, userA);
     const first = await agent.post(AP_FLOW_BASE).send({ documentId });
     expect(first.status).toBe(201);
+    expect(first.body.document.status).toBe('PENDING');
 
     const second = await agent.post(AP_FLOW_BASE).send({ documentId });
-    expect(second.status).toBe(409);
+    expect(second.status).toBe(201);
+    expect(second.body.document.id).not.toBe(first.body.document.id);
+    expect(second.body.document.status).toBe('DUPLICATE');
+    expect(second.body.document.duplicateOfId).toBe(first.body.document.id);
+
+    const { rows } = await pool.query('SELECT id FROM ap_flow_documents WHERE org_id = $1', [orgA]);
+    expect(rows).toHaveLength(2);
   });
 
   it('refuses a CSV vault document with 422', async () => {

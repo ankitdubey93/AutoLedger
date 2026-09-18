@@ -1,7 +1,7 @@
 # AP-Flow — App Spec & Build Ladder
 
-**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2
-**Status: Phases 10, 11, 19, 19.1 and 19.2 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2 — then **moved to the platform in Phase 19.3** (not an AP-Flow phase; see [roadmap.md](roadmap.md#phase-193-as-delivered) and [api.md](api.md#integrations--apiv1integrationsdrive--phase-193)). AP-Flow still *receives* files imported this way, unchanged — it just no longer owns the connection. `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
+**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2, 19.4
+**Status: Phases 10, 11, 19, 19.1, 19.2 and 19.4 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2 — then **moved to the platform in Phase 19.3** (not an AP-Flow phase; see [roadmap.md](roadmap.md#phase-193-as-delivered) and [api.md](api.md#integrations--apiv1integrationsdrive--phase-193)). AP-Flow still *receives* files imported this way, unchanged — it just no longer owns the connection. Phase 19.4 fixed a real bug 19.3's own use surfaced: a repeat capture of identical bytes is now a visible `DUPLICATE` row, not a silent no-op — see [roadmap.md](roadmap.md#phase-194-as-delivered). `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
 
 AP-Flow turns a photograph of a receipt into a balanced, auditable bill in LedgerCore. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
 
@@ -178,6 +178,19 @@ Produces a draft. Posts nothing to the ledger.
 **Acceptance ✅ — verified, at the time.** See [roadmap.md](roadmap.md#phase-192-as-delivered).
 
 **Superseded by Phase 19.3 (platform, not AP-Flow).** The connection, its two tables, and every route above moved to `/api/v1/integrations/drive` — service-account auth added alongside the retained OAuth path, many folders per org instead of one, each routed by purpose (`VENDOR_BILL` still reaches AP-Flow's `captureFile` exactly as above; `BANK_STATEMENT` reaches LedgerCore instead). Nothing in AP-Flow's own pipeline changed — a Drive-imported vendor bill is metered, extracted, classified and auto-posted exactly as this section describes. See [roadmap.md](roadmap.md#phase-193-as-delivered).
+
+---
+
+### Phase 19.4 — Duplicate-content capture
+
+- [x] `ux_ap_flow_documents_document UNIQUE (org_id, document_id)` dropped — a second AP-Flow registration of the same vault document is legal now, by design
+- [x] A repeat capture (any entry point: direct upload, the two-step registration route, or Drive folder sync) lands as a new row, `status = DUPLICATE`, `duplicateOfId` pointing at the earlier registration
+- [x] No extraction enqueued for a `DUPLICATE` row — no AI spend on a capture nobody has confirmed is worth processing
+- [x] `DUPLICATE -> PENDING` reuses the existing `POST /documents/:id/reextract` action ("Not a duplicate — process it") — no new endpoint
+- [x] `duplicateOfId` survives being pushed through, as history
+- [x] One function, `apFlowDocumentService.createApFlowDocument`, is the single place every entry point's duplicate check runs — not re-implemented per caller
+
+**Acceptance ✅ — verified.** See [roadmap.md](roadmap.md#phase-194-as-delivered).
 
 ---
 

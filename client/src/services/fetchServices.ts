@@ -2526,7 +2526,7 @@ export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filen
 // ---------------------------------------------------------- ap-flow (10)
 
 /** Mirrors server/src/types/ap-flow.ts's ApFlowDocumentStatus. */
-export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'POSTED';
+export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'POSTED' | 'DUPLICATE';
 
 export interface ApFlowLineItem {
   description: string;
@@ -2582,6 +2582,10 @@ export interface ApFlowDocument {
   billId: string | null;
   autoPosted: boolean;
   autoPostBlockers: ApFlowAutoPostBlocker[];
+  /** Non-null only when status is DUPLICATE — the earlier document this capture's bytes match. */
+  duplicateOfId: string | null;
+  /** The matched document's own original filename. Null unless duplicateOfId is set. */
+  duplicateOfFilename: string | null;
 }
 
 /** Mirrors server/src/types/ap-flow.ts's ApFlowAutoPostBlockerCode. */

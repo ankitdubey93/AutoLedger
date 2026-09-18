@@ -81,6 +81,32 @@ describe('dispatchDriveFile', () => {
     expect(await countRows('ap_flow_documents', orgA)).toBe(1);
   });
 
+  it('VENDOR_BILL: the same content arriving as a second, renamed Drive file is still IMPORTED, as a visible DUPLICATE', async () => {
+    // The exact bug this reproduces: a renamed re-upload of the identical
+    // invoice, via Drive, used to be silently absorbed into the original
+    // registration — nothing new appeared anywhere for a reviewer to see.
+    const first = await dispatchDriveFile(vendorBillTarget({ file: { buffer: PDF_BYTES, originalname: 'invoice.pdf' } }));
+    expect(first.status).toBe('IMPORTED');
+
+    const second = await dispatchDriveFile(
+      vendorBillTarget({ file: { buffer: PDF_BYTES, originalname: 'invoice-renamed.pdf' } }),
+    );
+
+    expect(second.status).toBe('IMPORTED');
+    expect(second).toMatchObject({ resultApp: 'ap-flow' });
+    if (first.status !== 'IMPORTED' || second.status !== 'IMPORTED') throw new Error('unreachable');
+    // A genuinely NEW document row — not the same one reused.
+    expect(second.resultEntityId).not.toBe(first.resultEntityId);
+
+    expect(await countRows('ap_flow_documents', orgA)).toBe(2);
+    const { rows } = await pool.query<{ status: string; duplicate_of_id: string | null }>(
+      'SELECT status, duplicate_of_id FROM ap_flow_documents WHERE org_id = $1 AND id = $2',
+      [orgA, second.resultEntityId],
+    );
+    expect(rows[0]?.status).toBe('DUPLICATE');
+    expect(rows[0]?.duplicate_of_id).toBe(first.resultEntityId);
+  });
+
   it('BANK_STATEMENT: imports through LedgerCore and creates the bank transaction rows', async () => {
     const csv = ['Date,Description,Amount', '2026-06-01,Payment,100.00', '2026-06-02,Supplies,-40.00', '2026-06-03,Fee,-5.00'].join(
       '\n',

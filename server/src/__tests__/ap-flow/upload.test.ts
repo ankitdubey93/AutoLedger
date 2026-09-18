@@ -8,8 +8,10 @@ import type { SeededUser } from '../helpers/factories.js';
 /**
  * Phase 19 — POST /ap-flow/documents/upload, straight from AP-Flow's own
  * page: vault + register in one call. Every case here proves the
- * mime-type/role gates it shares with the two-step flow, plus the new
- * idempotent-capture behaviour.
+ * mime-type/role gates it shares with the two-step flow, plus the
+ * duplicate-content capture behaviour a later change (2026-09-18) added:
+ * a repeat upload of identical bytes is a NEW, visible DUPLICATE row now,
+ * not a silent merge into the original.
  */
 
 const app = createApp();
@@ -62,20 +64,63 @@ describe('ap-flow direct upload API', () => {
     expect(linkRows).toHaveLength(1);
   });
 
-  it('re-uploading identical bytes returns 200 with the same document', async () => {
+  it('re-uploading identical bytes creates a second, DUPLICATE row instead of merging silently', async () => {
     const agent = await loginAgent(app, userA);
     const png = await pngBytes();
 
     const first = await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt.png');
     expect(first.status).toBe(201);
+    expect(first.body.document.status).toBe('PENDING');
 
     const second = await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt-again.png');
-    expect(second.status).toBe(200);
-    expect(second.body.created).toBe(false);
-    expect(second.body.document.id).toBe(first.body.document.id);
+    expect(second.status).toBe(201);
+    expect(second.body.created).toBe(true);
+    expect(second.body.document.id).not.toBe(first.body.document.id);
+    expect(second.body.document.status).toBe('DUPLICATE');
+    expect(second.body.document.duplicateOfId).toBe(first.body.document.id);
+    expect(second.body.document.duplicateOfFilename).toBe('receipt.png');
 
-    const { rows } = await pool.query('SELECT id FROM ap_flow_documents WHERE org_id = $1', [orgA]);
-    expect(rows).toHaveLength(1);
+    // Both rows point at the SAME vault document — the vault itself still
+    // dedupes by content hash; only AP-Flow's own registration doesn't.
+    const { rows: vaultRows } = await pool.query('SELECT id FROM documents WHERE org_id = $1', [orgA]);
+    expect(vaultRows).toHaveLength(1);
+    const { rows: apRows } = await pool.query(
+      'SELECT status FROM ap_flow_documents WHERE org_id = $1 ORDER BY created_at',
+      [orgA],
+    );
+    expect(apRows.map((r: { status: string }) => r.status)).toEqual(['PENDING', 'DUPLICATE']);
+  });
+
+  it('the duplicate row is not queued for extraction — no AI spend on an unconfirmed re-submission', async () => {
+    const agent = await loginAgent(app, userA);
+    const png = await pngBytes();
+
+    await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt.png');
+    const second = await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt-again.png');
+    const duplicateId = second.body.document.id as string;
+
+    const { rows } = await pool.query<{ processed_at: Date | null; page_count: number | null }>(
+      'SELECT processed_at, page_count FROM ap_flow_documents WHERE org_id = $1 AND id = $2',
+      [orgA, duplicateId],
+    );
+    expect(rows[0]?.processed_at).toBeNull();
+    expect(rows[0]?.page_count).toBeNull();
+  });
+
+  it('pushing a duplicate through re-enters the normal pipeline via re-extract', async () => {
+    const agent = await loginAgent(app, userA);
+    const png = await pngBytes();
+
+    await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt.png');
+    const second = await agent.post(`${AP_FLOW_BASE}/upload`).attach('file', png, 'receipt-again.png');
+    const duplicateId = second.body.document.id as string;
+
+    const reextractRes = await agent.post(`${AP_FLOW_BASE}/${duplicateId}/reextract`);
+    expect(reextractRes.status).toBe(200);
+    expect(reextractRes.body.document.status).toBe('PENDING');
+    // duplicateOfId is left in place as history — pushing it through doesn't
+    // erase where it came from, it just stops treating it specially.
+    expect(reextractRes.body.document.duplicateOfId).not.toBeNull();
   });
 
   it('a CSV upload returns 422 and stores nothing', async () => {
