@@ -7,6 +7,7 @@ client/dist/
 # uploaded documents (Phase 9.5) — never committed
 server/storage/
 server/storage-test/
+server/storage-test-*/
 
 # tesseract language data, downloaded on first dev run (Phase 10) — never committed
 server/.tesseract/

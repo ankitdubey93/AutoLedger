@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config';
-import { TEST_DATABASE } from './src/__tests__/setup/testDatabase.js';
+import { TEST_MAX_WORKERS } from './src/__tests__/setup/testDatabase.js';
 
 export default defineConfig({
   test: {
@@ -7,6 +7,11 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/__tests__/**/*.test.ts'],
+
+    // Evaluated in the worker BEFORE the test file (and therefore before
+    // anything imports config/env.ts), so this is what gives each worker
+    // its own PG_DATABASE/REDIS_DB/STORAGE_ROOT — see perWorkerEnv.ts.
+    setupFiles: ['src/__tests__/setup/perWorkerEnv.ts'],
 
     // Creates autodb_test if absent and applies migrations, once, before any
     // test file runs. Self-healing on purpose — a setup step you have to
@@ -24,7 +29,10 @@ export default defineConfig({
      */
     env: {
       NODE_ENV: 'test',
-      PG_DATABASE: TEST_DATABASE,
+      // The `postgres-test` cluster (fsync=off), never the dev one on 5432 —
+      // perWorkerEnv.ts sets this too; this is the default for anything that
+      // somehow loads before it.
+      PG_PORT: process.env.PG_TEST_PORT ?? '5433',
       ACCESS_TOKEN_SECRET: 'test-access-secret-not-for-any-real-deployment-0001',
       REFRESH_TOKEN_SECRET: 'test-refresh-secret-not-for-any-real-deployment-0002',
       // Index 1, never 0. globalSetup flushes this database before the suite;
@@ -54,16 +62,20 @@ export default defineConfig({
     },
 
     /**
-     * Vitest runs test FILES in parallel workers by default. These files share
-     * one database and truncate between tests, so parallel files would delete
-     * each other's fixtures mid-assertion — producing failures that look
-     * exactly like tenant-isolation bugs and waste an afternoon.
+     * Files may run in parallel **because** each worker owns its own resources:
+     * database `autodb_test_<n>`, Redis db `<n>` and `storage-test-<n>`, all
+     * derived from `VITEST_POOL_ID` in setup/workerResources.ts. Without that,
+     * parallel files truncate each other's fixtures mid-assertion and produce
+     * failures that look exactly like tenant-isolation bugs.
      *
-     * At this suite size serial execution costs nothing. When it does start to
-     * hurt, the fix is Vitest `projects` (parallel unit files, serial
-     * integration files), not turning this back on.
+     * The cap is memory-driven, not core-driven: this machine has 4 cores but
+     * only 7.3 GB, and each fork re-imports all 80 services plus
+     * sharp/pdfjs/tesseract. `maxWorkers` — `poolOptions.forks.maxForks` does
+     * not exist in Vitest 4.x. It must not exceed TEST_MAX_WORKERS, which is
+     * how many databases globalSetup clones.
      */
-    fileParallelism: false,
+    fileParallelism: true,
+    maxWorkers: TEST_MAX_WORKERS,
 
     coverage: {
       provider: 'v8',

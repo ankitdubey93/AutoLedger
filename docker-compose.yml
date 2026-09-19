@@ -27,6 +27,46 @@ services:
       timeout: 5s
       retries: 10
 
+  # A SECOND Postgres, for the test suite only — same image and major version
+  # as `postgres` above, but with durability switched off.
+  #
+  # The suite's `resetTables()` TRUNCATEs ~55 tables before almost every test,
+  # and TRUNCATE fsyncs a fresh relation file per table *and per index*.
+  # Measured on this machine: 2055 ms with fsync on, 69 ms with it off — a 30x
+  # difference, and the single largest cost in a 35-minute suite.
+  #
+  # This is a separate cluster rather than a flag on the one above because
+  # `fsync` is cluster-wide: turning it off on `postgres` would put `autodb`'s
+  # durability at risk too. Losing a test database to a crash costs nothing
+  # (globalSetup re-clones it from a freshly migrated template every run);
+  # losing the dev database would. Same reasoning as `autodb_test` never being
+  # `autodb`, applied one level down.
+  postgres-test:
+    image: pgvector/pgvector:pg16
+    container_name: autodb_postgres_test
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-autodb_user}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-autodb_pass}
+      POSTGRES_DB: postgres
+    # autovacuum is off as well: every test database is dropped and recreated
+    # from the template each run, so nothing lives long enough to need it.
+    command: >
+      postgres
+      -c fsync=off
+      -c full_page_writes=off
+      -c synchronous_commit=off
+      -c autovacuum=off
+    ports:
+      - "${PG_TEST_PORT:-5433}:5432"
+    volumes:
+      - postgres-test-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-autodb_user} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   # Backs BullMQ's job queues and the webhook dispatcher from Phase 7.
   redis:
     image: redis:7-alpine
@@ -42,3 +82,4 @@ services:
 
 volumes:
   postgres-data:
+  postgres-test-data:

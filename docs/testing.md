@@ -10,7 +10,14 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 868 server tests + 172 client tests** (as of Phase 9.5). The table below was last fully re-verified at Phase 7 — rows for Phase 8/9's own test files are not yet listed here; only Phase 9.5's are added in this pass.
+**Current state: 1599 server tests (1597 passing, 2 gated-live skipped) across 126 files, + 261 client tests.** The server suite runs in **~3.3 minutes**; the client suite in ~34s. The file table below was last fully re-verified at Phase 9.5 and does not list every file added since — treat it as a sample of the tiers, not an inventory.
+
+> **It used to take 35 minutes.** The fix was not fewer tests; it was `fsync`.
+> `resetTables()` TRUNCATEs ~55 tables before almost every test, and TRUNCATE
+> fsyncs a fresh relation file per table *and per index* — measured 2055 ms with
+> `fsync=on`, 69 ms with it off. Tests therefore run against their own
+> `postgres-test` cluster (below), and files run in parallel because each worker
+> owns its own database. See [§ Test database](#test-database).
 
 Server, in `server/src/__tests__/`:
 
@@ -41,7 +48,7 @@ Server, in `server/src/__tests__/`:
 
 Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `ledgerCoreWebhooks.test.tsx` / `ledgerCoreWebhookDeliveries.test.tsx`. (Phase 9.5) `DocumentsPage.test.tsx` (upload/list/delete, the `415` message surfaced verbatim, Delete hidden while linked) and `AttachmentsPanel.test.tsx` (upload-then-link ordering, a `409` rendered as "Already attached to this record", detach-after-confirm, `readOnly` hiding every control).
 
-Integration tests need `docker compose up -d postgres`; they are not mocked and will fail if it is down, which is the point. From Phase 7, tests that exercise the job queue also need `docker compose up -d redis` — `globalSetup` flushes Redis database index **1** (never index 0) before the run, the same `autodb_test`-not-`autodb` discipline applied to Redis.
+Integration tests need **`docker compose up -d postgres-test`** — a second Postgres on port **5433**, separate from the dev one on 5432. They are not mocked and will fail if it is down, which is the point (and from the `fsync` fix below, they now fail in ~5s with an actionable message rather than hanging). From Phase 7, tests that exercise the job queue also need `docker compose up -d redis` — `globalSetup` flushes Redis database index **1** (never index 0) before the run, the same `autodb_test`-not-`autodb` discipline applied to Redis.
 
 There is no CI yet. The prior build's `entrypoint.sh` ran the suite before server startup; that gate has no host equivalent and belongs in CI when it is set up.
 
@@ -49,14 +56,48 @@ Tests live in `server/src/__tests__/`, mirroring the source layout — platform 
 
 ### Test database
 
-The suite runs against **`autodb_test`, never `autodb`**, so its `TRUNCATE` between tests cannot wipe data you were looking at. `vitest.config.ts` sets `PG_DATABASE` and fixed token secrets in `test.env` — that overrides `server/.env` because dotenv never overwrites an existing key, so the suite does not depend on your local config.
+The suite runs against **`autodb_test_<n>` on the `postgres-test` cluster, never `autodb` on the dev one**, so its `TRUNCATE` between tests cannot wipe data you were looking at. `vitest.config.ts` sets `PG_PORT` and fixed token secrets in `test.env` — that overrides `server/.env` because dotenv never overwrites an existing key, so the suite does not depend on your local config. `PG_DATABASE` is *not* set there: it varies per worker, so `setup/perWorkerEnv.ts` owns it (see below).
+
+`globalSetup` migrates **`autodb_test`** and then treats it purely as a TEMPLATE: it `DROP`s and `CREATE ... TEMPLATE`s one clone per worker every run. Cloning is a file-level copy, far cheaper than re-running 56 migrations three times, and drop-then-create means a new migration can never leave a stale clone behind.
+
+If `CREATE DATABASE ... TEMPLATE` ever fails with **"template database has a collation version mismatch"**, the container's glibc/ICU version moved under an existing volume. Fix with `ALTER DATABASE autodb_test REFRESH COLLATION VERSION` — it updates recorded metadata only and rebuilds nothing.
 
 `globalSetup` creates the database if absent and applies migrations, so `npm test` works on a fresh checkout with no manual step.
 
 Two things that are easy to get wrong here, both learned the hard way:
 
-- **`test.env` applies to test *workers*, not to `globalSetup`.** globalSetup reads its environment from dotenv, so taking `PG_DATABASE` from `process.env` there silently migrates and truncates the *development* database. The name lives in one shared constant, `__tests__/setup/testDatabase.ts`, imported by both.
-- **`fileParallelism: false` is required.** Vitest runs test files in parallel workers by default; these files share one database and truncate between tests, so parallel files delete each other's fixtures mid-assertion — producing failures that look exactly like tenant-isolation bugs. This does not change per app: `autodb_test` and `fileParallelism: false` stay suite-wide, not per-app, or the same failure mode reappears the moment two apps' tests run at once.
+- **`test.env` applies to test *workers*, not to `globalSetup`.** globalSetup reads its environment from dotenv, so taking `PG_DATABASE` from `process.env` there silently migrates and truncates the *development* database — and taking `PG_PORT` from it points globalSetup at the *dev cluster* while the workers use the test one. Both names live in shared constants in `__tests__/setup/testDatabase.ts`, imported by both sides, and globalSetup pins both explicitly.
+- **`perWorkerEnv.ts` must run first, and must import almost nothing.** `config/env.ts` resolves `PG_DATABASE`, `PG_PORT`, `REDIS_DB` and `STORAGE_ROOT` **at module-import time** (env.ts:114–126). `perWorkerEnv.ts` is a `setupFiles` entry precisely because Vitest evaluates those in the worker *before* the test file — and therefore before anything pulls in `env.ts`. It imports only `workerResources.js` and `testDatabase.js`, neither of which imports anything that reaches `env.ts`. Add one import here that transitively does, and every worker silently collapses back onto a single database with no error to tell you.
+- **Files run in parallel, and that is only safe because each worker owns its own resources.** Vitest runs test files in parallel workers by default. These files truncate between tests, so if they shared one database they would delete each other's fixtures mid-assertion — producing failures that look exactly like tenant-isolation bugs. The suite therefore gives every worker a private database, Redis index and storage directory, all derived from **`VITEST_POOL_ID`** in `setup/workerResources.ts`. Turn that off and `fileParallelism` must go back to `false` in the same change.
+
+  Use **`VITEST_POOL_ID`**, never `VITEST_WORKER_ID`. Vitest documents the pool id as "between 1-`maxWorkers`" — a bounded slot reused as workers recycle. `VITEST_WORKER_ID` is a per-task counter that keeps climbing across isolated files; using it produced indices like 40, pointed workers at an `autodb_test_40` that was never created, and failed 1058 of 1600 tests.
+
+  `maxWorkers` is capped at `TEST_MAX_WORKERS` (3) — it must never exceed the number of databases `globalSetup` clones. The cap is memory-driven, not core-driven: each fork re-imports all 80 services plus `sharp`/`pdfjs`/`tesseract`. Note `poolOptions.forks.maxForks` does **not** exist in Vitest 4.x; the option is `maxWorkers`.
+
+### The `postgres-test` cluster, and why `fsync` mattered more than anything else
+
+Tests run against a **separate Postgres cluster** (`postgres-test`, port 5433) configured with `fsync=off full_page_writes=off synchronous_commit=off autovacuum=off`.
+
+This is the single largest performance decision in the suite. `resetTables()` runs in `beforeEach` for 93 of 126 files, and `TRUNCATE` rewrites and fsyncs a fresh relation file for every table **and every index** it names — whether or not the table holds a row:
+
+| Operation | `fsync=on` | `fsync=off` |
+|---|---|---|
+| `TRUNCATE` all 55 tables | **2055 ms** | **69 ms** |
+| one committed `INSERT` | 4.6 ms | 1.1 ms |
+
+That one setting was most of a 35-minute suite. `synchronous_commit` does **not** help here — it governs WAL flush at commit, not the relation-file writes TRUNCATE performs, which is why the measured `INSERT` cost was already negligible.
+
+`fsync` is cluster-wide and cannot be scoped to one database, which is why this is a second container rather than a flag on the dev one. Losing a test database to a crash costs nothing — `globalSetup` drops and re-clones all three every run from a freshly migrated template. Losing `autodb` would. It is the same reasoning as `autodb_test` never being `autodb`, applied one level down.
+
+A conditional `resetTables()` (probe with `EXISTS`, truncate only dirty tables) was designed and rejected: at 69 ms there is nothing left to win, and `TRUNCATE organizations CASCADE` alone still cost 974 ms under `fsync=on` because nearly every table carries an `org_id` FK — so it would have bought ~2x where the cluster change bought 30x.
+
+### Expensive fixtures: pay once, not per test
+
+`sandbox.test.ts` loads the full 24-month Phase 18 dataset through the real services — ~30s a time, and legitimately so. It originally reset and re-seeded in `beforeEach`, paying for **14 loads** and taking 5.1 minutes by itself.
+
+It is now organised by *how many loads it must pay for* rather than by endpoint: a `with nothing loaded` block (role gates and empty-state responses never needed a dataset), a `with org A's dataset loaded` block that seeds **once** in `beforeAll` and shares it across every read-only assertion, and an `unload and reload` block that pays for its own because it destroys the marker it tests. Three loads, 74.8s.
+
+Where a block shares one seed, any case that writes must be last and must say so — see the comment on the org-B case. That ordering is load-bearing; it is the price of not re-seeding.
 
 ## Two tiers, both required
 

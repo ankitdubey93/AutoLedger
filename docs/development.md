@@ -23,7 +23,7 @@ Three `.env` files, deliberately: root is read *only* by `docker-compose.yml`, `
 ## Every session
 
 ```bash
-docker compose up -d          # postgres :5432, redis :6379
+docker compose up -d          # postgres :5432, postgres-test :5433, redis :6379
 ```
 
 ```bash
@@ -65,7 +65,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm run seed:demo` | Phase 18 — seeds the 24-month sandbox dataset into the single organization in the database (or the one named by an argument: `npm run seed:demo -- "Acme Inc"`). Refuses when `NODE_ENV=production`, mirroring `db:reset`. Also reachable as `POST /api/v1/sandbox/load` |
 | `npm run worker` | Phase 7 — `tsx watch src/worker.ts`, a second process consuming the `integrity-check`, `outbox-drain`, and `webhook-deliver` queues. Requires `docker compose up -d redis` |
 | `npm run worker:start` | Runs the built `dist/worker.js` |
-| `npm test` | Vitest, single run |
+| `npm test` | Vitest, single run (~3.3 min, 126 files in parallel). Requires `docker compose up -d postgres-test redis` — the **test** cluster on :5433, not the dev one |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage over `services/`, `utils/` and `middleware/` |
 
@@ -112,8 +112,8 @@ No application secrets live here.
 | `REFRESH_TOKEN_SECRET` | **yes** | Refresh JWTs (7d). ≥32 chars, and **must differ** from the access secret |
 | `REDIS_HOST` | no — defaults `localhost` | Phase 7 — background jobs and the webhook dispatcher |
 | `REDIS_PORT` | no — defaults `6379` | |
-| `REDIS_DB` | no — defaults `0` | Database index. The test suite pins itself to index 1 so `npm test` never touches your dev queues |
-| `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. The test suite pins itself to `storage-test` so `npm test` never touches your dev vault |
+| `REDIS_DB` | no — defaults `0` | Database index. Each test worker pins itself to its own index (1..3, never 0) so `npm test` never touches your dev queues |
+| `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. Each test worker pins itself to its own `storage-test-<n>` so `npm test` never touches your dev vault |
 | `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction, reused by Phase 16 — TaxGuard AI's cited answers. The server and worker both boot without it; `extractionService`/`answerService` throw `503` only when a real call is attempted with no key configured. Every test stubs the client, so the suite needs no key at all |
 | `AP_FLOW_AI_PROVIDER` | no — defaults `anthropic` | Phase 19 — which of `anthropic` \| `gemini` AP-Flow's extraction and classification use. Only the selected provider's key needs to be set |
 | `GEMINI_API_KEY` | no — defaults `''` | Phase 19 — AP-Flow's second extraction provider, called over `fetch` (no SDK — rule 14). Needed only when `AP_FLOW_AI_PROVIDER=gemini`. Note: on Google's free tier, prompt content may be used to improve Google's products — AP-Flow only ever sends already-redacted pages, but confirm which tier your key is on |
@@ -164,6 +164,7 @@ Only `VITE_`-prefixed variables reach the bundle, and Vite **inlines them at bui
 | Service | Container | Host port | Healthcheck | Used by |
 |---|---|---|---|---|
 | PostgreSQL 16 (`pgvector/pgvector:pg16`, since Phase 16) | `autodb_postgres` | 5432 | `pg_isready` | The server |
+| PostgreSQL 16, same image, `fsync=off` | `autodb_postgres_test` | 5433 | `pg_isready` | **The test suite only.** Durability is off because `TRUNCATE` fsyncs a file per table and index: 2055 ms vs 69 ms. `fsync` is cluster-wide, hence a second container rather than a flag on the first — see [testing.md](testing.md) |
 | Redis 7 | `autodb_redis` | 6379 | `redis-cli ping` | The background worker (`npm run worker`) — BullMQ's job queues and the webhook dispatcher (Phase 7) |
 
 **The Postgres image is `pgvector/pgvector:pg16`, not stock `postgres:16`.** It is `postgres:16` plus the `vector` extension, built `FROM postgres:16`, so the existing `postgres-data` volume is binary-compatible — no data is lost by the swap. Phase 16 (TaxGuard AI) needs `CREATE EXTENSION vector` for its RAG retrieval, and the stock image does not ship it.
