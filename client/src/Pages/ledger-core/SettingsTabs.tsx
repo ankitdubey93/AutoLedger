@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
-/** The two-tab strip shared by SettingsPage and InvoiceSettingsPage. */
+/** The tab strip shared by SettingsPage, InvoiceSettingsPage and PaymentTermsSettingsPage. */
 export default function SettingsTabs() {
   const base = useAppBasePath();
 
@@ -20,6 +20,9 @@ export default function SettingsTabs() {
       </NavLink>
       <NavLink to={`${base}/settings/invoicing`} className={linkClass}>
         Invoicing
+      </NavLink>
+      <NavLink to={`${base}/settings/payment-terms`} className={linkClass}>
+        Payment terms
       </NavLink>
     </nav>
   );

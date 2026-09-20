@@ -85,6 +85,7 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
     customerTaxNumberSnapshot: null,
     notes: null,
     paymentTerms: null,
+    paymentTermsCode: null,
     subtotalCents: 25000,
     taxCents: 4500,
     totalCents: 29500,
@@ -113,6 +114,7 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
         taxRateBp: 1800,
         netCents: 25000,
         taxCents: 4500,
+        itemId: null,
       },
     ],
     allocatedCents: 0,
@@ -186,6 +188,12 @@ function mockNewInvoiceRoutes(
     }
     if (url.includes('/ledger-core/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
+    }
+    if (url.includes('/ledger-core/items')) {
+      return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
+    }
+    if (url.includes('/ledger-core/payment-terms')) {
+      return Promise.resolve(jsonResponse(200, { success: true, count: 0, paymentTerms: [] }));
     }
     if (url.includes('/ledger-core/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));

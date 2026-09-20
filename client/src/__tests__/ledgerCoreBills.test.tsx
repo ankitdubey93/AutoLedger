@@ -69,6 +69,7 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
     vendorTaxNumberSnapshot: null,
     notes: null,
     paymentTerms: null,
+    paymentTermsCode: null,
     subtotalCents: 60000,
     taxCents: 0,
     totalCents: 60000,
@@ -100,6 +101,7 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
         taxRateBp: 0,
         netCents: 60000,
         taxCents: 0,
+        itemId: null,
       },
     ],
     allocatedCents: 0,
@@ -255,7 +257,7 @@ describe('BillDetailPage', () => {
       }),
     ).toBeUndefined();
 
-    await user.click(screen.getByRole('button', { name: 'Approve bill' }));
+    await user.click(screen.getByRole('button', { name: 'Approve expense' }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find((c) => {

@@ -165,6 +165,7 @@ interface BankTxnOverrides {
   dedupeSeed?: string;
   status?: string;
   matchedPaymentId?: string | null;
+  matchedJournalEntryId?: string | null;
   matchedBy?: string | null;
 }
 
@@ -178,16 +179,28 @@ async function insertBankTransaction(
   const seed = overrides.dedupeSeed ?? `${org}|${importId}|${String(amountCents)}|${Math.random().toString(36)}`;
   const status = overrides.status ?? 'UNMATCHED';
   const matchedPaymentId = overrides.matchedPaymentId ?? null;
+  const matchedJournalEntryId = overrides.matchedJournalEntryId ?? null;
   const matchedBy = overrides.matchedBy ?? null;
   const matchedAt = status === 'MATCHED' ? new Date() : null;
 
   const { rows } = await pool.query<{ id: string }>(
     `INSERT INTO bank_transactions
        (org_id, import_id, account_id, txn_date, description, currency_code, amount_cents,
-        dedupe_hash, status, matched_payment_id, matched_at, matched_by)
-     VALUES ($1, $2, $3, '2026-07-01', 'Raw SQL Deposit', 'USD', $4, $5, $6, $7, $8, $9)
+        dedupe_hash, status, matched_payment_id, matched_journal_entry_id, matched_at, matched_by)
+     VALUES ($1, $2, $3, '2026-07-01', 'Raw SQL Deposit', 'USD', $4, $5, $6, $7, $8, $9, $10)
      RETURNING id`,
-    [org, importId, accountIdValue, amountCents, dedupeHash(seed), status, matchedPaymentId, matchedAt, matchedBy],
+    [
+      org,
+      importId,
+      accountIdValue,
+      amountCents,
+      dedupeHash(seed),
+      status,
+      matchedPaymentId,
+      matchedJournalEntryId,
+      matchedAt,
+      matchedBy,
+    ],
   );
   const row = rows[0];
   if (row === undefined) throw new Error('no bank transaction id');
@@ -263,6 +276,63 @@ describe('bank_transactions CHECK constraints', () => {
     );
     expect(code).toBe(CHECK_VIOLATION);
   });
+
+  it('rejects MATCHED with neither a payment id nor a journal entry id (Phase 6.1)', async () => {
+    const cashAccountId = await accountId(orgId, '1110');
+    const importId = await insertImport(orgId, user.id, cashAccountId);
+    const code = await errorCode(() =>
+      insertBankTransaction(orgId, importId, cashAccountId, { status: 'MATCHED', matchedBy: user.id }),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it('rejects MATCHED carrying both a payment id and a journal entry id (Phase 6.1)', async () => {
+    const cashAccountId = await accountId(orgId, '1110');
+    const importId = await insertImport(orgId, user.id, cashAccountId);
+    const customerId = await insertCustomer(orgId, user.id);
+    const invoiceId = await insertIssuedInvoice(orgId, user.id, customerId, 5000);
+    const paymentId = await insertPostedPayment(orgId, user.id, cashAccountId, customerId, invoiceId, 5000);
+    const journalEntryId = await insertBalancedEntry(orgId, user.id, '6600', '1110', 4000);
+
+    const code = await errorCode(() =>
+      insertBankTransaction(orgId, importId, cashAccountId, {
+        status: 'MATCHED',
+        matchedPaymentId: paymentId,
+        matchedJournalEntryId: journalEntryId,
+        matchedBy: user.id,
+      }),
+    );
+    expect(code).toBe(CHECK_VIOLATION);
+  });
+
+  it('accepts MATCHED settled by a journal entry alone (Phase 6.1)', async () => {
+    const cashAccountId = await accountId(orgId, '1110');
+    const importId = await insertImport(orgId, user.id, cashAccountId);
+    const journalEntryId = await insertBalancedEntry(orgId, user.id, '6600', '1110', 4000);
+
+    const txnId = await insertBankTransaction(orgId, importId, cashAccountId, {
+      status: 'MATCHED',
+      matchedJournalEntryId: journalEntryId,
+      matchedBy: user.id,
+    });
+    expect(txnId).toBeTruthy();
+  });
+
+  it("rejects a bank transaction pointing at another organization's journal entry", async () => {
+    const cashAccountId = await accountId(orgId, '1110');
+    const importId = await insertImport(orgId, user.id, cashAccountId);
+    const otherOrg = await createUserWithOrg({ label: 'bankraw5', orgName: 'Bank Raw SQL Org 5' });
+    const foreignEntryId = await insertBalancedEntry(otherOrg.orgId, otherOrg.id, '6600', '1110', 4000);
+
+    const code = await errorCode(() =>
+      insertBankTransaction(orgId, importId, cashAccountId, {
+        status: 'MATCHED',
+        matchedJournalEntryId: foreignEntryId,
+        matchedBy: user.id,
+      }),
+    );
+    expect(code).toBe(FOREIGN_KEY_VIOLATION);
+  });
 });
 
 describe('bank_transactions immutability', () => {
@@ -298,6 +368,27 @@ describe('bank_transactions immutability', () => {
       [txnId],
     );
     expect(rows[0]?.status).toBe('IGNORED');
+  });
+
+  it('permits setting matched_journal_entry_id as part of a match-state change (Phase 6.1)', async () => {
+    const cashAccountId = await accountId(orgId, '1110');
+    const importId = await insertImport(orgId, user.id, cashAccountId);
+    const txnId = await insertBankTransaction(orgId, importId, cashAccountId);
+    const journalEntryId = await insertBalancedEntry(orgId, user.id, '6600', '1110', 4000);
+
+    await pool.query(
+      `UPDATE bank_transactions
+          SET status = 'MATCHED', matched_journal_entry_id = $1, matched_at = now(), matched_by = $2
+        WHERE id = $3`,
+      [journalEntryId, user.id, txnId],
+    );
+
+    const { rows } = await pool.query<{ status: string; matched_journal_entry_id: string | null }>(
+      'SELECT status, matched_journal_entry_id FROM bank_transactions WHERE id = $1',
+      [txnId],
+    );
+    expect(rows[0]?.status).toBe('MATCHED');
+    expect(rows[0]?.matched_journal_entry_id).toBe(journalEntryId);
   });
 });
 

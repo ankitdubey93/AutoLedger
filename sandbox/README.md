@@ -6,6 +6,8 @@ A 24-month B2B services business, used to demonstrate all seven AutoLedger apps.
 cd server && npm run seed:demo        # or the "Load sample data" card in the app
 ```
 
+**Not to be confused with `walkthrough/`** (repo root, alongside this folder). This folder is *replayed through services* by a seeder — its bank statement is generated at seed time from payments the seeder itself just created, and nothing in it is meant to be typed in by hand. `walkthrough/` is the opposite artifact: a three-month scenario meant to be entered by a person at the LedgerCore UI, with fixed source documents, fixed bank statements, and a computed, service-verified answer key to check the result against. See `walkthrough/README.md`.
+
 ## Two rules govern every file here
 
 **Dates are relative.** Every dated row carries a `monthOffset` (`-23`…`0`) and usually a `day` (`1`–`28`), resolved against an anchor month at load time. No absolute date appears in any fixture. An absolute-dated fixture rots: within a few months it drifts out of the cohort display window and out of the fiscal year, and it makes tests non-deterministic. Day is capped at 28 so no month is ever invalid.

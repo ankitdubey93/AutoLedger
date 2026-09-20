@@ -237,6 +237,30 @@ export interface Customer {
   updatedAt: string;
 }
 
+/* --------------------------------------------------- Phase 24 — payment terms */
+
+export interface PaymentTerm {
+  id: string;
+  code: string;
+  name: string;
+  netDays: number;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** The seven terms every organization starts with. Order is the display order. */
+export const STANDARD_PAYMENT_TERMS: readonly { code: string; name: string; netDays: number }[] = [
+  { code: 'DUE_ON_RECEIPT', name: 'Due on receipt', netDays: 0 },
+  { code: 'NET_7', name: 'Net 7', netDays: 7 },
+  { code: 'NET_15', name: 'Net 15', netDays: 15 },
+  { code: 'NET_30', name: 'Net 30', netDays: 30 },
+  { code: 'NET_45', name: 'Net 45', netDays: 45 },
+  { code: 'NET_60', name: 'Net 60', netDays: 60 },
+  { code: 'NET_90', name: 'Net 90', netDays: 90 },
+] as const;
+
 export const INVOICE_STATUSES = ['DRAFT', 'ISSUED', 'VOID'] as const;
 export type InvoiceStatus = (typeof INVOICE_STATUSES)[number];
 
@@ -273,6 +297,8 @@ export interface InvoiceLine {
   taxRateBp: number;
   netCents: number;
   taxCents: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export interface Invoice {
@@ -290,6 +316,7 @@ export interface Invoice {
   customerTaxNumberSnapshot: string | null;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
@@ -332,6 +359,27 @@ export interface InvoiceSettings {
   accentColor: string;
   /** `false` until the organization has saved invoice settings at least once. */
   configured: boolean;
+}
+
+/* ------------------------------------------------------ Phase 24 — item catalogue */
+
+export type ItemKind = 'SERVICE' | 'GOODS';
+
+export interface Item {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  kind: ItemKind;
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  expenseAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 /* --------------------------------------------------- Phase 3.9 — accounts payable */
@@ -390,6 +438,8 @@ export interface BillLine {
   taxRateBp: number;
   netCents: number;
   taxCents: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export interface Bill {
@@ -407,6 +457,7 @@ export interface Bill {
   vendorTaxNumberSnapshot: string | null;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
@@ -803,6 +854,8 @@ export interface BankTransaction {
   amountCents: number;
   status: BankTransactionStatus;
   matchedPaymentId: string | null;
+  /** Set instead of matchedPaymentId when the line was settled by a posted journal entry. */
+  matchedJournalEntryId: string | null;
   matchedAt: string | null;
   matchedBy: string | null;
   matchedByName: string | null;
@@ -929,7 +982,12 @@ export interface FxRevaluation {
 
 // ------------------------------------------------- Phase 9b: migration imports
 
-export const MIGRATION_IMPORT_KINDS = ['CHART_OF_ACCOUNTS', 'OPENING_BALANCES'] as const;
+export const MIGRATION_IMPORT_KINDS = [
+  'CHART_OF_ACCOUNTS',
+  'OPENING_BALANCES',
+  'CUSTOMERS',
+  'VENDORS',
+] as const;
 export type MigrationImportKind = (typeof MIGRATION_IMPORT_KINDS)[number];
 
 export function isMigrationImportKind(value: string): value is MigrationImportKind {
@@ -995,6 +1053,14 @@ export interface MigrationImportRow {
   description: string | null;
   debitCents: number | null;
   creditCents: number | null;
+  /** CUSTOMERS and VENDORS only. */
+  partyName: string | null;
+  partyEmail: string | null;
+  partyPhone: string | null;
+  partyAddress: string | null;
+  partyTaxNumber: string | null;
+  partyPaymentTerms: string | null;
+  partyNotes: string | null;
   errors: string[];
   status: MigrationRowStatus;
 }
@@ -1014,6 +1080,9 @@ export interface MigrationCommitPreview {
   plugCents: number;
   plugAccountCode: string;
   entryDate: string | null;
+  /** CUSTOMERS and VENDORS only. */
+  partiesToCreate: number;
+  partiesToMerge: number;
 }
 
 /* ------------------------------------------------ Phase 12 — the FP&A actuals bridge */

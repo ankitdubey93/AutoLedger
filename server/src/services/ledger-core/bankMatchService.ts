@@ -11,6 +11,7 @@ import {
   type ScoreBreakdown,
 } from '../../utils/matchScore.js';
 import * as paymentService from './paymentService.js';
+import * as journalService from './journalService.js';
 import {
   canTransitionBankTransaction,
   isBankTransactionStatus,
@@ -21,10 +22,14 @@ import {
 
 /**
  * LedgerCore bank-line matching: the 40/30/30 confidence engine's
- * suggestion generation, plus accept/reject/ignore. Every GL posting goes
- * through paymentService's createPaymentOnClient/voidPaymentOnClient — this
- * file never writes journal_entries or ledger_lines directly (guardrails
- * rules 5, 16).
+ * suggestion generation, plus accept/reject/ignore. A line settles one of
+ * two ways — matched to a document (a payment) or posted directly to the
+ * GL (a journal entry, Phase 6.1, for a fee/interest/capital line with no
+ * counterpart document) — and every GL posting goes through
+ * paymentService's createPaymentOnClient/voidPaymentOnClient or
+ * journalService's createEntryOnClient/reverseEntryOnClient. This file
+ * never writes journal_entries or ledger_lines directly (guardrails rules
+ * 5, 16).
  */
 
 const PG_RAISE_EXCEPTION = 'P0001';
@@ -289,6 +294,7 @@ interface BankTxnRow {
   amount_cents: string;
   status: string;
   matched_payment_id: string | null;
+  matched_journal_entry_id: string | null;
   matched_at: Date | null;
   matched_by: string | null;
   matched_by_name: string | null;
@@ -298,8 +304,8 @@ interface BankTxnRow {
 
 const BANK_TXN_SELECT = `SELECT bt.id, bt.import_id, bt.account_id, a.code AS account_code, a.name AS account_name,
                                  bt.txn_date, bt.description, bt.external_reference, bt.currency_code, bt.amount_cents,
-                                 bt.status, bt.matched_payment_id, bt.matched_at, bt.matched_by, u.name AS matched_by_name,
-                                 bt.created_at, bt.updated_at
+                                 bt.status, bt.matched_payment_id, bt.matched_journal_entry_id, bt.matched_at, bt.matched_by,
+                                 u.name AS matched_by_name, bt.created_at, bt.updated_at
                             FROM bank_transactions bt
                             JOIN accounts a ON a.id = bt.account_id AND a.org_id = bt.org_id
                             LEFT JOIN users u ON u.id = bt.matched_by`;
@@ -398,6 +404,7 @@ function toBankTransaction(row: BankTxnRow, suggestions: BankMatchSuggestion[]):
     amountCents: parseCents(row.amount_cents),
     status,
     matchedPaymentId: row.matched_payment_id,
+    matchedJournalEntryId: row.matched_journal_entry_id,
     matchedAt: row.matched_at === null ? null : row.matched_at.toISOString(),
     matchedBy: row.matched_by,
     matchedByName: row.matched_by_name,
@@ -704,13 +711,133 @@ export async function matchTransaction(
   }
 }
 
+/**
+ * Posting input for a bank line with no counterpart document — a bank fee,
+ * interest, an opening capital deposit, a tax refund. The amount and the
+ * date are never taken from the request: both come from the immutable bank
+ * line itself, so a caller cannot post an entry that does not correspond to
+ * the statement line it claims to settle.
+ */
+export interface PostJournalInput {
+  /** The postable account the non-cash side of the entry lands on. */
+  accountId: string;
+  /** Entry description; null means the bank line's own description. */
+  description: string | null;
+}
+
+/**
+ * Settles a bank line by posting a journal entry directly, rather than by
+ * matching it to an invoice or bill (Phase 6.1 — docs/ledger-core.md § Phase
+ * 6 previously named this gap explicitly). Money in debits the bank
+ * account and credits the chosen account; money out is the reverse — one
+ * side per line, and the entry balances by construction (guardrails rule
+ * 7). The GL write goes through journalService.createEntryOnClient only
+ * (rule 16); this function never touches ledger_lines directly.
+ */
+export async function postJournalForTransaction(
+  orgId: string,
+  userId: string,
+  id: string,
+  input: PostJournalInput,
+): Promise<BankTransaction> {
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+
+    const { rows: lineRows } = await client.query<{
+      id: string;
+      status: string;
+      txn_date: string;
+      description: string;
+      amount_cents: string;
+      account_id: string;
+    }>(
+      `SELECT id, status, txn_date, description, amount_cents, account_id
+         FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+      [id, orgId],
+    );
+    const line = lineRows[0];
+    if (line === undefined) throw new ApiError(404, 'Bank transaction not found');
+    if (!isBankTransactionStatus(line.status)) {
+      throw new Error(`Unknown bank transaction status "${line.status}" on transaction ${id}`);
+    }
+    if (!canTransitionBankTransaction(line.status, 'MATCHED')) {
+      throw new ApiError(
+        409,
+        line.status === 'MATCHED'
+          ? 'This bank line is already matched'
+          : 'This bank line is ignored — un-ignore it first',
+      );
+    }
+
+    if (input.accountId === line.account_id) {
+      throw new ApiError(422, 'The journal entry cannot post back to the same bank account');
+    }
+
+    const amountCents = parseCents(line.amount_cents);
+    const absAmount = Math.abs(amountCents);
+
+    // Money in: debit the bank account, credit the chosen account. Money
+    // out: the reverse. Exactly one side per line (guardrails rule 7).
+    const lines =
+      amountCents > 0
+        ? [
+            { accountId: line.account_id, debitCents: absAmount, creditCents: 0 },
+            { accountId: input.accountId, debitCents: 0, creditCents: absAmount },
+          ]
+        : [
+            { accountId: input.accountId, debitCents: absAmount, creditCents: 0 },
+            { accountId: line.account_id, debitCents: 0, creditCents: absAmount },
+          ];
+
+    const entryId = await journalService.createEntryOnClient(client, orgId, userId, {
+      entryDate: line.txn_date,
+      description: input.description ?? line.description,
+      sourceType: 'bank_line',
+      sourceId: id,
+      lines,
+    });
+
+    await client.query(
+      `UPDATE bank_transactions
+          SET status = 'MATCHED', matched_journal_entry_id = $1, matched_at = now(), matched_by = $2
+        WHERE id = $3 AND org_id = $4`,
+      [entryId, userId, id, orgId],
+    );
+
+    // Spent suggestions are derived data and are not kept.
+    await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = $2', [
+      orgId,
+      id,
+    ]);
+
+    await client.query('COMMIT');
+    return await getTransactionById(orgId, id);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
+      throw new ApiError(422, pgErrorMessage(err));
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function unmatchTransaction(orgId: string, userId: string, id: string): Promise<BankTransaction> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    const { rows } = await client.query<{ id: string; status: string; matched_payment_id: string | null }>(
-      'SELECT id, status, matched_payment_id FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE',
+    const { rows } = await client.query<{
+      id: string;
+      status: string;
+      matched_payment_id: string | null;
+      matched_journal_entry_id: string | null;
+    }>(
+      `SELECT id, status, matched_payment_id, matched_journal_entry_id
+         FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
     const row = rows[0];
@@ -738,8 +865,14 @@ export async function unmatchTransaction(orgId: string, userId: string, id: stri
       }
     }
 
+    if (row.matched_journal_entry_id !== null) {
+      await journalService.reverseEntryOnClient(client, orgId, userId, row.matched_journal_entry_id, null);
+    }
+
     await client.query(
-      `UPDATE bank_transactions SET status = 'UNMATCHED', matched_payment_id = NULL, matched_at = NULL, matched_by = NULL
+      `UPDATE bank_transactions
+          SET status = 'UNMATCHED', matched_payment_id = NULL, matched_journal_entry_id = NULL,
+              matched_at = NULL, matched_by = NULL
         WHERE id = $1 AND org_id = $2`,
       [id, orgId],
     );

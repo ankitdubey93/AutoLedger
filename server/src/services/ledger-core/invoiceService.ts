@@ -8,6 +8,7 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
+import * as paymentTermService from './paymentTermService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
 import {
   canTransitionInvoice,
@@ -36,6 +37,7 @@ import {
 
 const PG_RAISE_EXCEPTION = 'P0001';
 const PG_UNIQUE_VIOLATION = '23505';
+const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 function pgErrorCode(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
@@ -64,16 +66,22 @@ export interface InvoiceLineInput {
   unitPriceCents: number;
   revenueAccountId: string;
   taxRateBp: number;
+  /** Phase 24 — which catalogue item this line was picked from, if any. Not
+   * used to fill any other field here — the client already copied the
+   * item's defaults into description/unitPriceCents/account/taxRateBp. */
+  itemId: string | null;
 }
 
 export interface CreateInvoiceInput {
   customerId: string;
   issueDate: string;
-  dueDate: string;
+  /** Omitted when paymentTermsCode is set — resolveDueDate derives it. */
+  dueDate?: string | undefined;
   /** Phase 8. Omitted means the organization's base currency. */
   currencyCode?: string | undefined;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   lines: InvoiceLineInput[];
 }
 
@@ -107,6 +115,7 @@ interface InvoiceRow {
   customer_tax_number_snapshot: string | null;
   notes: string | null;
   payment_terms: string | null;
+  payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
   total_cents: string;
@@ -138,12 +147,13 @@ interface InvoiceLineRow {
   tax_rate_bp: number;
   net_cents: string;
   tax_cents: string;
+  item_id: string | null;
 }
 
 const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, c.name AS customer_name,
                                 i.issue_date, i.due_date, i.currency_code,
                                 i.customer_name_snapshot, i.customer_address_snapshot,
-                                i.customer_tax_number_snapshot, i.notes, i.payment_terms,
+                                i.customer_tax_number_snapshot, i.notes, i.payment_terms, i.payment_terms_code,
                                 i.subtotal_cents, i.tax_cents, i.total_cents,
                                 i.fx_rate::text AS fx_rate, i.base_subtotal_cents,
                                 i.base_tax_cents, i.base_total_cents,
@@ -167,6 +177,7 @@ function toLine(row: InvoiceLineRow): InvoiceLine {
     taxRateBp: row.tax_rate_bp,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
+    itemId: row.item_id,
   };
 }
 
@@ -201,6 +212,7 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     customerTaxNumberSnapshot: row.customer_tax_number_snapshot,
     notes: row.notes,
     paymentTerms: row.payment_terms,
+    paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
     totalCents,
@@ -234,7 +246,7 @@ async function loadLines(
   const { rows } = await pool.query<InvoiceLineRow>(
     `SELECT l.id, l.invoice_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
        FROM invoice_lines l
        JOIN accounts a ON a.id = l.revenue_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -402,9 +414,32 @@ function validateInvoiceInput(input: CreateInvoiceInput): void {
   if (input.lines.length === 0) {
     throw new ApiError(422, 'An invoice needs at least one line');
   }
-  if (input.dueDate < input.issueDate) {
+}
+
+/** Due-date resolution needs the transaction client (a term lookup), so it
+ * cannot run inside the synchronous validateInvoiceInput above — this runs
+ * once the client is open, and re-checks the same ordering invariant against
+ * the resolved date. */
+async function resolveInvoiceDueDate(
+  client: PoolClient,
+  orgId: string,
+  input: Pick<CreateInvoiceInput, 'issueDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
+): Promise<{ dueDate: string; paymentTerms: string | null; paymentTermsCode: string | null }> {
+  const resolved = await paymentTermService.resolveDueDate(
+    client,
+    orgId,
+    input.issueDate,
+    input.paymentTermsCode,
+    input.dueDate,
+  );
+  if (resolved.dueDate < input.issueDate) {
     throw new ApiError(422, 'Due date cannot be before the issue date');
   }
+  return {
+    dueDate: resolved.dueDate,
+    paymentTerms: input.paymentTerms ?? resolved.paymentTermsLabel,
+    paymentTermsCode: resolved.paymentTermsCode,
+  };
 }
 
 /**
@@ -435,14 +470,14 @@ async function insertInvoiceLines(
   await client.query(
     `INSERT INTO invoice_lines
        (org_id, invoice_id, line_number, description, quantity_milli, unit_price_cents,
-        revenue_account_id, tax_rate_bp, net_cents, tax_cents)
+        revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents
+            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    revenue_account_id, tax_rate_bp, net_cents, tax_cents)`,
+                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id)`,
     [
       orgId,
       invoiceId,
@@ -454,6 +489,7 @@ async function insertInvoiceLines(
       totals.map((t) => t.input.taxRateBp),
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
+      totals.map((t) => t.input.itemId),
     ],
   );
 }
@@ -492,6 +528,8 @@ export async function createInvoice(
     const customer = customerRows[0];
     if (customer === undefined) throw new ApiError(422, 'Customer not found');
 
+    const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
+
     await assertRevenueAccounts(
       client,
       orgId,
@@ -509,21 +547,22 @@ export async function createInvoice(
       `INSERT INTO invoices
          (org_id, customer_id, issue_date, due_date, currency_code,
           customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
-          notes, payment_terms, subtotal_cents, tax_cents, total_cents,
+          notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
           fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
        RETURNING id`,
       [
         orgId,
         input.customerId,
         input.issueDate,
-        input.dueDate,
+        resolvedDue.dueDate,
         currencyCode,
         customer.name,
         customer.billing_address,
         customer.tax_number,
         input.notes,
-        input.paymentTerms,
+        resolvedDue.paymentTerms,
+        resolvedDue.paymentTermsCode,
         subtotalCents,
         taxCents,
         totalCents,
@@ -544,6 +583,9 @@ export async function createInvoice(
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
+      throw new ApiError(422, 'A referenced account or item does not exist in this organization');
+    }
     if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
       throw new ApiError(422, pgErrorMessage(err));
     }
@@ -598,6 +640,8 @@ export async function updateInvoice(
     const customer = customerRows[0];
     if (customer === undefined) throw new ApiError(422, 'Customer not found');
 
+    const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
+
     await assertRevenueAccounts(
       client,
       orgId,
@@ -618,20 +662,21 @@ export async function updateInvoice(
       `UPDATE invoices
           SET customer_id = $1, issue_date = $2, due_date = $3, currency_code = $4,
               customer_name_snapshot = $5, customer_address_snapshot = $6,
-              customer_tax_number_snapshot = $7, notes = $8, payment_terms = $9,
-              subtotal_cents = $10, tax_cents = $11, total_cents = $12,
-              fx_rate = $13, base_subtotal_cents = $14, base_tax_cents = $15, base_total_cents = $16
-        WHERE id = $17 AND org_id = $18`,
+              customer_tax_number_snapshot = $7, notes = $8, payment_terms = $9, payment_terms_code = $10,
+              subtotal_cents = $11, tax_cents = $12, total_cents = $13,
+              fx_rate = $14, base_subtotal_cents = $15, base_tax_cents = $16, base_total_cents = $17
+        WHERE id = $18 AND org_id = $19`,
       [
         input.customerId,
         input.issueDate,
-        input.dueDate,
+        resolvedDue.dueDate,
         currencyCode,
         customer.name,
         customer.billing_address,
         customer.tax_number,
         input.notes,
-        input.paymentTerms,
+        resolvedDue.paymentTerms,
+        resolvedDue.paymentTermsCode,
         subtotalCents,
         taxCents,
         totalCents,
@@ -651,6 +696,9 @@ export async function updateInvoice(
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
+      throw new ApiError(422, 'A referenced account or item does not exist in this organization');
+    }
     if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
       throw new ApiError(422, pgErrorMessage(err));
     }

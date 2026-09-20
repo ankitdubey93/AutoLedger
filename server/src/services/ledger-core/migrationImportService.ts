@@ -7,6 +7,7 @@ import { parseCsv, type CsvTable } from '../../utils/csv.js';
 import { normalizeForMatching } from '../../utils/matchScore.js';
 import * as chartImportService from './chartImportService.js';
 import * as openingBalanceImportService from './openingBalanceImportService.js';
+import * as partyImportService from './partyImportService.js';
 import {
   canTransitionMigrationImport,
   isAccountType,
@@ -58,8 +59,24 @@ const DEBIT_SYNONYMS = ['debit', 'dr', 'debit amount'];
 const CREDIT_SYNONYMS = ['credit', 'cr', 'credit amount'];
 const AMOUNT_SYNONYMS = ['amount', 'balance', 'opening balance'];
 
+// CUSTOMERS / VENDORS (Phase 24) — a party row is name-shaped, not
+// account-shaped, so it gets its own synonym set. Written already-normalized
+// (lowercase, no punctuation) to match findColumnBySynonyms's use of
+// normalizeForMatching on the header row.
+const PARTY_NAME_SYNONYMS = [
+  'name', 'customer', 'vendor', 'supplier', 'company', 'display name',
+  'customer name', 'vendor name', 'company name',
+];
+const PARTY_EMAIL_SYNONYMS = ['email', 'e mail', 'email address', 'contact email'];
+const PARTY_PHONE_SYNONYMS = ['phone', 'telephone', 'phone number', 'contact phone', 'mobile'];
+const PARTY_ADDRESS_SYNONYMS = ['address', 'billing address', 'street', 'postal address'];
+const PARTY_TAX_SYNONYMS = ['tax number', 'tax id', 'vat', 'vat number', 'gst', 'gstin', 'abn', 'ein'];
+const PARTY_TERMS_SYNONYMS = ['terms', 'payment terms', 'payment term'];
+const PARTY_NOTES_SYNONYMS = ['notes', 'memo', 'comment', 'comments'];
+
 interface ResolvedColumns {
-  codeIdx: number;
+  /** null for CUSTOMERS/VENDORS — a party row has no account code. */
+  codeIdx: number | null;
   nameIdx: number | null;
   typeIdx: number | null;
   parentIdx: number | null;
@@ -67,6 +84,14 @@ interface ResolvedColumns {
   debitIdx: number | null;
   creditIdx: number | null;
   amountIdx: number | null;
+  /** CUSTOMERS and VENDORS only. */
+  partyNameIdx: number | null;
+  partyEmailIdx: number | null;
+  partyPhoneIdx: number | null;
+  partyAddressIdx: number | null;
+  partyTaxNumberIdx: number | null;
+  partyPaymentTermsIdx: number | null;
+  partyNotesIdx: number | null;
 }
 
 function findColumnBySynonyms(headers: string[], synonyms: string[]): number | null {
@@ -78,7 +103,41 @@ function findColumnBySynonyms(headers: string[], synonyms: string[]): number | n
   return null;
 }
 
+/** Every account-shaped index null, every party-shaped index resolved — shared by the CUSTOMERS/VENDORS branch. */
+function nullAccountColumns(): Pick<
+  ResolvedColumns,
+  'codeIdx' | 'typeIdx' | 'parentIdx' | 'descriptionIdx' | 'debitIdx' | 'creditIdx' | 'amountIdx'
+> {
+  return { codeIdx: null, typeIdx: null, parentIdx: null, descriptionIdx: null, debitIdx: null, creditIdx: null, amountIdx: null };
+}
+
 function resolveColumns(headers: string[], kind: MigrationImportKind): ResolvedColumns {
+  if (kind === 'CUSTOMERS' || kind === 'VENDORS') {
+    const partyNameIdx = findColumnBySynonyms(headers, PARTY_NAME_SYNONYMS);
+    if (partyNameIdx === null) throw new ApiError(422, 'Could not find a name column in the file');
+    return {
+      ...nullAccountColumns(),
+      nameIdx: null,
+      partyNameIdx,
+      partyEmailIdx: findColumnBySynonyms(headers, PARTY_EMAIL_SYNONYMS),
+      partyPhoneIdx: findColumnBySynonyms(headers, PARTY_PHONE_SYNONYMS),
+      partyAddressIdx: findColumnBySynonyms(headers, PARTY_ADDRESS_SYNONYMS),
+      partyTaxNumberIdx: findColumnBySynonyms(headers, PARTY_TAX_SYNONYMS),
+      partyPaymentTermsIdx: findColumnBySynonyms(headers, PARTY_TERMS_SYNONYMS),
+      partyNotesIdx: findColumnBySynonyms(headers, PARTY_NOTES_SYNONYMS),
+    };
+  }
+
+  const partyColumnsNull = {
+    partyNameIdx: null,
+    partyEmailIdx: null,
+    partyPhoneIdx: null,
+    partyAddressIdx: null,
+    partyTaxNumberIdx: null,
+    partyPaymentTermsIdx: null,
+    partyNotesIdx: null,
+  } as const;
+
   const codeIdx = findColumnBySynonyms(headers, CODE_SYNONYMS);
   if (codeIdx === null) throw new ApiError(422, 'Could not find an account code column in the file');
   const nameIdx = findColumnBySynonyms(headers, NAME_SYNONYMS);
@@ -97,6 +156,7 @@ function resolveColumns(headers: string[], kind: MigrationImportKind): ResolvedC
       debitIdx: null,
       creditIdx: null,
       amountIdx: null,
+      ...partyColumnsNull,
     };
   }
 
@@ -106,7 +166,17 @@ function resolveColumns(headers: string[], kind: MigrationImportKind): ResolvedC
   if (amountIdx === null && (debitIdx === null || creditIdx === null)) {
     throw new ApiError(422, 'Could not find an amount column, or a debit/credit pair, in the file');
   }
-  return { codeIdx, nameIdx, typeIdx: null, parentIdx: null, descriptionIdx: null, debitIdx, creditIdx, amountIdx };
+  return {
+    codeIdx,
+    nameIdx,
+    typeIdx: null,
+    parentIdx: null,
+    descriptionIdx: null,
+    debitIdx,
+    creditIdx,
+    amountIdx,
+    ...partyColumnsNull,
+  };
 }
 
 // ------------------------------------------------------- account type alias
@@ -144,10 +214,28 @@ interface StagedRowInput {
   description: string | null;
   debitCents: number | null;
   creditCents: number | null;
+  /** CUSTOMERS and VENDORS only. */
+  partyName: string | null;
+  partyEmail: string | null;
+  partyPhone: string | null;
+  partyAddress: string | null;
+  partyTaxNumber: string | null;
+  partyPaymentTerms: string | null;
+  partyNotes: string | null;
 }
 
+const NULL_PARTY_FIELDS = {
+  partyName: null,
+  partyEmail: null,
+  partyPhone: null,
+  partyAddress: null,
+  partyTaxNumber: null,
+  partyPaymentTerms: null,
+  partyNotes: null,
+} as const;
+
 function parseChartRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
-  const codeRaw = (cells[columns.codeIdx] ?? '').trim();
+  const codeRaw = (cells[columns.codeIdx ?? -1] ?? '').trim();
   const nameRaw = columns.nameIdx !== null ? (cells[columns.nameIdx] ?? '').trim() : '';
   const typeRaw = columns.typeIdx !== null ? (cells[columns.typeIdx] ?? '').trim() : '';
   const parentRaw = columns.parentIdx !== null ? (cells[columns.parentIdx] ?? '').trim() : '';
@@ -169,11 +257,12 @@ function parseChartRow(cells: string[], columns: ResolvedColumns, rowNumber: num
     description: descriptionRaw === '' ? null : descriptionRaw.slice(0, 500),
     debitCents: null,
     creditCents: null,
+    ...NULL_PARTY_FIELDS,
   };
 }
 
 function parseOpeningRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
-  const codeRaw = (cells[columns.codeIdx] ?? '').trim();
+  const codeRaw = (cells[columns.codeIdx ?? -1] ?? '').trim();
   const nameRaw = columns.nameIdx !== null ? (cells[columns.nameIdx] ?? '').trim() : '';
 
   let debitCents: number | null = null;
@@ -221,6 +310,50 @@ function parseOpeningRow(cells: string[], columns: ResolvedColumns, rowNumber: n
     description: null,
     debitCents,
     creditCents,
+    ...NULL_PARTY_FIELDS,
+  };
+}
+
+/**
+ * Trims each cell and truncates to the target column's limit, matching
+ * `parseChartRow`'s idiom; the untruncated originals live in `raw` so
+ * `validateRows` can report against exactly what the file contained.
+ */
+function parseCustomerRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
+  const nameRaw = columns.partyNameIdx !== null ? (cells[columns.partyNameIdx] ?? '').trim() : '';
+  const emailRaw = columns.partyEmailIdx !== null ? (cells[columns.partyEmailIdx] ?? '').trim() : '';
+  const phoneRaw = columns.partyPhoneIdx !== null ? (cells[columns.partyPhoneIdx] ?? '').trim() : '';
+  const addressRaw = columns.partyAddressIdx !== null ? (cells[columns.partyAddressIdx] ?? '').trim() : '';
+  const taxNumberRaw = columns.partyTaxNumberIdx !== null ? (cells[columns.partyTaxNumberIdx] ?? '').trim() : '';
+  const paymentTermsRaw =
+    columns.partyPaymentTermsIdx !== null ? (cells[columns.partyPaymentTermsIdx] ?? '').trim() : '';
+  const notesRaw = columns.partyNotesIdx !== null ? (cells[columns.partyNotesIdx] ?? '').trim() : '';
+
+  return {
+    rowNumber,
+    raw: {
+      name: nameRaw,
+      email: emailRaw,
+      phone: phoneRaw,
+      address: addressRaw,
+      taxNumber: taxNumberRaw,
+      paymentTerms: paymentTermsRaw,
+      notes: notesRaw,
+    },
+    accountCode: null,
+    accountName: null,
+    accountType: null,
+    parentCode: null,
+    description: null,
+    debitCents: null,
+    creditCents: null,
+    partyName: nameRaw === '' ? null : nameRaw.slice(0, 200),
+    partyEmail: emailRaw === '' ? null : emailRaw.slice(0, 254),
+    partyPhone: phoneRaw === '' ? null : phoneRaw.slice(0, 40),
+    partyAddress: addressRaw === '' ? null : addressRaw.slice(0, 500),
+    partyTaxNumber: taxNumberRaw === '' ? null : taxNumberRaw.slice(0, 64),
+    partyPaymentTerms: paymentTermsRaw === '' ? null : paymentTermsRaw.slice(0, 500),
+    partyNotes: notesRaw === '' ? null : notesRaw.slice(0, 1000),
   };
 }
 
@@ -228,9 +361,9 @@ function parseRows(table: CsvTable, columns: ResolvedColumns, kind: MigrationImp
   return table.rows.map((cells, index) => {
     // 1-based, header row counted — matches bankImportService's convention.
     const rowNumber = index + 2;
-    return kind === 'CHART_OF_ACCOUNTS'
-      ? parseChartRow(cells, columns, rowNumber)
-      : parseOpeningRow(cells, columns, rowNumber);
+    if (kind === 'CHART_OF_ACCOUNTS') return parseChartRow(cells, columns, rowNumber);
+    if (kind === 'CUSTOMERS' || kind === 'VENDORS') return parseCustomerRow(cells, columns, rowNumber);
+    return parseOpeningRow(cells, columns, rowNumber);
   });
 }
 
@@ -264,7 +397,12 @@ const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, 
                           LEFT JOIN users u ON u.id = i.created_by`;
 
 function toImport(row: ImportRow): MigrationImport {
-  if (row.kind !== 'CHART_OF_ACCOUNTS' && row.kind !== 'OPENING_BALANCES') {
+  if (
+    row.kind !== 'CHART_OF_ACCOUNTS' &&
+    row.kind !== 'OPENING_BALANCES' &&
+    row.kind !== 'CUSTOMERS' &&
+    row.kind !== 'VENDORS'
+  ) {
     throw new Error(`Unknown migration import kind "${row.kind}"`);
   }
   if (row.status !== 'DRAFT' && row.status !== 'VALIDATED' && row.status !== 'COMMITTED') {
@@ -299,6 +437,13 @@ interface RowRow {
   description: string | null;
   debit_cents: string | null;
   credit_cents: string | null;
+  party_name: string | null;
+  party_email: string | null;
+  party_phone: string | null;
+  party_address: string | null;
+  party_tax_number: string | null;
+  party_payment_terms: string | null;
+  party_notes: string | null;
   errors: string[];
   status: string;
 }
@@ -330,13 +475,22 @@ function toRow(row: RowRow): MigrationImportRow {
     description: row.description,
     debitCents: row.debit_cents === null ? null : Number(row.debit_cents),
     creditCents: row.credit_cents === null ? null : Number(row.credit_cents),
+    partyName: row.party_name,
+    partyEmail: row.party_email,
+    partyPhone: row.party_phone,
+    partyAddress: row.party_address,
+    partyTaxNumber: row.party_tax_number,
+    partyPaymentTerms: row.party_payment_terms,
+    partyNotes: row.party_notes,
     errors: row.errors,
     status,
   };
 }
 
 const ROW_COLUMNS = `id, row_number, raw, account_code, account_name, account_type, parent_code,
-                     description, debit_cents, credit_cents, errors, status`;
+                     description, debit_cents, credit_cents,
+                     party_name, party_email, party_phone, party_address, party_tax_number,
+                     party_payment_terms, party_notes, errors, status`;
 
 // ---------------------------------------------------------------------- reads
 
@@ -479,9 +633,16 @@ async function revalidateOnClient(client: PoolClient, orgId: string, importId: s
   );
   const stagedRows = rowRows.map(toRow);
 
-  const validator =
-    importKind === 'CHART_OF_ACCOUNTS' ? chartImportService.validateRows : openingBalanceImportService.validateRows;
-  const results = await validator(client, orgId, stagedRows);
+  let results: { rowId: string; errors: string[] }[];
+  if (importKind === 'CHART_OF_ACCOUNTS') {
+    results = await chartImportService.validateRows(client, orgId, stagedRows);
+  } else if (importKind === 'OPENING_BALANCES') {
+    results = await openingBalanceImportService.validateRows(client, orgId, stagedRows);
+  } else if (importKind === 'CUSTOMERS' || importKind === 'VENDORS') {
+    results = await partyImportService.validateRows(client, orgId, importKind, stagedRows);
+  } else {
+    throw new Error(`Unknown migration import kind "${importKind}"`);
+  }
   const errorsByRowId = new Map(results.map((r) => [r.rowId, r.errors]));
 
   let errorCount = 0;
@@ -549,14 +710,20 @@ export async function createImport(
     await client.query(
       `INSERT INTO migration_import_rows
          (org_id, import_id, row_number, raw, account_code, account_name, account_type, parent_code,
-          description, debit_cents, credit_cents)
+          description, debit_cents, credit_cents,
+          party_name, party_email, party_phone, party_address, party_tax_number, party_payment_terms, party_notes)
        SELECT $1, $2, v.row_number, v.raw::jsonb, v.account_code, v.account_name, v.account_type,
-              v.parent_code, v.description, v.debit_cents, v.credit_cents
+              v.parent_code, v.description, v.debit_cents, v.credit_cents,
+              v.party_name, v.party_email, v.party_phone, v.party_address, v.party_tax_number,
+              v.party_payment_terms, v.party_notes
          FROM unnest(
                 $3::int[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
-                $10::bigint[], $11::bigint[]
+                $10::bigint[], $11::bigint[],
+                $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[]
               ) AS v(row_number, raw, account_code, account_name, account_type, parent_code, description,
-                      debit_cents, credit_cents)`,
+                      debit_cents, credit_cents,
+                      party_name, party_email, party_phone, party_address, party_tax_number,
+                      party_payment_terms, party_notes)`,
       [
         orgId,
         importId,
@@ -569,6 +736,13 @@ export async function createImport(
         parsed.map((r) => r.description),
         parsed.map((r) => r.debitCents),
         parsed.map((r) => r.creditCents),
+        parsed.map((r) => r.partyName),
+        parsed.map((r) => r.partyEmail),
+        parsed.map((r) => r.partyPhone),
+        parsed.map((r) => r.partyAddress),
+        parsed.map((r) => r.partyTaxNumber),
+        parsed.map((r) => r.partyPaymentTerms),
+        parsed.map((r) => r.partyNotes),
       ],
     );
 
@@ -597,6 +771,14 @@ export interface PatchRowInput {
   description?: string | null | undefined;
   debitCents?: number | undefined;
   creditCents?: number | undefined;
+  /** CUSTOMERS and VENDORS only. */
+  partyName?: string | undefined;
+  partyEmail?: string | null | undefined;
+  partyPhone?: string | null | undefined;
+  partyAddress?: string | null | undefined;
+  partyTaxNumber?: string | null | undefined;
+  partyPaymentTerms?: string | null | undefined;
+  partyNotes?: string | null | undefined;
   status?: 'VALID' | 'EXCLUDED' | undefined;
 }
 
@@ -626,6 +808,13 @@ export async function patchRow(
       description: 'description',
       debitCents: 'debit_cents',
       creditCents: 'credit_cents',
+      partyName: 'party_name',
+      partyEmail: 'party_email',
+      partyPhone: 'party_phone',
+      partyAddress: 'party_address',
+      partyTaxNumber: 'party_tax_number',
+      partyPaymentTerms: 'party_payment_terms',
+      partyNotes: 'party_notes',
       status: 'status',
     } as const;
 
@@ -687,15 +876,16 @@ export async function deleteImport(orgId: string, importId: string): Promise<voi
 export async function preview(orgId: string, importId: string) {
   const imp = await getImportById(orgId, importId);
   return withTransaction((client) => {
-    const previewer =
-      imp.kind === 'CHART_OF_ACCOUNTS' ? chartImportService.preview : openingBalanceImportService.preview;
-    return previewer(client, orgId, importId);
+    if (imp.kind === 'CHART_OF_ACCOUNTS') return chartImportService.preview(client, orgId, importId);
+    if (imp.kind === 'OPENING_BALANCES') return openingBalanceImportService.preview(client, orgId, importId);
+    return partyImportService.preview(client, orgId, importId);
   });
 }
 
 export type CommitResult =
   | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
-  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number };
+  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
+  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
 
 /** Commits a VALIDATED import, delegated by kind. All-or-nothing. */
 export async function commit(
@@ -716,7 +906,7 @@ export async function commit(
     if (imp.kind === 'CHART_OF_ACCOUNTS') {
       const { created, merged } = await chartImportService.commitOnClient(client, orgId, importId);
       result = { kind: 'CHART_OF_ACCOUNTS', createdCount: created, mergedCount: merged };
-    } else {
+    } else if (imp.kind === 'OPENING_BALANCES') {
       const { journalEntryId, plugCents } = await openingBalanceImportService.commitOnClient(
         client,
         orgId,
@@ -724,6 +914,9 @@ export async function commit(
         createdBy,
       );
       result = { kind: 'OPENING_BALANCES', journalEntryId, plugCents };
+    } else {
+      const { created, merged } = await partyImportService.commitOnClient(client, orgId, importId);
+      result = { kind: imp.kind, createdCount: created, mergedCount: merged };
     }
 
     await client.query('COMMIT');

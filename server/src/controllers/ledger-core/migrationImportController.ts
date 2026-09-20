@@ -30,7 +30,7 @@ export const list: RequestHandler = async (req, res) => {
   let kind = null;
   if (kindParam !== undefined) {
     if (typeof kindParam !== 'string' || !isMigrationImportKind(kindParam)) {
-      throw new ApiError(400, 'kind must be CHART_OF_ACCOUNTS or OPENING_BALANCES');
+      throw new ApiError(400, 'kind must be CHART_OF_ACCOUNTS, OPENING_BALANCES, CUSTOMERS or VENDORS');
     }
     kind = kindParam;
   }

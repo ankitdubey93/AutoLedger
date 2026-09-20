@@ -52,6 +52,13 @@ function baseRow(overrides: Partial<MigrationImportRow> = {}): MigrationImportRo
     description: null,
     debitCents: 100000,
     creditCents: 0,
+    partyName: null,
+    partyEmail: null,
+    partyPhone: null,
+    partyAddress: null,
+    partyTaxNumber: null,
+    partyPaymentTerms: null,
+    partyNotes: null,
     errors: [],
     status: 'VALID',
     ...overrides,
@@ -105,6 +112,25 @@ describe('NewMigrationImportPage', () => {
       expect(typeof parsed.content).toBe('string');
       expect(parsed.content).toContain('9100');
     });
+  });
+
+  it('the kind selector offers Customers and Vendors', () => {
+    renderPage();
+
+    const select = screen.getByLabelText('What are you importing?') as HTMLSelectElement;
+    const optionValues = Array.from(select.options).map((o) => o.value);
+    expect(optionValues).toEqual(['CHART_OF_ACCOUNTS', 'OPENING_BALANCES', 'CUSTOMERS', 'VENDORS']);
+  });
+
+  it('the Customers template lists Name as required', async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.selectOptions(screen.getByLabelText('What are you importing?'), 'CUSTOMERS');
+
+    const row = screen.getByText('Name').closest('tr');
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain('Yes');
   });
 });
 
@@ -257,5 +283,30 @@ describe('MigrationImportDetailPage', () => {
 
     const link = await screen.findByRole('link', { name: 'journal entry' });
     expect(link).toHaveAttribute('href', expect.stringContaining('entry-42'));
+  });
+
+  it('the party preview reports created and merged counts', async () => {
+    const imp = baseImport({ kind: 'CUSTOMERS', status: 'VALIDATED' });
+    mockRoutes(
+      imp,
+      [baseRow({ accountCode: null, partyName: 'Northwind Traders', partyEmail: 'ap@northwind.test' })],
+      {
+        kind: 'CUSTOMERS',
+        canCommit: true,
+        blockingErrorCount: 0,
+        accountsToCreate: 0,
+        accountsToMerge: 0,
+        totalDebitCents: 0,
+        totalCreditCents: 0,
+        plugCents: 0,
+        plugAccountCode: '',
+        entryDate: null,
+        partiesToCreate: 2,
+        partiesToMerge: 1,
+      },
+    );
+    renderPage(imp.id);
+
+    expect(await screen.findByText(/2 will be created, 1 will be merged into existing records/)).toBeInTheDocument();
   });
 });

@@ -22,7 +22,11 @@ import { parseCents } from '../utils/money.js';
  */
 
 export interface IntegrityCheck {
-  name: 'debits_equal_credits' | 'every_entry_balances' | 'no_orphaned_ledger_lines';
+  name:
+    | 'debits_equal_credits'
+    | 'every_entry_balances'
+    | 'no_orphaned_ledger_lines'
+    | 'bank_line_journal_entries_exist';
   description: string;
   passed: boolean;
   /** Up to 20 offending rows, for the operator to go look at. Empty when passed. */
@@ -152,11 +156,42 @@ async function checkNoOrphanedLedgerLines(): Promise<IntegrityCheck> {
   };
 }
 
+/**
+ * Phase 6.1 — a bank line settled by posting a journal entry directly
+ * (`matched_journal_entry_id`, migration 057) must name a real entry in its
+ * own organization. `fk_bank_txn_journal_entry` (057) already guarantees
+ * this at write time, ON DELETE RESTRICT — this check re-verifies it from
+ * scratch against whatever is actually in the table, the same posture
+ * checkNoOrphanedLedgerLines takes for ledger_lines.
+ */
+async function checkBankLineJournalEntriesExist(): Promise<IntegrityCheck> {
+  const { rows } = await pool.query<{ id: string; org_id: string; matched_journal_entry_id: string }>(
+    `SELECT bt.id, bt.org_id, bt.matched_journal_entry_id
+       FROM bank_transactions bt
+       LEFT JOIN journal_entries e
+         ON e.id = bt.matched_journal_entry_id AND e.org_id = bt.org_id
+      WHERE bt.matched_journal_entry_id IS NOT NULL AND e.id IS NULL
+      LIMIT 20`,
+  );
+
+  return {
+    name: 'bank_line_journal_entries_exist',
+    description: 'Every bank line settled by a posted journal entry must name a real entry in its own organization.',
+    passed: rows.length === 0,
+    offenders: rows.map((r) => ({
+      orgId: r.org_id,
+      subject: `bank_transactions/${r.id}`,
+      detail: `matched_journal_entry_id ${r.matched_journal_entry_id} does not exist in this organization`,
+    })),
+  };
+}
+
 export async function runIntegrityChecks(): Promise<IntegrityReport> {
   const checks = await Promise.all([
     checkDebitsEqualCredits(),
     checkEveryEntryBalances(),
     checkNoOrphanedLedgerLines(),
+    checkBankLineJournalEntriesExist(),
   ]);
 
   return {

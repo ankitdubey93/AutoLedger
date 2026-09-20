@@ -1,6 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import * as bankMatchService from '../../services/ledger-core/bankMatchService.js';
-import { matchBankTransactionSchema } from '../../schemas/ledger-core/bankSchema.js';
+import { matchBankTransactionSchema, postBankLineJournalSchema } from '../../schemas/ledger-core/bankSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -82,6 +82,15 @@ export const match: RequestHandler = async (req, res) => {
   const id = requireParam(req, 'id');
   const target = parseBody(matchBankTransactionSchema, req.body);
   const transaction = await bankMatchService.matchTransaction(user.orgId, user.id, id, target);
+  res.json({ success: true, transaction });
+};
+
+/** POST /ledger-core/bank-transactions/:id/post-journal */
+export const postJournal: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const id = requireParam(req, 'id');
+  const input = parseBody(postBankLineJournalSchema, req.body);
+  const transaction = await bankMatchService.postJournalForTransaction(user.orgId, user.id, id, input);
   res.json({ success: true, transaction });
 };
 

@@ -197,6 +197,7 @@ export async function seedSandbox(
         currencyCode: c.currency === baseCurrency ? undefined : c.currency,
         notes: null,
         paymentTerms: `Net ${String(c.paysInDays)}`,
+        paymentTermsCode: null,
         lines: [
           {
             description: `${c.name} — monthly services`,
@@ -204,6 +205,7 @@ export async function seedSandbox(
             unitPriceCents: netCents,
             revenueAccountId,
             taxRateBp: c.taxRateBp,
+            itemId: null,
           },
         ],
       });
@@ -253,6 +255,7 @@ export async function seedSandbox(
         currencyCode: undefined,
         notes: null,
         paymentTerms: `Net ${String(v.paysInDays)}`,
+        paymentTermsCode: null,
         lines: [
           {
             description: v.description,
@@ -260,6 +263,7 @@ export async function seedSandbox(
             unitPriceCents: netCents,
             expenseAccountId,
             taxRateBp: v.taxRateBp,
+            itemId: null,
           },
         ],
       });

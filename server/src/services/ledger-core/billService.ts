@@ -7,6 +7,7 @@ import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
+import * as paymentTermService from './paymentTermService.js';
 import { allocatedCentsSubquery } from './paymentService.js';
 import { resolveApPostingAccountsOnClient } from './settingsService.js';
 import {
@@ -42,6 +43,7 @@ import {
 
 const PG_RAISE_EXCEPTION = 'P0001';
 const PG_UNIQUE_VIOLATION = '23505';
+const PG_FOREIGN_KEY_VIOLATION = '23503';
 
 function pgErrorCode(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
@@ -70,17 +72,23 @@ export interface BillLineInput {
   unitPriceCents: number;
   expenseAccountId: string;
   taxRateBp: number;
+  /** Phase 24 — which catalogue item this line was picked from, if any. Not
+   * used to fill any other field here — the client already copied the
+   * item's defaults into description/unitPriceCents/account/taxRateBp. */
+  itemId: string | null;
 }
 
 export interface CreateBillInput {
   vendorId: string;
   vendorReference: string;
   billDate: string;
-  dueDate: string;
+  /** Omitted when paymentTermsCode is set — resolveDueDate derives it. */
+  dueDate?: string | undefined;
   /** Phase 8. Omitted means the organization's base currency. */
   currencyCode?: string | undefined;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   lines: BillLineInput[];
 }
 
@@ -114,6 +122,7 @@ interface BillRow {
   vendor_tax_number_snapshot: string | null;
   notes: string | null;
   payment_terms: string | null;
+  payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
   total_cents: string;
@@ -148,12 +157,13 @@ interface BillLineRow {
   tax_rate_bp: number;
   net_cents: string;
   tax_cents: string;
+  item_id: string | null;
 }
 
 const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.name AS vendor_name,
                              b.bill_date, b.due_date, b.currency_code,
                              b.vendor_name_snapshot, b.vendor_address_snapshot,
-                             b.vendor_tax_number_snapshot, b.notes, b.payment_terms,
+                             b.vendor_tax_number_snapshot, b.notes, b.payment_terms, b.payment_terms_code,
                              b.subtotal_cents, b.tax_cents, b.total_cents,
                              b.fx_rate::text AS fx_rate, b.base_subtotal_cents,
                              b.base_tax_cents, b.base_total_cents,
@@ -180,6 +190,7 @@ function toLine(row: BillLineRow): BillLine {
     taxRateBp: row.tax_rate_bp,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
+    itemId: row.item_id,
   };
 }
 
@@ -214,6 +225,7 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     vendorTaxNumberSnapshot: row.vendor_tax_number_snapshot,
     notes: row.notes,
     paymentTerms: row.payment_terms,
+    paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
     totalCents,
@@ -247,7 +259,7 @@ async function loadLines(orgId: string, billIds: string[]): Promise<Map<string, 
   const { rows } = await pool.query<BillLineRow>(
     `SELECT l.id, l.bill_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
        FROM bill_lines l
        JOIN accounts a ON a.id = l.expense_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -415,9 +427,32 @@ function validateBillInput(input: CreateBillInput): void {
   if (input.lines.length === 0) {
     throw new ApiError(422, 'A bill needs at least one line');
   }
-  if (input.dueDate < input.billDate) {
+}
+
+/** Due-date resolution needs the transaction client (a term lookup), so it
+ * cannot run inside the synchronous validateBillInput above — this runs once
+ * the client is open, and re-checks the same ordering invariant against the
+ * resolved date. */
+async function resolveBillDueDate(
+  client: PoolClient,
+  orgId: string,
+  input: Pick<CreateBillInput, 'billDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
+): Promise<{ dueDate: string; paymentTerms: string | null; paymentTermsCode: string | null }> {
+  const resolved = await paymentTermService.resolveDueDate(
+    client,
+    orgId,
+    input.billDate,
+    input.paymentTermsCode,
+    input.dueDate,
+  );
+  if (resolved.dueDate < input.billDate) {
     throw new ApiError(422, 'Due date cannot be before the bill date');
   }
+  return {
+    dueDate: resolved.dueDate,
+    paymentTerms: input.paymentTerms ?? resolved.paymentTermsLabel,
+    paymentTermsCode: resolved.paymentTermsCode,
+  };
 }
 
 /**
@@ -448,14 +483,14 @@ async function insertBillLines(
   await client.query(
     `INSERT INTO bill_lines
        (org_id, bill_id, line_number, description, quantity_milli, unit_price_cents,
-        expense_account_id, tax_rate_bp, net_cents, tax_cents)
+        expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents
+            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    expense_account_id, tax_rate_bp, net_cents, tax_cents)`,
+                    expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id)`,
     [
       orgId,
       billId,
@@ -467,8 +502,25 @@ async function insertBillLines(
       totals.map((t) => t.input.taxRateBp),
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
+      totals.map((t) => t.input.itemId),
     ],
   );
+}
+
+/**
+ * The already-resolved header `insertBillOnClient` writes — `dueDate` and
+ * `paymentTermsCode` are the OUTPUT of `resolveBillDueDate`, never the raw
+ * request, so this function never has to resolve a term itself.
+ */
+interface InsertBillHeader {
+  vendorId: string;
+  vendorReference: string;
+  billDate: string;
+  dueDate: string;
+  currencyCode?: string | undefined;
+  notes: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
 }
 
 /**
@@ -481,7 +533,7 @@ async function insertBillOnClient(
   client: PoolClient,
   orgId: string,
   createdBy: string,
-  header: Omit<CreateBillInput, 'lines'>,
+  header: InsertBillHeader,
   totals: LineTotal[],
 ): Promise<string> {
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
@@ -524,9 +576,9 @@ async function insertBillOnClient(
     `INSERT INTO bills
        (org_id, vendor_id, vendor_reference, bill_date, due_date, currency_code,
         vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
-        notes, payment_terms, subtotal_cents, tax_cents, total_cents,
+        notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING id`,
     [
       orgId,
@@ -540,6 +592,7 @@ async function insertBillOnClient(
       vendor.tax_number,
       header.notes,
       header.paymentTerms,
+      header.paymentTermsCode,
       subtotalCents,
       taxCents,
       totalCents,
@@ -570,7 +623,23 @@ export async function createBill(
   try {
     await beginTransaction(client);
 
-    const billId = await insertBillOnClient(client, orgId, createdBy, input, totals);
+    const resolvedDue = await resolveBillDueDate(client, orgId, input);
+    const billId = await insertBillOnClient(
+      client,
+      orgId,
+      createdBy,
+      {
+        vendorId: input.vendorId,
+        vendorReference: input.vendorReference,
+        billDate: input.billDate,
+        dueDate: resolvedDue.dueDate,
+        currencyCode: input.currencyCode,
+        notes: input.notes,
+        paymentTerms: resolvedDue.paymentTerms,
+        paymentTermsCode: resolvedDue.paymentTermsCode,
+      },
+      totals,
+    );
 
     await client.query('COMMIT');
     return await getBillById(orgId, billId);
@@ -579,6 +648,9 @@ export async function createBill(
     if (err instanceof ApiError) throw err;
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_bills_vendor_reference') {
       throw new ApiError(409, 'This vendor reference has already been entered for this vendor');
+    }
+    if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
+      throw new ApiError(422, 'A referenced account or item does not exist in this organization');
     }
     if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
       throw new ApiError(422, pgErrorMessage(err));
@@ -628,6 +700,8 @@ export async function createCapturedBillOnClient(
       unitPriceCents: line.netCents,
       expenseAccountId: line.expenseAccountId,
       taxRateBp: line.netCents === 0 ? 0 : Math.min(10000, Number(scaleCents(cents(line.taxCents), 10000, line.netCents))),
+      // A captured (AP-Flow) line never comes from the item catalogue.
+      itemId: null,
     },
     netCents: line.netCents,
     taxCents: line.taxCents,
@@ -641,6 +715,7 @@ export async function createCapturedBillOnClient(
     currencyCode: input.currencyCode,
     notes: input.notes,
     paymentTerms: null,
+    paymentTermsCode: null,
     lines: totals.map((t) => t.input),
   });
 
@@ -656,6 +731,7 @@ export async function createCapturedBillOnClient(
       currencyCode: input.currencyCode,
       notes: input.notes,
       paymentTerms: null,
+      paymentTermsCode: null,
     },
     totals,
   );
@@ -702,6 +778,8 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
     const vendor = vendorRows[0];
     if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
 
+    const resolvedDue = await resolveBillDueDate(client, orgId, input);
+
     await assertExpenseAccounts(
       client,
       orgId,
@@ -719,21 +797,22 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
       `UPDATE bills
           SET vendor_id = $1, vendor_reference = $2, bill_date = $3, due_date = $4, currency_code = $5,
               vendor_name_snapshot = $6, vendor_address_snapshot = $7,
-              vendor_tax_number_snapshot = $8, notes = $9, payment_terms = $10,
-              subtotal_cents = $11, tax_cents = $12, total_cents = $13,
-              fx_rate = $14, base_subtotal_cents = $15, base_tax_cents = $16, base_total_cents = $17
-        WHERE id = $18 AND org_id = $19`,
+              vendor_tax_number_snapshot = $8, notes = $9, payment_terms = $10, payment_terms_code = $11,
+              subtotal_cents = $12, tax_cents = $13, total_cents = $14,
+              fx_rate = $15, base_subtotal_cents = $16, base_tax_cents = $17, base_total_cents = $18
+        WHERE id = $19 AND org_id = $20`,
       [
         input.vendorId,
         input.vendorReference,
         input.billDate,
-        input.dueDate,
+        resolvedDue.dueDate,
         currencyCode,
         vendor.name,
         vendor.billing_address,
         vendor.tax_number,
         input.notes,
-        input.paymentTerms,
+        resolvedDue.paymentTerms,
+        resolvedDue.paymentTermsCode,
         subtotalCents,
         taxCents,
         totalCents,
@@ -755,6 +834,9 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
     if (err instanceof ApiError) throw err;
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_bills_vendor_reference') {
       throw new ApiError(409, 'This vendor reference has already been entered for this vendor');
+    }
+    if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
+      throw new ApiError(422, 'A referenced account or item does not exist in this organization');
     }
     if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
       throw new ApiError(422, pgErrorMessage(err));

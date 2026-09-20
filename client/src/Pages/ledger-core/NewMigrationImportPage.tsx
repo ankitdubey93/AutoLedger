@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Download } from 'lucide-react';
 import { createMigrationImport, type MigrationImportKind } from '../../services/fetchServices';
+import { IMPORT_TEMPLATES, templateCsv } from './importTemplates';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import BackLink from '../../components/BackLink';
 
 /**
- * Stages a new chart-of-accounts or opening-balance CSV (Phase 9b).
+ * Stages a new chart-of-accounts, opening-balance, customer or vendor CSV
+ * (Phase 9b; CUSTOMERS/VENDORS added Phase 24).
  *
  * The CSV's text goes straight into the JSON body — never a multipart
  * upload — the same shape `BankImportPage` uses, and for the same reason:
@@ -47,6 +50,20 @@ export default function NewMigrationImportPage() {
   }
 
   const canSubmit = fileName.trim() !== '' && content !== '' && !busy;
+  const template = IMPORT_TEMPLATES[kind];
+
+  function downloadTemplate() {
+    const blob = new Blob([templateCsv(kind)], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `autoledger-${kind.toLowerCase()}-template.csv`;
+      link.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -84,8 +101,41 @@ export default function NewMigrationImportPage() {
           >
             <option value="CHART_OF_ACCOUNTS">Chart of accounts</option>
             <option value="OPENING_BALANCES">Opening balances</option>
+            <option value="CUSTOMERS">Customers</option>
+            <option value="VENDORS">Vendors</option>
           </select>
         </label>
+
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-sm font-medium m-0">{template.label} columns</p>
+            <button
+              type="button"
+              onClick={downloadTemplate}
+              className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer p-0"
+            >
+              <Download size={14} aria-hidden="true" /> Download template CSV
+            </button>
+          </div>
+          <table className="w-full border-collapse text-xs">
+            <thead>
+              <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
+                <th className="py-1 pr-3 font-medium">Column</th>
+                <th className="py-1 pr-3 font-medium">Required</th>
+                <th className="py-1 font-medium">Notes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {template.columns.map((column) => (
+                <tr key={column.header} className="border-t border-[var(--border)]">
+                  <td className="py-1 pr-3">{column.header}</td>
+                  <td className="py-1 pr-3">{column.required ? 'Yes' : 'No'}</td>
+                  <td className="py-1 text-[var(--muted)]">{column.note}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">CSV file</span>

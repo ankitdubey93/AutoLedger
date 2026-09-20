@@ -9,15 +9,14 @@ import type { SeededUser } from './helpers/factories.js';
  * Phase 5's `verify:integrity` checker, exercised directly (not through the
  * CLI script — see `scripts/verifyIntegrity.ts` for why the two are split).
  *
- * Cases 3 and 4 manufacture the exact rows the schema's own triggers exist to
- * prevent, via `ALTER TABLE ... DISABLE TRIGGER USER`. This is the mandatory
- * proof from docs/roadmap.md that the checker "must be able to fail" — a
- * suite where it only ever passes has not actually tested it. `DISABLE
- * TRIGGER USER` turns off every user-defined trigger on the table (the
- * deferred balance trigger, the immutability trigger, the audit trigger, the
- * period-open guard), which is what makes the broken row insertable at all;
- * it is always re-enabled in a `finally`, because a test that leaves it
- * disabled would poison every later test in the file.
+ * Cases 3–5 manufacture the exact rows the schema's own triggers or
+ * constraints exist to prevent, via `ALTER TABLE ... DISABLE TRIGGER USER`
+ * (cases 3, 4) or `DISABLE TRIGGER ALL` (case 5, which needs to bypass a
+ * foreign key — enforced by an internal trigger, not a user one). This is
+ * the mandatory proof from docs/roadmap.md that the checker "must be able
+ * to fail" — a suite where it only ever passes has not actually tested it.
+ * Every DISABLE is re-enabled in a `finally`, because a test that leaves
+ * one off would poison every later test in the file.
  */
 
 let userA: SeededUser;
@@ -49,6 +48,7 @@ afterEach(async () => {
   // trigger off for the next test file in the run.
   await pool.query('ALTER TABLE journal_entries ENABLE TRIGGER USER');
   await pool.query('ALTER TABLE ledger_lines ENABLE TRIGGER USER');
+  await pool.query('ALTER TABLE bank_transactions ENABLE TRIGGER ALL');
 });
 
 afterAll(closePool);
@@ -58,7 +58,7 @@ describe('verify:integrity', () => {
     const report = await runIntegrityChecks();
 
     expect(report.passed).toBe(true);
-    expect(report.checks).toHaveLength(3);
+    expect(report.checks).toHaveLength(4);
     for (const check of report.checks) {
       expect(check.passed).toBe(true);
       expect(check.offenders).toEqual([]);
@@ -149,6 +149,48 @@ describe('verify:integrity', () => {
     } finally {
       await pool.query('ALTER TABLE journal_entries ENABLE TRIGGER USER');
       await pool.query('ALTER TABLE ledger_lines ENABLE TRIGGER USER');
+    }
+  });
+
+  it('fails when a bank line names a journal entry that does not exist (Phase 6.1)', async () => {
+    // fk_bank_txn_journal_entry (057) is what this check re-verifies from
+    // scratch, so manufacturing the violation means bypassing that FK —
+    // ALTER TABLE ... DISABLE TRIGGER ALL, not USER: a foreign key is
+    // enforced by an internal trigger, which DISABLE TRIGGER USER does not
+    // touch.
+    await pool.query('ALTER TABLE bank_transactions DISABLE TRIGGER ALL');
+    try {
+      const cashAccountId = await accountId(orgA, '1110');
+      const { rows: importRows } = await pool.query<{ id: string }>(
+        `INSERT INTO bank_statement_imports (org_id, account_id, file_name, date_format, delimiter, created_by)
+         VALUES ($1, $2, 'raw.csv', 'ISO', ',', $3) RETURNING id`,
+        [orgA, cashAccountId, userA.id],
+      );
+      const importId = importRows[0]?.id;
+      if (importId === undefined) throw new Error('fixture: no import id');
+
+      const bogusEntryId = '00000000-0000-0000-0000-000000000000';
+      const { rows: txnRows } = await pool.query<{ id: string }>(
+        `INSERT INTO bank_transactions
+           (org_id, import_id, account_id, txn_date, description, currency_code, amount_cents,
+            dedupe_hash, status, matched_journal_entry_id, matched_at, matched_by)
+         VALUES ($1, $2, $3, '2026-08-15', 'Orphaned journal ref', 'USD', -1000,
+                 'deadbeef00000000000000000000000000000000000000000000000000ff', 'MATCHED', $4, now(), $5)
+         RETURNING id`,
+        [orgA, importId, cashAccountId, bogusEntryId, userA.id],
+      );
+      const txnId = txnRows[0]?.id;
+      if (txnId === undefined) throw new Error('fixture: no bank transaction id');
+
+      const report = await runIntegrityChecks();
+
+      expect(report.passed).toBe(false);
+      const byName = Object.fromEntries(report.checks.map((c) => [c.name, c]));
+      expect(byName.bank_line_journal_entries_exist?.passed).toBe(false);
+      expect(byName.bank_line_journal_entries_exist?.offenders[0]?.orgId).toBe(orgA);
+      expect(byName.bank_line_journal_entries_exist?.offenders[0]?.subject).toBe(`bank_transactions/${txnId}`);
+    } finally {
+      await pool.query('ALTER TABLE bank_transactions ENABLE TRIGGER ALL');
     }
   });
 });

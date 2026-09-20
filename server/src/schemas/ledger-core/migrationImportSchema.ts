@@ -34,6 +34,15 @@ export const patchMigrationRowSchema = z
     description: z.string().trim().max(500).nullable().optional(),
     debitCents: z.int().min(0).max(1_000_000_000_000).optional(),
     creditCents: z.int().min(0).max(1_000_000_000_000).optional(),
+    // CUSTOMERS / VENDORS only (Phase 24). Limits mirror partyImportService's
+    // own truncation in parseCustomerRow.
+    partyName: z.string().trim().min(1).max(200).optional(),
+    partyEmail: z.string().trim().max(254).nullable().optional(),
+    partyPhone: z.string().trim().max(40).nullable().optional(),
+    partyAddress: z.string().trim().max(500).nullable().optional(),
+    partyTaxNumber: z.string().trim().max(64).nullable().optional(),
+    partyPaymentTerms: z.string().trim().max(500).nullable().optional(),
+    partyNotes: z.string().trim().max(1000).nullable().optional(),
     status: z.enum(['VALID', 'EXCLUDED']).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update' })

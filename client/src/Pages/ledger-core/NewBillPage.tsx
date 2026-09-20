@@ -7,9 +7,13 @@ import {
   getBill,
   getLatestFxRate,
   listAccounts,
+  listItems,
+  listPaymentTerms,
   listVendors,
   updateBill,
   type Account,
+  type Item,
+  type PaymentTerm,
   type ResolvedRate,
   type Vendor,
 } from '../../services/fetchServices';
@@ -36,6 +40,13 @@ const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED
  * A POSTED bill can never be edited (guardrails rule 6), so editing one here
  * refuses with a message instead of silently loading stale data into a form
  * that would post a lie.
+ *
+ * Phase 24 — the due date is derived from a chosen payment term rather than
+ * typed by hand, but stays overridable: `dueDateTouched` is set the moment
+ * the user edits the due date directly, and from then on the term-derived
+ * effect leaves it alone. Picking a catalogue item on a line copies its
+ * defaults into that line's fields once; the line never reads through to
+ * the item afterward, and every copied field stays editable.
  */
 
 interface DraftLine {
@@ -44,10 +55,11 @@ interface DraftLine {
   unitPrice: string;
   expenseAccountId: string;
   taxRate: string;
+  itemId: string;
 }
 
 function emptyLine(): DraftLine {
-  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '' };
+  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '', itemId: '' };
 }
 
 function today(): string {
@@ -55,6 +67,13 @@ function today(): string {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${String(now.getFullYear())}-${month}-${day}`;
+}
+
+function addDays(isoDate: string, days: number): string {
+  const [year, month, day] = isoDate.split('-').map(Number);
+  const date = new Date(Date.UTC(year ?? 2026, (month ?? 1) - 1, day ?? 1));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
 }
 
 /** unitPriceCents * quantityMilli / 1000, rounded half up — a preview, never what is saved. */
@@ -82,13 +101,16 @@ export default function NewBillPage() {
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
+  const [items, setItems] = useState<Item[]>([]);
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
 
   const [vendorId, setVendorId] = useState('');
   const [vendorReference, setVendorReference] = useState('');
   const [billDate, setBillDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
+  const [dueDateTouched, setDueDateTouched] = useState(false);
+  const [paymentTermsCode, setPaymentTermsCode] = useState('');
   const [currencyCode, setCurrencyCode] = useState(baseCurrency);
-  const [paymentTerms, setPaymentTerms] = useState('');
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
 
@@ -104,8 +126,13 @@ export default function NewBillPage() {
   useEffect(() => {
     let ignore = false;
 
-    Promise.all([listVendors({ includeInactive: false }), listAccounts()])
-      .then(([vendorsRes, accountsRes]) => {
+    Promise.all([
+      listVendors({ includeInactive: false }),
+      listAccounts(),
+      listItems({ includeInactive: false }),
+      listPaymentTerms(),
+    ])
+      .then(([vendorsRes, accountsRes, itemsRes, paymentTermsRes]) => {
         if (ignore) return;
         setVendors(vendorsRes.vendors);
         setExpenseAccounts(
@@ -113,9 +140,11 @@ export default function NewBillPage() {
             (a) => a.isPostable && (a.type === 'Expense' || a.type === 'Asset'),
           ),
         );
+        setItems(itemsRes.items);
+        setPaymentTerms(paymentTermsRes.paymentTerms);
       })
       .catch((err: unknown) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load bill data');
+        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load expense data');
       });
 
     return () => {
@@ -142,8 +171,9 @@ export default function NewBillPage() {
         setVendorReference(billId !== undefined ? bill.vendorReference : '');
         setBillDate(billId !== undefined ? bill.billDate : today());
         setDueDate(bill.dueDate);
+        setDueDateTouched(true);
+        setPaymentTermsCode(bill.paymentTermsCode ?? '');
         setCurrencyCode(bill.currencyCode);
-        setPaymentTerms(bill.paymentTerms ?? '');
         setNotes(bill.notes ?? '');
         setLines(
           bill.lines.map((line) => ({
@@ -152,13 +182,14 @@ export default function NewBillPage() {
             unitPrice: formatCents(line.unitPriceCents),
             expenseAccountId: line.expenseAccountId,
             taxRate: line.taxRateBp === 0 ? '' : formatRate(line.taxRateBp),
+            itemId: line.itemId ?? '',
           })),
         );
         setSeeded(true);
       })
       .catch((err: unknown) => {
         if (ignore) return;
-        setError(err instanceof Error ? err.message : 'Could not load the bill');
+        setError(err instanceof Error ? err.message : 'Could not load the expense');
         setSeeded(true);
       });
 
@@ -166,6 +197,16 @@ export default function NewBillPage() {
       ignore = true;
     };
   }, [billId, copyFrom, seeded]);
+
+  // Recomputes the due date whenever the term or the bill date changes,
+  // unless the user has edited the due date directly — an explicit edit
+  // always wins, matching the server's own resolution order.
+  useEffect(() => {
+    if (paymentTermsCode === '' || dueDateTouched || billDate === '') return;
+    const term = paymentTerms.find((t) => t.code === paymentTermsCode);
+    if (term === undefined) return;
+    setDueDate(addDays(billDate, term.netDays));
+  }, [paymentTermsCode, billDate, dueDateTouched, paymentTerms]);
 
   const totals = useMemo(() => {
     let subtotal = 0;
@@ -229,6 +270,30 @@ export default function NewBillPage() {
     setLines((current) => current.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
+  /**
+   * Picking an item COPIES its defaults into the line once — description,
+   * unit price, expense account, tax rate — and every field stays editable
+   * afterward. The line never reads through to the item again.
+   */
+  function applyItem(index: number, itemId: string) {
+    if (itemId === '') {
+      updateLine(index, { itemId: '' });
+      return;
+    }
+    const item = items.find((i) => i.id === itemId);
+    if (item === undefined) {
+      updateLine(index, { itemId });
+      return;
+    }
+    updateLine(index, {
+      itemId,
+      description: item.name,
+      unitPrice: formatCents(item.purchasePriceCents ?? 0),
+      expenseAccountId: item.expenseAccountId ?? '',
+      taxRate: item.purchaseTaxRateBp === 0 ? '' : formatRate(item.purchaseTaxRateBp),
+    });
+  }
+
   const complete =
     vendorId !== '' &&
     vendorReference.trim() !== '' &&
@@ -260,21 +325,23 @@ export default function NewBillPage() {
         dueDate,
         currencyCode,
         notes: notes.trim() === '' ? null : notes.trim(),
-        paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
+        paymentTerms: null,
+        paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
         lines: lines.map((line) => ({
           description: line.description.trim(),
           quantityMilli: parseQuantityInput(line.quantity) ?? 0,
           unitPriceCents: parseCentsInput(line.unitPrice) ?? 0,
           expenseAccountId: line.expenseAccountId,
           taxRateBp: line.taxRate.trim() === '' ? 0 : (parseRateInput(line.taxRate) ?? 0),
+          itemId: line.itemId === '' ? null : line.itemId,
         })),
       };
 
       const { bill } = billId === undefined ? await createBill(body) : await updateBill(billId, body);
 
-      navigate(`${base}/bills/${bill.id}`);
+      navigate(`${base}/expenses/${bill.id}`);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not save the bill');
+      setError(err instanceof Error ? err.message : 'Could not save the expense');
       setBusy(false);
     }
   }
@@ -282,23 +349,23 @@ export default function NewBillPage() {
   if (notEditable) {
     return (
       <section className="flex flex-col gap-3">
-        <BackLink to={`${base}/bills`} label="Back to bills" />
-        <p className="status status--bad">Only a draft or in-review bill can be edited.</p>
+        <BackLink to={`${base}/expenses`} label="Back to expenses" />
+        <p className="status status--bad">Only a draft or in-review expense can be edited.</p>
       </section>
     );
   }
 
   return (
     <section className="flex flex-col gap-4">
-      <BackLink to={`${base}/bills`} label="Back to bills" />
+      <BackLink to={`${base}/expenses`} label="Back to expenses" />
 
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         <header>
           <h2 className="text-lg font-semibold m-0">
-            {billId === undefined ? 'New bill' : 'Edit bill'}
+            {billId === undefined ? 'New expense' : 'Edit expense'}
           </h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            Saved as a draft. Submitting it for review, then approving it — from the bill page —
+            Saved as a draft. Submitting it for review, then approving it — from the expense page —
             posts a balanced journal entry.
           </p>
         </header>
@@ -333,7 +400,7 @@ export default function NewBillPage() {
 
         <div className="flex flex-wrap gap-3">
           <label className="flex flex-col gap-1 text-sm">
-            <span className="text-[var(--muted)]">Bill date</span>
+            <span className="text-[var(--muted)]">Expense date</span>
             <input
               type="date"
               value={billDate}
@@ -342,11 +409,32 @@ export default function NewBillPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Payment terms</span>
+            <select
+              value={paymentTermsCode}
+              onChange={(e) => {
+                setPaymentTermsCode(e.target.value);
+                setDueDateTouched(false);
+              }}
+              className={inputClass}
+            >
+              <option value="">Custom due date</option>
+              {paymentTerms.map((term) => (
+                <option key={term.id} value={term.code}>
+                  {term.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Due date</span>
             <input
               type="date"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={(e) => {
+                setDueDate(e.target.value);
+                setDueDateTouched(true);
+              }}
               className={inputClass}
             />
           </label>
@@ -380,25 +468,15 @@ export default function NewBillPage() {
         )}
 
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Payment terms</span>
-          <input
-            type="text"
-            value={paymentTerms}
-            onChange={(e) => setPaymentTerms(e.target.value)}
-            maxLength={500}
-            className={inputClass}
-          />
-        </label>
-
-        <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Notes</span>
           <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} />
         </label>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
-          <table className="w-full border-collapse text-sm min-w-[48rem]">
+          <table className="w-full border-collapse text-sm min-w-[56rem]">
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                <th className="p-3 font-medium w-40">Item</th>
                 <th className="p-3 font-medium">Description</th>
                 <th className="p-3 font-medium w-24 text-right">Qty</th>
                 <th className="p-3 font-medium w-28 text-right">Unit price</th>
@@ -418,6 +496,21 @@ export default function NewBillPage() {
 
                 return (
                   <tr key={index} className="border-t border-[var(--border)]">
+                    <td className="p-2">
+                      <select
+                        value={line.itemId}
+                        onChange={(e) => applyItem(index, e.target.value)}
+                        aria-label={`Item for line ${String(index + 1)}`}
+                        className={inputClass}
+                      >
+                        <option value="">Free text</option>
+                        {items.map((item) => (
+                          <option key={item.id} value={item.id}>
+                            {item.code} · {item.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="p-2">
                       <input
                         type="text"
@@ -489,7 +582,7 @@ export default function NewBillPage() {
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-[var(--border)]">
-                <td className="p-3" colSpan={7}>
+                <td className="p-3" colSpan={8}>
                   <button
                     type="button"
                     onClick={() => setLines((c) => [...c, emptyLine()])}
@@ -503,23 +596,25 @@ export default function NewBillPage() {
           </table>
         </div>
 
-        <div className="flex flex-col items-end gap-1 max-w-xs self-end text-sm">
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">Subtotal</span>
-            <span className="tabular-nums">{formatCents(totals.subtotal)}</span>
+        <div className="flex flex-col items-end gap-1.5 w-full max-w-sm self-end text-sm">
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">Subtotal</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(totals.subtotal)}</span>
           </div>
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">Tax</span>
-            <span className="tabular-nums">{formatCents(totals.tax)}</span>
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">Tax</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(totals.tax)}</span>
           </div>
-          <div className="flex justify-between w-full font-semibold border-t border-[var(--border)] pt-1">
-            <span>Total</span>
-            <span className="tabular-nums">{formatCents(totals.total)}</span>
+          <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">
+            <span className="min-w-0">Total</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(totals.total)}</span>
           </div>
           {currencyCode !== baseCurrency && resolvedRate !== null && (
-            <div className="flex justify-between w-full text-[var(--muted)]">
-              <span>≈ {baseCurrency}</span>
-              <span className="tabular-nums">{formatCents(Math.round(totals.total * Number(resolvedRate.rate)))}</span>
+            <div className="flex justify-between gap-6 w-full text-[var(--muted)]">
+              <span className="min-w-0">≈ {baseCurrency}</span>
+              <span className="tabular-nums whitespace-nowrap">
+                {formatCents(Math.round(totals.total * Number(resolvedRate.rate)))}
+              </span>
             </div>
           )}
         </div>

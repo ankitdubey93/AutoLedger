@@ -137,6 +137,8 @@ export async function preview(
     plugCents: 0,
     plugAccountCode: '3400',
     entryDate: null,
+    partiesToCreate: 0,
+    partiesToMerge: 0,
   };
 }
 

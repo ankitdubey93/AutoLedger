@@ -109,7 +109,7 @@ export default function BillsPage() {
       })
       .catch((err: unknown) => {
         if (ignore) return;
-        setError(err instanceof Error ? err.message : 'Could not load bills');
+        setError(err instanceof Error ? err.message : 'Could not load expenses');
         // Never leave a previous filter's results on screen under a failed one —
         // that reads as "this bill is in both tabs" instead of "this tab failed".
         setBills([]);
@@ -154,21 +154,21 @@ export default function BillsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Bills</h2>
+          <h2 className="text-lg font-semibold m-0">Expenses</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            Bills entered against vendors. Approving one posts a balanced journal entry; correcting one
+            Expenses entered against vendors. Approving one posts a balanced journal entry; correcting one
             means voiding it.
           </p>
         </div>
         <Link
-          to={`${base}/bills/new`}
+          to={`${base}/expenses/new`}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--text)] text-[var(--bg)]"
         >
-          <Plus size={15} /> New bill
+          <Plus size={15} /> New expense
         </Link>
       </header>
 
-      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Bill status">
+      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Expense status">
         {TABS.map((tab) => (
           <button
             key={tab.key}
@@ -206,10 +206,10 @@ export default function BillsPage() {
           {totalCount === 0 ? (
             <p className="muted">
               {activeTab !== 'all' || q !== '' ? (
-                'No bills match these filters.'
+                'No expenses match these filters.'
               ) : (
                 <>
-                  Nothing entered yet. <Link to={`${base}/bills/new`}>Create the first bill</Link>
+                  Nothing entered yet. <Link to={`${base}/expenses/new`}>Create the first expense</Link>
                 </>
               )}
             </p>
@@ -220,7 +220,7 @@ export default function BillsPage() {
                   <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
                     <th className="p-3 font-medium">Vendor</th>
                     <th className="p-3 font-medium">Reference</th>
-                    <th className="p-3 font-medium">Bill date</th>
+                    <th className="p-3 font-medium">Expense date</th>
                     <th className="p-3 font-medium">Due date</th>
                     <th className="p-3 font-medium">Status</th>
                     <th className="p-3 font-medium text-right">Total</th>
@@ -254,13 +254,13 @@ export default function BillsPage() {
                         <td className="p-3">
                           <div className="flex items-center justify-end gap-2">
                             <Link
-                              to={`${base}/bills/${bill.id}`}
+                              to={`${base}/expenses/${bill.id}`}
                               className="px-2 py-1 rounded-md text-xs no-underline text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)]"
                             >
                               View
                             </Link>
                             <Link
-                              to={`${base}/bills/new?copyFrom=${bill.id}`}
+                              to={`${base}/expenses/new?copyFrom=${bill.id}`}
                               className="px-2 py-1 rounded-md text-xs no-underline text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)]"
                             >
                               Duplicate

@@ -18,6 +18,8 @@ const STATUS_LABEL: Record<MigrationImport['status'], string> = {
 const KIND_LABEL: Record<MigrationImport['kind'], string> = {
   CHART_OF_ACCOUNTS: 'Chart of accounts',
   OPENING_BALANCES: 'Opening balances',
+  CUSTOMERS: 'Customers',
+  VENDORS: 'Vendors',
 };
 
 export default function MigrationImportsPage() {

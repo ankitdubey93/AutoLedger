@@ -147,18 +147,18 @@ export default function DashboardPage() {
         <div className="card">
           <p className="text-sm font-medium m-0 mb-3">This fiscal year</p>
           <dl className="flex flex-col gap-1.5 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Revenue</dt>
-              <dd className="m-0 tabular-nums">{formatCents(performance.yearToDate.revenueCents)}</dd>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.revenueCents)}</dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Expenses</dt>
-              <dd className="m-0 tabular-nums">{formatCents(performance.yearToDate.expenseCents)}</dd>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.expenseCents)}</dd>
             </div>
-            <div className="flex justify-between font-medium">
+            <div className="flex justify-between gap-4 font-medium">
               <dt>Net income</dt>
               <dd
-                className="m-0 tabular-nums flex items-center gap-1.5 justify-end"
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
                 style={{ color: performance.yearToDate.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
               >
                 {performance.yearToDate.netIncomeCents < 0 ? (
@@ -183,18 +183,18 @@ export default function DashboardPage() {
         <div className="card">
           <p className="text-sm font-medium m-0 mb-3">This month</p>
           <dl className="flex flex-col gap-1.5 text-sm">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Revenue</dt>
-              <dd className="m-0 tabular-nums">{formatCents(performance.currentMonth.revenueCents)}</dd>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.revenueCents)}</dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Expenses</dt>
-              <dd className="m-0 tabular-nums">{formatCents(performance.currentMonth.expenseCents)}</dd>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.expenseCents)}</dd>
             </div>
-            <div className="flex justify-between font-medium">
+            <div className="flex justify-between gap-4 font-medium">
               <dt>Net income</dt>
               <dd
-                className="m-0 tabular-nums flex items-center gap-1.5 justify-end"
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
                 style={{ color: performance.currentMonth.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
               >
                 {performance.currentMonth.netIncomeCents < 0 ? (
@@ -226,19 +226,19 @@ export default function DashboardPage() {
             <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
           </p>
           <dl className="flex flex-col gap-1 text-sm mt-3">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
                 <Link to={`${base}/invoices?status=ISSUED&settlement=OUTSTANDING`}>Awaiting payment</Link>
               </dt>
-              <dd className="m-0 tabular-nums">
+              <dd className="m-0 tabular-nums whitespace-nowrap">
                 {formatCents(receivables.outstandingCents - receivables.overdueCents)}
               </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
                 <Link to={`${base}/invoices?status=ISSUED&settlement=OVERDUE`}>Overdue</Link>
               </dt>
-              <dd className="m-0 tabular-nums" style={{ color: receivables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+              <dd className="m-0 tabular-nums whitespace-nowrap" style={{ color: receivables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
                 {formatCents(receivables.overdueCents)}
               </dd>
             </div>
@@ -263,40 +263,40 @@ export default function DashboardPage() {
         </div>
 
         <div className="card">
-          <p className="text-sm font-medium m-0 mb-1">Bills you need to pay</p>
+          <p className="text-sm font-medium m-0 mb-1">Expenses you need to pay</p>
           <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
             {formatCents(payables.outstandingCents)}{' '}
             <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
           </p>
           <dl className="flex flex-col gap-1 text-sm mt-3">
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
-                <Link to={`${base}/bills?status=POSTED&settlement=OUTSTANDING`}>Awaiting payment</Link>
+                <Link to={`${base}/expenses?status=POSTED&settlement=OUTSTANDING`}>Awaiting payment</Link>
               </dt>
-              <dd className="m-0 tabular-nums">
+              <dd className="m-0 tabular-nums whitespace-nowrap">
                 {formatCents(payables.outstandingCents - payables.overdueCents)}
               </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
-                <Link to={`${base}/bills?status=POSTED&settlement=OVERDUE`}>Overdue</Link>
+                <Link to={`${base}/expenses?status=POSTED&settlement=OVERDUE`}>Overdue</Link>
               </dt>
-              <dd className="m-0 tabular-nums" style={{ color: payables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+              <dd className="m-0 tabular-nums whitespace-nowrap" style={{ color: payables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
                 {formatCents(payables.overdueCents)}
               </dd>
             </div>
-            <div className="flex justify-between">
+            <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
-                <Link to={`${base}/bills?status=AWAITING_APPROVAL`}>To review</Link>
+                <Link to={`${base}/expenses?status=AWAITING_APPROVAL`}>To review</Link>
               </dt>
-              <dd className="m-0 tabular-nums">{formatCents(payables.awaitingReviewCents)}</dd>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(payables.awaitingReviewCents)}</dd>
             </div>
           </dl>
           <p className="text-xs text-[var(--muted)] m-0 mt-2">Bills entered but not yet approved.</p>
           {payables.draftCount > 0 && (
             <p className="text-xs text-[var(--muted)] m-0 mt-1">
-              <Link to={`${base}/bills?status=DRAFT`}>
-                {payables.draftCount} draft {payables.draftCount === 1 ? 'bill' : 'bills'}
+              <Link to={`${base}/expenses?status=DRAFT`}>
+                {payables.draftCount} draft {payables.draftCount === 1 ? 'expense' : 'expenses'}
               </Link>
             </p>
           )}

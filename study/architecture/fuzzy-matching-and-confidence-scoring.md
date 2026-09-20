@@ -3,7 +3,7 @@
 > A bank line either matches an invoice exactly, or it doesn't — but a human reconciling a statement by hand doesn't reject every near-miss, they glance at the amount, the date, the payer's name, and decide. Confidence scoring is the attempt to encode that glance as arithmetic, and the discipline that makes it trustworthy is storing *why* a score is what it is, not just the number.
 
 **Category:** Architecture
-**Introduced by:** Phase 6 — LedgerCore bank reconciliation's 40/30/30 matching engine (`utils/matchScore.ts`), built on a hand-written Levenshtein distance (`utils/levenshtein.ts`).
+**Introduced by:** Phase 6 — LedgerCore bank reconciliation's 40/30/30 matching engine (`utils/matchScore.ts`), built on a hand-written Levenshtein distance (`utils/levenshtein.ts`). Extended by Phase 6.1 — the third resolution for a scored line, posting a journal entry directly.
 
 ---
 
@@ -41,6 +41,12 @@ Every `ScoreComponent` carries `points`, `maxPoints`, and a human-readable `reas
 
 `AUTO_MATCH_THRESHOLD = 85` is the line above which a suggestion is offered for one-click accept; `SUGGESTION_MIN_SCORE = 40` is the line below which a candidate isn't even shown. These aren't symmetric risk decisions. Missing a genuine match below the threshold (a false negative) costs a user one extra click to confirm it by hand — annoying, recoverable. Auto-accepting a wrong match above the threshold (a false positive) posts a real payment against the wrong document, requiring a manual unmatch-and-reverse to undo — expensive, and exactly the kind of error a "confidence" feature exists to prevent, not cause. That asymmetry is why the threshold sits high (85 out of 100, not 60) and why the noise floor above exists at all: a scoring engine for financial reconciliation should be biased toward under-claiming confidence, not over-claiming it.
 
+### After the score: three resolutions, not two
+
+A scored line eventually leaves `UNMATCHED` one of three ways, and it is worth being precise about which, because two of the three look similar on screen but behave completely differently in the reconciliation report (`bankReconciliation()`, `reportService.ts`). **Match** posts a payment against a real invoice or bill — the ordinary case, when the score found a genuine counterpart document. **Post journal** (Phase 6.1) settles a line that genuinely moved cash but names no counterpart document at all — a bank fee, interest earned, an opening capital deposit — by posting a balanced two-line journal entry directly (`bankMatchService.postJournalForTransaction`), still through `journalService`, never a direct `ledger_lines` write. **Ignore** is for a line that should never reach the general ledger in the first place — a transfer to another of the organization's own accounts, say, which is real bank activity but not *this* organization's income or expense.
+
+The asymmetry that makes the distinction matter: `bankReconciliation()` sums every **non-`IGNORED`** statement line and compares that sum to the GL's own cash movement. A `MATCHED` or journal-posted line counts on both sides — its GL entry moved the cash account, and its statement line counts toward the statement total — so the two stay in step. An `IGNORED` line counts on **neither** side; it is invisible to the report by design. So a line that genuinely moved cash but gets `IGNORE`d instead of journaled silently breaks the reconciliation by exactly that amount, and a line that never should have reached the GL but gets journaled anyway breaks it the other way. The three-way choice is not a UI nicety — it is the input to an integer-equality invariant (`differenceCents === 0`, rule 3), and picking the wrong one of the three is picked up immediately, not eventually, because there is no tolerance for it to hide inside.
+
 ---
 
 ## Why we chose it here
@@ -59,7 +65,7 @@ Every `ScoreComponent` carries `points`, `maxPoints`, and a human-readable `reas
 
 - `server/src/utils/levenshtein.ts` — `levenshtein`, `similarity`, the rolling-array DP
 - `server/src/utils/matchScore.ts` — `scoreMatch`, `normalizeForMatching`, `AUTO_MATCH_THRESHOLD`, `SUGGESTION_MIN_SCORE`, `COUNTERPARTY_NOISE_FLOOR`
-- `server/src/services/ledger-core/bankMatchService.ts` — `generateSuggestionsOnClient`, which loads open-document candidates within a ±30-day window and calls `scoreMatch` against each
+- `server/src/services/ledger-core/bankMatchService.ts` — `generateSuggestionsOnClient`, which loads open-document candidates within a ±30-day window and calls `scoreMatch` against each; `matchTransaction`, `postJournalForTransaction` (Phase 6.1) and `setIgnored`, the three resolutions
 - `server/src/__tests__/levenshtein.test.ts`, `matchScore.test.ts` — known-distance pairs, symmetry, the noise-floor case
 - `server/src/__tests__/ledger-core/bankMatching.test.ts` — the 100-line acceptance fixture proving zero false positives above the auto-match threshold
 
@@ -93,6 +99,9 @@ A: `pg_trgm` is fast and index-backed, but it only gives you one signal — trig
 
 **Q: How would this change if you needed to match against thousands of open documents instead of a handful?**
 A: Right now every unmatched line is scored against every open document within a ±30-day window, which is fine at the scale a small business's monthly reconciliation actually needs. At real scale you'd want to prune candidates before scoring — an amount-bucketed index (documents grouped by rounded amount) would eliminate most non-matches before any string comparison runs at all, since the amount signal alone (`0` or `40` points) already rules out most candidates cheaply; only running the expensive Levenshtein comparison against candidates that already cleared an amount pre-filter would be the natural next optimization.
+
+**Q: What happens to a bank line that scores well below the threshold and genuinely has no matching document — say, a bank fee?**
+A: It has to leave `UNMATCHED` some other way, and there are two options that look similar but are not interchangeable: `IGNORE`, or — since Phase 6.1 — posting a journal entry directly from the line. The reconciliation report sums every non-`IGNORED` statement line and compares it to the GL's own cash movement, so an `IGNORED` line is invisible to that comparison on both sides, while a journal-posted line moves the GL and counts on the statement side too. A fee genuinely moved cash, so it has to be journaled, not ignored — ignoring it would leave the GL and the statement permanently out of step by the fee amount. `IGNORE` is for the opposite case: a line that's real bank activity but shouldn't touch this organization's books at all, like an internal transfer between two of its own accounts.
 
 ---
 

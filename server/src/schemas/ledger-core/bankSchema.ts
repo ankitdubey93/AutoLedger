@@ -51,3 +51,15 @@ export const matchBankTransactionSchema = z
   .refine((v) => [v.suggestionId, v.invoiceId, v.billId].filter((x) => x !== null).length === 1, {
     message: 'Name exactly one of suggestionId, invoiceId or billId',
   });
+
+/**
+ * Phase 6.1 — posting a journal entry directly from a bank line with no
+ * counterpart document. The amount and the date are deliberately absent:
+ * both come from the immutable bank line itself, never the request — taking
+ * either from the client would let a caller post an entry that does not
+ * correspond to the statement line it claims to settle.
+ */
+export const postBankLineJournalSchema = z.object({
+  accountId: z.uuid(),
+  description: z.string().trim().min(1).max(500).nullable().default(null),
+});

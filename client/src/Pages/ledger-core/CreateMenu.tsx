@@ -35,10 +35,11 @@ export default function CreateMenu() {
 
   const items = [
     { label: 'Invoice', to: `${base}/invoices/new` },
-    { label: 'Bill', to: `${base}/bills/new` },
+    { label: 'Expense', to: `${base}/expenses/new` },
     { label: 'Journal entry', to: `${base}/journals/new` },
     { label: 'Customer', to: `${base}/customers?new=1` },
     { label: 'Vendor', to: `${base}/vendors?new=1` },
+    { label: 'Item', to: `${base}/items?new=1` },
     { label: 'Account', to: `${base}/accounts?new=1` },
   ];
 
@@ -51,7 +52,7 @@ export default function CreateMenu() {
         onClick={() => setOpen((o) => !o)}
         className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
       >
-        <Plus size={15} aria-hidden="true" /> Create
+        <Plus size={15} aria-hidden="true" /> New
       </button>
 
       {open && (

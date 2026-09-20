@@ -7,6 +7,9 @@ import {
   ignoreBankTransaction,
   unignoreBankTransaction,
   rescoreBankTransaction,
+  postBankLineJournal,
+  listAccounts,
+  type Account,
   type BankTransaction,
   type BankTransactionStatus,
 } from '../../services/fetchServices';
@@ -56,6 +59,10 @@ export default function BankTransactionsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<PendingConfirm | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [postJournalOpenId, setPostJournalOpenId] = useState<string | null>(null);
+  const [postJournalAccountId, setPostJournalAccountId] = useState('');
+  const [postJournalDescription, setPostJournalDescription] = useState('');
 
   const status = (params.get('status') ?? '') as BankTransactionStatus | '';
   const q = params.get('q') ?? '';
@@ -85,6 +92,14 @@ export default function BankTransactionsPage() {
       ignore = true;
     };
   }, [status, q, page, reloadToken]);
+
+  useEffect(() => {
+    listAccounts()
+      .then((res) => setAccounts(res.accounts.filter((a) => a.isPostable && a.isActive)))
+      .catch(() => {
+        /* the post-journal panel simply shows no options; its own row error covers a submit failure */
+      });
+  }, []);
 
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(params);
@@ -119,6 +134,34 @@ export default function BankTransactionsPage() {
       void runAction(transactionId, () => matchBankTransaction(transactionId, { suggestionId, invoiceId: null, billId: null }));
     } else {
       setConfirm({ kind: 'match', transactionId, suggestionId });
+    }
+  }
+
+  function openPostJournal(txn: BankTransaction) {
+    setPostJournalOpenId(txn.id);
+    setPostJournalAccountId('');
+    setPostJournalDescription('');
+    setRowError(null);
+  }
+
+  async function submitPostJournal(txn: BankTransaction): Promise<void> {
+    if (postJournalAccountId === '') {
+      setRowError({ id: txn.id, message: 'Choose an account first' });
+      return;
+    }
+    setBusyId(txn.id);
+    setRowError(null);
+    try {
+      await postBankLineJournal(txn.id, {
+        accountId: postJournalAccountId,
+        description: postJournalDescription.trim() === '' ? null : postJournalDescription.trim(),
+      });
+      setPostJournalOpenId(null);
+      setReloadToken((t) => t + 1);
+    } catch (err: unknown) {
+      setRowError({ id: txn.id, message: err instanceof Error ? err.message : 'That action failed' });
+    } finally {
+      setBusyId(null);
     }
   }
 
@@ -214,6 +257,16 @@ export default function BankTransactionsPage() {
                           <button
                             type="button"
                             disabled={busy}
+                            onClick={() => openPostJournal(txn)}
+                            className="btn btn--ghost"
+                          >
+                            Post journal
+                          </button>
+                        )}
+                        {txn.status === 'UNMATCHED' && (
+                          <button
+                            type="button"
+                            disabled={busy}
                             onClick={() => void runAction(txn.id, () => ignoreBankTransaction(txn.id))}
                             className="btn btn--ghost"
                           >
@@ -229,6 +282,11 @@ export default function BankTransactionsPage() {
                           >
                             Un-ignore
                           </button>
+                        )}
+                        {txn.status === 'MATCHED' && txn.matchedJournalEntryId !== null && (
+                          <Link to={`${base}/journals/${txn.matchedJournalEntryId}`} className="btn btn--ghost no-underline">
+                            View entry
+                          </Link>
                         )}
                         {txn.status === 'MATCHED' && (
                           <button
@@ -254,6 +312,54 @@ export default function BankTransactionsPage() {
 
                     {rowError !== null && rowError.id === txn.id && (
                       <p className="status status--bad px-3 pb-2 m-0">{rowError.message}</p>
+                    )}
+
+                    {postJournalOpenId === txn.id && (
+                      <div className="border-t border-[var(--border)] p-3 flex flex-col gap-2">
+                        <p className="text-xs text-[var(--muted)] m-0">
+                          Money in debits the bank account; money out credits it. The other side lands on the
+                          account you pick.
+                        </p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <select
+                            value={postJournalAccountId}
+                            onChange={(e) => setPostJournalAccountId(e.target.value)}
+                            className={inputClass}
+                          >
+                            <option value="">Select an account…</option>
+                            {accounts
+                              .filter((a) => a.id !== txn.accountId)
+                              .map((a) => (
+                                <option key={a.id} value={a.id}>
+                                  {a.code} {a.name}
+                                </option>
+                              ))}
+                          </select>
+                          <input
+                            type="text"
+                            value={postJournalDescription}
+                            onChange={(e) => setPostJournalDescription(e.target.value)}
+                            placeholder={txn.description}
+                            className={`${inputClass} flex-1 min-w-40`}
+                          />
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void submitPostJournal(txn)}
+                            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+                          >
+                            Post
+                          </button>
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => setPostJournalOpenId(null)}
+                            className="btn btn--ghost"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
                     )}
 
                     {isExpanded && txn.suggestions.length > 0 && (

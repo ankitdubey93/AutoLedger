@@ -5,6 +5,7 @@ import { beginTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { slugify } from '../utils/validate.js';
 import { seedDefaultChart } from './ledger-core/accountService.js';
+import { seedStandardPaymentTerms } from './ledger-core/paymentTermService.js';
 import {
   accessTokenExpiry,
   hashRefreshToken,
@@ -311,6 +312,9 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
     // connection and commit immediately, leaving a chart of accounts behind for
     // an organization that the rollback erased (guardrails rule 5).
     await seedDefaultChart(client, orgId);
+    // Same client, same transaction (rule 5) — a fresh organization gets the
+    // seven standard payment terms alongside its chart of accounts.
+    await seedStandardPaymentTerms(client, orgId);
 
     const user = await loadUser(client, userId);
     await client.query('COMMIT');

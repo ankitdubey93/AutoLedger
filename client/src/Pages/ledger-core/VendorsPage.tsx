@@ -197,7 +197,7 @@ export default function VendorsPage() {
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold m-0">Vendors</h2>
-          <p className="text-sm text-[var(--muted)] m-0 mt-1">The parties bills are entered against.</p>
+          <p className="text-sm text-[var(--muted)] m-0 mt-1">The parties expenses are entered against.</p>
         </div>
         <button
           type="button"

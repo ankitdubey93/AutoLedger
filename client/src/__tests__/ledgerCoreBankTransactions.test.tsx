@@ -48,6 +48,7 @@ function transaction(overrides: Partial<BankTransaction> = {}): BankTransaction 
     amountCents: 40000,
     status: 'UNMATCHED',
     matchedPaymentId: null,
+    matchedJournalEntryId: null,
     matchedAt: null,
     matchedBy: null,
     matchedByName: null,
@@ -69,6 +70,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function account(overrides: Partial<import('../services/fetchServices').Account> = {}) {
+  return {
+    id: 'acc-6600',
+    code: '6600',
+    name: 'Bank Fees',
+    type: 'Expense' as const,
+    parentId: null,
+    isPostable: true,
+    isActive: true,
+    description: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
 function mockListRoutes(transactions: BankTransaction[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
@@ -84,8 +101,19 @@ function mockListRoutes(transactions: BankTransaction[]) {
         }),
       );
     }
+    if (url.includes('/ledger-core/accounts') && (init === undefined || init.method === undefined)) {
+      return Promise.resolve(jsonResponse(200, { success: true, accounts: [account()] }));
+    }
     if (init?.method === 'POST' && url.includes('/match')) {
       return Promise.resolve(jsonResponse(200, { success: true, transaction: transactions[0] }));
+    }
+    if (init?.method === 'POST' && url.includes('/post-journal')) {
+      return Promise.resolve(
+        jsonResponse(200, {
+          success: true,
+          transaction: { ...transactions[0], status: 'MATCHED', matchedJournalEntryId: 'je-1' },
+        }),
+      );
     }
     if (init?.method === 'POST' && url.includes('/unmatch')) {
       return Promise.resolve(jsonResponse(200, { success: true, transaction: transactions[0] }));
@@ -205,5 +233,40 @@ describe('BankTransactionsPage', () => {
     renderPage();
 
     await screen.findByText(/No bank lines yet/);
+  });
+
+  it('Post journal opens a panel and posts the chosen account to /post-journal', async () => {
+    mockListRoutes([transaction({ suggestions: [] })]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('PAYMENT RECEIVED INV-0001');
+    await user.click(screen.getByRole('button', { name: 'Post journal' }));
+
+    const select = await screen.findByRole('combobox');
+    await user.selectOptions(select, 'acc-6600');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => {
+        const [input, init] = c as [RequestInfo | URL, RequestInit?];
+        const url = typeof input === 'string' ? input : input.toString();
+        return init?.method === 'POST' && url.includes('/post-journal');
+      });
+      expect(call).toBeDefined();
+      const [, init] = call as [RequestInfo | URL, RequestInit];
+      expect(init.body as string).toContain('acc-6600');
+    });
+  });
+
+  it('a matched line settled by a journal entry shows a View entry link', async () => {
+    mockListRoutes([
+      transaction({ status: 'MATCHED', matchedPaymentId: null, matchedJournalEntryId: 'je-1', suggestions: [] }),
+    ]);
+    renderPage();
+
+    await screen.findByText('PAYMENT RECEIVED INV-0001');
+    const link = screen.getByRole('link', { name: 'View entry' });
+    expect(link.getAttribute('href')).toContain('je-1');
   });
 });

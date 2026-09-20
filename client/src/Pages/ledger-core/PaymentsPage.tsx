@@ -92,7 +92,7 @@ export default function PaymentsPage() {
       <header>
         <h2 className="text-lg font-semibold m-0">Payments</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
-          Every receipt and payment recorded against an invoice or a bill.
+          Every receipt and payment recorded against an invoice or an expense.
         </p>
       </header>
 

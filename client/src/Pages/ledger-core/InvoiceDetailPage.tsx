@@ -276,34 +276,34 @@ export default function InvoiceDetailPage() {
           </table>
         </div>
 
-        <div className="flex flex-col items-end gap-1 max-w-xs self-end text-sm">
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">Subtotal</span>
-            <span className="tabular-nums">{formatCents(invoice.subtotalCents)}</span>
+        <div className="flex flex-col items-end gap-1.5 w-full max-w-sm self-end text-sm">
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">Subtotal</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.subtotalCents)}</span>
           </div>
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">{settings?.taxLabel ?? 'Tax'}</span>
-            <span className="tabular-nums">{formatCents(invoice.taxCents)}</span>
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">{settings?.taxLabel ?? 'Tax'}</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.taxCents)}</span>
           </div>
-          <div className="flex justify-between w-full font-semibold border-t border-[var(--border)] pt-1">
-            <span>Total</span>
-            <span className="tabular-nums">{formatCents(invoice.totalCents)} {invoice.currencyCode}</span>
+          <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">
+            <span className="min-w-0">Total</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.totalCents)} {invoice.currencyCode}</span>
           </div>
           {ledgerSettings.status === 'ready' && invoice.currencyCode !== ledgerSettings.settings.baseCurrency && (
-            <div className="flex justify-between w-full text-[var(--muted)]">
-              <span>≈ {ledgerSettings.settings.baseCurrency} (at {invoice.fxRate})</span>
-              <span className="tabular-nums">{formatCents(invoice.baseTotalCents)}</span>
+            <div className="flex justify-between gap-6 w-full text-[var(--muted)]">
+              <span className="min-w-0">≈ {ledgerSettings.settings.baseCurrency} (at {invoice.fxRate})</span>
+              <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.baseTotalCents)}</span>
             </div>
           )}
           {invoice.status === 'ISSUED' && (
             <>
-              <div className="flex justify-between w-full">
-                <span className="text-[var(--muted)]">Paid</span>
-                <span className="tabular-nums">{formatCents(invoice.allocatedCents)}</span>
+              <div className="flex justify-between gap-6 w-full">
+                <span className="text-[var(--muted)] min-w-0">Paid</span>
+                <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.allocatedCents)}</span>
               </div>
-              <div className="flex justify-between w-full font-semibold">
-                <span>Amount due</span>
-                <span className="tabular-nums">{formatCents(invoice.amountDueCents)}</span>
+              <div className="flex justify-between gap-6 w-full font-semibold">
+                <span className="min-w-0">Amount due</span>
+                <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.amountDueCents)}</span>
               </div>
             </>
           )}

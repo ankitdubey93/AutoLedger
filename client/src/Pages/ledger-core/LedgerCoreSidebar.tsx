@@ -12,6 +12,7 @@ import {
   Landmark,
   LayoutDashboard,
   ListTree,
+  Package,
   ReceiptText,
   RefreshCw,
   Scale,
@@ -57,13 +58,14 @@ const NAV_GROUPS = [
     items: [
       { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
       { to: 'customers', label: 'Customers', icon: Users, end: false },
+      { to: 'items', label: 'Items & Services', icon: Package, end: false },
       { to: 'payments', label: 'Payments', icon: Banknote, end: false },
     ],
   },
   {
     heading: 'Purchases',
     items: [
-      { to: 'bills', label: 'Bills', icon: ReceiptText, end: false },
+      { to: 'expenses', label: 'Expenses', icon: ReceiptText, end: false },
       { to: 'vendors', label: 'Vendors', icon: Building2, end: false },
     ],
   },

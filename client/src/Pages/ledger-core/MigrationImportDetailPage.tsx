@@ -42,6 +42,10 @@ interface RowEdits {
   parentCode: string;
   debit: string;
   credit: string;
+  partyName: string;
+  partyEmail: string;
+  partyPhone: string;
+  partyTaxNumber: string;
 }
 
 function toEdits(row: MigrationImportRow): RowEdits {
@@ -52,6 +56,10 @@ function toEdits(row: MigrationImportRow): RowEdits {
     parentCode: row.parentCode ?? '',
     debit: row.debitCents !== null && row.debitCents > 0 ? formatCents(row.debitCents) : '',
     credit: row.creditCents !== null && row.creditCents > 0 ? formatCents(row.creditCents) : '',
+    partyName: row.partyName ?? '',
+    partyEmail: row.partyEmail ?? '',
+    partyPhone: row.partyPhone ?? '',
+    partyTaxNumber: row.partyTaxNumber ?? '',
   };
 }
 
@@ -108,6 +116,7 @@ export default function MigrationImportDetailPage() {
   // functions defined below, even though this check already ran.
   const id = importId;
   const isChart = imp.kind === 'CHART_OF_ACCOUNTS';
+  const isParty = imp.kind === 'CUSTOMERS' || imp.kind === 'VENDORS';
   const readOnly = imp.status === 'COMMITTED';
 
   async function saveRow(row: MigrationImportRow) {
@@ -122,6 +131,11 @@ export default function MigrationImportDetailPage() {
       body.accountName = edit.accountName.trim();
       if (edit.accountType !== '') body.accountType = edit.accountType;
       body.parentCode = edit.parentCode.trim() === '' ? null : edit.parentCode.trim();
+    } else if (isParty) {
+      body.partyName = edit.partyName.trim();
+      body.partyEmail = edit.partyEmail.trim() === '' ? null : edit.partyEmail.trim();
+      body.partyPhone = edit.partyPhone.trim() === '' ? null : edit.partyPhone.trim();
+      body.partyTaxNumber = edit.partyTaxNumber.trim() === '' ? null : edit.partyTaxNumber.trim();
     } else {
       body.accountCode = edit.accountCode.trim();
       const debitCents = parseCentsInput(edit.debit);
@@ -208,6 +222,11 @@ export default function MigrationImportDetailPage() {
               {preview.accountsToCreate} account{preview.accountsToCreate === 1 ? '' : 's'} will be created,{' '}
               {preview.accountsToMerge} merged into an existing account.
             </p>
+          ) : isParty ? (
+            <p className="text-sm m-0">
+              {preview.partiesToCreate} will be created, {preview.partiesToMerge} will be merged into existing
+              records.
+            </p>
           ) : preview.plugCents === 0 ? (
             <p className="text-sm m-0">This trial balance is already in balance — no plug will be posted.</p>
           ) : (
@@ -256,12 +275,19 @@ export default function MigrationImportDetailPage() {
           <thead>
             <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
               <th className="p-2 font-medium">Row</th>
-              <th className="p-2 font-medium">Code</th>
+              {!isParty && <th className="p-2 font-medium">Code</th>}
               {isChart ? (
                 <>
                   <th className="p-2 font-medium">Name</th>
                   <th className="p-2 font-medium">Type</th>
                   <th className="p-2 font-medium">Parent</th>
+                </>
+              ) : isParty ? (
+                <>
+                  <th className="p-2 font-medium">Name</th>
+                  <th className="p-2 font-medium">Email</th>
+                  <th className="p-2 font-medium">Phone</th>
+                  <th className="p-2 font-medium">Tax number</th>
                 </>
               ) : (
                 <>
@@ -280,18 +306,20 @@ export default function MigrationImportDetailPage() {
               return (
                 <tr key={row.id} className="border-t border-[var(--border)] align-top">
                   <td className="p-2">{row.rowNumber}</td>
-                  <td className="p-2">
-                    {readOnly ? (
-                      row.accountCode ?? '—'
-                    ) : (
-                      <input
-                        type="text"
-                        value={edit.accountCode}
-                        onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, accountCode: e.target.value } }))}
-                        className={inputClass}
-                      />
-                    )}
-                  </td>
+                  {!isParty && (
+                    <td className="p-2">
+                      {readOnly ? (
+                        row.accountCode ?? '—'
+                      ) : (
+                        <input
+                          type="text"
+                          value={edit.accountCode}
+                          onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, accountCode: e.target.value } }))}
+                          className={inputClass}
+                        />
+                      )}
+                    </td>
+                  )}
                   {isChart ? (
                     <>
                       <td className="p-2">
@@ -332,6 +360,57 @@ export default function MigrationImportDetailPage() {
                             type="text"
                             value={edit.parentCode}
                             onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, parentCode: e.target.value } }))}
+                            className={inputClass}
+                          />
+                        )}
+                      </td>
+                    </>
+                  ) : isParty ? (
+                    <>
+                      <td className="p-2">
+                        {readOnly ? (
+                          row.partyName ?? '—'
+                        ) : (
+                          <input
+                            type="text"
+                            value={edit.partyName}
+                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyName: e.target.value } }))}
+                            className={inputClass}
+                          />
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {readOnly ? (
+                          row.partyEmail ?? '—'
+                        ) : (
+                          <input
+                            type="text"
+                            value={edit.partyEmail}
+                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyEmail: e.target.value } }))}
+                            className={inputClass}
+                          />
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {readOnly ? (
+                          row.partyPhone ?? '—'
+                        ) : (
+                          <input
+                            type="text"
+                            value={edit.partyPhone}
+                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyPhone: e.target.value } }))}
+                            className={inputClass}
+                          />
+                        )}
+                      </td>
+                      <td className="p-2">
+                        {readOnly ? (
+                          row.partyTaxNumber ?? '—'
+                        ) : (
+                          <input
+                            type="text"
+                            value={edit.partyTaxNumber}
+                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyTaxNumber: e.target.value } }))}
                             className={inputClass}
                           />
                         )}

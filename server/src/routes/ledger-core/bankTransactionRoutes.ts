@@ -6,9 +6,9 @@ import { requireRole } from '../../middleware/rbac.js';
 /**
  * /api/v1/ledger-core/bank-transactions — see docs/api.md.
  *
- * Reading is open to any member. Every mutation (rescore, match, unmatch,
- * ignore, unignore) takes ACCOUNTANT or above, matching /payments — match
- * and unmatch each post or void a real GL entry.
+ * Reading is open to any member. Every mutation (rescore, match, post-journal,
+ * unmatch, ignore, unignore) takes ACCOUNTANT or above, matching /payments —
+ * match, post-journal and unmatch each post or void a real GL entry.
  *
  * There is no PATCH and no DELETE.
  */
@@ -28,6 +28,12 @@ router.post(
   authenticate,
   requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
   bankTransactionController.match,
+);
+router.post(
+  '/:id/post-journal',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  bankTransactionController.postJournal,
 );
 router.post(
   '/:id/unmatch',

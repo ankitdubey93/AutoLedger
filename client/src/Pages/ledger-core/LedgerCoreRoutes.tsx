@@ -22,6 +22,8 @@ import NewInvoicePage from './NewInvoicePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
 import CustomersPage from './CustomersPage';
 import InvoiceSettingsPage from './InvoiceSettingsPage';
+import PaymentTermsSettingsPage from './PaymentTermsSettingsPage';
+import ItemsPage from './ItemsPage';
 import VendorsPage from './VendorsPage';
 import BillsPage from './BillsPage';
 import NewBillPage from './NewBillPage';
@@ -92,7 +94,15 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
           <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
           <Route path="invoices/:invoiceId/edit" element={<NewInvoicePage />} />
           <Route path="customers" element={<CustomersPage />} />
+          <Route path="items" element={<ItemsPage />} />
           <Route path="vendors" element={<VendorsPage />} />
+          {/* "Expenses" is the current UI label for this document (Phase 24) — the
+              /bills/* paths are kept as aliases so existing links and bookmarks
+              keep working; the schema, API and types all still say "bills". */}
+          <Route path="expenses" element={<BillsPage />} />
+          <Route path="expenses/new" element={<NewBillPage />} />
+          <Route path="expenses/:billId" element={<BillDetailPage />} />
+          <Route path="expenses/:billId/edit" element={<NewBillPage />} />
           <Route path="bills" element={<BillsPage />} />
           <Route path="bills/new" element={<NewBillPage />} />
           <Route path="bills/:billId" element={<BillDetailPage />} />
@@ -113,6 +123,7 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
           <Route path="migration-imports/:importId" element={<MigrationImportDetailPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />
+          <Route path="settings/payment-terms" element={<PaymentTermsSettingsPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}
           <Route path="*" element={<Navigate to={base} replace />} />
         </Routes>

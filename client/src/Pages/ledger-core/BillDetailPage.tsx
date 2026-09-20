@@ -72,7 +72,7 @@ export default function BillDetailPage() {
         if (err instanceof ApiRequestError && err.status === 404) {
           setNotFound(true);
         } else {
-          setError(err instanceof Error ? err.message : 'Could not load the bill');
+          setError(err instanceof Error ? err.message : 'Could not load the expense');
         }
       });
 
@@ -89,7 +89,7 @@ export default function BillDetailPage() {
       const { bill: updated } = await submitBill(bill.id);
       setBill(updated);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not submit the bill');
+      setError(err instanceof Error ? err.message : 'Could not submit the expense');
     } finally {
       setBusy(false);
     }
@@ -103,7 +103,7 @@ export default function BillDetailPage() {
       const { bill: updated } = await approveBill(bill.id);
       setBill(updated);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not approve the bill');
+      setError(err instanceof Error ? err.message : 'Could not approve the expense');
     } finally {
       setBusy(false);
     }
@@ -117,7 +117,7 @@ export default function BillDetailPage() {
       const { bill: updated } = await voidBill(bill.id);
       setBill(updated);
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not void the bill');
+      setError(err instanceof Error ? err.message : 'Could not void the expense');
     } finally {
       setBusy(false);
     }
@@ -126,8 +126,8 @@ export default function BillDetailPage() {
   if (notFound) {
     return (
       <section className="flex flex-col gap-3">
-        <BackLink to={`${base}/bills`} label="Back to bills" />
-        <p className="status status--bad">Bill not found.</p>
+        <BackLink to={`${base}/expenses`} label="Back to expenses" />
+        <p className="status status--bad">Expense not found.</p>
       </section>
     );
   }
@@ -136,7 +136,7 @@ export default function BillDetailPage() {
     return (
       <div className="shell" aria-busy="true">
         <div className="skeleton skeleton--title" />
-        <span className="visually-hidden">Loading bill…</span>
+        <span className="visually-hidden">Loading expense…</span>
       </div>
     );
   }
@@ -145,7 +145,7 @@ export default function BillDetailPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <BackLink to={`${base}/bills`} label="Back to bills" />
+      <BackLink to={`${base}/expenses`} label="Back to expenses" />
 
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
@@ -155,7 +155,7 @@ export default function BillDetailPage() {
         <div className="flex items-center gap-2">
           {(bill.status === 'DRAFT' || bill.status === 'AWAITING_APPROVAL') && (
             <Link
-              to={`${base}/bills/${bill.id}/edit`}
+              to={`${base}/expenses/${bill.id}/edit`}
               className="px-3 py-1.5 rounded-md text-sm no-underline text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)]"
             >
               Edit
@@ -222,7 +222,7 @@ export default function BillDetailPage() {
           </div>
           <div className="text-right">
             <p className="text-lg font-semibold m-0">{bill.vendorReference}</p>
-            <p className="text-sm text-[var(--muted)] m-0">Bill date {bill.billDate}</p>
+            <p className="text-sm text-[var(--muted)] m-0">Expense date {bill.billDate}</p>
             <p className="text-sm text-[var(--muted)] m-0">Due {bill.dueDate}</p>
           </div>
         </div>
@@ -263,34 +263,34 @@ export default function BillDetailPage() {
           </table>
         </div>
 
-        <div className="flex flex-col items-end gap-1 max-w-xs self-end text-sm">
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">Subtotal</span>
-            <span className="tabular-nums">{formatCents(bill.subtotalCents)}</span>
+        <div className="flex flex-col items-end gap-1.5 w-full max-w-sm self-end text-sm">
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">Subtotal</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(bill.subtotalCents)}</span>
           </div>
-          <div className="flex justify-between w-full">
-            <span className="text-[var(--muted)]">Tax</span>
-            <span className="tabular-nums">{formatCents(bill.taxCents)}</span>
+          <div className="flex justify-between gap-6 w-full">
+            <span className="text-[var(--muted)] min-w-0">Tax</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(bill.taxCents)}</span>
           </div>
-          <div className="flex justify-between w-full font-semibold border-t border-[var(--border)] pt-1">
-            <span>Total</span>
-            <span className="tabular-nums">{formatCents(bill.totalCents)} {bill.currencyCode}</span>
+          <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">
+            <span className="min-w-0">Total</span>
+            <span className="tabular-nums whitespace-nowrap">{formatCents(bill.totalCents)} {bill.currencyCode}</span>
           </div>
           {ledgerSettings.status === 'ready' && bill.currencyCode !== ledgerSettings.settings.baseCurrency && (
-            <div className="flex justify-between w-full text-[var(--muted)]">
-              <span>≈ {ledgerSettings.settings.baseCurrency} (at {bill.fxRate})</span>
-              <span className="tabular-nums">{formatCents(bill.baseTotalCents)}</span>
+            <div className="flex justify-between gap-6 w-full text-[var(--muted)]">
+              <span className="min-w-0">≈ {ledgerSettings.settings.baseCurrency} (at {bill.fxRate})</span>
+              <span className="tabular-nums whitespace-nowrap">{formatCents(bill.baseTotalCents)}</span>
             </div>
           )}
           {bill.status === 'POSTED' && (
             <>
-              <div className="flex justify-between w-full">
-                <span className="text-[var(--muted)]">Paid</span>
-                <span className="tabular-nums">{formatCents(bill.allocatedCents)}</span>
+              <div className="flex justify-between gap-6 w-full">
+                <span className="text-[var(--muted)] min-w-0">Paid</span>
+                <span className="tabular-nums whitespace-nowrap">{formatCents(bill.allocatedCents)}</span>
               </div>
-              <div className="flex justify-between w-full font-semibold">
-                <span>Amount due</span>
-                <span className="tabular-nums">{formatCents(bill.amountDueCents)}</span>
+              <div className="flex justify-between gap-6 w-full font-semibold">
+                <span className="min-w-0">Amount due</span>
+                <span className="tabular-nums whitespace-nowrap">{formatCents(bill.amountDueCents)}</span>
               </div>
             </>
           )}
@@ -357,9 +357,9 @@ export default function BillDetailPage() {
 
       {confirmAction === 'approve' && (
         <ConfirmDialog
-          title="Approve this bill?"
-          body="This posts a balanced journal entry against your payable account. A posted bill can never be edited — only voided."
-          confirmLabel="Approve bill"
+          title="Approve this expense?"
+          body="This posts a balanced journal entry against your payable account. A posted expense can never be edited — only voided."
+          confirmLabel="Approve expense"
           tone="default"
           busy={busy}
           onConfirm={() => {
@@ -371,9 +371,9 @@ export default function BillDetailPage() {
       )}
       {confirmAction === 'void' && (
         <ConfirmDialog
-          title="Void this bill?"
-          body="This posts a reversing journal entry and marks the bill void. It cannot be undone."
-          confirmLabel="Void bill"
+          title="Void this expense?"
+          body="This posts a reversing journal entry and marks the expense void. It cannot be undone."
+          confirmLabel="Void expense"
           tone="danger"
           busy={busy}
           onConfirm={() => {

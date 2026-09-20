@@ -1,0 +1,12 @@
+# Customers to enter
+
+Enter each of these as a new customer before raising any invoice.
+
+| Name | Email | Phone | Address |
+|---|---|---|---|
+| Brightline Analytics | ap@brightlineanalytics.example | +1-555-0512 | 88 Insight Plaza, Austin, TX 78701 |
+| Kestrel Logistics | payables@kestrellogistics.example | +1-555-0523 | 4400 Freight Yard Rd, Memphis, TN 38118 |
+| Ferrous Works Ltd | ap@ferrousworks.example | +1-555-0537 | 19 Millwright Ave, Pittsburgh, PA 15222 |
+| Novato Health Systems | finance@novatohealth.example | +1-555-0548 | 710 Wellness Blvd, Novato, CA 94945 |
+| Orchid Media Group | accounting@orchidmedia.example | +1-555-0561 | 52 Studio Row, Burbank, CA 91502 |
+| Pinnacle Robotics | ap@pinnaclerobotics.example | +1-555-0579 | 3 Actuator Court, San Jose, CA 95110 |

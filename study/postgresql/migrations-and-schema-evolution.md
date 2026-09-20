@@ -137,6 +137,24 @@ ALTER TABLE integration_drive_connections ADD  CONSTRAINT chk_..._auth_payload C
 
 `DROP CONSTRAINT IF EXISTS` tolerates the constraint already being gone (a second run of this same migration); the `ADD` is guarded separately if there's any chance of colliding with a constraint of the same new name already present. Two statements, two independent existence checks, rather than one statement trying to be both at once.
 
+### Widening a CHECK to add a second legal shape, and the XOR idiom
+
+Phase 6.1 needed the same drop-then-add swap for a different reason: not renaming the constraint, but widening what it accepts. `bank_transactions` previously had exactly one way to be `MATCHED` — a payment id set, everything else about the match state following from that. Adding a second way (a directly-posted journal entry, `matched_journal_entry_id`) meant the old CHECK — which hard-coded "payment id present" as part of "matched" — had to become "**exactly one** of these two columns is present," not "both may now be present" and not "either constraint, OR'd."
+
+```sql
+ALTER TABLE bank_transactions DROP CONSTRAINT IF EXISTS chk_bank_txn_matched_fields;
+ALTER TABLE bank_transactions ADD CONSTRAINT chk_bank_txn_matched_fields CHECK (
+  (status = 'MATCHED' AND (matched_payment_id IS NULL) <> (matched_journal_entry_id IS NULL))
+  OR (status <> 'MATCHED' AND matched_payment_id IS NULL AND matched_journal_entry_id IS NULL)
+);
+```
+
+`(matched_payment_id IS NULL) <> (matched_journal_entry_id IS NULL)` is exclusive-or over two booleans — SQL has no `XOR` keyword, but `<>` between two `boolean` expressions is exactly that: true when they differ, which is true precisely when one is `NULL` and the other is not. The alternative shapes are both worse. A `match_type` discriminator column (`'payment'` / `'journal'`) plus two nullable FKs is more self-documenting but adds a column and a second thing that can disagree with the two match-target columns it's meant to describe — the CHECK still has to tie all three together, so the discriminator buys clarity at the cost of a third fact to keep consistent, not less to check. Enforcing "exactly one" only in the service layer and dropping the database-level CHECK entirely would be strictly worse: it is exactly the class of invariant guardrails rule 7 exists to keep out of "trust the application," proven by the raw-SQL constraint tests in `bankConstraints.test.ts` that insert directly against the pool and expect the database itself to refuse the row, service code never in the loop at all.
+
+**`ADD CONSTRAINT` validates every existing row by default**, a full sequential scan under a lock that blocks writes for its duration — fine for a small table, a real concern for one with rows already in production. PostgreSQL 9.2+ offers an escape: `ADD CONSTRAINT ... CHECK (...) NOT VALID` skips that initial scan (existing rows are simply trusted, not checked), and a later `VALIDATE CONSTRAINT` — which takes a lighter lock and only requires that no concurrent writer produce a *new* violating row while it scans — closes the gap without blocking writes the whole time. This migration did not need that: `bank_transactions` had rows, but every one of them already satisfied the new CHECK (existing `MATCHED` rows all had a payment id and no journal-entry id, which is one of the two now-legal shapes), so a full immediate validation was cheap and there was no reason to leave the gap `NOT VALID` opens.
+
+**A CHECK constraint can collide with an FK's own cascade action**, a trap this codebase hit once already (migration 056, unrelated table): an `ON DELETE SET NULL` foreign key nulls a column as its cascade side effect, and Postgres re-validates every CHECK against the row that cascade produces — so a CHECK that assumed "this column is only ever nulled by the application" can be violated by the database's own FK enforcement instead. `fk_bank_txn_journal_entry` here is `ON DELETE RESTRICT`, not `SET NULL`, specifically so this migration's own CHECK can't be caught by the same trap — a bank line's counterpart journal entry can never silently disappear out from under it the way that a duplicate-document pointer could.
+
 ---
 
 ## Why we chose it here
@@ -155,6 +173,8 @@ ALTER TABLE integration_drive_connections ADD  CONSTRAINT chk_..._auth_payload C
 - `server/src/db/reset.ts` — dev-only `DROP SCHEMA public CASCADE`, refuses under `NODE_ENV=production`
 - `server/src/db/migrations/001_organizations_and_users.sql`
 - `server/src/db/migrations/053_platform_drive_integration.sql` — the guarded `ALTER TABLE ... RENAME`, driven from `pg_constraint`/`pg_index` catalog loops so every auto-generated constraint and index name is renamed without being hand-listed and risking a guessed name being wrong
+- `server/src/db/migrations/057_ledger-core_bank_line_journal.sql` — the XOR CHECK swap: `bank_transactions` gains a second legal "matched" shape without a discriminator column
+- `server/src/db/migrations/056_ap-flow_duplicate_check_relax.sql` — the CHECK-vs-FK-cascade collision, on a different table
 - `server/src/__tests__/migrations.test.ts` — idempotency, the checksum guard, and every constraint the migration claims to create
 - `server/package.json` — `migrate`, `db:reset`, and the `.sql` copy step in `build`
 
@@ -190,6 +210,12 @@ A: The first run of migration 001 failed with `column "expires_at" does not exis
 
 **Q: How do you rename a table under a rule that says an applied migration can never be edited?**
 A: The rule protects the *file*, not the table's name forever — you write the rename in a brand-new migration, as `ALTER TABLE ... RENAME`, and leave the original `CREATE TABLE` migration untouched and still checksum-valid. Two things need explicit handling that are easy to miss. First, `RENAME` has no `IF NOT EXISTS` form, so making it idempotent means hand-rolling the guard with `to_regclass` — check the old name still resolves and the new one doesn't yet, inside a `DO` block, so a second run of the same migration file is a no-op instead of an error. Second, and the one that actually causes drift if you skip it: Postgres renames *only* the table. Every constraint, index and trigger it carries keeps its old name, still attached, forever, unless you rename those explicitly too — I drove that from a catalog query (`pg_constraint`/`pg_index` filtered by the old name pattern) rather than hand-listing names, because several of them were Postgres-auto-generated (`..._pkey`, `..._check`) and guessing one wrong fails the whole migration.
+
+**Q: How do you widen a CHECK constraint to accept a second legal case, without breaking the rule that an applied migration can't be edited?**
+A: Same drop-then-add idiom as a rename, in a new migration: `DROP CONSTRAINT IF EXISTS` followed by `ADD CONSTRAINT` with the same name but a wider definition. The interesting part is *how* it widens. A bank line used to be "matched" only by having a payment id set; I needed a second way — a directly-posted journal entry — without letting a row claim both or neither. That's exclusive-or, and SQL has no `XOR` keyword, but `<>` between two boolean expressions gives you exactly that: `(a IS NULL) <> (b IS NULL)` is true exactly when one is null and the other isn't. I rejected a `match_type` discriminator column for the same reason I'd reject denormalizing anything else that has to stay in sync with two other columns — it's a third fact that can disagree with the two it's describing, not less to check. And I rejected enforcing "exactly one" only in application code, full stop — that's precisely the invariant a database CHECK exists to guarantee regardless of which code path wrote the row, and I have raw-SQL tests that insert straight against the pool to prove the database catches it even when no service function is involved.
+
+**Q: Does `ADD CONSTRAINT` block writes on a big table, and how would you avoid that?**
+A: By default, yes — it validates every existing row under a lock that blocks writes for the duration, a full sequential scan. PostgreSQL gives you an escape: `ADD CONSTRAINT ... NOT VALID` skips that initial scan and trusts existing rows, then a separate `VALIDATE CONSTRAINT` does the check later under a much lighter lock that only has to guarantee no new violating row shows up mid-scan. I didn't need it for this particular constraint — the table had rows, but every one already satisfied the new, wider CHECK, so an immediate full validation was cheap — but it's the right tool the moment "every existing row already qualifies" isn't true, or the table is too large to lock even briefly.
 
 ## Follow-ups they'll dig into
 

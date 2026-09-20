@@ -709,6 +709,114 @@ export function updateCustomer(
   return apiFetch(`/ledger-core/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+/** Mirrors server/src/types/ledger-core.ts's PaymentTerm. */
+export interface PaymentTerm {
+  id: string;
+  code: string;
+  name: string;
+  netDays: number;
+  isSystem: boolean;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /ledger-core/payment-terms */
+export function listPaymentTerms(
+  params: { includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; paymentTerms: PaymentTerm[] }> {
+  const query = new URLSearchParams();
+  if (params.includeInactive === true) query.set('includeInactive', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/payment-terms${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/payment-terms */
+export function createPaymentTerm(body: {
+  code: string;
+  name: string;
+  netDays: number;
+}): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
+  return apiFetch('/ledger-core/payment-terms', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/payment-terms/:id */
+export function updatePaymentTerm(
+  id: string,
+  body: Partial<{ name: string; netDays: number; isActive: boolean }>,
+): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
+  return apiFetch(`/ledger-core/payment-terms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** Mirrors server/src/types/ledger-core.ts's ItemKind. */
+export type ItemKind = 'SERVICE' | 'GOODS';
+
+/** Mirrors server/src/types/ledger-core.ts's Item. */
+export interface Item {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  kind: ItemKind;
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  expenseAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** GET /ledger-core/items */
+export function listItems(
+  params: { q?: string; kind?: ItemKind; includeInactive?: boolean } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; items: Item[] }> {
+  const query = new URLSearchParams();
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.kind !== undefined) query.set('kind', params.kind);
+  if (params.includeInactive === true) query.set('includeInactive', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/items${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/items */
+export function createItem(body: {
+  code: string;
+  name: string;
+  description: string | null;
+  kind: ItemKind;
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  expenseAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+}): Promise<{ success: boolean; item: Item }> {
+  return apiFetch('/ledger-core/items', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/items/:id */
+export function updateItem(
+  id: string,
+  body: Partial<{
+    name: string;
+    description: string | null;
+    salePriceCents: number | null;
+    purchasePriceCents: number | null;
+    revenueAccountId: string | null;
+    expenseAccountId: string | null;
+    saleTaxRateBp: number;
+    purchaseTaxRateBp: number;
+    isActive: boolean;
+  }>,
+): Promise<{ success: boolean; item: Item }> {
+  return apiFetch(`/ledger-core/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
 /** Mirrors server/src/types/ledger-core.ts's InvoiceLine. */
 export interface InvoiceLine {
   id: string;
@@ -722,6 +830,8 @@ export interface InvoiceLine {
   taxRateBp: number;
   netCents: number;
   taxCents: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
@@ -744,6 +854,7 @@ export interface Invoice {
   customerTaxNumberSnapshot: string | null;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
@@ -819,16 +930,20 @@ export interface InvoiceLineInput {
   unitPriceCents: number;
   revenueAccountId: string;
   taxRateBp: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export interface InvoiceInput {
   customerId: string;
   issueDate: string;
-  dueDate: string;
+  /** Omitted when paymentTermsCode is set — the server derives it. */
+  dueDate?: string;
   /** Phase 8. Omitted means the organization's base currency. */
   currencyCode?: string;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   lines: InvoiceLineInput[];
 }
 
@@ -988,6 +1103,8 @@ export interface BillLine {
   taxRateBp: number;
   netCents: number;
   taxCents: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export type BillStatus = 'DRAFT' | 'AWAITING_APPROVAL' | 'POSTED' | 'VOID';
@@ -1007,6 +1124,7 @@ export interface Bill {
   vendorTaxNumberSnapshot: string | null;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
@@ -1080,17 +1198,21 @@ export interface BillLineInput {
   unitPriceCents: number;
   expenseAccountId: string;
   taxRateBp: number;
+  /** Phase 24 — which item catalogue entry this line was picked from, if any. */
+  itemId: string | null;
 }
 
 export interface BillInput {
   vendorId: string;
   vendorReference: string;
   billDate: string;
-  dueDate: string;
+  /** Omitted when paymentTermsCode is set — the server derives it. */
+  dueDate?: string;
   /** Phase 8. Omitted means the organization's base currency. */
   currencyCode?: string;
   notes: string | null;
   paymentTerms: string | null;
+  paymentTermsCode: string | null;
   lines: BillLineInput[];
 }
 
@@ -1586,6 +1708,8 @@ export interface BankTransaction {
   amountCents: number;
   status: BankTransactionStatus;
   matchedPaymentId: string | null;
+  /** Set instead of matchedPaymentId when the line was settled by a posted journal entry. */
+  matchedJournalEntryId: string | null;
   matchedAt: string | null;
   matchedBy: string | null;
   matchedByName: string | null;
@@ -1729,6 +1853,22 @@ export function matchBankTransaction(
   body: MatchBankTransactionInput,
 ): Promise<{ success: boolean; transaction: BankTransaction }> {
   return apiFetch(`/ledger-core/bank-transactions/${id}/match`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export interface PostBankLineJournalInput {
+  accountId: string;
+  description: string | null;
+}
+
+/** POST /ledger-core/bank-transactions/:id/post-journal — posts a GL entry for a line with no counterpart document. */
+export function postBankLineJournal(
+  id: string,
+  body: PostBankLineJournalInput,
+): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/ledger-core/bank-transactions/${id}/post-journal`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 /** POST /ledger-core/bank-transactions/:id/unmatch — voids the payment the match created. */
@@ -2172,7 +2312,7 @@ export async function resumeOnboarding(appSlug: string): Promise<OnboardingState
 
 /* ---------------------------------------------- ledger-core: migration imports (9b) */
 
-export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES';
+export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS';
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
 
@@ -2206,6 +2346,14 @@ export interface MigrationImportRow {
   description: string | null;
   debitCents: number | null;
   creditCents: number | null;
+  /** CUSTOMERS and VENDORS only. */
+  partyName: string | null;
+  partyEmail: string | null;
+  partyPhone: string | null;
+  partyAddress: string | null;
+  partyTaxNumber: string | null;
+  partyPaymentTerms: string | null;
+  partyNotes: string | null;
   errors: string[];
   status: MigrationRowStatus;
 }
@@ -2223,11 +2371,15 @@ export interface MigrationCommitPreview {
   plugCents: number;
   plugAccountCode: string;
   entryDate: string | null;
+  /** CUSTOMERS and VENDORS only. */
+  partiesToCreate: number;
+  partiesToMerge: number;
 }
 
 export type MigrationCommitResult =
   | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
-  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number };
+  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
+  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
 
 /** POST /ledger-core/migration-imports — OWNER, ADMIN or ACCOUNTANT. */
 export function createMigrationImport(body: {
@@ -2299,6 +2451,13 @@ export function patchMigrationImportRow(
     description: string | null;
     debitCents: number;
     creditCents: number;
+    partyName: string;
+    partyEmail: string | null;
+    partyPhone: string | null;
+    partyAddress: string | null;
+    partyTaxNumber: string | null;
+    partyPaymentTerms: string | null;
+    partyNotes: string | null;
     status: 'VALID' | 'EXCLUDED';
   }>,
 ): Promise<{ success: boolean; import: MigrationImport; row: MigrationImportRow }> {

@@ -187,7 +187,7 @@ describe('DashboardPage', () => {
 
     await screen.findByText('Invoices owed to you');
     expect(screen.getByText('1500.00')).toBeInTheDocument();
-    expect(screen.getByText('Bills you need to pay')).toBeInTheDocument();
+    expect(screen.getByText('Expenses you need to pay')).toBeInTheDocument();
     expect(screen.getByText('600.00')).toBeInTheDocument();
     expect(screen.getByText('To review')).toBeInTheDocument();
     expect(screen.getByText('120.00')).toBeInTheDocument();
