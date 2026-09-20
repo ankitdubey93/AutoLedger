@@ -3,8 +3,8 @@
 > A Node process dies instantly on SIGTERM unless you take over the signal — and for a financial API, "instantly" means killing in-flight transactions mid-flight.
 
 **Category:** Node/Express
-**Introduced by:** Phase 0 — `server/src/index.ts`. Extended Phase 7 — `server/src/worker.ts`, a second process with the same discipline
-**Verified against:** Node 24.4.1 (defaults below read off `http.createServer()` at runtime), Express 5.2, `pg` 8.22, `bullmq` ^6.3.4
+**Introduced by:** Phase 0 — `server/src/index.ts`. Extended Phase 7 — `server/src/worker.ts`, a second process with the same discipline. Extended again by the `./dev.sh` dev launcher (tooling, not a phase) — the same problem one level up: stopping three host processes with one signal.
+**Verified against:** Node 24.4.1 (defaults below read off `http.createServer()` at runtime), Express 5.2, `pg` 8.22, `bullmq` ^6.3.4, bash 5.2.21, GNU sed (`sed -u`), Docker Compose v2.24.7 (`./dev.sh` section below)
 
 ---
 
@@ -102,6 +102,41 @@ Shutdown order mirrors the API server's reasoning exactly: workers close (stop t
 
 This is the case graceful shutdown *can't* cover — `SIGKILL` bypasses every handler, so `worker.close()` never runs and the in-flight job's completion is simply never recorded. BullMQ's answer isn't a shutdown-time mechanism at all; it's a standing one. A job in the `active` list carries a **lock**, renewed periodically by the worker while it runs; a `SIGKILL`ed process stops renewing it, and once the lock expires, BullMQ's maintenance routine notices the stale lock and moves the job back to `wait` (or to `failed`, if it's already spent its retries) for another worker to pick up. This is the same at-least-once guarantee [background-jobs-and-queues.md](../architecture/background-jobs-and-queues.md) describes for an ordinary retry — from the queue's point of view, "the process was killed mid-job" and "the job legitimately failed" look identical, which is exactly why every handler here is written to be safely re-run rather than relying on graceful shutdown as its only correctness guarantee. Graceful shutdown reduces *how often* this reclaim path fires; it can't be the only thing standing between a `SIGKILL` and a lost or duplicated job.
 
+### Orchestrating three processes from one shell
+
+`./dev.sh` runs the server, the worker and the client as three background jobs of one bash script, and needs to stop all three — cleanly, in order, on one Ctrl-C — without becoming a fourth process with its own lifecycle bugs. The mechanism is a shell-level analogue of everything above, one process layer up.
+
+**Process groups and sessions.** Every process belongs to a *process group* (pgid), and a signal sent to a **negative** pid is delivered to every member of that group, not just its leader. That is the only reliable way to stop a `npm run dev` → `tsx watch` → `node` chain: this note's own Gotcha below already establishes that npm does not forward signals to its child, so `kill -TERM <npm-pid>` alone stops `npm` and orphans `tsx` and its node grandchild, still holding the port. Signalling the *group* reaches all three (plus the `sed` prefixing its output) in one call, regardless of how many process layers `npm` interposes.
+
+**`set -m` in a non-interactive shell.** Job control — the feature that assigns each background job its own process group — is **off by default** in a non-interactive shell (a script). Without it, every `cmd &` shares the *script's own* pgid, and signalling "the group" would signal the script itself along with everything else. `set -m` immediately before backgrounding a job turns job control on just for that spawn, making the new background job its own group leader (`pgid == pid`); `set +m` right after turns it back off, so later job-control bookkeeping (bash printing `[1]- Terminated` at shutdown) is suppressed:
+
+```bash
+set -m
+( cd "$dir" && "$@" < /dev/null 2>&1 | sed -u "s/^/[$label] /" ) &
+CHILD_PGIDS+=("$!")
+set +m
+```
+
+**Why the pipeline must be inside a subshell.** `$!` is the pid of the most recently backgrounded job — and for a bare pipeline `cmd | sed &`, that is `sed`'s pid, the *last* command in the pipeline, not its first. `sed` is not the group leader in any sense that helps: killing `-$!` in that form signals `sed`'s own group, which — depending on exactly how the shell set it up — may not even include `npm`. Wrapping the whole pipeline in `( … ) &` makes the parenthesized subshell itself the backgrounded job, so `$!` is *that* subshell's pid, and (because `set -m` was active when it was launched) also its pgid. Verified directly on this host: two nested `bash -c '… & wait'` chains launched this way, each simulating an `npm → tsx → node` depth, both fully reaped by one `kill -TERM "-$pid"` per chain — 0 survivors — versus the naive form leaving grandchildren running.
+
+**The inversion this produces.** Once every child is its own process group, the terminal's Ctrl-C — SIGINT to the whole *foreground* process group (see the table above) — reaches only `dev.sh` itself, never the children, because they are no longer in that foreground group. That looks like a bug and is the actual design: shutdown becomes a sequence `dev.sh` controls deliberately (stop the client, then the worker, then the server, each fully, before moving to the next) rather than three processes racing an OS broadcast in an arbitrary order. It is the exact same re-entrancy problem `index.ts`'s `shuttingDown` latch solves for a single process, solved the same way — a `TEARING_DOWN` flag so a second Ctrl-C cannot restart the sequence mid-drain — one process layer up.
+
+**`SIGTTIN` and why every child redirects stdin from `/dev/null`.** A process group that is not the terminal's current foreground group is, by POSIX definition, a *background* group. If a process in a background group attempts to read from the controlling terminal, the kernel does not deliver the input — it sends that process group `SIGTTIN`, whose default disposition **stops** the group (like `SIGSTOP`, visible as `T` in `ps`'s `STAT` column), pending a shell resuming it in the foreground. Vite's dev server binds stdin to offer interactive shortcuts (`r` to restart, `o` to open the browser) whenever stdin *is* a terminal. Once `set -m` has put the client in its own background group, that TTY read is exactly the trigger `SIGTTIN` exists for, and the process can stop rather than ever printing "ready". Redirecting stdin from `/dev/null` removes the precondition entirely: it is not a terminal, so Vite skips binding the shortcuts, and there is no read to trap on. This is a correctness fix for the specific failure mode, not general tidiness — and it is reasoned from the POSIX group/terminal rule and Vite's documented TTY-gated behavior, not reproduced as a live hang in this repo (this session has no controlling terminal to reproduce it against).
+
+**`wait -n` and why `pipefail` is load-bearing here, not hygiene.** `wait -n` (bash 4.3+) blocks until *any* one background job finishes and returns with that job's own exit status — exactly what a launcher wants for "if one process dies, tear down the other two" rather than waiting for all three or a fixed one. But every child here is a pipeline (`cmd | sed`), and a pipeline's exit status is, by default, its **last** command's — `sed`'s, which exits 0 as long as it can read and write, regardless of what `cmd` did. Without `set -o pipefail`, a crashed server would report success to `wait -n` and the launcher would never know to tear down. Measured directly: a two-job test where one job's pipeline ends in a command that `exit 3`s yields `wait -n; echo $?` → `3` with `pipefail` set, confirming the real status propagates through the pipe.
+
+**Bounded escalation.** `dev.sh`'s teardown sends `SIGTERM` to each group, polls `kill -0` on it in a loop with a fixed iteration cap, and sends `SIGKILL` once that cap is reached — the shell-level analogue of `index.ts`'s unref'd force-exit `setTimeout`: a hard bound on how long shutdown can take, so a hung child cannot make Ctrl-C hang too.
+
+**Rejected alternatives:**
+
+| Option | Why it lost |
+|---|---|
+| `concurrently` / `npm-run-all` | A dependency for something bash already does (rule 14), and neither can sequence "wait for Docker's healthcheck, then migrate, then start processes" — they run their process list, full stop |
+| `pkill -f tsx` / `pkill -f vite` | Pattern-matches on command text project-wide — kills another project's `tsx watch` on the same machine too. A process-group signal is scoped to exactly the tree this script started |
+| A bare `trap` without `set -m` | Without job control, the background jobs share the script's own pgid, so the trap handler's own attempt to signal "the group" would include — and could re-signal — the script itself |
+| Full Docker Compose for the server/client too | Rejected earlier, for unrelated reasons — see `docs/development.md` § "Why not full Docker" (native file watching, no anonymous-volume rebuild step) |
+| `tmux`/`screen` session scripting | Works, but requires that program installed on the host; a plain POSIX-ish bash script needs nothing beyond what's already required |
+
 ## Why we chose it here
 
 The prior build had no shutdown handling at all. It didn't visibly hurt, because nothing about a single-user bookkeeping app made a truncated request expensive. That changes the moment a request spans `BEGIN … COMMIT` across several tables: killed mid-transaction, PostgreSQL rolls back when the connection drops, which is *correct* — but the client got no response and does not know whether it committed. Under a retry, that is a double-posted journal entry.
@@ -125,6 +160,7 @@ Related: [guardrails.md](../../docs/guardrails.md) rule 5 (transaction safety) i
 - `server/src/__tests__/health.test.ts` — `afterAll` closes the pool, or Vitest hangs on exit for exactly the same reason
 - `server/src/worker.ts` — the worker process entry point, mirroring `index.ts` line for line: same latch, same unref'd force-exit timer, same four `process.on` handlers
 - `server/src/queue/worker.ts` — `startWorkers()`/`stopWorkers()`, where the drain actually happens
+- `dev.sh` — the repo-root launcher: `start_child()`'s `set -m` / subshell / `set +m` triplet, and `teardown()`'s reverse-order, group-signalled, bounded-escalation stop
 
 ## Gotchas
 
@@ -134,6 +170,7 @@ Related: [guardrails.md](../../docs/guardrails.md) rule 5 (transaction safety) i
 - **`process.exit()` truncates async stdout.** When stdout is a pipe (not a TTY), writes are asynchronous and `process.exit()` discards what's buffered — the reason a final log line vanishes in a container but appears in your terminal. Setting `process.exitCode` and letting the loop drain naturally avoids it; we use `process.exit()` deliberately, because we want a hard bound, and accept that the last line is best-effort.
 - **Forgetting `unref()`** turns every clean shutdown into a full-timeout wait.
 - **Draining is not zero-downtime.** Between the socket closing and the replacement accepting, requests fail. Zero downtime needs a readiness probe that fails *before* SIGTERM arrives, so the load balancer stops sending traffic first. That's orchestration work, not process work — and it is not built here.
+- **`$!` after a bare pipeline is the wrong pid.** `cmd | sed &` sets `$!` to `sed`'s pid — the last command in the pipeline — never `cmd`'s. A `kill -TERM "-$!"` written against that form signals the wrong group and can miss the actual process you meant to stop. Wrapping the whole pipeline in a subshell, `( cmd | sed ) &`, fixes it: now `$!` is the subshell's own pid, which (with `set -m` active at the time) is also its pgid.
 
 ## Interview Q&A
 
@@ -154,6 +191,12 @@ A: Shorter than whatever the supervisor will wait before SIGKILL, because past t
 
 **Q: Does graceful shutdown give you zero-downtime deploys?**
 A: No, and conflating the two is a common mistake. Draining stops you from *truncating* work that's already in progress. Zero downtime is about not *receiving* work you can't serve, which needs a readiness probe that starts failing before SIGTERM is sent, so the load balancer removes the instance while it's still healthy enough to finish what it has. Draining is a process concern; zero downtime is an orchestration concern. We have the first and not the second.
+
+**Q: You run three dev processes from one script. Ctrl-C leaves two of them alive. Walk me through the diagnosis.**
+A: First suspect is exactly this note's own Gotcha: something in the chain is `npm`, and npm doesn't forward signals to its child. I'd confirm with `ps -o pid,pgid,ppid,stat,cmd` on the surviving processes — if the orphan's `ppid` no longer points at anything alive and it's still holding its process group from before, that's the signature. The fix isn't to `pkill` by name (too broad, hits unrelated processes with the same command text); it's to make sure the *launcher* put that child in its own process group when it started it (`set -m` around the spawn) and signals `-$pgid`, the negative form, so the kill reaches every member of that group — `npm`, `tsx`, and the node grandchild — in one call. After the fix, I'd verify with `pgrep -af 'tsx watch'` and `pgrep -af vite` printing nothing post-shutdown, not just that the launcher's own log said "stopped".
+
+**Q: Why does your launcher redirect every child's stdin from `/dev/null`?**
+A: Because these children run in background process groups — Ctrl-C reaches only the launcher script, not them, which is deliberate — and POSIX says a background process group that tries to read the controlling terminal gets `SIGTTIN`, whose default action stops the group rather than letting it race the foreground job for keystrokes. Vite specifically binds stdin for its `r`/`o` dev-server shortcuts whenever stdin is a TTY, so without the redirect it can hit exactly that read and sit in `T` state in `ps`, never printing "ready" — a silent hang that looks like a slow start rather than a stopped process. `< /dev/null` means stdin isn't a TTY at all, so Vite skips binding the shortcuts and there's no read to trap on.
 
 **Q: Tell me about a time a shutdown detail bit you.**
 A: Building the Phase 0 scaffold I tested SIGTERM by killing the `npm run dev` process, and got exit 143 with an empty log — as if my handler didn't exist. It did; npm just doesn't forward signals to its child, so the `tsx` process and its node grandchild survived and kept holding port 5000. What made it genuinely misleading was that my curl health check *passed* — it was talking to the orphan from the previous run, not the process I'd just started, which had failed to bind and written nothing. Two lessons: signal-test against the real process (`node dist/index.js`), not through a wrapper; and treat "the assertion passed but the log is empty" as evidence you're talking to something other than what you think.

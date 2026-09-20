@@ -37,7 +37,7 @@ Nothing under `docs/` describes working code unless this table says so. See [doc
 
 ## Running it
 
-PostgreSQL and Redis run in Docker. The server and client run on the host, each in its own terminal.
+PostgreSQL and Redis run in Docker. The server, worker and client run on the host, via one command.
 
 Requires Node 22+ and Docker.
 
@@ -49,19 +49,13 @@ cp client/.env.example client/.env
 (cd server && npm install)
 (cd client && npm install)
 
-# infrastructure
-docker compose up -d                  # postgres :5432, redis :6379
-```
-
-```bash
-# terminal 1
-cd server && npm run dev              # http://localhost:5000
-
-# terminal 2
-cd client && npm run dev              # http://localhost:5173
+# every session
+./dev.sh                              # postgres :5432, redis :6379, migrations, server, worker, client
 ```
 
 Open http://localhost:5173 — register an organization and you land on the app chooser.
+
+Prefer a terminal per process, or need the test cluster? See [docs/development.md](docs/development.md) for the manual path.
 
 ```bash
 curl http://localhost:5000/api/v1/health

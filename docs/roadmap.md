@@ -843,6 +843,8 @@ Phase 7 also delivered **financial-event webhooks** — an outbound notification
 
 **Document storage (Phase 9.5) — promoted from AP-Flow.** The suite retains uploaded documents on the local filesystem under `server/storage/`, org-scoped and named by SHA-256, with metadata in a platform `documents` table and per-app attachment rows in `document_links`. This is deliberately the simplest thing that satisfies the audit requirement, and it does **not** survive a multi-instance deployment; the storage service keeps a narrow interface (`put(orgId, buffer) → hash`, `get(orgId, hash) → stream`) so object storage is a one-file swap when deployment becomes real. It was AP-Flow-owned until 2026-09-10 — see the [renumbering entry](#phase-renumbering--2026-09-10) for why it moved and why the path is keyed by organization rather than globally content-addressed.
 
+**Dev tooling — `./dev.sh` (not a phase).** Collapses the three-terminal startup (Postgres/Redis, server, worker, client) into one command, adding no dependency. It is the process-group counterpart of the per-process drains already in `index.ts`/`worker.ts`: `set -m` puts each spawned child in its own process group so one `kill -TERM "-$pgid"` reaches the whole `npm → tsx → node` chain, which `npm` alone will not forward a signal into. See [docs/development.md](development.md).
+
 ---
 
 ## Dropped from scope

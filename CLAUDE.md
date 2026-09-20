@@ -56,7 +56,7 @@ On 2026-07-30 the previous single-user bookkeeping build (`server/`, `client/`, 
 
 `server/.env` still requires `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET` — at least 32 chars and different from each other, or the server refuses to boot.
 
-Dev model: Postgres + Redis in Docker; server and client run from separate terminals on the host. There are no Dockerfiles and no `entrypoint.sh`.
+Dev model: Postgres + Redis in Docker; server, worker and client run on the host via `./dev.sh` (one command; `docs/development.md` keeps the per-terminal path). Still no Dockerfiles and no `entrypoint.sh`.
 
 **Assume nothing in `docs/` is built unless it is listed above.** The rest is target state — check the filesystem before claiming any capability exists.
 

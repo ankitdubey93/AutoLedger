@@ -23,6 +23,14 @@ Three `.env` files, deliberately: root is read *only* by `docker-compose.yml`, `
 ## Every session
 
 ```bash
+./dev.sh
+```
+
+One command, run from the repository root, no arguments. In order: brings up `postgres` + `redis` and waits for their compose healthchecks, applies pending migrations, then runs the server (`:5000`), the background worker, and the client (`:5173`) as three prefixed processes. One Ctrl-C stops all three. It starts `postgres` and `redis` only, **not** `postgres-test` — running the test suite still needs `docker compose up -d postgres-test redis` separately.
+
+**The per-terminal path still works, and is still the right tool** when you want to restart one process alone, attach a debugger to just the server, or read one process's output without the other two interleaved:
+
+```bash
 docker compose up -d          # postgres :5432, postgres-test :5433, redis :6379
 ```
 
@@ -50,6 +58,12 @@ A healthy response is `200` with `"status":"ok"`, `db.connected: true`, and `red
 Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the containers (add `-v` to also drop the Postgres volume, which destroys all data).
 
 ## Scripts
+
+### Root
+
+| Script | Does |
+|---|---|
+| `./dev.sh` | The full stack in one command; see [§ Every session](#every-session) |
 
 ### `server/`
 
@@ -310,6 +324,10 @@ Approved for later phases, add only when the app that needs it is being built:
 ---
 
 ## Troubleshooting
+
+**`./dev.sh` exits with "port 5000 is already in use"** — an earlier run was orphaned, or a `npm run dev` is still up in another terminal. `pgrep -af 'tsx watch'`, then kill the process group (`kill -TERM -<pid>`), not the pid alone — see the study note on why signalling `npm` leaves children behind.
+
+**One process dies and `./dev.sh` takes the other two down** — deliberate. `wait -n` returns on the first child to exit and the launcher tears the rest down and exits 1, because a half-running stack (a server with no worker draining its queues) fails in ways that look like application bugs. The exiting process's own `[label]` lines above the shutdown message say why.
 
 **Server exits immediately with "Invalid server environment"** — `server/.env` is missing or incomplete. The message lists every missing variable.
 
