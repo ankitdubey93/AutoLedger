@@ -14,7 +14,11 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],
     include: ['src/__tests__/**/*.test.{ts,tsx}'],
-    css: false,
+    // Component tests never need real styles, so CSS stays off — except the
+    // `?raw` import in stylesheetLayers.test.ts, which reads index.css as text.
+    // Raw text is returned before any CSS pipeline runs, so the Tailwind
+    // plugin (absent from this config) is never needed.
+    css: { include: [/index\.css\?raw$/] },
   },
   define: {
     // The client reads import.meta.env.VITE_API_BASE_URL at module scope, and

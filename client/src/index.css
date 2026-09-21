@@ -332,26 +332,46 @@ select {
   overflow-x: auto;
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.875rem;
-}
+/*
+  These three are ELEMENT selectors, so they blanket every table in the app —
+  including the utility-first LedgerCore/FP&A/UnitEcon pages. Left unlayered they
+  beat every Tailwind utility (same trap as the `.app-topbar` note at the foot of
+  this file), which silently killed `p-3`, `px-2` and `text-right` on roughly 650
+  cells: the markup asked for cell padding and right-aligned money columns and got
+  neither, because `padding: ... 0` and `text-align: left` always won.
 
-th,
-td {
-  text-align: left;
-  padding: 0.4rem 0.75rem 0.4rem 0;
-  border-bottom: 1px solid var(--border);
-  white-space: nowrap;
-}
+  `@layer base` is the fix. Tailwind declares `@layer theme, base, components,
+  utilities`, so `utilities` outranks `base` — a cell that asks for `p-3` now gets
+  it, while bare tables (TrendChart, BarChart, AccountPage) still inherit these
+  defaults because nothing competes for them. Preflight is also in `base` and these
+  rules come after it in source order, so they still win there as before.
 
-th {
-  color: var(--muted);
-  font-weight: 500;
-  font-size: 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  Keep these three rules inside the layer. The class-based rules elsewhere in this
+  file stay unlayered on purpose — they are opt-in, not blanket, so they cannot
+  ambush a utility the way an element selector does.
+*/
+@layer base {
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.875rem;
+  }
+
+  th,
+  td {
+    text-align: left;
+    padding: 0.4rem 0.75rem 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
 }
 
 .panel-subhead {

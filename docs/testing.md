@@ -10,7 +10,7 @@ cd client
 npm test                  # Vitest + jsdom + Testing Library
 ```
 
-**Current state: 1680 server tests (1678 passing, 2 gated-live skipped) across 135 files, + 277 client tests across 53 files.** The server suite runs in **~3.3 minutes**; the client suite in ~34s. The file table below was last fully re-verified at Phase 9.5 and does not list every file added since — treat it as a sample of the tiers, not an inventory.
+**Current state: 1680 server tests (1678 passing, 2 gated-live skipped) across 135 files, + 280 client tests across 54 files.** The server suite runs in **~3.3 minutes**; the client suite in ~34s. The file table below was last fully re-verified at Phase 9.5 and does not list every file added since — treat it as a sample of the tiers, not an inventory.
 
 > **It used to take 35 minutes.** The fix was not fewer tests; it was `fsync`.
 > `resetTables()` TRUNCATEs ~55 tables before almost every test, and TRUNCATE

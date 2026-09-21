@@ -880,6 +880,8 @@ A direct feature request, not part of the strategic-plan sequence — see the ph
 
 **Acceptance ✅ — verified.** Four new cross-tenant isolation cases (payment terms, items, line-item references, party import), each proving org A gets `404`s and org B's rows are untouched. `paymentTermConstraints.test.ts`/`itemConstraints.test.ts` prove the CHECK/UNIQUE/composite-FK constraints hold via raw SQL regardless of what wrote the row. An explicit due date always overrides a payment term, proven directly. A merge never overwrites an existing value, proven directly. `guardrail-review` clean after the `060` fix. **1678 server tests + 277 client tests**, zero regressions, 2 server tests skipped (the pre-existing gated live-provider cases).
 
+**Follow-up, 2026-09-22 — table cell padding.** The blanket `table`, `th, td` and `th` element rules in `client/src/index.css` were unlayered, so they beat every Tailwind utility: roughly 650 padding utilities (`p-3`, `px-2`, …) and 235 `text-right` cells across 37 files did nothing, leaving table first columns flush against the card edge and every money column left-aligned. The three rules moved into `@layer base` with declarations unchanged, so utilities now win where a cell asks for them and bare tables (`TrendChart`, `BarChart`, `AccountPage`) look as before. Client-only; no page markup changed. `stylesheetLayers.test.ts` reads `index.css` as text, because `vitest.config.ts` keeps CSS off and no component test could see this; `vitest.config.ts` now lets exactly `index.css?raw` through. **277 → 280 client tests.** Visual check in a browser not done. Study note deliberately skipped at the user's direction — owed to `study/react/utility-first-css-tailwind.md`.
+
 ---
 
 ## Cross-cutting infrastructure
