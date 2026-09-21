@@ -71,7 +71,7 @@ describe('Phase 5 — audit actor and client IP', () => {
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     });
     expect(res.status).toBe(201);
@@ -89,7 +89,7 @@ describe('Phase 5 — audit actor and client IP', () => {
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     });
 
@@ -175,7 +175,7 @@ describe('Phase 5 — audit actor and client IP', () => {
 
   it('leaves the actor null for a write with no request context', async () => {
     const debitAccount = await accountId(orgA, '6120');
-    const creditAccount = await accountId(orgA, '2100');
+    const creditAccount = await accountId(orgA, '2120');
 
     await journalService.createEntry(orgA, userA.id, {
       entryDate: '2026-08-15',
@@ -208,7 +208,7 @@ describe('Phase 5 — audit actor and client IP', () => {
       description: 'Posted by A',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 1000 },
       ],
     });
 
@@ -217,7 +217,7 @@ describe('Phase 5 — audit actor and client IP', () => {
       description: 'Posted by B',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 2000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 2000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 2000 },
       ],
     });
 

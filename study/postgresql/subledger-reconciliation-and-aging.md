@@ -3,7 +3,7 @@
 > An AR/AP aging report buckets open documents by how far past due they are, and its grand total must equal the GL control account's own balance — two independently derived numbers that are supposed to agree by construction, and checking that they actually do is the report's real job.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below
+**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below. Phase 25 adds per-party accounts (a customer's/vendor's own ledger) and the rule that journals may not post to a control account
 **Verified against:** PostgreSQL 16
 
 ---
@@ -92,6 +92,46 @@ Phase 11 gave AP-Flow a one-click "post to LedgerCore" button. Its first impleme
 
 This is the general lesson a reconciliation check earns its keep by teaching: when an independently-derived cross-check starts failing, the question is never "how do I make the check pass" — it's "what part of the system stopped producing the invariant the check assumes." Here that was a service writing to the ledger without writing to the subledger it claims to be part of.
 
+### Control accounts vs. party sub-accounts, and who may post to them (Phase 25)
+
+**The accounting model.** A business with 2,000 customers does not have 2,000 receivable accounts in its chart. It has **one control account** (`1120 Accounts Receivable`) whose balance is the total owed, and a **subsidiary ledger** ("subledger") per customer that breaks that total down. The trial balance, P&L and balance sheet show only the control account; per-party detail lives on its own reports (customer statement, open items, aging). The invariant tying them together is
+
+```
+Σ over customers (customer balance)  =  balance of the AR control account
+```
+
+and the same for vendors against AP. QuickBooks, Xero and SAP all work this way; a GL account per party would make the chart and every financial statement unreadable, and every new customer would be a chart-of-accounts change.
+
+**How a "customer account" is built here without a party column on `ledger_lines`.** `ledger_lines` has no `customer_id`/`vendor_id`. Instead a control-account line is *attributed* to a party through the document that posted it: every `invoices`, `bills` and `payments` row carries `journal_entry_id` (the posting) and `void_journal_entry_id` (its reversal), both FK-constrained. `partyLedgerService.buildPartyRowsCte` unions those four `(kind, document, entry)` sources for one party, joins them to `journal_entries` and to `ledger_lines` **filtered to the control account**, and groups per `(entry, document)`:
+
+```sql
+party_entries AS (
+  SELECT 'INVOICE', d.id, d.invoice_number, d.journal_entry_id      FROM invoices d WHERE d.org_id = $1 AND d.customer_id = $2 AND d.journal_entry_id IS NOT NULL
+  UNION ALL SELECT 'INVOICE_VOID', d.id, d.invoice_number, d.void_journal_entry_id FROM invoices d WHERE ... AND d.void_journal_entry_id IS NOT NULL
+  UNION ALL SELECT 'PAYMENT',      p.id, p.reference, p.journal_entry_id      FROM payments p WHERE p.org_id = $1 AND p.customer_id = $2
+  UNION ALL SELECT 'PAYMENT_VOID', p.id, p.reference, p.void_journal_entry_id FROM payments p WHERE ... AND p.void_journal_entry_id IS NOT NULL
+),
+party_rows AS (
+  SELECT pe.kind, pe.document_id, e.id, e.entry_date,
+         SUM(l.base_debit_cents) AS debit_cents, SUM(l.base_credit_cents) AS credit_cents
+    FROM party_entries pe
+    JOIN journal_entries e ON e.id = pe.entry_id AND e.org_id = $1
+    JOIN ledger_lines l    ON l.journal_entry_id = e.id AND l.org_id = $1 AND l.account_id = $3  -- the control account
+   GROUP BY ...
+)
+```
+
+Two details matter. **The grouping:** a payment that settles three invoices posts three control-account lines (one per allocation, each at its own document's frozen FX rate — see [realized-and-unrealized-fx.md](../architecture/realized-and-unrealized-fx.md)); grouping by entry gives the customer one "Payment" row, with the split recovered from `payment_allocations` as `allocations`. **The running balance** is then the same explicit-`ROWS`-frame window function as the account ledger, evaluated over `party_rows` *after* the grouping, so it steps once per document event, not once per line (see [window-functions-and-running-totals.md](window-functions-and-running-totals.md)).
+
+Because it reads the *GL lines* rather than the documents, the party ledger is a GL-side view, while `/open-items` (and the aging report) are document-side views. They are independently derived, so the per-party version of this note's central check holds: **ledger closing balance = open-items outstanding** for every party, and `partyLedger.test.ts` asserts it, then asserts their sum equals `/reports/ar-aging`'s total and control balance. It holds exactly because an invoice/bill with payments applied cannot be voided (409 "Void the payments first") — without that rule, a voided-but-paid invoice would leave a payment credit on the GL side that no open document explains.
+
+**Who may post to a control account.** A manual journal line on `1120` names no customer, so no party ledger can ever claim it and `reconciles` goes `false` permanently. Mainstream packages solve this one of two ways:
+
+- **QuickBooks Online** requires a *Name* (customer/vendor) on any journal line that hits A/R or A/P — the party is carried on the line itself.
+- **SAP** marks AR/AP as *reconciliation accounts* that refuse direct posting entirely (message F5354, "Account … cannot be directly posted to"); you post to the customer/vendor subledger and SAP posts the reconciliation account for you.
+
+This codebase takes SAP's route: `journalService.assertNotControlAccountsOnClient` makes `POST /journals` and `POST /bank-transactions/:id/post-journal` return **422** for any line on the configured (or default `1120`/`2100`) control account, while `createEntryOnClient` — the path invoices, bills, payments and FX revaluation use — is deliberately left unguarded. Reversals stay allowed: a reversal of a legacy manual AR entry can only move the books back toward agreement. (Sources: SAP KB 3091350 for F5354; QuickBooks Community threads for the Name requirement — product behavior as documented in September 2026, not independently tested against either product.)
+
 ---
 
 ## Why we chose it here
@@ -104,6 +144,9 @@ This is the general lesson a reconciliation check earns its keep by teaching: wh
 | Trust the GL control-account balance as "the" AR number, skip the subledger detail | Simpler, one source | Rejected — loses the age breakdown per document, which is the entire deliverable of an aging report |
 | Trust the subledger sum as "the" AR number, skip control-account reconciliation | Simpler, one query | Rejected — removes the one check that catches documents and postings drifting apart, which is the report's actual value to an accountant |
 | **Compute both, assert equality** | Two queries instead of one | **Chosen** — the assertion is the report's job |
+| One GL account per customer/vendor (sub-accounts of AR/AP) | Balance per party "for free" from the trial balance | Rejected (Phase 25) — thousands of chart rows, every new customer is a chart change, statements unreadable; not how any mainstream package models it |
+| `customer_id`/`vendor_id` column on `ledger_lines` (the QuickBooks model) | Journals could carry a party; the party ledger becomes a plain `WHERE` | Rejected for now — needs a migration, a backfill, per-party FX revaluation lines, and aging (which sums *documents*) still wouldn't see a party-tagged journal line, so `reconciles` would still break |
+| **Attribute control-account lines via the owning document's `journal_entry_id`; refuse journals to the control account (the SAP model)** | Adjustments (e.g. bad-debt write-offs) now need a document — credit notes are unbuilt | **Chosen** (Phase 25) — no migration, every existing FK already carries the link, and the subledger stays provably equal to the GL |
 
 ---
 
@@ -113,6 +156,9 @@ This is the general lesson a reconciliation check earns its keep by teaching: wh
 - `server/src/types/ledger-core.ts` — `AGING_BUCKETS`, `AGING_BUCKET_LABELS`, `AgingReport`
 - `server/src/__tests__/ledger-core/aging.test.ts` — the bucket-boundary tests (15/51/86/far-past days overdue land in the right bucket) and the `reconciles === true` assertions for both AR and AP
 - `server/src/services/ledger-core/reportService.ts` — `trialBalance`, the sibling report this one borrows its debit-normal/credit-normal convention and its "no summary table" discipline from; `bankReconciliation` (Phase 6), the completeness-flavored sibling of this file's correctness-flavored `reconciles`
+- `server/src/services/ledger-core/partyLedgerService.ts` (Phase 25) — `buildPartyRowsCte` (attribution), `customerLedger`/`vendorLedger`, `customerOpenItems`/`vendorOpenItems`; `GET /customers/:id/ledger|open-items`, `GET /vendors/:id/ledger|open-items`
+- `server/src/services/ledger-core/journalService.ts` — `assertNotControlAccountsOnClient`, called from `createEntry` and `bankMatchService.postJournalForTransaction`, never from `createEntryOnClient`
+- `server/src/__tests__/ledger-core/partyLedger.test.ts` — `'per customer, ledger closing === open-items outstanding; their sum === ar-aging total === control balance'`; `controlAccountGuard.test.ts` — the 422s, the rollback, and that documents still post
 - `server/src/__tests__/ledger-core/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
 
 ---
@@ -123,6 +169,9 @@ This is the general lesson a reconciliation check earns its keep by teaching: wh
 - **`asOf` must flow through as a bind parameter, never string-concatenated.** It already does (`$2::date`), but it's worth naming: a report endpoint accepting a client-supplied date is exactly the kind of value that must never be interpolated (guardrails rule 4).
 - **The `VALUES`-list gap-fill only works because the bucket set is small and fixed.** If buckets ever became configurable per organization, this pattern would need to generate the `VALUES` rows from `AGING_BUCKETS` in application code, not hand-type five literals in SQL.
 - **Reconciliation can be `null`, not just `true`/`false`.** No configured (and no fallback) control account means there's nothing to compare against — the report says so explicitly (`controlAccount: null`, `reconciles: null`) rather than defaulting to `true`, which would silently claim a clean bill of health for a check that never ran.
+- **Changing the configured control account mid-life orphans history from the party view.** The party ledger (and aging) read lines on the *currently* configured control account; lines posted to the old one drop out. Moving AR to a new account should be done with a transfer through documents, or not at all.
+- **Some control-account lines belong to no party — by design.** FX revaluation posts one aggregate AR line (reversed the next day), and legacy manual journals from before the guard exist. Neither appears in any customer's ledger; `reconciles` is what surfaces them.
+- **Guard the manual path, not the shared posting primitive.** Putting the control-account check inside `createEntryOnClient` would have broken invoice issue, payments and FX revaluation, which are *supposed* to post there. The rule is about *who* posts, so it lives at the entry points humans use.
 - **The sign convention has to match the account type, not be hardcoded.** AR sums `debit - credit` (Asset, debit-normal); AP sums `credit - debit` (Liability, credit-normal). Getting this backwards makes `reconciles` false for entirely correct data — a wrong-sign bug looks identical to a real reconciliation break until you check the account type.
 
 ---
@@ -149,6 +198,21 @@ A: Anything that posts a journal entry to the receivable account outside `invoic
 
 **Q: Why derive AR from documents at all — why not just report the control account balance directly?**
 A: Because the control account balance is one number with no structure — it can't tell you which customer owes what, or how overdue any of it is, which is the entire point of an aging report. The subledger (the invoices themselves) carries that detail; the control account is there specifically to be reconciled *against* the subledger, as a cross-check that the detail and the total agree.
+
+**Q: Should each customer be its own account in the chart of accounts?**
+A: No. The chart has one Accounts Receivable control account, and each customer has a subsidiary ledger underneath it. The financial statements show only the control account; the per-customer detail lives on a customer statement, open-items list and aging report. The invariant is that the sum of every customer's balance equals the control account — that's what an auditor checks. Sub-accounts per customer would put thousands of rows in the chart, make every new customer a chart change, and make the balance sheet unreadable; no mainstream package works that way.
+
+**Q: How do you build a per-customer ledger if your journal lines don't have a customer column?**
+A: By attribution through the documents. Every invoice and payment row already stores the id of the journal entry it posted and the one that voided it. I union those four sources for a customer, join to `journal_entries` and to `ledger_lines` filtered to the AR control account, and group by entry — so a payment covering three invoices is one row, with the split pulled from `payment_allocations`. Then a window function gives the running balance. No migration, and every link is an existing foreign key.
+
+**Q: Why forbid manual journal entries to Accounts Receivable?**
+A: Because a journal line on AR says nothing about *which* customer it belongs to, so after one of those, the customer balances can never add up to the AR balance again — the subledger and the GL permanently disagree. There are two industry answers: QuickBooks makes you name a customer on any AR journal line, and SAP refuses direct postings to AR/AP entirely (its reconciliation accounts). My subledger is built from documents, so I took SAP's route: the manual journal endpoint and the bank-line journal endpoint return 422 for the control accounts, while the document posting path is untouched. Reversals are still allowed, since they can only restore agreement.
+
+**Q: How do you prove the customer ledgers tie to the general ledger?**
+A: Two independently-derived numbers per customer. The ledger reads GL lines on the control account attributed to that customer; open items reads the customer's open invoices minus their allocations. The test asserts those are equal for each customer, that their sum equals the aging report's total, and that that equals the control account's GL balance — all integer equality. It holds because a document with payments applied can't be voided, so there's never a payment on the GL side without an open document explaining it.
+
+**Q: If you later needed write-offs or party-tagged journals, what would you change?**
+A: Write-offs are a document problem — the right fix is a credit note that posts to AR through the same document path, so it shows up on the customer's ledger and in aging. If party-tagged journals became a requirement, I'd add nullable `customer_id`/`vendor_id` columns to `ledger_lines` with a CHECK that at most one is set and a trigger requiring one when the account is a control account, backfill them from the documents via the same attribution join, and make aging read party balances from the GL instead of documents — at that point the GL is the subledger and the document-vs-GL check changes meaning.
 
 ---
 

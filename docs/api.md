@@ -436,7 +436,9 @@ Every new organization is seeded with the [44-account default chart](schema.md#d
 
 Every entry also carries `createdByName` / `createdByEmail` (the posting user, denormalised for display), `reversedByEntryId` (set on an original once it has been reversed — the inverse of `reversesEntryId`, `null` while uncorrected), and `totalDebitCents` / `totalCreditCents` (summed from `lines`).
 
-Failure paths: `400` from the schema (fewer than two lines, a line with both sides set, a fractional amount) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`) · `400 accountId must be a UUID` · `422 Entry is unbalanced: debits N, credits M` · `422 Account <code> is a header account and cannot be posted to` · `422 Account not found` · `409 Entry has already been reversed` · `422 A reversing entry cannot itself be reversed`.
+Failure paths: `400` from the schema (fewer than two lines, a line with both sides set, a fractional amount) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`) · `400 accountId must be a UUID` · `422 Entry is unbalanced: debits N, credits M` · `422 Account <code> is a header account and cannot be posted to` · `422 Account not found` · `422 Account <code> is the receivable control account — post to it through an invoice or a payment, not a journal entry` / `422 Account <code> is the payable control account — post to it through a bill or a payment, not a journal entry` (Phase 25, see below) · `409 Entry has already been reversed` · `422 A reversing entry cannot itself be reversed`.
+
+**Control accounts refuse manual journals (Phase 25).** `POST /` rejects any line on the receivable control account (`ledger_invoice_settings.receivableAccountId`, falling back to the postable default-chart `1120`) or the payable control account (`ledger_settings.payableAccountId`, falling back to `2100`). A journal line names no customer or vendor, so it could only ever break the tie between a party's subledger and the control account (`/reports/ar-aging`'s `reconciles`). Documents (invoice issue/void, bill approve/void, payments, FX revaluation) still post there through the service-to-service path, which this check does not apply to. `POST /:id/reverse` is **not** refused: reversing a pre-Phase-25 manual entry on a control account can only restore agreement.
 
 #### Reports — `/api/v1/ledger-core/reports`
 
@@ -526,12 +528,22 @@ Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb
 |---|---|---|---|
 | GET | `/` | any member | The org's customers, ordered by name. `?q=` filters by name (case-insensitive substring); `?includeInactive=true` includes retired customers (excluded by default) |
 | GET | `/:id` | any member | One customer |
+| GET | `/:id/ledger` | any member | Phase 25 — the customer's account: every receivable-control-account posting attributed to this customer, with running balance. `?from=&to=&page=&limit=` |
+| GET | `/:id/open-items` | any member | Phase 25 — the customer's open (issued, not fully paid) invoices with days overdue and aging bucket. Optional `?asOf=YYYY-MM-DD` |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a customer |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Edit a customer, including retiring it (`isActive: false`) |
 
 Email is lowercased on write. **There is no DELETE** — a customer is retired with `isActive: false`, matching `accounts`, since an invoice may reference one.
 
 Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Customer not found`.
+
+**Party accounts (Phase 25) — `GET /:id/ledger` and `GET /:id/open-items`**, identical under `/vendors`. There is **no GL account per customer or vendor**: the chart keeps one receivable and one payable control account, and each party's account is a subsidiary ledger underneath it, derived on read. A control-account `ledger_lines` row belongs to a party when its journal entry is the `journalEntryId` or `voidJournalEntryId` of one of that party's invoices/bills/payments. No migration; lines no document owns (a pre-Phase-25 manual journal, the FX revaluation's aggregate line) belong to no party.
+
+`/ledger` → `{ success, party: { kind: 'CUSTOMER'|'VENDOR', id, name }, controlAccount: { id, code, name } | null, from, to, openingBalanceCents, periodDebitCents, periodCreditCents, closingBalanceCents, totalCount, rows, count, currentPage, totalPages }`. One row per (journal entry, document): `{ journalEntryId, entryDate, kind, documentId, documentNumber, debitCents, creditCents, runningBalanceCents, allocations }`. `kind` is `INVOICE`/`INVOICE_VOID`/`PAYMENT`/`PAYMENT_VOID` for a customer and `BILL`/`BILL_VOID`/`PAYMENT`/`PAYMENT_VOID` for a vendor. `documentNumber` is the invoice number, the bill's `vendorReference`, or the payment's `reference`. A payment settling several documents is **one** row, with the split in `allocations: [{ documentId, documentNumber, baseAmountCents }]` (empty for non-payment rows). All amounts are base-currency cents. The balance is positive when the customer owes us (AR, debit-normal) or we owe the vendor (AP, credit-normal). `openingBalanceCents` is everything before `from` (`0` when `from` is omitted), and the running balance is a window over the whole filtered set, so it continues across pages. `controlAccount: null` (and empty rows) when the org has no resolvable control account.
+
+`/open-items` → `{ success, party, asOf, outstandingCents, overdueCents, items: [{ documentId, documentNumber, documentDate, dueDate, currencyCode, totalCents, baseTotalCents, baseOutstandingCents, daysOverdue, bucket }] }`: only documents with a positive outstanding balance, due date first. The same arithmetic and buckets as `/reports/ar-aging`. **For every party, `/ledger`'s `closingBalanceCents` (to `asOf`) equals `/open-items`' `outstandingCents`, and the sum over parties equals the aging report's total and control balance.** `partyLedger.test.ts` asserts all three.
+
+Failure paths: `404 Customer not found` / `404 Vendor not found` (also another org's id) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`/`asOf`).
 
 #### Invoices — `/api/v1/ledger-core/invoices` — Phase 3.8
 
@@ -581,12 +593,14 @@ Failure paths: `400` from the schema · `400 No fields to update` (PATCH) · `40
 |---|---|---|---|
 | GET | `/` | any member | The org's vendors, ordered by name. `?q=` filters by name (case-insensitive substring); `?includeInactive=true` includes retired vendors (excluded by default) |
 | GET | `/:id` | any member | One vendor |
+| GET | `/:id/ledger` | any member | Phase 25 — the vendor's account under the payable control account, same shape as customers' |
+| GET | `/:id/open-items` | any member | Phase 25 — the vendor's approved, unpaid bills. Optional `?asOf=YYYY-MM-DD` |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a vendor |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Edit a vendor, including retiring it (`isActive: false`) |
 
 Email is lowercased on write. **There is no DELETE** — a vendor is retired with `isActive: false`, matching `customers`, since a bill may reference one.
 
-Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Vendor not found`.
+Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Vendor not found`. `/:id/ledger` and `/:id/open-items`: see the customers section's Phase 25 note.
 
 #### Bills — `/api/v1/ledger-core/bills` — Phase 3.9
 
@@ -696,7 +710,7 @@ Each `BankTransaction` carries `amountCents` **signed** — positive is money in
 
 **`POST /:id/unmatch`** takes no body. Voids the linked payment (if still `POSTED`) via a reversing journal entry, or reverses the linked journal entry directly (Phase 6.1) — never deletes either — clears the match, and regenerates suggestions for the line.
 
-Failure paths: `400 status must be UNMATCHED, MATCHED or IGNORED` · `400 minScore must be a whole number between 0 and 100` · `400` from the schema (`match` naming zero or two of `suggestionId`/`invoiceId`/`billId`) · `404 Bank transaction not found` · `404 Suggestion not found` · `422 A deposit can only be matched to an invoice` / `422 A withdrawal can only be matched to a bill` · `422 Invoice not found` / `422 Bill not found` (also another org's) · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 That document is already settled` · `422 The bank line exceeds the amount still due on that document` · `422 A base-currency bank line cannot settle a foreign-currency document` (Phase 8) · `422 The journal entry cannot post back to the same bank account` (Phase 6.1) · `422 Only an unmatched bank line can be rescored` · `422 The fiscal period covering <date> is closed/locked; ...` (from the underlying payment or journal post) · `409 This bank line is already matched` / `409 This bank line is ignored — un-ignore it first` · `409 This bank line is not matched` · `409 This bank line is matched — unmatch it first`.
+Failure paths: `400 status must be UNMATCHED, MATCHED or IGNORED` · `400 minScore must be a whole number between 0 and 100` · `400` from the schema (`match` naming zero or two of `suggestionId`/`invoiceId`/`billId`) · `404 Bank transaction not found` · `404 Suggestion not found` · `422 A deposit can only be matched to an invoice` / `422 A withdrawal can only be matched to a bill` · `422 Invoice not found` / `422 Bill not found` (also another org's) · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 That document is already settled` · `422 The bank line exceeds the amount still due on that document` · `422 A base-currency bank line cannot settle a foreign-currency document` (Phase 8) · `422 The journal entry cannot post back to the same bank account` (Phase 6.1) · `422 Account <code> is the receivable control account — …` / `422 Account <code> is the payable control account — …` (Phase 25, `post-journal` to AR/AP; settle a customer or vendor line through `match` instead) · `422 Only an unmatched bank line can be rescored` · `422 The fiscal period covering <date> is closed/locked; ...` (from the underlying payment or journal post) · `409 This bank line is already matched` / `409 This bank line is ignored — un-ignore it first` · `409 This bank line is not matched` · `409 This bank line is matched — unmatch it first`.
 
 #### Exchange rates — `/api/v1/ledger-core/fx-rates` — Phase 8
 

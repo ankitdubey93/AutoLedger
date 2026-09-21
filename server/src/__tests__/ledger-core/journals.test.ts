@@ -37,7 +37,7 @@ async function awsBill(orgId: string) {
     description: 'AWS August',
     lines: [
       { accountId: await accountId(orgId, '6120'), debitCents: 45000, creditCents: 0 },
-      { accountId: await accountId(orgId, '2100'), debitCents: 0, creditCents: 45000 },
+      { accountId: await accountId(orgId, '2120'), debitCents: 0, creditCents: 45000 },
     ],
   };
 }
@@ -118,7 +118,7 @@ describe('posting a journal entry', () => {
       entryDate: '2026-08-15',
       lines: [
         { accountId: await accountId(orgA, '1000'), debitCents: 100, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 100 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 100 },
       ],
     });
 
@@ -176,7 +176,7 @@ describe('rollback', () => {
       entryDate: '2026-08-15',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 100, creditCents: 0 },
-        { accountId: await accountId(orgB, '2100'), debitCents: 0, creditCents: 100 },
+        { accountId: await accountId(orgB, '2120'), debitCents: 0, creditCents: 100 },
       ],
     });
 
@@ -321,7 +321,7 @@ describe('register filters', () => {
       description: 'July entry',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 1000 },
       ],
     });
     await agent.post(JOURNALS).send(await awsBill(orgA)); // dated 2026-08-15
@@ -339,7 +339,7 @@ describe('register filters', () => {
       description: 'July entry',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 1000 },
       ],
     });
     await agent.post(JOURNALS).send(await awsBill(orgA));
@@ -358,7 +358,7 @@ describe('register filters', () => {
       description: 'Rent',
       lines: [
         { accountId: await accountId(orgA, '6110'), debitCents: 2000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 2000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 2000 },
       ],
     });
 
@@ -396,7 +396,7 @@ describe('register filters', () => {
       description: 'July entry',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 1000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 1000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 1000 },
       ],
     });
     await agent.post(JOURNALS).send(await awsBill(orgA));
@@ -430,7 +430,7 @@ describe('register filters', () => {
         description: `Entry ${String(i)}`,
         lines: [
           { accountId: await accountId(orgA, '6120'), debitCents: 100 + i, creditCents: 0 },
-          { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 100 + i },
+          { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 100 + i },
         ],
       });
       posted.add(res.body.entry.id as string);

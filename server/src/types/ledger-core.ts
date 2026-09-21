@@ -1136,3 +1136,81 @@ export interface ControlAccounts {
   receivableAccountId: string | null;
   payableAccountId: string | null;
 }
+
+// -------------------------------------------- Phase 25 — party accounts
+
+/**
+ * A customer's or vendor's subsidiary ledger: every line on the AR/AP control
+ * account, attributed to the party through the document (invoice, bill,
+ * payment) whose `journal_entry_id` / `void_journal_entry_id` it belongs to.
+ * The chart keeps one control account; parties are never GL accounts.
+ */
+export type PartyKind = 'CUSTOMER' | 'VENDOR';
+
+export type PartyLedgerEntryKind =
+  | 'INVOICE'
+  | 'INVOICE_VOID'
+  | 'BILL'
+  | 'BILL_VOID'
+  | 'PAYMENT'
+  | 'PAYMENT_VOID';
+
+export interface PartyLedgerAllocation {
+  documentId: string;
+  /** invoice_number for AR, vendor_reference for AP. */
+  documentNumber: string | null;
+  baseAmountCents: number;
+}
+
+export interface PartyLedgerRow {
+  journalEntryId: string;
+  entryDate: string;
+  kind: PartyLedgerEntryKind;
+  /** The invoice, bill or payment id — the row that owns journalEntryId. */
+  documentId: string;
+  /** invoice_number / vendor_reference / payment reference. */
+  documentNumber: string | null;
+  /** Base currency, summed over the entry's control-account lines. */
+  debitCents: number;
+  creditCents: number;
+  /** Positive = the party owes us (AR) / we owe the party (AP). */
+  runningBalanceCents: number;
+  /** Non-empty only for PAYMENT / PAYMENT_VOID. */
+  allocations: PartyLedgerAllocation[];
+}
+
+export interface PartyLedger {
+  party: { kind: PartyKind; id: string; name: string };
+  /** null when the org has no resolvable control account — rows is then []. */
+  controlAccount: { id: string; code: string; name: string } | null;
+  from: string | null;
+  to: string | null;
+  openingBalanceCents: number;
+  periodDebitCents: number;
+  periodCreditCents: number;
+  closingBalanceCents: number;
+  totalCount: number;
+  rows: PartyLedgerRow[];
+}
+
+export interface PartyOpenItem {
+  documentId: string;
+  documentNumber: string | null;
+  documentDate: string;
+  dueDate: string;
+  currencyCode: string;
+  totalCents: number;
+  baseTotalCents: number;
+  baseOutstandingCents: number;
+  /** 0 when not yet due. */
+  daysOverdue: number;
+  bucket: AgingBucket;
+}
+
+export interface PartyOpenItems {
+  party: { kind: PartyKind; id: string; name: string };
+  asOf: string;
+  outstandingCents: number;
+  overdueCents: number;
+  items: PartyOpenItem[];
+}

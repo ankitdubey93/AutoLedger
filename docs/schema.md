@@ -678,6 +678,10 @@ See [api.md](api.md#sandbox--apiv1sandbox--phase-18) for the routes.
 
 See [api.md](api.md#ledgercore--apiv1ledger-core) for the routes and [ledger-core.md](ledger-core.md) for the full feature description and gaps.
 
+## Phase 25 — customer & vendor accounts (LedgerCore) — no migration
+
+**No schema change.** A customer's or vendor's account is derived on read: a control-account `ledger_lines` row belongs to a party when its `journal_entry_id` equals the `journal_entry_id` or `void_journal_entry_id` of that party's `invoices`/`bills`/`payments` row. All six are existing columns with composite `(org_id, …)` FKs into `journal_entries`, and each already has its own index (`idx_invoices_journal_entry`, `idx_invoices_void_journal_entry`, `idx_payments_journal_entry`, `idx_payments_void_journal_entry` and the `bills` equivalents). `ledger_lines` deliberately carries **no** `customer_id`/`vendor_id`. Instead of party-tagging, manual and bank-line journals are refused on the control accounts at the service layer (`journalService.assertNotControlAccountsOnClient`); there is no database trigger for this rule, because the document posting path must still write to those accounts. See [roadmap.md § Phase 25](roadmap.md#phase-25-as-delivered).
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

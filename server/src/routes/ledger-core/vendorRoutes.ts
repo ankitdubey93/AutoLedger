@@ -16,6 +16,8 @@ const router = Router();
 
 router.get('/', authenticate, vendorController.list);
 router.get('/:id', authenticate, vendorController.getOne);
+router.get('/:id/ledger', authenticate, vendorController.ledger);
+router.get('/:id/open-items', authenticate, vendorController.openItems);
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), vendorController.create);
 router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), vendorController.update);

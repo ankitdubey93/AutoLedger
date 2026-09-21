@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   createVendor,
+  getAgingReport,
   listVendors,
   updateVendor,
   type Vendor,
 } from '../../services/fetchServices';
+import { formatCents } from '../../utils/money';
 
 /**
  * The vendor list — the parties bills are entered against.
@@ -151,6 +153,9 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
 export default function VendorsPage() {
   const [params, setParams] = useSearchParams();
   const [vendors, setVendors] = useState<Vendor[] | null>(null);
+  // Balance due per vendor, from the AP aging report's per-party rows
+  // (Phase 25). `null` = still loading or failed — the list renders anyway.
+  const [balances, setBalances] = useState<Map<string, number> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
@@ -174,6 +179,20 @@ export default function VendorsPage() {
       ignore = true;
     };
   }, [q, reloadToken]);
+
+  useEffect(() => {
+    let ignore = false;
+    getAgingReport('AP')
+      .then((report) => {
+        if (!ignore) setBalances(new Map(report.rows.map((row) => [row.counterpartyId, row.totalCents])));
+      })
+      .catch(() => {
+        if (!ignore) setBalances(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [reloadToken]);
 
   async function toggleActive(vendor: Vendor) {
     try {
@@ -249,6 +268,7 @@ export default function VendorsPage() {
                 <th className="p-3 font-medium">Email</th>
                 <th className="p-3 font-medium">Phone</th>
                 <th className="p-3 font-medium">Tax number</th>
+                <th className="p-3 font-medium text-right">Balance due</th>
                 <th className="p-3 font-medium">Status</th>
                 <th className="p-3 font-medium text-right">Actions</th>
               </tr>
@@ -256,10 +276,15 @@ export default function VendorsPage() {
             <tbody>
               {vendors.map((vendor) => (
                 <tr key={vendor.id} className="border-t border-[var(--border)]">
-                  <td className="p-3">{vendor.name}</td>
+                  <td className="p-3">
+                    <Link to={vendor.id}>{vendor.name}</Link>
+                  </td>
                   <td className="p-3">{vendor.email ?? '—'}</td>
                   <td className="p-3">{vendor.phone ?? '—'}</td>
                   <td className="p-3">{vendor.taxNumber ?? '—'}</td>
+                  <td className="p-3 text-right tabular-nums">
+                    {balances === null ? '—' : formatCents(balances.get(vendor.id) ?? 0)}
+                  </td>
                   <td className="p-3">
                     {vendor.isActive ? (
                       <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Active</span>

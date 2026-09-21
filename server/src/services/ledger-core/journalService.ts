@@ -323,6 +323,81 @@ async function assertAccountsArePostable(
 }
 
 /**
+ * Resolves one control account the way `reportService.resolveControlAccounts`
+ * does — the configured settings column, else the postable default-chart code —
+ * but on the caller's transaction client (guardrails rule 5).
+ */
+async function resolveControlAccountIdOnClient(
+  client: Queryable,
+  orgId: string,
+  settingsQuery: string,
+  fallbackCode: string,
+): Promise<string | null> {
+  const { rows } = await client.query<{ account_id: string | null }>(settingsQuery, [orgId]);
+  const configured = rows[0]?.account_id ?? null;
+  if (configured !== null) return configured;
+
+  const { rows: fallbackRows } = await client.query<{ id: string }>(
+    'SELECT id FROM accounts WHERE org_id = $1 AND code = $2 AND is_postable',
+    [orgId, fallbackCode],
+  );
+  return fallbackRows[0]?.id ?? null;
+}
+
+/**
+ * Refuses any line on the receivable or payable control account. Manual and
+ * bank-line journals only — documents post through createEntryOnClient,
+ * which deliberately does not call this.
+ *
+ * A control account's balance is the sum of its subledger (every customer's
+ * or vendor's open documents). A journal line names no party, so once one
+ * lands on a control account the subledger can never tie to the GL again —
+ * the same reason SAP refuses direct postings to a reconciliation account.
+ * Reversals stay allowed: they can only move the books back toward agreement.
+ */
+export async function assertNotControlAccountsOnClient(
+  client: Queryable,
+  orgId: string,
+  accountIds: string[],
+): Promise<void> {
+  const receivableId = await resolveControlAccountIdOnClient(
+    client,
+    orgId,
+    'SELECT receivable_account_id AS account_id FROM ledger_invoice_settings WHERE org_id = $1',
+    '1120',
+  );
+  const payableId = await resolveControlAccountIdOnClient(
+    client,
+    orgId,
+    'SELECT payable_account_id AS account_id FROM ledger_settings WHERE org_id = $1',
+    '2100',
+  );
+
+  async function codeOf(accountId: string): Promise<string> {
+    const { rows } = await client.query<{ code: string }>(
+      'SELECT code FROM accounts WHERE org_id = $1 AND id = $2',
+      [orgId, accountId],
+    );
+    return rows[0]?.code ?? accountId;
+  }
+
+  if (receivableId !== null && accountIds.includes(receivableId)) {
+    const code = await codeOf(receivableId);
+    throw new ApiError(
+      422,
+      `Account ${code} is the receivable control account — post to it through an invoice or a payment, not a journal entry`,
+    );
+  }
+  if (payableId !== null && accountIds.includes(payableId)) {
+    const code = await codeOf(payableId);
+    throw new ApiError(
+      422,
+      `Account ${code} is the payable control account — post to it through a bill or a payment, not a journal entry`,
+    );
+  }
+}
+
+/**
  * Posts one balanced entry on a caller-supplied, already-open transaction
  * client. Runs no BEGIN, no COMMIT and no ROLLBACK — the caller owns the
  * transaction, which is what lets a document (an invoice, say) and its
@@ -467,6 +542,12 @@ export async function createEntry(
   const client = await pool.connect();
   try {
     await beginTransaction(client);
+
+    await assertNotControlAccountsOnClient(
+      client,
+      orgId,
+      input.lines.map((line) => line.accountId),
+    );
 
     const entryId = await createEntryOnClient(client, orgId, createdBy, input);
 

@@ -21,6 +21,7 @@ import InvoicesPage from './InvoicesPage';
 import NewInvoicePage from './NewInvoicePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
 import CustomersPage from './CustomersPage';
+import PartyAccountPage from './PartyAccountPage';
 import InvoiceSettingsPage from './InvoiceSettingsPage';
 import PaymentTermsSettingsPage from './PaymentTermsSettingsPage';
 import ItemsPage from './ItemsPage';
@@ -94,8 +95,10 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
           <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
           <Route path="invoices/:invoiceId/edit" element={<NewInvoicePage />} />
           <Route path="customers" element={<CustomersPage />} />
+          <Route path="customers/:partyId" element={<PartyAccountPage kind="CUSTOMER" />} />
           <Route path="items" element={<ItemsPage />} />
           <Route path="vendors" element={<VendorsPage />} />
+          <Route path="vendors/:partyId" element={<PartyAccountPage kind="VENDOR" />} />
           {/* "Expenses" is the current UI label for this document (Phase 24) — the
               /bills/* paths are kept as aliases so existing links and bookmarks
               keep working; the schema, API and types all still say "bills". */}

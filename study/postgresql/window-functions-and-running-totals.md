@@ -75,6 +75,7 @@ Consistent with every other report in this codebase (see [aggregating-a-ledger.m
 
 ## Where it lives in this codebase
 
+- `server/src/services/ledger-core/partyLedgerService.ts` (Phase 25) — the same running balance over a customer's/vendor's rows, but windowed over a `party_rows` CTE that has already `GROUP BY`-collapsed several control-account lines into one row per (journal entry, document); see the gotcha below
 - `server/src/services/ledger-core/accountLedgerService.ts` — `accountLedger()`'s line-page query, the explicit `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` frame, and the `l.id ASC` tiebreaker shared between the `ORDER BY` and the window's implicit ordering
 - `server/src/__tests__/ledger-core/accountLedger.test.ts` — `'the running balance accumulates'` (the basic case) and `'the running balance continues across pages'` (the case that actually exercises why the window runs before `LIMIT`)
 - `client/src/Pages/ledger-core/AccountLedgerPage.tsx` — renders the server-computed `runningBalanceCents` per row; there is no client-side accumulation anywhere
@@ -88,6 +89,8 @@ Consistent with every other report in this codebase (see [aggregating-a-ledger.m
 - **Window functions run before `LIMIT`/`OFFSET`, not after.** It's tempting to think of pagination as "compute the answer, then take a slice" — for a windowed running total, the slicing happens strictly after the per-row computation, in the same query, which is the mechanism that makes cross-page continuity work at all.
 - **A window function cannot appear in a `WHERE` clause** (logical order of operations again — `WHERE` runs before window functions do), which is why filtering "rows where the running balance exceeds X" needs an outer query wrapping the windowed `SELECT`, or a `QUALIFY`-equivalent pattern (Postgres has no `QUALIFY`; a subquery or CTE is the idiom).
 - **This still costs a real scan.** A window function is not free — Postgres still has to sort (or use an already-sorted index) and pass over every row in the filtered set to compute the running values, even though only one page is returned. At the row counts a single account's ledger accumulates this is invisible; it would not stay invisible at a materially larger scale, the same honest caveat every report in this codebase carries.
+
+- **Aggregate first, then window — and know which one the query is doing.** In a single `SELECT`, window functions are evaluated *after* `GROUP BY`/`HAVING`, so `SUM(SUM(x)) OVER (...)` over grouped rows is legal but easy to misread. `partyLedgerService` keeps the two steps visibly apart: the `party_rows` CTE does the `GROUP BY` (a payment settling three invoices posts three control-account lines, collapsed to one row), and the outer query windows over that CTE. Windowing over raw `ledger_lines` instead would have stepped the running balance three times for one payment. The frame, the unique tiebreaker (`entry_id` last), and "window before `LIMIT/OFFSET`" all carry over unchanged. (Verified against PostgreSQL 16.)
 
 ---
 

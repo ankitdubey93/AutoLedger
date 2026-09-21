@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   createCustomer,
+  getAgingReport,
   listCustomers,
   updateCustomer,
   type Customer,
 } from '../../services/fetchServices';
+import { formatCents } from '../../utils/money';
 
 /**
  * The customer list — the parties sales invoices are issued to.
@@ -138,6 +140,9 @@ function CustomerForm({ onCreated, onCancel }: { onCreated: () => void; onCancel
 export default function CustomersPage() {
   const [params, setParams] = useSearchParams();
   const [customers, setCustomers] = useState<Customer[] | null>(null);
+  // Balance due per customer, from the AR aging report's per-party rows
+  // (Phase 25). `null` = still loading or failed — the list renders anyway.
+  const [balances, setBalances] = useState<Map<string, number> | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
@@ -161,6 +166,20 @@ export default function CustomersPage() {
       ignore = true;
     };
   }, [q, reloadToken]);
+
+  useEffect(() => {
+    let ignore = false;
+    getAgingReport('AR')
+      .then((report) => {
+        if (!ignore) setBalances(new Map(report.rows.map((row) => [row.counterpartyId, row.totalCents])));
+      })
+      .catch(() => {
+        if (!ignore) setBalances(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [reloadToken]);
 
   async function toggleActive(customer: Customer) {
     try {
@@ -243,6 +262,7 @@ export default function CustomersPage() {
                 <th className="p-3 font-medium">Email</th>
                 <th className="p-3 font-medium">Phone</th>
                 <th className="p-3 font-medium">Tax number</th>
+                <th className="p-3 font-medium text-right">Balance due</th>
                 <th className="p-3 font-medium">Status</th>
                 <th className="p-3 font-medium text-right">Actions</th>
               </tr>
@@ -250,10 +270,15 @@ export default function CustomersPage() {
             <tbody>
               {customers.map((customer) => (
                 <tr key={customer.id} className="border-t border-[var(--border)]">
-                  <td className="p-3">{customer.name}</td>
+                  <td className="p-3">
+                    <Link to={customer.id}>{customer.name}</Link>
+                  </td>
                   <td className="p-3">{customer.email ?? '—'}</td>
                   <td className="p-3">{customer.phone ?? '—'}</td>
                   <td className="p-3">{customer.taxNumber ?? '—'}</td>
+                  <td className="p-3 text-right tabular-nums">
+                    {balances === null ? '—' : formatCents(balances.get(customer.id) ?? 0)}
+                  </td>
                   <td className="p-3">
                     {customer.isActive ? (
                       <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">

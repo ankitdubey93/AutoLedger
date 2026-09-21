@@ -49,7 +49,7 @@ describe('Phase 5 — audit trail capture', () => {
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     });
     expect(res.status).toBe(201);
@@ -74,7 +74,7 @@ describe('Phase 5 — audit trail capture', () => {
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     });
     expect(res.status).toBe(201);
@@ -196,7 +196,7 @@ describe('Phase 5 — audit trail capture', () => {
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     });
 

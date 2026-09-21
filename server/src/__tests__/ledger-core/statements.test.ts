@@ -178,7 +178,7 @@ describe('GET /reports/balance-sheet', () => {
     const agent = await loginAgent(app, userA);
     await onboard(agent);
     await buildFixture(agent, orgA);
-    await post(agent, orgA, '2026-04-01', '1110', '2100', 45000);
+    await post(agent, orgA, '2026-04-01', '1110', '2120', 45000);
 
     const res = await agent.get(`${BALANCE_SHEET}?asOf=2026-12-31`);
 

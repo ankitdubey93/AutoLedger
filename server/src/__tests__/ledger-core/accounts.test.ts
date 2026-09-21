@@ -359,14 +359,14 @@ describe('account balances', () => {
     return found;
   }
 
-  /** A $450.00 AWS bill: debit 6120 (Expense), credit 2100 (Liability). */
+  /** A $450.00 AWS bill: debit 6120 (Expense), credit 2120 (Liability). */
   async function awsBill(orgId: string, entryDate = '2026-08-15') {
     return {
       entryDate,
       description: 'AWS August',
       lines: [
         { accountId: await accountId(orgId, '6120'), debitCents: 45000, creditCents: 0 },
-        { accountId: await accountId(orgId, '2100'), debitCents: 0, creditCents: 45000 },
+        { accountId: await accountId(orgId, '2120'), debitCents: 0, creditCents: 45000 },
       ],
     };
   }

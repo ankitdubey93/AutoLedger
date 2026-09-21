@@ -16,6 +16,8 @@ const router = Router();
 
 router.get('/', authenticate, customerController.list);
 router.get('/:id', authenticate, customerController.getOne);
+router.get('/:id/ledger', authenticate, customerController.ledger);
+router.get('/:id/open-items', authenticate, customerController.openItems);
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), customerController.create);
 router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), customerController.update);

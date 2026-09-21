@@ -71,7 +71,7 @@ describe('verify:integrity', () => {
       description: 'Balanced',
       lines: [
         { accountId: await accountId(orgA, '6120'), debitCents: 10000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2100'), debitCents: 0, creditCents: 10000 },
+        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 10000 },
       ],
     });
 

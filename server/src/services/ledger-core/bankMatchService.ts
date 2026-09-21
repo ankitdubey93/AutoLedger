@@ -773,6 +773,7 @@ export async function postJournalForTransaction(
     if (input.accountId === line.account_id) {
       throw new ApiError(422, 'The journal entry cannot post back to the same bank account');
     }
+    await journalService.assertNotControlAccountsOnClient(client, orgId, [input.accountId]);
 
     const amountCents = parseCents(line.amount_cents);
     const absAmount = Math.abs(amountCents);

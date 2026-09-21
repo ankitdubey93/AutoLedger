@@ -65,7 +65,7 @@ describe('fpa-engine projection and comparison API', () => {
 
   async function seedBasicModel(agent: Awaited<ReturnType<typeof loginAgent>>, orgId: string) {
     await agent.post(JOURNALS).send(await entry(orgId, '1110', '3100', 1_000_000, '2026-08-15'));
-    await agent.post(JOURNALS).send(await entry(orgId, '1120', '4100', 300_000, '2026-09-10'));
+    await agent.post(JOURNALS).send(await entry(orgId, '1130', '4100', 300_000, '2026-09-10'));
 
     const created = await agent.post(MODELS_BASE).send({
       name: 'FY27 Plan',
@@ -182,7 +182,7 @@ describe('fpa-engine projection and comparison API', () => {
     const { scenarioId } = await seedBasicModel(agentA, orgA);
 
     const agentB = await loginAgent(app, userB);
-    await agentB.post(JOURNALS).send(await entry(orgB, '1120', '4100', 3_000_000, '2026-09-10'));
+    await agentB.post(JOURNALS).send(await entry(orgB, '1130', '4100', 3_000_000, '2026-09-10'));
 
     const res = await agentA.get(`${SCENARIOS_BASE}/${scenarioId}/projection`);
     expect(res.body.projection.months[0].incomeStatement.revenueCents).toBe(300000);

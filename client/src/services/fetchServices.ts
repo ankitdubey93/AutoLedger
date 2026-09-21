@@ -1090,6 +1090,175 @@ export function updateVendor(
   return apiFetch(`/ledger-core/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+/* --------------------------------------- ledger-core: party accounts (Phase 25) */
+
+/** Mirrors server/src/types/ledger-core.ts's PartyKind. */
+export type PartyKind = 'CUSTOMER' | 'VENDOR';
+
+/** Mirrors server/src/types/ledger-core.ts's PartyLedgerEntryKind. */
+export type PartyLedgerEntryKind =
+  | 'INVOICE'
+  | 'INVOICE_VOID'
+  | 'BILL'
+  | 'BILL_VOID'
+  | 'PAYMENT'
+  | 'PAYMENT_VOID';
+
+/** Mirrors server/src/types/ledger-core.ts's PartyLedgerAllocation. */
+export interface PartyLedgerAllocation {
+  documentId: string;
+  documentNumber: string | null;
+  baseAmountCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's PartyLedgerRow. */
+export interface PartyLedgerRow {
+  journalEntryId: string;
+  entryDate: string;
+  kind: PartyLedgerEntryKind;
+  documentId: string;
+  documentNumber: string | null;
+  debitCents: number;
+  creditCents: number;
+  runningBalanceCents: number;
+  allocations: PartyLedgerAllocation[];
+}
+
+/** Mirrors server/src/types/ledger-core.ts's PartyLedger. */
+export interface PartyLedger {
+  party: { kind: PartyKind; id: string; name: string };
+  controlAccount: { id: string; code: string; name: string } | null;
+  from: string | null;
+  to: string | null;
+  openingBalanceCents: number;
+  periodDebitCents: number;
+  periodCreditCents: number;
+  closingBalanceCents: number;
+  totalCount: number;
+  rows: PartyLedgerRow[];
+}
+
+/** Mirrors server/src/types/ledger-core.ts's PartyOpenItem. */
+export interface PartyOpenItem {
+  documentId: string;
+  documentNumber: string | null;
+  documentDate: string;
+  dueDate: string;
+  currencyCode: string;
+  totalCents: number;
+  baseTotalCents: number;
+  baseOutstandingCents: number;
+  daysOverdue: number;
+  bucket: AgingBucket;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's PartyOpenItems. */
+export interface PartyOpenItems {
+  party: { kind: PartyKind; id: string; name: string };
+  asOf: string;
+  outstandingCents: number;
+  overdueCents: number;
+  items: PartyOpenItem[];
+}
+
+type PartyLedgerResponse = {
+  success: boolean;
+  count: number;
+  currentPage: number;
+  totalPages: number;
+} & PartyLedger;
+
+function partyLedger(
+  base: 'customers' | 'vendors',
+  id: string,
+  params: { from?: string; to?: string; page?: number; limit?: number },
+  signal: AbortSignal | undefined,
+): Promise<PartyLedgerResponse> {
+  const query = new URLSearchParams();
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/ledger-core/${base}/${id}/ledger${suffix}`, { signal: signal ?? null });
+}
+
+function partyOpenItems(
+  base: 'customers' | 'vendors',
+  id: string,
+  asOf: string | null,
+  signal: AbortSignal | undefined,
+): Promise<{ success: boolean } & PartyOpenItems> {
+  const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
+  return apiFetch(`/ledger-core/${base}/${id}/open-items${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/customers/:id/ledger — the customer's account under AR, running balance server-side. */
+export function getCustomerLedger(
+  id: string,
+  params: { from?: string; to?: string; page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<PartyLedgerResponse> {
+  return partyLedger('customers', id, params, signal);
+}
+
+/** GET /ledger-core/vendors/:id/ledger */
+export function getVendorLedger(
+  id: string,
+  params: { from?: string; to?: string; page?: number; limit?: number } = {},
+  signal?: AbortSignal,
+): Promise<PartyLedgerResponse> {
+  return partyLedger('vendors', id, params, signal);
+}
+
+/** GET /ledger-core/customers/:id/open-items */
+export function getCustomerOpenItems(
+  id: string,
+  asOf: string | null = null,
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & PartyOpenItems> {
+  return partyOpenItems('customers', id, asOf, signal);
+}
+
+/** GET /ledger-core/vendors/:id/open-items */
+export function getVendorOpenItems(
+  id: string,
+  asOf: string | null = null,
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & PartyOpenItems> {
+  return partyOpenItems('vendors', id, asOf, signal);
+}
+
+/** Mirrors server/src/types/ledger-core.ts's AgingReport. */
+export interface AgingReport {
+  asOf: string;
+  kind: 'AR' | 'AP';
+  buckets: AgingBucketAmount[];
+  totalOutstandingCents: number;
+  totalOverdueCents: number;
+  controlAccount: { id: string; code: string; name: string; balanceCents: number } | null;
+  reconciles: boolean | null;
+  rows: {
+    counterpartyId: string;
+    counterpartyName: string;
+    currentCents: number;
+    d1to30Cents: number;
+    d31to60Cents: number;
+    d61to90Cents: number;
+    d90PlusCents: number;
+    totalCents: number;
+  }[];
+}
+
+/** GET /ledger-core/reports/ar-aging | ap-aging — per-party outstanding balances. */
+export function getAgingReport(
+  kind: 'AR' | 'AP',
+  signal?: AbortSignal,
+): Promise<{ success: boolean } & AgingReport> {
+  const path = kind === 'AR' ? 'ar-aging' : 'ap-aging';
+  return apiFetch(`/ledger-core/reports/${path}`, { signal: signal ?? null });
+}
+
 /** Mirrors server/src/types/ledger-core.ts's BillLine. */
 export interface BillLine {
   id: string;

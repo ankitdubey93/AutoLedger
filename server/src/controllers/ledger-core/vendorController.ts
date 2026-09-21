@@ -4,7 +4,8 @@ import { createVendorSchema, updateVendorSchema } from '../../schemas/ledger-cor
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
-import { optionalText } from '../../utils/queryParam.js';
+import * as partyLedgerService from '../../services/ledger-core/partyLedgerService.js';
+import { optionalIsoDate, optionalText, readPagination } from '../../utils/queryParam.js';
 
 /**
  * Thin adapters over vendorService. Zero SQL (guardrails rule 2).
@@ -44,4 +45,36 @@ export const update: RequestHandler = async (req, res) => {
   const input = parseBody(updateVendorSchema, req.body);
   const vendor = await vendorService.updateVendor(user.orgId, requireParam(req, 'id'), input);
   res.json({ success: true, vendor });
+};
+
+/** GET /ledger-core/vendors/:id/ledger — the party's account under the control account (Phase 25). */
+export const ledger: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const { page, limit } = readPagination(req.query);
+
+  const result = await partyLedgerService.vendorLedger(user.orgId, requireParam(req, 'id'), {
+    page,
+    limit,
+    from: optionalIsoDate(req, 'from'),
+    to: optionalIsoDate(req, 'to'),
+  });
+
+  res.json({
+    success: true,
+    ...result,
+    count: result.rows.length,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(result.totalCount / limit)),
+  });
+};
+
+/** GET /ledger-core/vendors/:id/open-items?asOf=YYYY-MM-DD */
+export const openItems: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const result = await partyLedgerService.vendorOpenItems(
+    user.orgId,
+    requireParam(req, 'id'),
+    optionalIsoDate(req, 'asOf'),
+  );
+  res.json({ success: true, ...result });
 };
