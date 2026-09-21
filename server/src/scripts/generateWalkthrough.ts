@@ -78,7 +78,7 @@ function renderVendors(): string {
     `All six vendors ship as one CSV, \`vendors.csv\`, imported through the customer/vendor migration importer ` +
     `(Phase 24) rather than typed in one at a time — the same importer a business migrating off another system ` +
     `would use for real. Payment terms: **Due on receipt** for all six.\n\n` +
-    `**Settings → Migration Imports → New import.** Kind: **Vendors**. Upload \`vendors.csv\`, or paste its ` +
+    `**Data migration → Imports → New import.** Kind: **Vendors**. Upload \`vendors.csv\`, or paste its ` +
     `contents (shown below) into a new file and upload that. It should stage all 6 rows as \`VALID\` and the ` +
     `import should read \`VALIDATED\` — nothing here has a bad row. Preview, then Commit.\n\n` +
     "```csv\n" +
@@ -91,7 +91,7 @@ function renderCustomers(): string {
   return (
     `# Customers to import\n\n` +
     `All six customers ship as one CSV, \`customers.csv\`, imported the same way as the vendors above.\n\n` +
-    `**Settings → Migration Imports → New import.** Kind: **Customers**. Upload \`customers.csv\`, or paste its ` +
+    `**Data migration → Imports → New import.** Kind: **Customers**. Upload \`customers.csv\`, or paste its ` +
     `contents (shown below) into a new file and upload that. It should stage all 6 rows as \`VALID\` and the ` +
     `import should read \`VALIDATED\`. Preview, then Commit.\n\n` +
     "```csv\n" +
@@ -324,10 +324,10 @@ function renderReadme(): string {
     `- \`04-bills-received.md\`, \`05-invoices-to-raise.md\` — the source documents, in order\n` +
     `- \`06-bank-statements.md\` — what each statement is and the per-line action to take\n` +
     `- \`07-expected-results.md\` — the answer key\n` +
-    `- \`vendors.csv\`, \`customers.csv\` — the two files to import via Migration Imports\n` +
+    `- \`vendors.csv\`, \`customers.csv\` — the two files to import via Data migration → Imports\n` +
     `- \`statements/\` — the three CSV files to import via Bank Imports\n\n` +
-    `**Run order:** import all 6 vendors and all 6 customers once, up front, via **Settings → Migration ` +
-    `Imports**. Then, one month at a time — enter that month's bills (submit + approve), enter that month's ` +
+    `**Run order:** import all 6 vendors and all 6 customers once, up front, via **Data migration → ` +
+    `Imports** in the left sidebar. Then, one month at a time — enter that month's bills (submit + approve), enter that month's ` +
     `invoices (issue), import that month's statement, resolve every line, check the reconciliation report, ` +
     `check that month's figures against \`07-expected-results.md\` — before moving to the next month. ` +
     `Suggestions are generated at import time against documents that are open right then, so a month's ` +
@@ -359,7 +359,7 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `> **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" ` +
     `will have no account to offer for it — come back here and add it.\n\n` +
     `## Step 1 — import the master records\n\n` +
-    `Go to **Settings → Migration Imports → New import**. Kind **Vendors**, upload \`vendors.csv\` (its contents ` +
+    `Go to **Data migration → Imports → New import**. Kind **Vendors**, upload \`vendors.csv\` (its contents ` +
     `are also shown in \`02-vendors.md\` if you'd rather copy-paste). It stages 6 rows, all \`VALID\`; Preview ` +
     `shows \`6 will be created, 0 will be merged\`; Commit. Repeat with kind **Customers** and \`customers.csv\`. ` +
     `Do this now, before entering any document — every one of the 12 is used at least once across the three ` +

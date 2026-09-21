@@ -10,10 +10,10 @@ A complete, three-month accounting scenario for LedgerCore — a vendor and a cu
 - `04-bills-received.md`, `05-invoices-to-raise.md` — the source documents, in order
 - `06-bank-statements.md` — what each statement is and the per-line action to take
 - `07-expected-results.md` — the answer key
-- `vendors.csv`, `customers.csv` — the two files to import via Migration Imports
+- `vendors.csv`, `customers.csv` — the two files to import via Data migration → Imports
 - `statements/` — the three CSV files to import via Bank Imports
 
-**Run order:** import all 6 vendors and all 6 customers once, up front, via **Settings → Migration Imports**. Then, one month at a time — enter that month's bills (submit + approve), enter that month's invoices (issue), import that month's statement, resolve every line, check the reconciliation report, check that month's figures against `07-expected-results.md` — before moving to the next month. Suggestions are generated at import time against documents that are open right then, so a month's documents must exist before its statement is imported.
+**Run order:** import all 6 vendors and all 6 customers once, up front, via **Data migration → Imports** in the left sidebar. Then, one month at a time — enter that month's bills (submit + approve), enter that month's invoices (issue), import that month's statement, resolve every line, check the reconciliation report, check that month's figures against `07-expected-results.md` — before moving to the next month. Suggestions are generated at import time against documents that are open right then, so a month's documents must exist before its statement is imported.
 
 **Do not hand-edit anything in this folder.** It is generated output — change `server/src/scripts/walkthroughDataset.ts` and run `npm run walkthrough` again.
 

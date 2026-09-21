@@ -2,7 +2,7 @@
 
 All six vendors ship as one CSV, `vendors.csv`, imported through the customer/vendor migration importer (Phase 24) rather than typed in one at a time — the same importer a business migrating off another system would use for real. Payment terms: **Due on receipt** for all six.
 
-**Settings → Migration Imports → New import.** Kind: **Vendors**. Upload `vendors.csv`, or paste its contents (shown below) into a new file and upload that. It should stage all 6 rows as `VALID` and the import should read `VALIDATED` — nothing here has a bad row. Preview, then Commit.
+**Data migration → Imports → New import.** Kind: **Vendors**. Upload `vendors.csv`, or paste its contents (shown below) into a new file and upload that. It should stage all 6 rows as `VALID` and the import should read `VALIDATED` — nothing here has a bad row. Preview, then Commit.
 
 ```csv
 Name,Email,Phone,Billing Address,Tax Number,Payment Terms,Notes

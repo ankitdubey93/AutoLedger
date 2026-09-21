@@ -2,7 +2,7 @@
 
 All six customers ship as one CSV, `customers.csv`, imported the same way as the vendors above.
 
-**Settings → Migration Imports → New import.** Kind: **Customers**. Upload `customers.csv`, or paste its contents (shown below) into a new file and upload that. It should stage all 6 rows as `VALID` and the import should read `VALIDATED`. Preview, then Commit.
+**Data migration → Imports → New import.** Kind: **Customers**. Upload `customers.csv`, or paste its contents (shown below) into a new file and upload that. It should stage all 6 rows as `VALID` and the import should read `VALIDATED`. Preview, then Commit.
 
 ```csv
 Name,Email,Phone,Billing Address,Tax Number,Notes

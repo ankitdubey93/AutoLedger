@@ -14,7 +14,7 @@ Follow `01-setup.md`: register a fresh org (base currency USD), then create one 
 
 ## Step 1 — import the master records
 
-Go to **Settings → Migration Imports → New import**. Kind **Vendors**, upload `vendors.csv` (its contents are also shown in `02-vendors.md` if you'd rather copy-paste). It stages 6 rows, all `VALID`; Preview shows `6 will be created, 0 will be merged`; Commit. Repeat with kind **Customers** and `customers.csv`. Do this now, before entering any document — every one of the 12 is used at least once across the three months.
+Go to **Data migration → Imports → New import**. Kind **Vendors**, upload `vendors.csv` (its contents are also shown in `02-vendors.md` if you'd rather copy-paste). It stages 6 rows, all `VALID`; Preview shows `6 will be created, 0 will be merged`; Commit. Repeat with kind **Customers** and `customers.csv`. Do this now, before entering any document — every one of the 12 is used at least once across the three months.
 
 > **Hint:** payment terms for every vendor are "Due on receipt" — there's no net-30 anywhere in this scenario, which keeps every bank line's date close to its document's date.
 
