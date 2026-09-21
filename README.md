@@ -55,6 +55,8 @@ cp client/.env.example client/.env
 
 Open http://localhost:5173 — register an organization and you land on the app chooser.
 
+Setting up a machine from scratch — installing Node and Docker, generating the token secrets, restoring data? [SETUP.md](SETUP.md) walks through the whole thing.
+
 Prefer a terminal per process, or need the test cluster? See [docs/development.md](docs/development.md) for the manual path.
 
 ```bash
