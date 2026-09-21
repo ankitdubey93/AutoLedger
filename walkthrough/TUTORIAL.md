@@ -12,11 +12,13 @@ Follow `01-setup.md`: register a fresh org (base currency USD), then create one 
 
 > **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" will have no account to offer for it — come back here and add it.
 
-## Step 1 — enter the master records
+## Step 1 — import the master records
 
-From `02-vendors.md` and `03-customers.md`, create all 6 vendors and all 6 customers now, before entering any document. Every one of them is used at least once across the three months.
+Go to **Settings → Migration Imports → New import**. Kind **Vendors**, upload `vendors.csv` (its contents are also shown in `02-vendors.md` if you'd rather copy-paste). It stages 6 rows, all `VALID`; Preview shows `6 will be created, 0 will be merged`; Commit. Repeat with kind **Customers** and `customers.csv`. Do this now, before entering any document — every one of the 12 is used at least once across the three months.
 
 > **Hint:** payment terms for every vendor are "Due on receipt" — there's no net-30 anywhere in this scenario, which keeps every bank line's date close to its document's date.
+
+> **Hint:** if a staged row comes back `INVALID`, the importer is telling you something is genuinely wrong with that row (a blank name, a malformed email) — these two files are clean, so seeing one means the upload got corrupted somewhere, not that you should force a commit past it.
 
 ---
 

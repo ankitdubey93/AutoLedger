@@ -5,19 +5,24 @@ import { resolveSettlementLines, type ResolvedSettlementLine } from './walkthrou
 import { computeExpectedResults, type ExpectedMonth, type ExpectedStatementRow } from './walkthroughExpected.js';
 import { parseAnchor, defaultAnchor, resolveDate, lastDayOfWalkthroughMonth, type AnchorMonth } from './walkthroughDates.js';
 import { money, statement1, statement2, statement3 } from './walkthroughStatements.js';
+import { vendorsCsv, customersCsv } from './walkthroughParties.js';
 import { parseMoneyText } from '../utils/money.js';
 
 /**
  * `npm run walkthrough [-- --anchor YYYY-MM]` — writes `walkthrough/` at the
  * repo root: source documents an accountant would receive and enter by
- * hand, three bank statements in three different formats, and a computed,
- * service-verified answer key.
+ * hand, a vendor and a customer CSV imported through the Phase 24 party
+ * importer, three bank statements in three different formats imported
+ * through the Phase 6 bank importer, and a computed, service-verified
+ * answer key.
  *
  * Deliberately not `fixtures/` and not seeded through the API here — this
- * folder is meant to be typed in by a human at the LedgerCore UI, and is
- * committed as plain, reviewable files. Contrast `sandbox/`, which is
- * replayed through services by a seeder (see `walkthrough/README.md` and
- * `sandbox/README.md`, which cross-reference each other).
+ * folder is meant to be worked through by a human at the LedgerCore UI
+ * (typing a bill or invoice in by hand, uploading a CSV through the
+ * importer screens), and is committed as plain, reviewable files. Contrast
+ * `sandbox/`, which is replayed through services by a seeder (see
+ * `walkthrough/README.md` and `sandbox/README.md`, which cross-reference
+ * each other).
  */
 
 // process.cwd() === server/ for every npm script, the same convention
@@ -68,27 +73,30 @@ function accountName(code: string): string {
 // ------------------------------------------------------------ markdown sheets
 
 function renderVendors(): string {
-  const rows = WALKTHROUGH_DATASET.vendors
-    .map(
-      (v) =>
-        `| ${v.name} | ${v.email} | ${v.phone} | ${v.address} | ${v.taxNumber} | Due on receipt |`,
-    )
-    .join('\n');
   return (
-    `# Vendors to enter\n\n` +
-    `Enter each of these as a new vendor before entering any bill. Payment terms: **Due on receipt** for all six.\n\n` +
-    `| Name | Email | Phone | Address | Tax number | Terms |\n|---|---|---|---|---|---|\n${rows}\n`
+    `# Vendors to import\n\n` +
+    `All six vendors ship as one CSV, \`vendors.csv\`, imported through the customer/vendor migration importer ` +
+    `(Phase 24) rather than typed in one at a time — the same importer a business migrating off another system ` +
+    `would use for real. Payment terms: **Due on receipt** for all six.\n\n` +
+    `**Settings → Migration Imports → New import.** Kind: **Vendors**. Upload \`vendors.csv\`, or paste its ` +
+    `contents (shown below) into a new file and upload that. It should stage all 6 rows as \`VALID\` and the ` +
+    `import should read \`VALIDATED\` — nothing here has a bad row. Preview, then Commit.\n\n` +
+    "```csv\n" +
+    vendorsCsv() +
+    "```\n"
   );
 }
 
 function renderCustomers(): string {
-  const rows = WALKTHROUGH_DATASET.customers
-    .map((c) => `| ${c.name} | ${c.email} | ${c.phone} | ${c.address} |`)
-    .join('\n');
   return (
-    `# Customers to enter\n\n` +
-    `Enter each of these as a new customer before raising any invoice.\n\n` +
-    `| Name | Email | Phone | Address |\n|---|---|---|---|\n${rows}\n`
+    `# Customers to import\n\n` +
+    `All six customers ship as one CSV, \`customers.csv\`, imported the same way as the vendors above.\n\n` +
+    `**Settings → Migration Imports → New import.** Kind: **Customers**. Upload \`customers.csv\`, or paste its ` +
+    `contents (shown below) into a new file and upload that. It should stage all 6 rows as \`VALID\` and the ` +
+    `import should read \`VALIDATED\`. Preview, then Commit.\n\n` +
+    "```csv\n" +
+    customersCsv() +
+    "```\n"
   );
 }
 
@@ -305,23 +313,25 @@ function renderTheBusiness(): string {
 function renderReadme(): string {
   return (
     `# Walkthrough: Harbor Point Fabrication\n\n` +
-    `A complete, three-month accounting scenario for LedgerCore — source documents to enter by hand, three ` +
-    `bank statements to import, and a computed answer key to check your work against.\n\n` +
+    `A complete, three-month accounting scenario for LedgerCore — a vendor and a customer CSV to import, source ` +
+    `documents to enter by hand, three bank statements to import, and a computed answer key to check your work ` +
+    `against.\n\n` +
     `**Start with \`TUTORIAL.md\`** — it walks the whole thing start to finish with hints. The files below are ` +
     `its reference material, useful to come back to on their own:\n\n` +
     `- \`00-the-business.md\` — who Harbor Point Fabrication is\n` +
     `- \`01-setup.md\` — organization registration, the one account to create by hand\n` +
-    `- \`02-vendors.md\`, \`03-customers.md\` — master records to enter\n` +
+    `- \`02-vendors.md\`, \`03-customers.md\` — the CSV import steps, with the CSV shown inline\n` +
     `- \`04-bills-received.md\`, \`05-invoices-to-raise.md\` — the source documents, in order\n` +
     `- \`06-bank-statements.md\` — what each statement is and the per-line action to take\n` +
     `- \`07-expected-results.md\` — the answer key\n` +
-    `- \`statements/\` — the three CSV files to import\n\n` +
-    `**Run order:** enter all 6 vendors and all 6 customers once, up front. Then, one month at a time — enter ` +
-    `that month's bills (submit + approve), enter that month's invoices (issue), import that month's statement, ` +
-    `resolve every line, check the reconciliation report, check that month's figures against ` +
-    `\`07-expected-results.md\` — before moving to the next month. Suggestions are generated at import time ` +
-    `against documents that are open right then, so a month's documents must exist before its statement is ` +
-    `imported.\n\n` +
+    `- \`vendors.csv\`, \`customers.csv\` — the two files to import via Migration Imports\n` +
+    `- \`statements/\` — the three CSV files to import via Bank Imports\n\n` +
+    `**Run order:** import all 6 vendors and all 6 customers once, up front, via **Settings → Migration ` +
+    `Imports**. Then, one month at a time — enter that month's bills (submit + approve), enter that month's ` +
+    `invoices (issue), import that month's statement, resolve every line, check the reconciliation report, ` +
+    `check that month's figures against \`07-expected-results.md\` — before moving to the next month. ` +
+    `Suggestions are generated at import time against documents that are open right then, so a month's ` +
+    `documents must exist before its statement is imported.\n\n` +
     `**Do not hand-edit anything in this folder.** It is generated output — change ` +
     `\`server/src/scripts/walkthroughDataset.ts\` and run \`npm run walkthrough\` again.\n\n` +
     `## If a number does not match\n\n` +
@@ -348,11 +358,17 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `create yourself.\n\n` +
     `> **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" ` +
     `will have no account to offer for it — come back here and add it.\n\n` +
-    `## Step 1 — enter the master records\n\n` +
-    `From \`02-vendors.md\` and \`03-customers.md\`, create all 6 vendors and all 6 customers now, before ` +
-    `entering any document. Every one of them is used at least once across the three months.\n\n` +
+    `## Step 1 — import the master records\n\n` +
+    `Go to **Settings → Migration Imports → New import**. Kind **Vendors**, upload \`vendors.csv\` (its contents ` +
+    `are also shown in \`02-vendors.md\` if you'd rather copy-paste). It stages 6 rows, all \`VALID\`; Preview ` +
+    `shows \`6 will be created, 0 will be merged\`; Commit. Repeat with kind **Customers** and \`customers.csv\`. ` +
+    `Do this now, before entering any document — every one of the 12 is used at least once across the three ` +
+    `months.\n\n` +
     `> **Hint:** payment terms for every vendor are "Due on receipt" — there's no net-30 anywhere in this ` +
-    `scenario, which keeps every bank line's date close to its document's date.\n\n---\n\n`;
+    `scenario, which keeps every bank line's date close to its document's date.\n\n` +
+    `> **Hint:** if a staged row comes back \`INVALID\`, the importer is telling you something is genuinely ` +
+    `wrong with that row (a blank name, a malformed email) — these two files are clean, so seeing one means the ` +
+    `upload got corrupted somewhere, not that you should force a commit past it.\n\n---\n\n`;
 
   for (const m of [1, 2, 3] as const) {
     const monthResult = expected.find((e) => e.month === m);
@@ -427,6 +443,8 @@ function main(): void {
   write('01-setup.md', renderSetup());
   write('02-vendors.md', renderVendors());
   write('03-customers.md', renderCustomers());
+  write('vendors.csv', vendorsCsv());
+  write('customers.csv', customersCsv());
   write('04-bills-received.md', renderDocuments(anchor, WALKTHROUGH_DATASET.bills, 'bill'));
   write('05-invoices-to-raise.md', renderDocuments(anchor, WALKTHROUGH_DATASET.invoices, 'invoice'));
   write('06-bank-statements.md', renderBankStatements(anchor, resolved));

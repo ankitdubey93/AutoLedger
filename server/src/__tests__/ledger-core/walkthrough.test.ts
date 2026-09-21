@@ -11,6 +11,7 @@ import { WALKTHROUGH_DATASET, type DatasetDocument } from '../../scripts/walkthr
 import { resolveSettlementLines, verifyExpectedScores, type ResolvedSettlementLine } from '../../scripts/walkthroughTiers.js';
 import { computeExpectedResults } from '../../scripts/walkthroughExpected.js';
 import { statement1, statement2, statement3 } from '../../scripts/walkthroughStatements.js';
+import { vendorsCsv, customersCsv } from '../../scripts/walkthroughParties.js';
 import { resolveDate, type AnchorMonth } from '../../scripts/walkthroughDates.js';
 
 /**
@@ -34,6 +35,7 @@ const VENDORS = '/api/v1/ledger-core/vendors';
 const INVOICES = '/api/v1/ledger-core/invoices';
 const BILLS = '/api/v1/ledger-core/bills';
 const BANK_IMPORTS = '/api/v1/ledger-core/bank-imports';
+const MIGRATION_IMPORTS = '/api/v1/ledger-core/migration-imports';
 const BANK_TRANSACTIONS = '/api/v1/ledger-core/bank-transactions';
 const REPORTS = '/api/v1/ledger-core/reports';
 
@@ -177,28 +179,64 @@ async function createInterestAccount(): Promise<void> {
   accountIdByCode.set('4300', res.body.account.id as string);
 }
 
+/**
+ * Imports the walkthrough's vendors and customers through the Phase 24
+ * party importer — the exact `vendors.csv`/`customers.csv` bytes that ship
+ * in `walkthrough/`, staged then committed, never a direct `POST /vendors`
+ * or `POST /customers` — replaying what `TUTORIAL.md`'s Step 1 actually
+ * instructs a person to click through.
+ */
 async function createVendorsAndCustomers(): Promise<void> {
-  for (const v of WALKTHROUGH_DATASET.vendors) {
-    const res = await agent.post(VENDORS).send({
-      name: v.name,
-      email: v.email,
-      phone: v.phone,
-      billingAddress: v.address,
-      taxNumber: v.taxNumber,
-      paymentTerms: 'Due on receipt',
-    });
-    if (res.status !== 201) throw new Error(`fixture: vendor create failed ${res.status} ${res.text}`);
-    vendorIdByKey.set(v.key, res.body.vendor.id as string);
+  const vendorImport = await agent
+    .post(MIGRATION_IMPORTS)
+    .send({ kind: 'VENDORS', fileName: 'vendors.csv', content: vendorsCsv() });
+  if (vendorImport.status !== 201) {
+    throw new Error(`fixture: vendor import stage failed ${vendorImport.status} ${vendorImport.text}`);
   }
+  if (vendorImport.body.import.status !== 'VALIDATED') {
+    throw new Error(`fixture: vendor import did not validate: ${JSON.stringify(vendorImport.body)}`);
+  }
+  const vendorImportId = vendorImport.body.import.id as string;
+  const vendorCommit = await agent.post(`${MIGRATION_IMPORTS}/${vendorImportId}/commit`);
+  if (vendorCommit.status !== 200) {
+    throw new Error(`fixture: vendor import commit failed ${vendorCommit.status} ${vendorCommit.text}`);
+  }
+  if (vendorCommit.body.result.createdCount !== WALKTHROUGH_DATASET.vendors.length) {
+    throw new Error(`fixture: vendor import created ${String(vendorCommit.body.result.createdCount)}, expected ${String(WALKTHROUGH_DATASET.vendors.length)}`);
+  }
+
+  const customerImport = await agent
+    .post(MIGRATION_IMPORTS)
+    .send({ kind: 'CUSTOMERS', fileName: 'customers.csv', content: customersCsv() });
+  if (customerImport.status !== 201) {
+    throw new Error(`fixture: customer import stage failed ${customerImport.status} ${customerImport.text}`);
+  }
+  if (customerImport.body.import.status !== 'VALIDATED') {
+    throw new Error(`fixture: customer import did not validate: ${JSON.stringify(customerImport.body)}`);
+  }
+  const customerImportId = customerImport.body.import.id as string;
+  const customerCommit = await agent.post(`${MIGRATION_IMPORTS}/${customerImportId}/commit`);
+  if (customerCommit.status !== 200) {
+    throw new Error(`fixture: customer import commit failed ${customerCommit.status} ${customerCommit.text}`);
+  }
+  if (customerCommit.body.result.createdCount !== WALKTHROUGH_DATASET.customers.length) {
+    throw new Error(`fixture: customer import created ${String(customerCommit.body.result.createdCount)}, expected ${String(WALKTHROUGH_DATASET.customers.length)}`);
+  }
+
+  const vendorList = await agent.get(VENDORS);
+  if (vendorList.status !== 200) throw new Error(`fixture: could not list vendors after import`);
+  for (const v of WALKTHROUGH_DATASET.vendors) {
+    const match = (vendorList.body.vendors as { id: string; name: string }[]).find((r) => r.name === v.name);
+    if (match === undefined) throw new Error(`fixture: vendor "${v.name}" not found after import`);
+    vendorIdByKey.set(v.key, match.id);
+  }
+
+  const customerList = await agent.get(CUSTOMERS);
+  if (customerList.status !== 200) throw new Error(`fixture: could not list customers after import`);
   for (const c of WALKTHROUGH_DATASET.customers) {
-    const res = await agent.post(CUSTOMERS).send({
-      name: c.name,
-      email: c.email,
-      phone: c.phone,
-      billingAddress: c.address,
-    });
-    if (res.status !== 201) throw new Error(`fixture: customer create failed ${res.status} ${res.text}`);
-    customerIdByKey.set(c.key, res.body.customer.id as string);
+    const match = (customerList.body.customers as { id: string; name: string }[]).find((r) => r.name === c.name);
+    if (match === undefined) throw new Error(`fixture: customer "${c.name}" not found after import`);
+    customerIdByKey.set(c.key, match.id);
   }
 }
 
