@@ -20,6 +20,12 @@ import OnboardingPage from './OnboardingPage';
 import InvoicesPage from './InvoicesPage';
 import NewInvoicePage from './NewInvoicePage';
 import InvoiceDetailPage from './InvoiceDetailPage';
+import CreditNotesPage from './CreditNotesPage';
+import NewCreditNotePage from './NewCreditNotePage';
+import CreditNoteDetailPage from './CreditNoteDetailPage';
+import DebitNotesPage from './DebitNotesPage';
+import NewDebitNotePage from './NewDebitNotePage';
+import DebitNoteDetailPage from './DebitNoteDetailPage';
 import CustomersPage from './CustomersPage';
 import PartyAccountPage from './PartyAccountPage';
 import InvoiceSettingsPage from './InvoiceSettingsPage';
@@ -94,6 +100,15 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
           <Route path="invoices/new" element={<NewInvoicePage />} />
           <Route path="invoices/:invoiceId" element={<InvoiceDetailPage />} />
           <Route path="invoices/:invoiceId/edit" element={<NewInvoicePage />} />
+          {/* Phase 26 — a new note is always reached from its original document (?invoiceId= / ?billId=). */}
+          <Route path="credit-notes" element={<CreditNotesPage />} />
+          <Route path="credit-notes/new" element={<NewCreditNotePage />} />
+          <Route path="credit-notes/:noteId" element={<CreditNoteDetailPage />} />
+          <Route path="credit-notes/:noteId/edit" element={<NewCreditNotePage />} />
+          <Route path="debit-notes" element={<DebitNotesPage />} />
+          <Route path="debit-notes/new" element={<NewDebitNotePage />} />
+          <Route path="debit-notes/:noteId" element={<DebitNoteDetailPage />} />
+          <Route path="debit-notes/:noteId/edit" element={<NewDebitNotePage />} />
           <Route path="customers" element={<CustomersPage />} />
           <Route path="customers/:partyId" element={<PartyAccountPage kind="CUSTOMER" />} />
           <Route path="items" element={<ItemsPage />} />

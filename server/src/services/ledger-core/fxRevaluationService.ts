@@ -7,7 +7,8 @@ import { convertToBase } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
-import { allocatedCentsSubquery, resolveControlAccount } from './paymentService.js';
+import { resolveControlAccount } from './paymentService.js';
+import { settledCentsSubquery } from './settlementSql.js';
 import type {
   FxExposureDocument,
   FxExposureReport,
@@ -66,7 +67,7 @@ async function loadOpenInvoices(
     `SELECT * FROM (
        SELECT i.id, i.invoice_number AS document_number, c.name AS counterparty_name,
               i.currency_code, i.fx_rate::text AS document_rate,
-              (i.total_cents - ${allocatedCentsSubquery('i', 'invoice_id')}::bigint) AS outstanding_cents
+              (i.total_cents - ${settledCentsSubquery('i', 'invoice_id')}::bigint) AS outstanding_cents
          FROM invoices i
          JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
         WHERE i.org_id = $1
@@ -90,7 +91,7 @@ async function loadOpenBills(
     `SELECT * FROM (
        SELECT b.id, b.vendor_reference AS document_number, v.name AS counterparty_name,
               b.currency_code, b.fx_rate::text AS document_rate,
-              (b.total_cents - ${allocatedCentsSubquery('b', 'bill_id')}::bigint) AS outstanding_cents
+              (b.total_cents - ${settledCentsSubquery('b', 'bill_id')}::bigint) AS outstanding_cents
          FROM bills b
          JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
         WHERE b.org_id = $1

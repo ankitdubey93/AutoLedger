@@ -91,6 +91,9 @@ A: Not in the strictest sense — voiding an already-issued invoice doesn't retu
 **Q: What would you do differently if numbering needed to be strictly gapless even across process crashes mid-transaction?**
 A: PostgreSQL's transactional guarantees already cover a crash mid-transaction — either the whole `BEGIN…COMMIT` lands or none of it does, so a crash can't leave a "half-issued" invoice with a burned number. The scenario that would need more machinery is a two-phase workflow where the number has to be reserved before some external, non-transactional side effect (an email send, a call to an external e-invoicing API) that can't be rolled back — that needs a reservation/confirmation table so a failed external step can release the reservation rather than leaving a mystery gap.
 
+**Q: Why do credit notes get their own number series instead of sharing the invoice counter?**
+A: Two reasons. Practically, sharing would punch holes in the invoice series every time a credit note was issued, and "every invoice number is accounted for" is the property the counter exists to provide. From a compliance angle, VAT/GST regimes generally expect each document type to carry its own consecutive series and a credit note to reference the invoice it amends (verify the exact rule for your jurisdiction — I'm not stating a specific statute here). In Phase 26 the credit-note and debit-note counters live on the same settings row as the invoice counter (`credit_note_next_number`, `debit_note_next_number`), allocated by the same `UPDATE … RETURNING` row-lock pattern inside the issuing transaction, with the column names chosen from a constant map rather than interpolated from input.
+
 ## Follow-ups they'll dig into
 
 - What if the organization's counter row doesn't exist yet when the first invoice is issued? (Handled by `INSERT ... ON CONFLICT (org_id) DO NOTHING` immediately before the `UPDATE`, itself safe under the same concurrency this pattern defends against.)

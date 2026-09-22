@@ -7,20 +7,21 @@ import { parseCsv } from '../../utils/csv.js';
 import { parseMoneyText } from '../../utils/money.js';
 import { parseFlexibleDate } from '../../utils/dateParse.js';
 import { scoreMatch } from '../../utils/matchScore.js';
-import { WALKTHROUGH_DATASET, type DatasetDocument } from '../../scripts/walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, type DatasetDocument, type DatasetNote } from '../../scripts/walkthroughDataset.js';
 import { resolveSettlementLines, verifyExpectedScores, type ResolvedSettlementLine } from '../../scripts/walkthroughTiers.js';
 import { computeExpectedResults } from '../../scripts/walkthroughExpected.js';
-import { statement1, statement2, statement3 } from '../../scripts/walkthroughStatements.js';
+import { statement1, statement2, statement3, statement4 } from '../../scripts/walkthroughStatements.js';
 import { vendorsCsv, customersCsv } from '../../scripts/walkthroughParties.js';
-import { resolveDate, type AnchorMonth } from '../../scripts/walkthroughDates.js';
+import { resolveDate, type AnchorMonth, type WalkthroughMonth } from '../../scripts/walkthroughDates.js';
 
 /**
  * The walkthrough scenario (Phase 6.1), Harbor Point Fabrication.
  *
  * The critical case here is the end-to-end replay: the same dataset that
  * drives `07-expected-results.md` is replayed through the real HTTP API —
- * customers, vendors, bills, invoices, three bank statement imports, three
- * different match/post-journal/ignore resolutions — and the *real* reports
+ * customers, vendors, bills, invoices, four bank statement imports, the
+ * match/post-journal/ignore resolutions, and (Phase 26, month 4) credit and
+ * debit notes issued and applied — and the *real* reports
  * are asserted to equal `computeExpectedResults`'s output, cent for cent.
  * That is what makes the answer key trustworthy: it has been checked
  * against the product, not just against its own arithmetic.
@@ -37,6 +38,8 @@ const BILLS = '/api/v1/ledger-core/bills';
 const BANK_IMPORTS = '/api/v1/ledger-core/bank-imports';
 const MIGRATION_IMPORTS = '/api/v1/ledger-core/migration-imports';
 const BANK_TRANSACTIONS = '/api/v1/ledger-core/bank-transactions';
+const CREDIT_NOTES = '/api/v1/ledger-core/credit-notes';
+const DEBIT_NOTES = '/api/v1/ledger-core/debit-notes';
 const REPORTS = '/api/v1/ledger-core/reports';
 
 type Agent = Awaited<ReturnType<typeof loginAgent>>;
@@ -78,11 +81,34 @@ describe('walkthrough dataset — internal checks', () => {
 
   it('every month is internally balanced: trial balance, balance sheet and reconciliation', () => {
     const months = computeExpectedResults(ANCHOR);
-    expect(months).toHaveLength(3);
+    expect(months).toHaveLength(4);
     for (const m of months) {
       expect(m.trialBalance.isBalanced).toBe(true);
       expect(m.balanceSheet.balances).toBe(true);
       expect(m.bankReconciliation.differenceCents).toBe(0);
+    }
+  });
+
+  it("month 4 (returns & adjustments) matches the plan's hand-computed figures", () => {
+    const month4 = computeExpectedResults(ANCHOR).find((m) => m.month === 4);
+    if (month4 === undefined) throw new Error('no month 4');
+    // Cumulative net income 98,783.30 + month 4's 5,378.20 (revenue 12,000 +
+    // 6,200 − 2,300 returns/allowances + 16.20 interest − 10,500 net steel −
+    // 38 fees).
+    expect(month4.profitAndLoss.netIncomeCents).toBe(10416150);
+    expect(month4.balanceSheet.assets.find((r) => r.code === '1110')?.amountCents).toBe(17916150);
+    expect(month4.profitAndLoss.revenue.find((r) => r.code === '4800')?.amountCents).toBe(-230000);
+    expect(month4.arAging.reduce((sum, b) => sum + b.amountCents, 0)).toBe(0);
+    expect(month4.apAging.reduce((sum, b) => sum + b.amountCents, 0)).toBe(0);
+    expect(month4.bankReconciliation.ignoredCount).toBe(4);
+  });
+
+  it('every note is dated inside its month and applies no more than its total', () => {
+    for (const note of WALKTHROUGH_DATASET.notes) {
+      expect(note.day).toBeGreaterThanOrEqual(1);
+      expect(note.day).toBeLessThanOrEqual(28);
+      const applied = note.allocations.reduce((sum, a) => sum + parseMoneyText(a.amount), 0);
+      expect(applied).toBeLessThanOrEqual(parseMoneyText(note.total));
     }
   });
 
@@ -279,7 +305,7 @@ async function enterInvoice(doc: DatasetDocument): Promise<void> {
   documentIdByRef.set(doc.ref, invoiceId);
 }
 
-async function importStatement(month: 1 | 2 | 3): Promise<void> {
+async function importStatement(month: WalkthroughMonth): Promise<void> {
   const resolved = resolveSettlementLines(ANCHOR);
   const cashAccountId = await loadAccountId('1110');
   const body =
@@ -287,7 +313,9 @@ async function importStatement(month: 1 | 2 | 3): Promise<void> {
       ? { fileName: 'month-1.csv', content: statement1(ANCHOR, resolved), dateFormat: 'ISO' as const, columnMap: null }
       : month === 2
         ? { fileName: 'month-2.csv', content: statement2(ANCHOR, resolved), dateFormat: 'DMY' as const, columnMap: null }
-        : {
+        : month === 4
+          ? { fileName: 'month-4.csv', content: statement4(ANCHOR, resolved), dateFormat: 'ISO' as const, columnMap: null }
+          : {
             fileName: 'month-3.csv',
             content: statement3(ANCHOR, resolved),
             dateFormat: 'MDY' as const,
@@ -297,7 +325,61 @@ async function importStatement(month: 1 | 2 | 3): Promise<void> {
   if (res.status !== 201) throw new Error(`fixture: import failed month ${String(month)}: ${res.status} ${res.text}`);
 }
 
-async function resolveMonth(month: 1 | 2 | 3, resolved: ResolvedSettlementLine[]): Promise<void> {
+/**
+ * Phase 26 — issues one credit or debit note against its original document,
+ * asserts that issuing auto-applied exactly what the dataset says it should
+ * to that original, and returns the note id. Applying to any *other*
+ * document is `applyNote`, a separate step so the test can observe the
+ * unapplied-credit state in between.
+ */
+async function issueNote(note: DatasetNote): Promise<string> {
+  const originalId = documentIdByRef.get(note.againstRef);
+  if (originalId === undefined) throw new Error(`fixture: no document for ${note.againstRef}`);
+  const accountId = await loadAccountId(note.accountCode);
+  const line = { description: note.lineDescription, quantityMilli: 1000, unitPriceCents: parseMoneyText(note.total), taxRateBp: 0 };
+  const isCredit = note.kind === 'CREDIT_NOTE';
+  const base = isCredit ? CREDIT_NOTES : DEBIT_NOTES;
+  const body = isCredit
+    ? { invoiceId: originalId, issueDate: resolveDate(ANCHOR, note.month, note.day), reasonCode: note.reasonCode, reason: null, notes: null, lines: [{ ...line, revenueAccountId: accountId }] }
+    : {
+        billId: originalId,
+        issueDate: resolveDate(ANCHOR, note.month, note.day),
+        reasonCode: note.reasonCode,
+        reason: null,
+        vendorCreditReference: note.vendorCreditReference,
+        notes: null,
+        lines: [{ ...line, expenseAccountId: accountId }],
+      };
+  const created = await agent.post(base).send(body);
+  if (created.status !== 201) throw new Error(`fixture: ${note.ref} create failed ${created.status} ${created.text}`);
+  const noteId = (isCredit ? created.body.creditNote.id : created.body.debitNote.id) as string;
+  const issued = await agent.post(`${base}/${noteId}/issue`).send({});
+  if (issued.status !== 200) throw new Error(`fixture: ${note.ref} issue failed ${issued.status} ${issued.text}`);
+
+  const autoApplied = ((isCredit ? issued.body.creditNote : issued.body.debitNote).allocations as Array<{ amountCents: number }>)
+    .reduce((sum, a) => sum + a.amountCents, 0);
+  const expectedAuto = note.allocations
+    .filter((a) => a.documentRef === note.againstRef)
+    .reduce((sum, a) => sum + parseMoneyText(a.amount), 0);
+  expect(autoApplied, `${note.ref} auto-applied to ${note.againstRef}`).toBe(expectedAuto);
+  return noteId;
+}
+
+async function applyNote(note: DatasetNote, noteId: string): Promise<void> {
+  const base = note.kind === 'CREDIT_NOTE' ? CREDIT_NOTES : DEBIT_NOTES;
+  for (const allocation of note.allocations.filter((a) => a.documentRef !== note.againstRef)) {
+    const targetId = documentIdByRef.get(allocation.documentRef);
+    if (targetId === undefined) throw new Error(`fixture: no document for ${allocation.documentRef}`);
+    const res = await agent.post(`${base}/${noteId}/allocations`).send({
+      ...(note.kind === 'CREDIT_NOTE' ? { invoiceId: targetId } : { billId: targetId }),
+      amountCents: parseMoneyText(allocation.amount),
+      allocationDate: resolveDate(ANCHOR, note.month, allocation.day),
+    });
+    if (res.status !== 201) throw new Error(`fixture: ${note.ref} apply failed ${res.status} ${res.text}`);
+  }
+}
+
+async function resolveMonth(month: WalkthroughMonth, resolved: ResolvedSettlementLine[]): Promise<void> {
   const cashAccountId = await loadAccountId('1110');
   const listRes = await agent.get(`${BANK_TRANSACTIONS}?accountId=${cashAccountId}&status=UNMATCHED&limit=100`);
   const transactions = listRes.body.transactions as Array<{
@@ -353,16 +435,42 @@ beforeEach(async () => {
 afterAll(closePool);
 
 describe('walkthrough — end-to-end replay through the real API', () => {
-  it('reproduces the computed answer key for all three months, cent for cent', async () => {
+  it('reproduces the computed answer key for all four months, cent for cent', async () => {
     await createInterestAccount();
     await createVendorsAndCustomers();
 
     const expected = computeExpectedResults(ANCHOR);
     const resolved = resolveSettlementLines(ANCHOR);
 
-    for (const month of [1, 2, 3] as const) {
+    for (const month of [1, 2, 3, 4] as const) {
       for (const bill of WALKTHROUGH_DATASET.bills.filter((b) => b.month === month)) await enterBill(bill);
       for (const invoice of WALKTHROUGH_DATASET.invoices.filter((i) => i.month === month)) await enterInvoice(invoice);
+
+      // Month 4 — issue the notes (in dataset order) before the statement is
+      // imported, so the matcher scores against the credited amounts due.
+      for (const note of WALKTHROUGH_DATASET.notes.filter((n) => n.month === month)) {
+        const noteId = await issueNote(note);
+        if (note.ref === 'CN2') {
+          // The checkpoint the tutorial tells the user to look at: CN2 is
+          // against I13, paid in full in month 3, so none of it applies —
+          // Ferrous Works' account shows a 500.00 credit balance, and AR
+          // still reconciles to the control account.
+          //
+          // asOf is I16's date, not CN2's: the aging report's open-document
+          // set is today's state (it does not filter documents by their own
+          // date — a pre-Phase-26 property of agingService), and I16 is
+          // already entered, so only an asOf on/after I16's date lines up with
+          // the GL control balance. A user checks this "as of today".
+          const ferrousId = customerIdByKey.get('ferrous-works');
+          const checkpointDate = resolveDate(ANCHOR, 4, 10);
+          const open = await agent.get(`${CUSTOMERS}/${ferrousId ?? ''}/open-items?asOf=${checkpointDate}`);
+          expect(open.body.items.some((i: { documentKind: string; baseOutstandingCents: number }) =>
+            i.documentKind === 'CREDIT_NOTE' && i.baseOutstandingCents === -50000)).toBe(true);
+          const aging = await agent.get(`${REPORTS}/ar-aging?asOf=${checkpointDate}`);
+          expect(aging.body.reconciles).toBe(true);
+        }
+        await applyNote(note, noteId);
+      }
 
       await importStatement(month);
       await resolveMonth(month, resolved);
@@ -428,7 +536,7 @@ describe('walkthrough — end-to-end replay through the real API', () => {
       expect(brRes.body.ignoredCount).toBe(monthExpected.bankReconciliation.ignoredCount);
     }
 
-    // Every bank line, across all three months, ends up MATCHED or IGNORED —
+    // Every bank line, across all four months, ends up MATCHED or IGNORED —
     // never left UNMATCHED, and every document was entered.
     const cashAccountId = await loadAccountId('1110');
     const unmatchedRes = await agent.get(`${BANK_TRANSACTIONS}?accountId=${cashAccountId}&status=UNMATCHED&limit=100`);

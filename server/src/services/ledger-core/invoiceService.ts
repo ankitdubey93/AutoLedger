@@ -9,7 +9,7 @@ import * as journalService from './journalService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { allocatedCentsSubquery } from './paymentService.js';
+import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import {
   canTransitionInvoice,
   isInvoiceStatus,
@@ -132,6 +132,7 @@ interface InvoiceRow {
   created_at: Date;
   updated_at: Date;
   allocated_cents: string;
+  credited_cents: string;
 }
 
 interface InvoiceLineRow {
@@ -159,7 +160,8 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.base_tax_cents, i.base_total_cents,
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
                                 i.created_by, u.name AS created_by_name, i.created_at, i.updated_at,
-                                ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents
+                                ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents,
+                                ${noteAppliedCentsSubquery('i', 'invoice_id')} AS credited_cents
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
                            LEFT JOIN users u ON u.id = i.created_by`;
@@ -189,11 +191,14 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
   const isOpen = row.status === 'ISSUED';
   const totalCents = parseCents(row.total_cents);
   const allocatedCents = isOpen ? parseCents(row.allocated_cents) : 0;
-  const amountDueCents = isOpen ? totalCents - allocatedCents : 0;
+  const creditedCents = isOpen ? parseCents(row.credited_cents) : 0;
+  const amountDueCents = isOpen ? totalCents - allocatedCents - creditedCents : 0;
+  // A credit note settles an invoice exactly as a payment does, so a fully
+  // credited invoice reads PAID (Phase 26).
   const settlementStatus = settlementStatusOf({
     isOpen,
     totalCents,
-    allocatedCents,
+    allocatedCents: allocatedCents + creditedCents,
     dueDate: row.due_date,
     asOf: today(),
   });
@@ -230,6 +235,7 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     updatedAt: row.updated_at.toISOString(),
     lines,
     allocatedCents,
+    creditedCents,
     amountDueCents,
     settlementStatus,
   };
@@ -302,15 +308,15 @@ function buildFilters(
   if (options.to !== null) add((p) => `i.issue_date <= ${p}::date`, options.to);
   // `alias` and `column` below are our own constants, never request input (rule 4).
   if (options.settlement === 'OUTSTANDING') {
-    clauses.push(`i.status = 'ISSUED' AND i.total_cents > ${allocatedCentsSubquery('i', 'invoice_id')}::bigint`);
+    clauses.push(`i.status = 'ISSUED' AND i.total_cents > ${settledCentsSubquery('i', 'invoice_id')}::bigint`);
   } else if (options.settlement === 'OVERDUE') {
     add(
       (p) =>
-        `i.status = 'ISSUED' AND i.total_cents > ${allocatedCentsSubquery('i', 'invoice_id')}::bigint AND i.due_date < ${p}::date`,
+        `i.status = 'ISSUED' AND i.total_cents > ${settledCentsSubquery('i', 'invoice_id')}::bigint AND i.due_date < ${p}::date`,
       today(),
     );
   } else if (options.settlement === 'PAID') {
-    clauses.push(`i.status = 'ISSUED' AND i.total_cents <= ${allocatedCentsSubquery('i', 'invoice_id')}::bigint`);
+    clauses.push(`i.status = 'ISSUED' AND i.total_cents <= ${settledCentsSubquery('i', 'invoice_id')}::bigint`);
   }
   if (options.q !== null)
     add(
@@ -366,7 +372,7 @@ interface ResolvedAccount {
 }
 
 /** Confirms every revenue account exists in this org, is postable, and is type Revenue. */
-async function assertRevenueAccounts(
+export async function assertRevenueAccounts(
   client: PoolClient,
   orgId: string,
   accountIds: string[],
@@ -739,7 +745,7 @@ interface PostingAccounts {
  * against: the org's invoice settings first, falling back to the default
  * chart's `1120`/`2140`. Fails loudly rather than guessing further.
  */
-async function resolvePostingAccounts(
+export async function resolvePostingAccounts(
   client: PoolClient,
   orgId: string,
   needsTaxAccount: boolean,
@@ -968,6 +974,19 @@ export async function voidInvoice(
       );
       if (parseCents(allocatedRows[0]?.allocated ?? '0') > 0) {
         throw new ApiError(409, 'This document has payments applied. Void the payments first.');
+      }
+
+      // Phase 26 — an invoice that a credit note corrects (or that a credit
+      // was applied to) cannot disappear from under that note.
+      const { rows: noteRows } = await client.query<{ has_notes: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM credit_notes WHERE org_id = $1 AND invoice_id = $2 AND status = 'ISSUED')
+             OR EXISTS (SELECT 1 FROM credit_note_allocations a
+                          JOIN credit_notes n ON n.id = a.credit_note_id AND n.org_id = a.org_id
+                         WHERE a.org_id = $1 AND a.invoice_id = $2 AND n.status = 'ISSUED') AS has_notes`,
+        [orgId, id],
+      );
+      if (noteRows[0]?.has_notes === true) {
+        throw new ApiError(409, 'This invoice has credit notes. Void the credit notes first.');
       }
     }
 

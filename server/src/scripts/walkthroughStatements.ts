@@ -7,7 +7,7 @@
  */
 import { WALKTHROUGH_DATASET } from './walkthroughDataset.js';
 import type { ResolvedSettlementLine } from './walkthroughTiers.js';
-import { resolveDate, type AnchorMonth } from './walkthroughDates.js';
+import { resolveDate, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
 import { parseMoneyText } from '../utils/money.js';
 
 export function money(cents: number): string {
@@ -63,10 +63,20 @@ function docByRefMap(): Map<string, (typeof WALKTHROUGH_DATASET.invoices)[number
 
 /** Statement 1 — Northwind Bank: comma-delimited, ISO dates, one signed Amount column. */
 export function statement1(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
-  const rows = lines.filter((l) => l.month === 1).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+  return isoStatement(anchor, lines, 1);
+}
+
+/** Statement 4 (Phase 26) — Northwind Bank again, statement 1's exact format, for month 4. */
+export function statement4(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
+  return isoStatement(anchor, lines, 4);
+}
+
+/** Northwind's format: comma-delimited, ISO dates, one signed Amount column, vendor reference in Reference. */
+function isoStatement(anchor: AnchorMonth, lines: ResolvedSettlementLine[], month: WalkthroughMonth): string {
+  const rows = lines.filter((l) => l.month === month).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
   const noiseRows = WALKTHROUGH_DATASET.noise
-    .filter((n) => n.month === 1)
-    .map((n) => ({ isoDate: resolveDate(anchor, 1, n.day), description: n.description, amountCents: parseMoneyText(n.amount), reference: '' }));
+    .filter((n) => n.month === month)
+    .map((n) => ({ isoDate: resolveDate(anchor, month, n.day), description: n.description, amountCents: parseMoneyText(n.amount), reference: '' }));
   const docByRef = docByRefMap();
   const settlementRows = rows.map((l) => {
     const doc = docByRef.get(l.documentRef);

@@ -336,6 +336,8 @@ export interface Invoice {
   lines: InvoiceLine[];
   /** Derived from POSTED payment allocations — see settlementStatusOf. `0` unless status is ISSUED. */
   allocatedCents: number;
+  /** Phase 26 — applied ISSUED credit notes. `0` unless status is ISSUED. amountDueCents = total − allocated − credited. */
+  creditedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
 }
@@ -480,6 +482,8 @@ export interface Bill {
   lines: BillLine[];
   /** Derived from POSTED payment allocations — see settlementStatusOf. `0` unless status is POSTED. */
   allocatedCents: number;
+  /** Phase 26 — applied ISSUED debit notes. `0` unless status is POSTED. amountDueCents = total − allocated − debited. */
+  debitedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
 }
@@ -581,6 +585,174 @@ export function settlementStatusOf(args: {
   if (args.dueDate < args.asOf) return 'OVERDUE';
   if (args.allocatedCents > 0) return 'PARTIALLY_PAID';
   return 'UNPAID';
+}
+
+/* ------------------------------------------- Phase 26 — credit & debit notes */
+
+/**
+ * A credit note (issued by us to a customer, reduces AR on an ISSUED invoice)
+ * and a debit note (issued by us to a vendor, reduces AP on a POSTED bill)
+ * share one lifecycle and one set of reason codes.
+ */
+export const NOTE_STATUSES = ['DRAFT', 'ISSUED', 'VOID'] as const;
+export type NoteStatus = (typeof NOTE_STATUSES)[number];
+
+export function isNoteStatus(value: string): value is NoteStatus {
+  return (NOTE_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The one lifecycle transition table for both credit and debit notes
+ * (guardrails rule 10). Migration 063's `status` CHECKs list exactly these
+ * three values — if a status is ever added, both change in the same migration.
+ */
+export const NOTE_TRANSITIONS = {
+  DRAFT: ['ISSUED', 'VOID'],
+  ISSUED: ['VOID'],
+  VOID: [],
+} as const satisfies Record<NoteStatus, readonly NoteStatus[]>;
+
+export function canTransitionNote(from: NoteStatus, to: NoteStatus): boolean {
+  return (NOTE_TRANSITIONS[from] as readonly NoteStatus[]).includes(to);
+}
+
+export const NOTE_REASON_CODES = ['RETURN', 'PRICE_ADJUSTMENT', 'DISCOUNT', 'DAMAGED', 'OTHER'] as const;
+export type NoteReasonCode = (typeof NOTE_REASON_CODES)[number];
+
+export function isNoteReasonCode(value: string): value is NoteReasonCode {
+  return (NOTE_REASON_CODES as readonly string[]).includes(value);
+}
+
+export interface CreditNoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  /** Thousandths of a unit — 2500 means 2.5. Never a float. */
+  quantityMilli: number;
+  unitPriceCents: number;
+  revenueAccountId: string;
+  revenueAccountCode: string;
+  revenueAccountName: string;
+  /** Basis points — 1850 means 18.5%. */
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export interface CreditNoteAllocation {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  amountCents: number;
+  baseAmountCents: number;
+  allocationDate: string;
+  createdAt: string;
+}
+
+export interface CreditNote {
+  id: string;
+  /** `null` while DRAFT — the number is allocated at issue. */
+  creditNoteNumber: string | null;
+  status: NoteStatus;
+  customerId: string;
+  customerName: string;
+  /** The original invoice this note corrects. */
+  invoiceId: string;
+  invoiceNumber: string | null;
+  issueDate: string;
+  /** Copied from the original invoice, never client-supplied. */
+  currencyCode: string;
+  fxRate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  customerNameSnapshot: string;
+  customerAddressSnapshot: string | null;
+  customerTaxNumberSnapshot: string | null;
+  notes: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: CreditNoteLine[];
+  allocations: CreditNoteAllocation[];
+  /** Σ allocations while ISSUED; 0 otherwise. */
+  appliedCents: number;
+  /** totalCents − appliedCents while ISSUED; 0 otherwise. */
+  unappliedCents: number;
+}
+
+export interface DebitNoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  expenseAccountId: string;
+  expenseAccountCode: string;
+  expenseAccountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+export interface DebitNoteAllocation {
+  id: string;
+  billId: string;
+  billVendorReference: string;
+  amountCents: number;
+  baseAmountCents: number;
+  allocationDate: string;
+  createdAt: string;
+}
+
+export interface DebitNote {
+  id: string;
+  debitNoteNumber: string | null;
+  status: NoteStatus;
+  vendorId: string;
+  vendorName: string;
+  /** The original bill this note corrects. */
+  billId: string;
+  billVendorReference: string;
+  /** The vendor's own credit-note number, when they send one back. */
+  vendorCreditReference: string | null;
+  issueDate: string;
+  currencyCode: string;
+  fxRate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  vendorNameSnapshot: string;
+  vendorAddressSnapshot: string | null;
+  vendorTaxNumberSnapshot: string | null;
+  notes: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: DebitNoteLine[];
+  allocations: DebitNoteAllocation[];
+  appliedCents: number;
+  unappliedCents: number;
 }
 
 export const AGING_BUCKETS = ['CURRENT', 'D1_30', 'D31_60', 'D61_90', 'D90_PLUS'] as const;
@@ -1153,7 +1325,12 @@ export type PartyLedgerEntryKind =
   | 'BILL'
   | 'BILL_VOID'
   | 'PAYMENT'
-  | 'PAYMENT_VOID';
+  | 'PAYMENT_VOID'
+  /** Phase 26 — a credit note (customer) or debit note (vendor) and its reversal. */
+  | 'CREDIT_NOTE'
+  | 'CREDIT_NOTE_VOID'
+  | 'DEBIT_NOTE'
+  | 'DEBIT_NOTE_VOID';
 
 export interface PartyLedgerAllocation {
   documentId: string;
@@ -1194,6 +1371,8 @@ export interface PartyLedger {
 }
 
 export interface PartyOpenItem {
+  /** Phase 26 — a note's unapplied remainder is an open item too, with a negative outstanding. */
+  documentKind: 'INVOICE' | 'BILL' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
   documentId: string;
   documentNumber: string | null;
   documentDate: string;

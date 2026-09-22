@@ -68,6 +68,7 @@ function customerOpenItems(overrides: Partial<PartyOpenItems> = {}): PartyOpenIt
     overdueCents: 6000,
     items: [
       {
+        documentKind: 'INVOICE',
         documentId: 'inv-1',
         documentNumber: 'INV-0001',
         documentDate: '2026-06-01',

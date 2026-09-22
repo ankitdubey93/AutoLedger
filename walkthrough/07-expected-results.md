@@ -270,4 +270,96 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 
 ---
 
+## Month 4 — as of 2026-09-30
+
+### Trial balance
+
+| Account | Debit | Credit |
+|---|---|---|
+| 1110 Operating Cash | 255,008.50 | 75,847.00 |
+| 1120 Accounts Receivable | 182,250.00 | 182,250.00 |
+| 2100 Accounts Payable | 77,150.00 | 77,150.00 |
+| 3100 Common Stock / Owner's Capital |  | 75,000.00 |
+| 4100 Product Revenue |  | 44,600.00 |
+| 4200 Service Revenue |  | 137,650.00 |
+| 4300 Interest Income |  | 58.50 |
+| 4800 Sales Returns & Allowances | 2,300.00 |  |
+| 5100 Direct Materials | 33,650.00 | 1,500.00 |
+| 5300 Freight & Duty | 5,440.00 |  |
+| 6110 Rent & Utilities | 18,200.00 |  |
+| 6120 Software & IT Infrastructure | 6,960.00 |  |
+| 6200 Professional Fees | 8,800.00 |  |
+| 6400 Marketing & Advertising | 4,100.00 |  |
+| 6600 Bank Fees | 197.00 |  |
+| **Total** | **594,055.50** | **594,055.50** |
+
+### Profit & loss (cumulative from month 1)
+
+| | Amount |
+|---|---|
+| 4100 Product Revenue | 44,600.00 |
+| 4200 Service Revenue | 137,650.00 |
+| 4300 Interest Income | 58.50 |
+| 4800 Sales Returns & Allowances | -2,300.00 |
+| **Total revenue** | **180,008.50** |
+| 5100 Direct Materials | 32,150.00 |
+| 5300 Freight & Duty | 5,440.00 |
+| **Total cost of sales** | **37,590.00** |
+| **Gross profit** | **142,418.50** |
+| 6110 Rent & Utilities | 18,200.00 |
+| 6120 Software & IT Infrastructure | 6,960.00 |
+| 6200 Professional Fees | 8,800.00 |
+| 6400 Marketing & Advertising | 4,100.00 |
+| 6600 Bank Fees | 197.00 |
+| **Total operating expenses** | **38,257.00** |
+| **Net income** | **104,161.50** |
+
+### Balance sheet — as of 2026-09-30
+
+| | Amount |
+|---|---|
+| 1110 Operating Cash | 179,161.50 |
+| 1120 Accounts Receivable | 0.00 |
+| **Total assets** | **179,161.50** |
+| 2100 Accounts Payable | 0.00 |
+| **Total liabilities** | **0.00** |
+| 3100 Common Stock / Owner's Capital | 75,000.00 |
+| Retained/current earnings (derived) | 104,161.50 |
+| **Total equity** | **179,161.50** |
+
+Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
+
+### AR aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### AP aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### Bank reconciliation
+
+| | |
+|---|---|
+| GL balance | 179,161.50 |
+| Statement balance | 179,161.50 |
+| **Difference** | **0.00** |
+| Matched | 39 |
+| Unmatched | 0 |
+| Ignored | 4 |
+
+---
+
 If any figure above differs, see "If a number does not match" in `README.md`.

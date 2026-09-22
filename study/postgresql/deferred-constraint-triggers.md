@@ -133,6 +133,21 @@ This is a different *kind* of multi-row rule than the balance trigger. The balan
 
 Both triggers raise with `ERRCODE = 'P0001'` (the default for `RAISE EXCEPTION`) rather than `0A000` — because both are *domain validation failures* ("this payment doesn't add up," "this would overpay the invoice"), the same category `assert_journal_entry_balanced` uses, not *immutability violations*, which is what `0A000` is reserved for elsewhere in this codebase (`reject_payment_mutation`, `reject_mutation`). The two error codes map onto two different HTTP statuses in `paymentService`'s `catch` block: `P0001` becomes a `422`, `0A000` would indicate a `409`-shaped "you can't touch this row at all" problem. Distinguishing them at the SQLSTATE level is what lets the service translate a raw trigger failure into the right client-facing error without parsing message text.
 
+### Phase 26 — one invariant, two allocation sources, and replacing a function without editing its migration
+
+Credit and debit notes settle an invoice/bill the same way a payment does: through an insert-only allocation row (`credit_note_allocations`, `debit_note_allocations`). That changed the invariant `trg_allocations_no_overallocation` protects from *"POSTED payments ≤ document total"* to *"POSTED payments **+ ISSUED notes** ≤ document total"* — and the invariant now has to hold no matter which of the two tables received the new row.
+
+So it is enforced from **both** sides:
+
+- `assert_no_overallocation()` (fires on a new `payment_allocations` row) now sums both sources.
+- `assert_note_allocation_within_limits()` (a new `AFTER INSERT … DEFERRABLE INITIALLY DEFERRED` trigger on each note-allocation table) sums both sources too, and also checks the note never applies more than its own total.
+
+Each branch filters by its parent's status — `p.status = 'POSTED'`, `n.status = 'ISSUED'` — which is what lets a void un-settle a document without deleting a single allocation row. One function serves both note tables by branching on `TG_TABLE_NAME`, the same way the immutability function is shared.
+
+The function change itself is worth knowing how to do. `assert_no_overallocation()` was created by migration **014**, which is applied and must never be edited (its checksum is recorded). Migration **063** simply runs `CREATE OR REPLACE FUNCTION assert_no_overallocation() …` with the new body. A trigger references its function by OID, and `CREATE OR REPLACE` keeps the OID, so `trg_allocations_no_overallocation` — still defined only in 014 — runs the new body from the moment 063 commits. No `DROP TRIGGER`, no change to 014, and re-running 063 is a no-op. (The limits: `CREATE OR REPLACE` refuses to change a function's return type, and different argument types don't replace anything — they create a second, overloaded function while the trigger keeps calling the old one. Either change needs a `DROP` + recreate of the function and the trigger in the same migration. A trigger function takes no declared arguments, so in practice only the body ever changes.)
+
+A third deferred trigger, `assert_notes_within_original()`, protects a *document-level* cap: Σ totals of ISSUED notes against one invoice ≤ the invoice total. As with over-allocation, deferral is not concurrency safety on its own — two transactions each issuing a note see only their own uncommitted row in their snapshot, so each trigger can pass while the pair together over-credits. The service closes that race by locking the invoice row `FOR UPDATE` before summing; the trigger is the backstop for any write path that skips the service.
+
 ---
 
 ## Why we chose it here
@@ -198,6 +213,9 @@ A: The balance trigger's rows all belong to one journal entry, inserted together
 
 **Q: How do you test a database-level guarantee?**
 A: Deliberately bypassing the application. All my constraint tests talk straight to the connection pool and write raw SQL, because a test that posts through the service proves the service is correct, which is the thing I was *already* confident about. The whole claim is that the database holds when the service isn't involved, so the test has to not involve it. I also assert on SQLSTATE rather than message text — `23514` for a CHECK, `0A000` for the immutability trigger — because messages get reworded and error codes are the actual contract.
+
+**Q: You need to change the body of a trigger function that an already-applied migration created. How?**
+A: A new migration with `CREATE OR REPLACE FUNCTION` and the new body — never an edit to the old migration, whose checksum the runner has recorded. The trigger points at the function by OID and `CREATE OR REPLACE` keeps the OID, so the existing trigger picks up the new body with no `DROP TRIGGER`. I did exactly this in Phase 26: migration 063 replaced `assert_no_overallocation()` from migration 014 so it counts credit-note and debit-note allocations as well as payments. What `CREATE OR REPLACE` can't do is change the return type (it errors), and different argument types silently create an overload instead of replacing; either needs a drop and recreate of the function and its triggers in one migration.
 
 ---
 

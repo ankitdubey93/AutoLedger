@@ -8,7 +8,7 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { allocatedCentsSubquery } from './paymentService.js';
+import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { resolveApPostingAccountsOnClient } from './settingsService.js';
 import {
   canTransitionBill,
@@ -142,6 +142,7 @@ interface BillRow {
   created_at: Date;
   updated_at: Date;
   allocated_cents: string;
+  debited_cents: string;
 }
 
 interface BillLineRow {
@@ -171,7 +172,8 @@ const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.n
                              b.submitted_at, b.posted_at, b.voided_at,
                              b.approved_by, au.name AS approved_by_name,
                              b.created_by, u.name AS created_by_name, b.created_at, b.updated_at,
-                             ${allocatedCentsSubquery('b', 'bill_id')} AS allocated_cents
+                             ${allocatedCentsSubquery('b', 'bill_id')} AS allocated_cents,
+                             ${noteAppliedCentsSubquery('b', 'bill_id')} AS debited_cents
                         FROM bills b
                         JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
                         LEFT JOIN users u  ON u.id = b.created_by
@@ -202,11 +204,14 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
   const isOpen = row.status === 'POSTED';
   const totalCents = parseCents(row.total_cents);
   const allocatedCents = isOpen ? parseCents(row.allocated_cents) : 0;
-  const amountDueCents = isOpen ? totalCents - allocatedCents : 0;
+  const debitedCents = isOpen ? parseCents(row.debited_cents) : 0;
+  const amountDueCents = isOpen ? totalCents - allocatedCents - debitedCents : 0;
+  // A debit note settles a bill exactly as a payment does, so a fully
+  // debited bill reads PAID (Phase 26).
   const settlementStatus = settlementStatusOf({
     isOpen,
     totalCents,
-    allocatedCents,
+    allocatedCents: allocatedCents + debitedCents,
     dueDate: row.due_date,
     asOf: today(),
   });
@@ -246,6 +251,7 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     updatedAt: row.updated_at.toISOString(),
     lines,
     allocatedCents,
+    debitedCents,
     amountDueCents,
     settlementStatus,
   };
@@ -315,15 +321,15 @@ function buildFilters(
   if (options.to !== null) add((p) => `b.bill_date <= ${p}::date`, options.to);
   // `alias` and `column` below are our own constants, never request input (rule 4).
   if (options.settlement === 'OUTSTANDING') {
-    clauses.push(`b.status = 'POSTED' AND b.total_cents > ${allocatedCentsSubquery('b', 'bill_id')}::bigint`);
+    clauses.push(`b.status = 'POSTED' AND b.total_cents > ${settledCentsSubquery('b', 'bill_id')}::bigint`);
   } else if (options.settlement === 'OVERDUE') {
     add(
       (p) =>
-        `b.status = 'POSTED' AND b.total_cents > ${allocatedCentsSubquery('b', 'bill_id')}::bigint AND b.due_date < ${p}::date`,
+        `b.status = 'POSTED' AND b.total_cents > ${settledCentsSubquery('b', 'bill_id')}::bigint AND b.due_date < ${p}::date`,
       today(),
     );
   } else if (options.settlement === 'PAID') {
-    clauses.push(`b.status = 'POSTED' AND b.total_cents <= ${allocatedCentsSubquery('b', 'bill_id')}::bigint`);
+    clauses.push(`b.status = 'POSTED' AND b.total_cents <= ${settledCentsSubquery('b', 'bill_id')}::bigint`);
   }
   if (options.q !== null)
     add(
@@ -379,7 +385,7 @@ interface ResolvedAccount {
 }
 
 /** Confirms every expense account exists in this org, is postable, and is type Expense or Asset (plan D8). */
-async function assertExpenseAccounts(
+export async function assertExpenseAccounts(
   client: PoolClient,
   orgId: string,
   accountIds: string[],
@@ -1113,6 +1119,19 @@ export async function voidBill(
       );
       if (parseCents(allocatedRows[0]?.allocated ?? '0') > 0) {
         throw new ApiError(409, 'This document has payments applied. Void the payments first.');
+      }
+
+      // Phase 26 — a bill that a debit note corrects (or that a debit was
+      // applied to) cannot disappear from under that note.
+      const { rows: noteRows } = await client.query<{ has_notes: boolean }>(
+        `SELECT EXISTS (SELECT 1 FROM debit_notes WHERE org_id = $1 AND bill_id = $2 AND status = 'ISSUED')
+             OR EXISTS (SELECT 1 FROM debit_note_allocations a
+                          JOIN debit_notes n ON n.id = a.debit_note_id AND n.org_id = a.org_id
+                         WHERE a.org_id = $1 AND a.bill_id = $2 AND n.status = 'ISSUED') AS has_notes`,
+        [orgId, id],
+      );
+      if (noteRows[0]?.has_notes === true) {
+        throw new ApiError(409, 'This bill has debit notes. Void the debit notes first.');
       }
     }
 

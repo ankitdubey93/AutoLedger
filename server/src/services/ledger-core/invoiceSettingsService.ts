@@ -233,3 +233,41 @@ export async function allocateInvoiceNumber(client: Queryable, orgId: string): P
 
   return `${row.number_prefix}${String(row.allocated).padStart(row.number_padding, '0')}`;
 }
+
+/**
+ * Phase 26 — credit and debit notes each keep their own gapless series
+ * (`CN-000001`, `DN-000001`) on the same settings row, allocated exactly like
+ * the invoice number: inside the issuing transaction, so a rollback un-burns
+ * the number. The identifiers interpolated below come only from this constant
+ * map, never request input (guardrails rule 4).
+ */
+const NOTE_COUNTER = {
+  CREDIT_NOTE: { prefix: 'credit_note_prefix', next: 'credit_note_next_number' },
+  DEBIT_NOTE: { prefix: 'debit_note_prefix', next: 'debit_note_next_number' },
+} as const;
+
+export async function allocateNoteNumber(
+  client: Queryable,
+  orgId: string,
+  kind: 'CREDIT_NOTE' | 'DEBIT_NOTE',
+): Promise<string> {
+  const counter = NOTE_COUNTER[kind];
+
+  await client.query(
+    'INSERT INTO ledger_invoice_settings (org_id) VALUES ($1) ON CONFLICT (org_id) DO NOTHING',
+    [orgId],
+  );
+
+  const { rows } = await client.query<{ allocated: number; prefix: string; number_padding: number }>(
+    `UPDATE ledger_invoice_settings
+        SET ${counter.next} = ${counter.next} + 1
+      WHERE org_id = $1
+      RETURNING ${counter.next} - 1 AS allocated, ${counter.prefix} AS prefix, number_padding`,
+    [orgId],
+  );
+
+  const row = rows[0];
+  if (row === undefined) throw new Error('invoice settings row missing after upsert');
+
+  return `${row.prefix}${String(row.allocated).padStart(row.number_padding, '0')}`;
+}

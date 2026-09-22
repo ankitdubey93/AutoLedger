@@ -2,7 +2,7 @@ import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
 import * as customerService from './customerService.js';
 import * as vendorService from './vendorService.js';
-import { allocatedCentsSubquery } from './paymentService.js';
+import { noteOwnAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { resolveControlAccounts } from './reportService.js';
 import {
   AGING_BUCKETS,
@@ -23,7 +23,8 @@ import {
  * There is no GL account per party and no party column on `ledger_lines`. A
  * control-account line belongs to a party when its journal entry is the
  * `journal_entry_id` or `void_journal_entry_id` of one of that party's
- * invoices, bills or payments — FK-constrained columns that already exist, so
+ * invoices, bills, payments or (Phase 26) credit/debit notes — FK-constrained
+ * columns that already exist, so
  * attribution is derived on every read and needs no migration. Lines no
  * document owns (legacy manual journals, FX revaluation) belong to no party;
  * `/reports/ar-aging`'s `reconciles` is what surfaces them.
@@ -46,6 +47,12 @@ interface PartyConfig {
   allocationColumn: 'invoice_id' | 'bill_id';
   /** AR is an Asset (debit-normal); AP a Liability (credit-normal). */
   debitNormal: boolean;
+  /** Phase 26 — the party's correcting documents. */
+  noteTable: 'credit_notes' | 'debit_notes';
+  noteNumberColumn: 'credit_note_number' | 'debit_note_number';
+  noteKind: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+  noteVoidKind: 'CREDIT_NOTE_VOID' | 'DEBIT_NOTE_VOID';
+  noteSubqueryKind: 'credit' | 'debit';
 }
 
 const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
@@ -60,6 +67,11 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     voidKind: 'INVOICE_VOID',
     allocationColumn: 'invoice_id',
     debitNormal: true,
+    noteTable: 'credit_notes',
+    noteNumberColumn: 'credit_note_number',
+    noteKind: 'CREDIT_NOTE',
+    noteVoidKind: 'CREDIT_NOTE_VOID',
+    noteSubqueryKind: 'credit',
   },
   VENDOR: {
     partyTable: 'vendors',
@@ -72,6 +84,11 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     voidKind: 'BILL_VOID',
     allocationColumn: 'bill_id',
     debitNormal: false,
+    noteTable: 'debit_notes',
+    noteNumberColumn: 'debit_note_number',
+    noteKind: 'DEBIT_NOTE',
+    noteVoidKind: 'DEBIT_NOTE_VOID',
+    noteSubqueryKind: 'debit',
   },
 };
 
@@ -121,6 +138,14 @@ function buildPartyRowsCte(config: PartyConfig): string {
     SELECT 'PAYMENT_VOID'::text, p.id, p.reference, p.void_journal_entry_id
       FROM payments p
      WHERE p.org_id = $1 AND p.${config.partyColumn} = $2 AND p.void_journal_entry_id IS NOT NULL
+    UNION ALL
+    SELECT '${config.noteKind}'::text, n.id, n.${config.noteNumberColumn}, n.journal_entry_id
+      FROM ${config.noteTable} n
+     WHERE n.org_id = $1 AND n.${config.partyColumn} = $2 AND n.journal_entry_id IS NOT NULL
+    UNION ALL
+    SELECT '${config.noteVoidKind}'::text, n.id, n.${config.noteNumberColumn}, n.void_journal_entry_id
+      FROM ${config.noteTable} n
+     WHERE n.org_id = $1 AND n.${config.partyColumn} = $2 AND n.void_journal_entry_id IS NOT NULL
   ),
   party_rows AS (
     SELECT pe.kind, pe.document_id, pe.document_number,
@@ -312,6 +337,7 @@ async function ledger(
 }
 
 interface OpenItemRow {
+  document_kind: string;
   id: string;
   document_number: string | null;
   document_date: string;
@@ -328,11 +354,21 @@ function isAgingBucket(value: string): value is AgingBucket {
   return (AGING_BUCKETS as readonly string[]).includes(value);
 }
 
+function isOpenItemKind(value: string): value is PartyOpenItem['documentKind'] {
+  return value === 'INVOICE' || value === 'BILL' || value === 'CREDIT_NOTE' || value === 'DEBIT_NOTE';
+}
+
 /**
  * The party's open documents. The same bucketing as
  * `agingService.buildOpenDocsCte`, plus the party predicate — copied rather
  * than exported so the aging report's SQL stays its own. `$1` org, `$2` asOf,
  * `$3` party.
+ *
+ * Phase 26: an ISSUED note's unapplied remainder is an open item too, with a
+ * NEGATIVE outstanding (credit the party holds against us / we hold against
+ * the vendor). It is never overdue — always CURRENT — and it is what keeps
+ * "ledger closing = open-items outstanding" true once a note is issued
+ * against an already-settled document.
  */
 async function openItems(
   orgId: string,
@@ -346,14 +382,15 @@ async function openItems(
 
   const { rows } = await pool.query<OpenItemRow>(
     `WITH open_docs AS (
-       SELECT d.id,
+       SELECT '${config.docKind}'::text AS document_kind,
+              d.id,
               d.${config.numberColumn} AS document_number,
               d.${config.dateColumn}   AS document_date,
               d.due_date,
               d.currency_code,
               d.total_cents::text      AS total_cents,
               d.base_total_cents::text AS base_total_cents,
-              (d.base_total_cents - ${allocatedCentsSubquery('d', config.allocationColumn, 'base_amount_cents')}::bigint) AS outstanding_cents,
+              (d.base_total_cents - ${settledCentsSubquery('d', config.allocationColumn, 'base_amount_cents')}::bigint) AS outstanding_cents,
               GREATEST(0, $2::date - d.due_date) AS days_overdue,
               CASE
                 WHEN d.due_date >= $2::date THEN 'CURRENT'
@@ -366,11 +403,27 @@ async function openItems(
         WHERE d.org_id = $1
           AND d.${config.partyColumn} = $3
           AND d.status = '${config.openStatus}'
+       UNION ALL
+       SELECT '${config.noteKind}'::text,
+              n.id,
+              n.${config.noteNumberColumn},
+              n.issue_date,
+              n.issue_date,
+              n.currency_code,
+              n.total_cents::text,
+              n.base_total_cents::text,
+              -(n.base_total_cents - ${noteOwnAppliedCentsSubquery('n', config.noteSubqueryKind, 'base_amount_cents')}::bigint),
+              0,
+              'CURRENT'
+         FROM ${config.noteTable} n
+        WHERE n.org_id = $1
+          AND n.${config.partyColumn} = $3
+          AND n.status = 'ISSUED'
      )
-     SELECT id, document_number, document_date, due_date, currency_code, total_cents,
+     SELECT document_kind, id, document_number, document_date, due_date, currency_code, total_cents,
             base_total_cents, outstanding_cents::text AS outstanding_cents, days_overdue, bucket
        FROM open_docs
-      WHERE outstanding_cents > 0
+      WHERE outstanding_cents <> 0
       ORDER BY due_date ASC, id ASC`,
     [orgId, on, partyId],
   );
@@ -381,10 +434,14 @@ async function openItems(
     if (!isAgingBucket(row.bucket)) {
       throw new Error(`Unknown aging bucket "${row.bucket}" on document ${row.id}`);
     }
+    if (!isOpenItemKind(row.document_kind)) {
+      throw new Error(`Unknown open item kind "${row.document_kind}" on document ${row.id}`);
+    }
     const baseOutstandingCents = parseCents(row.outstanding_cents);
     outstandingCents += baseOutstandingCents;
     if (row.bucket !== 'CURRENT') overdueCents += baseOutstandingCents;
     return {
+      documentKind: row.document_kind,
       documentId: row.id,
       documentNumber: row.document_number,
       documentDate: row.document_date,

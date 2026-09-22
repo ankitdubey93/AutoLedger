@@ -1,10 +1,10 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { WALKTHROUGH_DATASET, type DatasetDocument } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, type DatasetDocument, type DatasetNote } from './walkthroughDataset.js';
 import { resolveSettlementLines, type ResolvedSettlementLine } from './walkthroughTiers.js';
 import { computeExpectedResults, type ExpectedMonth, type ExpectedStatementRow } from './walkthroughExpected.js';
-import { parseAnchor, defaultAnchor, resolveDate, lastDayOfWalkthroughMonth, type AnchorMonth } from './walkthroughDates.js';
-import { money, statement1, statement2, statement3 } from './walkthroughStatements.js';
+import { parseAnchor, defaultAnchor, resolveDate, lastDayOfWalkthroughMonth, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
+import { money, statement1, statement2, statement3, statement4 } from './walkthroughStatements.js';
 import { vendorsCsv, customersCsv } from './walkthroughParties.js';
 import { parseMoneyText } from '../utils/money.js';
 
@@ -56,6 +56,7 @@ function accountName(code: string): string {
   const DEFAULT_NAMES: Record<string, string> = {
     '4100': '4100 Product Revenue',
     '4200': '4200 Service Revenue',
+    '4800': '4800 Sales Returns & Allowances',
     '5100': '5100 Direct Materials',
     '5300': '5300 Freight & Duty',
     '6110': '6110 Rent & Utilities',
@@ -107,7 +108,7 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
   // as "November") when a June-first array was walked with a January-first
   // formula.
   const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
-  function monthHeading(m: 1 | 2 | 3): string {
+  function monthHeading(m: WalkthroughMonth): string {
     const totalMonths = anchor.year * 12 + (anchor.month - 1) + (m - 1);
     const year = Math.floor(totalMonths / 12);
     const monthIndex = totalMonths % 12; // 0 = January .. 11 = December
@@ -124,7 +125,7 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
   for (const doc of docs) {
     if (doc.month !== currentMonth) {
       currentMonth = doc.month;
-      out += `${monthHeading(doc.month as 1 | 2 | 3)}\n\n`;
+      out += `${monthHeading(doc.month as WalkthroughMonth)}\n\n`;
     }
     const date = resolveDate(anchor, doc.month, doc.day);
     const dueDate = resolveDate(anchor, doc.month, doc.day + doc.dueDays);
@@ -160,7 +161,7 @@ function renderBankStatements(anchor: AnchorMonth, resolved: ResolvedSettlementL
 
   let out =
     `# Bank statements\n\n` +
-    `Three months, three different banks, three different export formats. Import each one against ` +
+    `Four months, three different banks, three different export formats. Import each one against ` +
     `\`1110 Operating Cash\` **only after** that month's bills are approved and invoices are issued — ` +
     `suggestions are generated at import time against documents that are open at that moment.\n\n` +
     `## Statement 1 — Northwind Bank (\`statements/month-1-northwind-ISO.csv\`)\n\n` +
@@ -175,9 +176,14 @@ function renderBankStatements(anchor: AnchorMonth, resolved: ResolvedSettlementL
     `none of which the importer's synonym list recognizes, so it responds \`422 Could not find a date column in ` +
     `the file\`. Open the column map and enter it by hand:\n\n` +
     `| Field | Column |\n|---|---|\n| Date | \`Posted\` |\n| Description | \`Memo\` |\n| Amount | \`Net\` |\n| Reference | \`Check No\` |\n\n` +
-    `and pick **date format: MDY**.\n\n---\n\n`;
+    `and pick **date format: MDY**.\n\n` +
+    `## Statement 4 — Northwind Bank again (\`statements/month-4-northwind-ISO.csv\`)\n\n` +
+    `Statement 1's format — comma-delimited, ISO dates, one signed \`Amount\` column; pick **date format: ISO**. ` +
+    `Two deposits and one withdrawal this month are for **less** than the document total: the matcher scores ` +
+    `each line against the amount still due *after* credit and debit notes, which is why you issue the notes in ` +
+    `\`08-returns-and-adjustments.md\` **before** importing this statement.\n\n---\n\n`;
 
-  for (const m of [1, 2, 3] as const) {
+  for (const m of [1, 2, 3, 4] as const) {
     const monthLines = resolved.filter((l) => l.month === m).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
     const monthNoise = WALKTHROUGH_DATASET.noise
       .filter((n) => n.month === m)
@@ -292,7 +298,8 @@ function renderTheBusiness(): string {
   return (
     `# Harbor Point Fabrication\n\n` +
     `${WALKTHROUGH_DATASET.businessDescription}\n\n` +
-    `**Period:** three consecutive months, entered one at a time. **Currency:** USD throughout.\n\n` +
+    `**Period:** four consecutive months, entered one at a time — the fourth is about returns and ` +
+    `adjustments (credit and debit notes). **Currency:** USD throughout.\n\n` +
     `**Scope.** This scenario covers the accounts-receivable / accounts-payable / cash cycle — invoicing, ` +
     `billing, and bank reconciliation. It does not include payroll, fixed assets or depreciation, inventory, ` +
     `accruals or prepayments, or a year-end close. One bank account, one currency.\n\n` +
@@ -304,6 +311,7 @@ function renderTheBusiness(): string {
     `| 3100 Common Stock / Owner's Capital | The founder's opening deposit |\n` +
     `| 4100 Product Revenue, 4200 Service Revenue | The two ways Harbor Point bills customers |\n` +
     `| 4300 Interest Income | The one account you create by hand — see 01-setup.md |\n` +
+    `| 4800 Sales Returns & Allowances | Month 4's credit notes — a contra-revenue account |\n` +
     `| 5100 Direct Materials, 5300 Freight & Duty | Cost of sales |\n` +
     `| 6110, 6120, 6200, 6400 | Rent, software, professional fees, marketing |\n` +
     `| 6600 Bank Fees | Wire fees and monthly service charges |\n`
@@ -313,9 +321,9 @@ function renderTheBusiness(): string {
 function renderReadme(): string {
   return (
     `# Walkthrough: Harbor Point Fabrication\n\n` +
-    `A complete, three-month accounting scenario for LedgerCore — a vendor and a customer CSV to import, source ` +
-    `documents to enter by hand, three bank statements to import, and a computed answer key to check your work ` +
-    `against.\n\n` +
+    `A complete, four-month accounting scenario for LedgerCore — a vendor and a customer CSV to import, source ` +
+    `documents to enter by hand, four bank statements to import, credit and debit notes in the fourth month, and ` +
+    `a computed answer key to check your work against.\n\n` +
     `**Start with \`TUTORIAL.md\`** — it walks the whole thing start to finish with hints. The files below are ` +
     `its reference material, useful to come back to on their own:\n\n` +
     `- \`00-the-business.md\` — who Harbor Point Fabrication is\n` +
@@ -324,12 +332,16 @@ function renderReadme(): string {
     `- \`04-bills-received.md\`, \`05-invoices-to-raise.md\` — the source documents, in order\n` +
     `- \`06-bank-statements.md\` — what each statement is and the per-line action to take\n` +
     `- \`07-expected-results.md\` — the answer key\n` +
+    `- \`08-returns-and-adjustments.md\` — month 4: what credit and debit notes are, when you need one, their ` +
+    `journal entries, and the three notes to enter\n` +
     `- \`vendors.csv\`, \`customers.csv\` — the two files to import via Data migration → Imports\n` +
-    `- \`statements/\` — the three CSV files to import via Bank Imports\n\n` +
+    `- \`statements/\` — the four CSV files to import via Bank Imports\n\n` +
     `**Run order:** import all 6 vendors and all 6 customers once, up front, via **Data migration → ` +
     `Imports** in the left sidebar. Then, one month at a time — enter that month's bills (submit + approve), enter that month's ` +
     `invoices (issue), import that month's statement, resolve every line, check the reconciliation report, ` +
-    `check that month's figures against \`07-expected-results.md\` — before moving to the next month. ` +
+    `check that month's figures against \`07-expected-results.md\` — before moving to the next month. In ` +
+    `month 4, issue the notes in \`08-returns-and-adjustments.md\` after entering that month's documents and ` +
+    `**before** importing its statement. ` +
     `Suggestions are generated at import time against documents that are open right then, so a month's ` +
     `documents must exist before its statement is imported.\n\n` +
     `**Do not hand-edit anything in this folder.** It is generated output — change ` +
@@ -347,7 +359,7 @@ function renderReadme(): string {
 function renderTutorial(expected: ExpectedMonth[]): string {
   let out =
     `# Tutorial: run the whole scenario\n\n` +
-    `You are Harbor Point Fabrication's bookkeeper for three months. Everything you need to type is in this ` +
+    `You are Harbor Point Fabrication's bookkeeper for four months. Everything you need to type is in this ` +
     `folder; everything you should end up seeing is in this file, month by month, with a hint at each step ` +
     `that tends to trip people up.\n\n` +
     `Read \`00-the-business.md\` first if you have not already — it is one page and tells you what the company ` +
@@ -362,7 +374,7 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `Go to **Data migration → Imports → New import**. Kind **Vendors**, upload \`vendors.csv\` (its contents ` +
     `are also shown in \`02-vendors.md\` if you'd rather copy-paste). It stages 6 rows, all \`VALID\`; Preview ` +
     `shows \`6 will be created, 0 will be merged\`; Commit. Repeat with kind **Customers** and \`customers.csv\`. ` +
-    `Do this now, before entering any document — every one of the 12 is used at least once across the three ` +
+    `Do this now, before entering any document — every one of the 12 is used at least once across the four ` +
     `months.\n\n` +
     `> **Hint:** payment terms for every vendor are "Due on receipt" — there's no net-30 anywhere in this ` +
     `scenario, which keeps every bank line's date close to its document's date.\n\n` +
@@ -370,7 +382,7 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `wrong with that row (a blank name, a malformed email) — these two files are clean, so seeing one means the ` +
     `upload got corrupted somewhere, not that you should force a commit past it.\n\n---\n\n`;
 
-  for (const m of [1, 2, 3] as const) {
+  for (const m of [1, 2, 3, 4] as const) {
     const monthResult = expected.find((e) => e.month === m);
     out +=
       `## Month ${String(m)}\n\n` +
@@ -380,8 +392,25 @@ function renderTutorial(expected: ExpectedMonth[]): string {
       `> **Hint:** a document you forget to advance out of DRAFT will never get a suggestion when you import ` +
       `the statement below — if a bank line comes up with zero suggestions and you expected one, check the ` +
       `document's status first.\n\n` +
+      (m === 4
+        ? `**Issue the notes.** This is the month about corrections — read \`08-returns-and-adjustments.md\` ` +
+          `(what credit and debit notes are, when you need one, and the journal entry each posts), then work ` +
+          `through its "Enter these" section in order: CN1, DN1, CN2, then apply CN2 to I16. Checkpoints:\n\n` +
+          `- after CN1 → invoice I15 shows amount due **10,200.00**\n` +
+          `- after DN1 → expense B12 shows amount due **10,500.00**\n` +
+          `- after CN2 → **Customers → Ferrous Works Ltd**'s open items show CN2 as its own line at ` +
+          `**−500.00** (unapplied credit) next to I16's 6,200.00, and **Reports → AR aging** still says it ` +
+          `reconciles\n` +
+          `- after applying CN2 → invoice I16 shows amount due **5,700.00**\n\n` +
+          `> **Hint:** issue the notes **before** importing the statement. Suggestions are scored at import time ` +
+          `against the amount still due; imported first, the 10,200.00 deposit would be scored against I15's full ` +
+          `12,000.00 and come up short on the amount points.\n\n` +
+          `> **Hint:** a credit note posts to **4800 Sales Returns & Allowances**, not back to 4100 — change the ` +
+          `account on the line copied from the invoice. The debit note stays on 5100, the account the steel was ` +
+          `originally expensed to.\n\n`
+        : '') +
       `**Import the statement.** From \`06-bank-statements.md\`, import \`statements/month-${String(m)}-` +
-      `${m === 1 ? 'northwind-ISO' : m === 2 ? 'meridian-DMY' : 'cascade-MDY'}.csv\` against \`1110 Operating ` +
+      `${m === 1 || m === 4 ? 'northwind-ISO' : m === 2 ? 'meridian-DMY' : 'cascade-MDY'}.csv\` against \`1110 Operating ` +
       `Cash\`, using the date format \`06-bank-statements.md\` gives you. Enter the closing balance it names ` +
       `too — it's optional, but it's what lets the import screen tell you immediately if a total is off.\n\n` +
       (m === 3
@@ -419,10 +448,149 @@ function renderTutorial(expected: ExpectedMonth[]): string {
 
   out +=
     `## You're done\n\n` +
-    `Three months entered, three statements reconciled, three months of financial statements that tie back to ` +
-    `a hand-typed source document for every dollar. If you want to see the same scenario built a different ` +
+    `Four months entered, four statements reconciled, four months of financial statements that tie back to ` +
+    `a hand-typed source document for every dollar — including three corrections made the way an auditor ` +
+    `expects them, by separate documents that leave the originals untouched. If you want to see the same scenario built a different ` +
     `way, \`sandbox/\` runs a 24-month version of a different business through the seeder instead of by hand — ` +
     `see \`sandbox/README.md\`.\n`;
+
+  return out;
+}
+
+// ----------------------------------------------- month 4: credit & debit notes
+
+/**
+ * `08-returns-and-adjustments.md` (Phase 26) — the explainer and entry sheet
+ * for month 4's credit and debit notes. Every amount and date comes from
+ * `WALKTHROUGH_DATASET.notes`, never retyped here.
+ */
+function renderAdjustments(anchor: AnchorMonth): string {
+  const docByRef = new Map(
+    [...WALKTHROUGH_DATASET.invoices, ...WALKTHROUGH_DATASET.bills].map((d) => [d.ref, d]),
+  );
+
+  function journalTable(note: DatasetNote): string {
+    const total = money(parseMoneyText(note.total));
+    const rows =
+      note.kind === 'CREDIT_NOTE'
+        ? [`| ${accountName(note.accountCode)} | ${total} | |`, `| 1120 Accounts Receivable | | ${total} |`]
+        : [`| 2100 Accounts Payable | ${total} | |`, `| ${accountName(note.accountCode)} | | ${total} |`];
+    return `| Account | Debit | Credit |\n|---|---|---|\n${rows.join('\n')}\n`;
+  }
+
+  let out =
+    `# Month 4 — returns & adjustments (credit notes and debit notes)\n\n` +
+    `Months 1–3 only ever *added* documents. Real businesses also have to *correct* them: a customer sends ` +
+    `goods back, a supplier overcharges, a job is delivered late and you give a discount after the fact. ` +
+    `This month shows the two documents that do that job without touching the original.\n\n` +
+    `## What these documents are\n\n` +
+    `| Document | Issued by | Sent to | What it does in **our** books | Called elsewhere |\n|---|---|---|---|---|\n` +
+    `| **Credit note** | us (the seller) | a customer | Reduces what the customer owes us (AR ↓) | QuickBooks "credit memo", Xero "sales credit note", Zoho "credit note" |\n` +
+    `| **Debit note** | us (the buyer) | a vendor | Reduces what we owe the vendor (AP ↓) | QuickBooks "vendor credit", Xero "purchase credit note", Zoho "vendor credit" |\n\n` +
+    `The names describe what the document does to the *other party's* account in your books: a credit note ` +
+    `**credits** the customer's (receivable) account; a debit note **debits** the vendor's (payable) account. ` +
+    `When you send a vendor a debit note, they usually answer with their own credit note — LedgerCore lets ` +
+    `you record its number as the *vendor's credit note no.*\n\n` +
+    `## When you need one\n\n` +
+    `**Credit note** — the customer returned goods; you agreed a price allowance or an after-the-sale discount; ` +
+    `goods arrived damaged; part of an invoice should never have been charged.\n\n` +
+    `**Debit note** — you returned goods to a vendor; the vendor overcharged you; they delivered less than ` +
+    `they billed.\n\n` +
+    `**When you don't:**\n\n` +
+    `- The whole invoice was wrong and nothing has been paid on it → **void** the invoice and re-issue it.\n` +
+    `- The customer will simply never pay → that is a bad-debt write-off, a different document (not built in ` +
+    `LedgerCore yet).\n` +
+    `- The customer owes you **more** than you invoiced → issue another invoice. (Some tax regimes call a ` +
+    `seller's document that *increases* an invoice a "debit note" too — e.g. India's GST. LedgerCore does not ` +
+    `build that variant; a supplementary invoice does the same job in the books.)\n\n` +
+    `> For background (verify for your jurisdiction): returns and allowances reduce revenue under IFRS 15 / ` +
+    `ASC 606; India's CGST Act s.34 and the EU VAT Directive (art. 219) treat a document that amends an invoice ` +
+    `as part of the invoice record, which is why it references the original and carries its own number series.\n\n` +
+    `## Why a separate document instead of editing or voiding the original\n\n` +
+    `- **The original stays intact.** An issued invoice is immutable in LedgerCore (and in any audited set of ` +
+    `books); tax records and the customer both hold a copy of it.\n` +
+    `- **Partial corrections.** Returning 3 kits out of 20 is not a reason to cancel the other 17.\n` +
+    `- **Closed periods stay closed.** The note is dated when the return happens, so last month's reports ` +
+    `never change.\n` +
+    `- **Its own number series** (\`CN-000001\`, \`DN-000001\`), so auditors can see every correction in order.\n\n` +
+    `## What they do to the books\n\n` +
+    `Every note posts one journal entry when it is **issued** — the mirror image of the original document:\n\n`;
+
+  for (const note of WALKTHROUGH_DATASET.notes) {
+    out += `**${note.ref}** — ${note.lineDescription}\n\n${journalTable(note)}\n`;
+  }
+
+  out +=
+    `With sales tax (not part of this dataset, for illustration): returning goods worth 1,000.00 plus 10% tax ` +
+    `posts DR 4800 Sales Returns & Allowances 1,000.00, DR 2140 Sales Tax Payable 100.00 / CR 1120 Accounts ` +
+    `Receivable 1,100.00 — the tax you had collected is given back too.\n\n` +
+    `**Applying** a note to an invoice or bill posts **no** journal entry at all. The note already credited ` +
+    `1120 and the invoice already debited it, so both are sitting inside the same Accounts Receivable ` +
+    `balance; applying one to the other only matches them up on the customer's account.\n\n` +
+    `4800 Sales Returns & Allowances is a *Revenue* account with a debit balance — a "contra-revenue" ` +
+    `account. On the P&L it shows as a negative line under Revenue, so gross sales and returns stay visible ` +
+    `separately. The debit note, by contrast, credits the original expense account (5100) directly: the steel ` +
+    `you sent back simply never became a cost.\n\n` +
+    `## Rules LedgerCore enforces\n\n` +
+    `- A note must reference its original invoice (credit note) or approved bill (debit note), and takes ` +
+    `that document's customer/vendor, currency and exchange rate — you never pick them.\n` +
+    `- All notes against one document together can never exceed that document's total.\n` +
+    `- On **Issue**, the note is applied to its original automatically, up to what is still owed. If the ` +
+    `original is already paid, nothing applies and the whole note sits on the party's account as **unapplied ` +
+    `credit** — a *negative* open item — until you apply it to another of their open documents.\n` +
+    `- The original can't be voided while a note is issued against it; void the note first. Voiding a note ` +
+    `reverses its journal entry and re-opens whatever it had been applied to.\n` +
+    `- A draft note can be edited or deleted; an issued one can only be voided.\n\n` +
+    `## Enter these\n\n` +
+    `Enter all of month 4's invoices and bills first (\`04-…\` and \`05-…\`), then these three notes **in this ` +
+    `order**, then import month 4's statement. The notes must exist before the statement: the matcher scores ` +
+    `each bank line against the amount still due, and two of this month's payments are for the *net* amount.\n\n`;
+
+  for (const note of WALKTHROUGH_DATASET.notes) {
+    const original = docByRef.get(note.againstRef);
+    const isCredit = note.kind === 'CREDIT_NOTE';
+    const party = isCredit ? customerName(note.counterpartyKey) : vendorName(note.counterpartyKey);
+    const originalLabel =
+      original === undefined
+        ? note.againstRef
+        : isCredit
+          ? `invoice ${note.againstRef} (${original.lineDescription}, ${money(parseMoneyText(original.total))})`
+          : `bill ${note.againstRef} (their no. \`${original.vendorReference ?? ''}\`, ${money(parseMoneyText(original.total))})`;
+    out +=
+      `### ${note.ref} · ${isCredit ? 'Credit note' : 'Debit note'} · ${party}\n\n` +
+      `Open ${originalLabel} → **${isCredit ? 'Create credit note' : 'Create debit note'}**.\n\n` +
+      `| | |\n|---|---|\n` +
+      `| **Date** | ${resolveDate(anchor, note.month, note.day)} |\n` +
+      `| **Reason** | ${note.reasonCode} |\n` +
+      (note.vendorCreditReference !== null ? `| **Vendor's credit note no.** | \`${note.vendorCreditReference}\` |\n` : '') +
+      `\n| # | Description | Qty | Unit price | Account |\n|---|---|---|---|---|\n` +
+      `| 1 | ${note.lineDescription} | 1 | ${money(parseMoneyText(note.total))} | ${accountName(note.accountCode)} |\n\n` +
+      `Replace the lines copied from the original with this one line, **Save**, then **Issue**.\n\n`;
+    for (const allocation of note.allocations) {
+      if (allocation.documentRef === note.againstRef) {
+        out += `> Issuing applies ${money(parseMoneyText(allocation.amount))} to ${note.againstRef} automatically — nothing more to do.\n\n`;
+      } else {
+        out +=
+          `> ${note.againstRef} was already paid in full, so issuing applies **nothing** — the whole ` +
+          `${money(parseMoneyText(note.total))} becomes unapplied credit on ${party}'s account. Then, on the note, ` +
+          `**Apply credit** → ${allocation.documentRef}, amount ${money(parseMoneyText(allocation.amount))}, date ` +
+          `${resolveDate(anchor, note.month, allocation.day)}.\n\n`;
+      }
+    }
+  }
+
+  out +=
+    `## What to check\n\n` +
+    `| After | Where | You should see |\n|---|---|---|\n` +
+    `| CN1 | Invoice I15 | Credits applied 1,800.00 · Amount due **10,200.00** |\n` +
+    `| DN1 | Expense B12 | Debits applied 1,500.00 · Amount due **10,500.00** |\n` +
+    `| CN2 (before applying) | Customers → Ferrous Works Ltd → open items | Two open items: I16 **6,200.00** and CN2 **−500.00** (unapplied credit) — balance 5,700.00 |\n` +
+    `| CN2 (before applying) | Reports → AR aging | Ferrous Works 5,700.00, and "Reconciles" still ✓ |\n` +
+    `| CN2 applied | Invoice I16 | Credits applied 500.00 · Amount due **5,700.00** |\n` +
+    `| Statement 4 imported | Bank lines | 10,200.00, −10,500.00 and 5,700.00 each suggest I15, B12 and I16 |\n\n` +
+    `By month end every one of these is settled, so AR and AP are both **0.00** again — but the P&L now shows ` +
+    `**4800 Sales Returns & Allowances −2,300.00** under Revenue, and 5100 Direct Materials is 1,500.00 lower ` +
+    `than the steel bill alone.\n`;
 
   return out;
 }
@@ -449,11 +617,13 @@ function main(): void {
   write('05-invoices-to-raise.md', renderDocuments(anchor, WALKTHROUGH_DATASET.invoices, 'invoice'));
   write('06-bank-statements.md', renderBankStatements(anchor, resolved));
   write('07-expected-results.md', renderExpectedResults(expected));
+  write('08-returns-and-adjustments.md', renderAdjustments(anchor));
   write('statements/month-1-northwind-ISO.csv', statement1(anchor, resolved));
   write('statements/month-2-meridian-DMY.csv', statement2(anchor, resolved));
   write('statements/month-3-cascade-MDY.csv', statement3(anchor, resolved));
+  write('statements/month-4-northwind-ISO.csv', statement4(anchor, resolved));
 
-  console.log(`[walkthrough] done — anchor ${String(anchor.year)}-${String(anchor.month).padStart(2, '0')}, ${String(lastDayOfWalkthroughMonth(anchor, 3))} last day`);
+  console.log(`[walkthrough] done — anchor ${String(anchor.year)}-${String(anchor.month).padStart(2, '0')}, ${String(lastDayOfWalkthroughMonth(anchor, 4))} last day`);
 }
 
 main();

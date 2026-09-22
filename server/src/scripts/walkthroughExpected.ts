@@ -12,6 +12,10 @@
  *   - a withdrawal settling:  DR 2100 (AP)          / CR 1110 (Cash), at the settled amount
  *   - a money-in journal:     DR 1110 (Cash)        / CR <chosen account>
  *   - a money-out journal:    DR <chosen account>   / CR 1110 (Cash)
+ *   - issuing a credit note:  DR <revenue account, 4800> / CR 1120 (AR), at the note total (Phase 26)
+ *   - issuing a debit note:   DR 2100 (AP)          / CR <expense account>, at the note total (Phase 26)
+ *   - applying a note:        no journal entry at all — it only matches two
+ *                             open items inside the same control account
  *
  * Money is integer cents throughout (guardrails rule 3) — every input comes
  * through `parseMoneyText`, and this module never introduces a float.
@@ -22,8 +26,8 @@
  * asserted.
  */
 import { WALKTHROUGH_DATASET } from './walkthroughDataset.js';
-import { resolveSettlementLines } from './walkthroughTiers.js';
-import type { AnchorMonth } from './walkthroughDates.js';
+import { noteAppliedCents, resolveSettlementLines } from './walkthroughTiers.js';
+import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
 import { lastDayOfWalkthroughMonth, resolveDate } from './walkthroughDates.js';
 import { parseMoneyText } from '../utils/money.js';
 
@@ -35,6 +39,7 @@ const ACCOUNT_NAMES: Record<string, string> = {
   '4100': 'Product Revenue',
   '4200': 'Service Revenue',
   '4300': 'Interest Income',
+  '4800': 'Sales Returns & Allowances',
   '5100': 'Direct Materials',
   '5300': 'Freight & Duty',
   '6110': 'Rent & Utilities',
@@ -52,7 +57,7 @@ function accountName(code: string): string {
 
 /** One simulated ledger_lines row: exactly one side populated, matching guardrails rule 7. */
 interface SimLine {
-  month: 1 | 2 | 3;
+  month: WalkthroughMonth;
   code: string;
   debitCents: number;
   creditCents: number;
@@ -83,6 +88,16 @@ function buildLedgerLines(): SimLine[] {
     } else {
       lines.push({ month: settlement.month, code: '2100', debitCents: abs, creditCents: 0 });
       lines.push({ month: settlement.month, code: '1110', debitCents: 0, creditCents: abs });
+    }
+  }
+  for (const note of WALKTHROUGH_DATASET.notes) {
+    const totalCents = parseMoneyText(note.total);
+    if (note.kind === 'CREDIT_NOTE') {
+      lines.push({ month: note.month, code: note.accountCode, debitCents: totalCents, creditCents: 0 });
+      lines.push({ month: note.month, code: '1120', debitCents: 0, creditCents: totalCents });
+    } else {
+      lines.push({ month: note.month, code: '2100', debitCents: totalCents, creditCents: 0 });
+      lines.push({ month: note.month, code: note.accountCode, debitCents: 0, creditCents: totalCents });
     }
   }
   for (const noise of WALKTHROUGH_DATASET.noise) {
@@ -161,7 +176,7 @@ export interface ExpectedBankReconciliation {
 }
 
 export interface ExpectedMonth {
-  month: 1 | 2 | 3;
+  month: WalkthroughMonth;
   asOf: string;
   trialBalance: ExpectedTrialBalance;
   profitAndLoss: ExpectedProfitAndLoss;
@@ -208,7 +223,7 @@ function emptyAgingBuckets(): ExpectedAgingBucket[] {
 export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
   const allLines = buildLedgerLines();
   const settlements = resolveSettlementLines(anchor);
-  const months: (1 | 2 | 3)[] = [1, 2, 3];
+  const months: WalkthroughMonth[] = [1, 2, 3, 4];
 
   return months.map((month): ExpectedMonth => {
     const asOf = lastDayOfWalkthroughMonth(anchor, month);
@@ -229,7 +244,9 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     const totalCreditCents = tbRows.reduce((s, r) => s + r.creditCents, 0);
 
     // ---- P&L (cumulative from month 1 through this month's asOf) ----
-    const revenueCodes = ['4100', '4200', '4300'];
+    // 4800 is a Revenue account carrying a debit balance (sales returns), so
+    // it lands here as a negative revenue row.
+    const revenueCodes = ['4100', '4200', '4300', '4800'];
     const costOfSalesCodes = ['5100', '5300'];
     const opexCodes = ['6110', '6120', '6200', '6400', '6600'];
 
@@ -273,7 +290,7 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
       const settledCents = settlements
         .filter((s) => s.documentRef === ref && s.month <= month)
         .reduce((sum, s) => sum + Math.abs(s.amountCents), 0);
-      return totalCents - settledCents;
+      return totalCents - settledCents - noteAppliedCents(ref, month);
     }
 
     const arBuckets = emptyAgingBuckets();
@@ -296,6 +313,18 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
       const bucket = agingBucket(dueDate, asOf);
       const entry = apBuckets.find((b) => b.bucket === bucket);
       if (entry !== undefined) entry.amountCents += outstanding;
+    }
+
+    // A note's unapplied remainder is a NEGATIVE open item, always CURRENT —
+    // the same rule agingService applies (Phase 26).
+    for (const note of WALKTHROUGH_DATASET.notes) {
+      if (note.month > month) continue;
+      const unappliedCents =
+        parseMoneyText(note.total) - note.allocations.reduce((sum, a) => sum + parseMoneyText(a.amount), 0);
+      if (unappliedCents === 0) continue;
+      const buckets = note.kind === 'CREDIT_NOTE' ? arBuckets : apBuckets;
+      const entry = buckets.find((b) => b.bucket === 'CURRENT');
+      if (entry !== undefined) entry.amountCents -= unappliedCents;
     }
 
     // ---- Bank reconciliation ----

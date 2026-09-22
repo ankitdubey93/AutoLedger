@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import {
   Banknote,
+  FileMinus,
   BookOpen,
   Building2,
   CalendarCheck,
@@ -57,6 +58,7 @@ const NAV_GROUPS = [
     heading: 'Sales',
     items: [
       { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
+      { to: 'credit-notes', label: 'Credit notes', icon: FileMinus, end: false },
       { to: 'customers', label: 'Customers', icon: Users, end: false },
       { to: 'items', label: 'Items & Services', icon: Package, end: false },
       { to: 'payments', label: 'Payments', icon: Banknote, end: false },
@@ -66,6 +68,7 @@ const NAV_GROUPS = [
     heading: 'Purchases',
     items: [
       { to: 'expenses', label: 'Expenses', icon: ReceiptText, end: false },
+      { to: 'debit-notes', label: 'Debit notes', icon: FileMinus, end: false },
       { to: 'vendors', label: 'Vendors', icon: Building2, end: false },
     ],
   },

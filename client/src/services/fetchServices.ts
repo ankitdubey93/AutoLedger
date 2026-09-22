@@ -873,6 +873,8 @@ export interface Invoice {
   updatedAt: string;
   lines: InvoiceLine[];
   allocatedCents: number;
+  /** Phase 26 — applied ISSUED credit notes. amountDueCents = total − allocated − credited. */
+  creditedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
 }
@@ -1102,7 +1104,11 @@ export type PartyLedgerEntryKind =
   | 'BILL'
   | 'BILL_VOID'
   | 'PAYMENT'
-  | 'PAYMENT_VOID';
+  | 'PAYMENT_VOID'
+  | 'CREDIT_NOTE'
+  | 'CREDIT_NOTE_VOID'
+  | 'DEBIT_NOTE'
+  | 'DEBIT_NOTE_VOID';
 
 /** Mirrors server/src/types/ledger-core.ts's PartyLedgerAllocation. */
 export interface PartyLedgerAllocation {
@@ -1140,6 +1146,8 @@ export interface PartyLedger {
 
 /** Mirrors server/src/types/ledger-core.ts's PartyOpenItem. */
 export interface PartyOpenItem {
+  /** Phase 26 — an unapplied credit/debit note is an open item with a negative outstanding. */
+  documentKind: 'INVOICE' | 'BILL' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
   documentId: string;
   documentNumber: string | null;
   documentDate: string;
@@ -1315,6 +1323,8 @@ export interface Bill {
   updatedAt: string;
   lines: BillLine[];
   allocatedCents: number;
+  /** Phase 26 — applied ISSUED debit notes. amountDueCents = total − allocated − debited. */
+  debitedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
 }
@@ -4540,4 +4550,278 @@ export async function loadSandbox(): Promise<SandboxDataset> {
  */
 export async function unloadSandbox(): Promise<void> {
   await apiFetch('/sandbox', { method: 'DELETE' });
+}
+
+/* ------------------------------------------- Phase 26 — credit & debit notes */
+
+export type NoteStatus = 'DRAFT' | 'ISSUED' | 'VOID';
+export type NoteReasonCode = 'RETURN' | 'PRICE_ADJUSTMENT' | 'DISCOUNT' | 'DAMAGED' | 'OTHER';
+export const NOTE_REASON_CODES: readonly NoteReasonCode[] = ['RETURN', 'PRICE_ADJUSTMENT', 'DISCOUNT', 'DAMAGED', 'OTHER'];
+
+/** Mirrors server/src/types/ledger-core.ts's CreditNoteLine. */
+export interface CreditNoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  revenueAccountId: string;
+  revenueAccountCode: string;
+  revenueAccountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's CreditNoteAllocation. */
+export interface CreditNoteAllocation {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  amountCents: number;
+  baseAmountCents: number;
+  allocationDate: string;
+  createdAt: string;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's CreditNote. */
+export interface CreditNote {
+  id: string;
+  creditNoteNumber: string | null;
+  status: NoteStatus;
+  customerId: string;
+  customerName: string;
+  invoiceId: string;
+  invoiceNumber: string | null;
+  issueDate: string;
+  currencyCode: string;
+  fxRate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  customerNameSnapshot: string;
+  customerAddressSnapshot: string | null;
+  customerTaxNumberSnapshot: string | null;
+  notes: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: CreditNoteLine[];
+  allocations: CreditNoteAllocation[];
+  appliedCents: number;
+  unappliedCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's DebitNoteLine. */
+export interface DebitNoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  expenseAccountId: string;
+  expenseAccountCode: string;
+  expenseAccountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's DebitNoteAllocation. */
+export interface DebitNoteAllocation {
+  id: string;
+  billId: string;
+  billVendorReference: string;
+  amountCents: number;
+  baseAmountCents: number;
+  allocationDate: string;
+  createdAt: string;
+}
+
+/** Mirrors server/src/types/ledger-core.ts's DebitNote. */
+export interface DebitNote {
+  id: string;
+  debitNoteNumber: string | null;
+  status: NoteStatus;
+  vendorId: string;
+  vendorName: string;
+  billId: string;
+  billVendorReference: string;
+  vendorCreditReference: string | null;
+  issueDate: string;
+  currencyCode: string;
+  fxRate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  vendorNameSnapshot: string;
+  vendorAddressSnapshot: string | null;
+  vendorTaxNumberSnapshot: string | null;
+  notes: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  baseSubtotalCents: number;
+  baseTaxCents: number;
+  baseTotalCents: number;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  issuedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lines: DebitNoteLine[];
+  allocations: DebitNoteAllocation[];
+  appliedCents: number;
+  unappliedCents: number;
+}
+
+export interface NoteListFilters {
+  page?: number;
+  limit?: number;
+  status?: NoteStatus | '';
+  /** Credit notes: customerId; debit notes: vendorId. */
+  partyId?: string;
+  /** Credit notes: invoiceId; debit notes: billId. */
+  originalId?: string;
+}
+
+interface NoteListResponse {
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+function noteQuery(params: NoteListFilters, partyKey: string, originalKey: string): string {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.partyId !== undefined && params.partyId !== '') query.set(partyKey, params.partyId);
+  if (params.originalId !== undefined && params.originalId !== '') query.set(originalKey, params.originalId);
+  return query.size > 0 ? `?${query.toString()}` : '';
+}
+
+export interface CreditNoteInput {
+  invoiceId: string;
+  issueDate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  notes: string | null;
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; revenueAccountId: string; taxRateBp: number }[];
+}
+
+export interface DebitNoteInput {
+  billId: string;
+  issueDate: string;
+  reasonCode: NoteReasonCode;
+  reason: string | null;
+  vendorCreditReference: string | null;
+  notes: string | null;
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; expenseAccountId: string; taxRateBp: number }[];
+}
+
+/** GET /ledger-core/credit-notes */
+export function listCreditNotes(
+  params: NoteListFilters = {},
+  signal?: AbortSignal,
+): Promise<NoteListResponse & { creditNotes: CreditNote[] }> {
+  return apiFetch(`/ledger-core/credit-notes${noteQuery(params, 'customerId', 'invoiceId')}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/credit-notes/:id */
+export function getCreditNote(id: string, signal?: AbortSignal): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch(`/ledger-core/credit-notes/${id}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/credit-notes — always a DRAFT against an issued invoice. */
+export function createCreditNote(body: CreditNoteInput): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch('/ledger-core/credit-notes', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/credit-notes/:id — a draft only. */
+export function updateCreditNote(id: string, body: CreditNoteInput): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch(`/ledger-core/credit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /ledger-core/credit-notes/:id — a draft only. */
+export async function deleteCreditNote(id: string): Promise<void> {
+  await apiFetch(`/ledger-core/credit-notes/${id}`, { method: 'DELETE' });
+}
+
+/** POST /ledger-core/credit-notes/:id/issue — numbers it, posts DR revenue/tax · CR AR, auto-applies to its invoice. */
+export function issueCreditNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch(`/ledger-core/credit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+}
+
+/** POST /ledger-core/credit-notes/:id/void — posts a reversal; its allocations stop counting. */
+export function voidCreditNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch(`/ledger-core/credit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+}
+
+/** POST /ledger-core/credit-notes/:id/allocations — apply unapplied credit to an open invoice (no journal entry). */
+export function applyCreditNote(
+  id: string,
+  body: { invoiceId: string; amountCents: number; allocationDate: string },
+): Promise<{ success: boolean; creditNote: CreditNote }> {
+  return apiFetch(`/ledger-core/credit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** GET /ledger-core/debit-notes */
+export function listDebitNotes(
+  params: NoteListFilters = {},
+  signal?: AbortSignal,
+): Promise<NoteListResponse & { debitNotes: DebitNote[] }> {
+  return apiFetch(`/ledger-core/debit-notes${noteQuery(params, 'vendorId', 'billId')}`, { signal: signal ?? null });
+}
+
+/** GET /ledger-core/debit-notes/:id */
+export function getDebitNote(id: string, signal?: AbortSignal): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch(`/ledger-core/debit-notes/${id}`, { signal: signal ?? null });
+}
+
+/** POST /ledger-core/debit-notes — always a DRAFT against an approved bill. */
+export function createDebitNote(body: DebitNoteInput): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch('/ledger-core/debit-notes', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /ledger-core/debit-notes/:id — a draft only. */
+export function updateDebitNote(id: string, body: DebitNoteInput): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch(`/ledger-core/debit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /ledger-core/debit-notes/:id — a draft only. */
+export async function deleteDebitNote(id: string): Promise<void> {
+  await apiFetch(`/ledger-core/debit-notes/${id}`, { method: 'DELETE' });
+}
+
+/** POST /ledger-core/debit-notes/:id/issue — numbers it, posts DR AP · CR expense/tax, auto-applies to its bill. */
+export function issueDebitNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch(`/ledger-core/debit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+}
+
+/** POST /ledger-core/debit-notes/:id/void — posts a reversal; its allocations stop counting. */
+export function voidDebitNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch(`/ledger-core/debit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+}
+
+/** POST /ledger-core/debit-notes/:id/allocations — apply unapplied credit to an open bill (no journal entry). */
+export function applyDebitNote(
+  id: string,
+  body: { billId: string; amountCents: number; allocationDate: string },
+): Promise<{ success: boolean; debitNote: DebitNote }> {
+  return apiFetch(`/ledger-core/debit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
 }

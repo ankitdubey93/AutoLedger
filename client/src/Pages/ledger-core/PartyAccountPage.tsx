@@ -11,6 +11,7 @@ import {
   type PartyLedger,
   type PartyLedgerEntryKind,
   type PartyLedgerRow,
+  type PartyOpenItem,
   type PartyOpenItems,
 } from '../../services/fetchServices';
 import { useOrg } from '../../context/OrgContext';
@@ -39,7 +40,18 @@ const KIND_LABELS: Record<PartyLedgerEntryKind, string> = {
   BILL_VOID: 'Expense voided',
   PAYMENT: 'Payment',
   PAYMENT_VOID: 'Payment voided',
+  CREDIT_NOTE: 'Credit note',
+  CREDIT_NOTE_VOID: 'Credit note voided',
+  DEBIT_NOTE: 'Debit note',
+  DEBIT_NOTE_VOID: 'Debit note voided',
 };
+
+/** Phase 26 — a note row links to its own page, not the party's invoice/expense list. */
+function notePath(kind: PartyLedgerEntryKind | PartyOpenItem['documentKind']): string | null {
+  if (kind === 'CREDIT_NOTE' || kind === 'CREDIT_NOTE_VOID') return 'credit-notes';
+  if (kind === 'DEBIT_NOTE' || kind === 'DEBIT_NOTE_VOID') return 'debit-notes';
+  return null;
+}
 
 const COPY: Record<
   PartyKind,
@@ -135,14 +147,14 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
     setParams(nextParams);
   }
 
-  function documentLink(documentId: string, label: string | null) {
+  function documentLink(documentId: string, label: string | null, path: string | null = null) {
     return (
-      <Link to={`${base}/${copy.documentPath}/${documentId}`}>{label ?? documentId.slice(0, 8)}</Link>
+      <Link to={`${base}/${path ?? copy.documentPath}/${documentId}`}>{label ?? documentId.slice(0, 8)}</Link>
     );
   }
 
   function referenceCell(row: PartyLedgerRow) {
-    if (!isPaymentKind(row.kind)) return documentLink(row.documentId, row.documentNumber);
+    if (!isPaymentKind(row.kind)) return documentLink(row.documentId, row.documentNumber, notePath(row.kind));
     return (
       <span>
         {row.documentNumber ?? '—'}
@@ -251,7 +263,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
             {openItems.items.map((item) => (
               <tr key={item.documentId} className="border-t border-[var(--border)]">
                 <td className="p-3 font-mono text-xs">
-                  {documentLink(item.documentId, item.documentNumber)}
+                  {documentLink(item.documentId, item.documentNumber, notePath(item.documentKind))}
                 </td>
                 <td className="p-3 tabular-nums whitespace-nowrap">{item.documentDate}</td>
                 <td className="p-3 tabular-nums whitespace-nowrap">{item.dueDate}</td>

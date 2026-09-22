@@ -195,3 +195,22 @@ Enter each of these against the vendor named, in the order shown, then take it t
 
 > After saving, take this bill through **Submit for approval → Approve**. The matcher only considers a bill once it is `POSTED`.
 
+## Month 4 — September 2026
+
+### B12 · Ironclad Supply Co
+
+| | |
+|---|---|
+| **Their bill number** | `INV-IC-9120`  ← enter as the vendor reference |
+| **Bill date** | 2026-09-04 |
+| **Terms** | Due on receipt |
+| **Due date** | 2026-09-04 |
+
+| # | Description | Qty | Unit price | Account |
+|---|---|---|---|---|
+| 1 | Steel stock, 40mm — 80 bars × 150.00 | 1 | 12,000.00 | 5100 Direct Materials |
+
+**Total: 12,000.00**
+
+> After saving, take this bill through **Submit for approval → Approve**. The matcher only considers a bill once it is `POSTED`.
+

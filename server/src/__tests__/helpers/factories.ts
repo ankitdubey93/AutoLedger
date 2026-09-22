@@ -29,7 +29,9 @@ export async function resetTables(): Promise<void> {
   await pool.query(
     `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
-              vendors, bills, bill_lines, payment_terms, items, payments, payment_allocations, fiscal_periods,
+              vendors, bills, bill_lines, payment_terms, items, payments, payment_allocations,
+              credit_notes, credit_note_lines, credit_note_allocations,
+              debit_notes, debit_note_lines, debit_note_allocations, fiscal_periods,
               bank_statement_imports, bank_transactions, bank_match_suggestions,
               outbox_events, webhook_endpoints, webhook_deliveries,
               audit_logs, onboarding_states, migration_imports, migration_import_rows,

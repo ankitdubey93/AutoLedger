@@ -1,6 +1,12 @@
+import type { WalkthroughMonth } from './walkthroughDates.js';
+
 /**
- * The source-of-truth data for `walkthrough/` — a hand-enterable, three-month
+ * The source-of-truth data for `walkthrough/` — a hand-enterable, four-month
  * accounting scenario for one fictional business, Harbor Point Fabrication.
+ * Months 1–3 are ordinary trading; month 4 (Phase 26) is "Returns &
+ * adjustments" — a sales return (credit note), a supplier return (debit
+ * note), and a price allowance on an already-paid invoice that sits as
+ * unapplied credit until it is applied to the customer's next invoice.
  *
  * Unlike `sandbox/` (replayed through services by a seeder, its bank
  * statement generated from payments the seeder itself created), this data
@@ -49,7 +55,7 @@ export interface DatasetDocument {
   /** The pack's own label — 'I1', 'B3' — not the system-assigned invoice number. */
   ref: string;
   counterpartyKey: string;
-  month: 1 | 2 | 3;
+  month: WalkthroughMonth;
   day: number;
   /** Always 0 in this dataset — every document is due on receipt. */
   dueDays: number;
@@ -64,16 +70,47 @@ export interface DatasetDocument {
   /** Set only on REVIEW_ANON — the processor descriptor used instead of the name. */
   anonMemo: string | null;
   /** Set only on the REVIEW_PARTIAL document — where its REVIEW_REMAINDER line lands. */
-  remainder: { month: 2 | 3; day: number } | null;
+  remainder: { month: WalkthroughMonth; day: number } | null;
 }
 
 export interface DatasetNoiseLine {
-  month: 1 | 2 | 3;
+  month: WalkthroughMonth;
   day: number;
   description: string;
   /** Decimal string, signed: "75000.00" or "-45.00". */
   amount: string;
   resolution: { kind: 'POST_JOURNAL'; accountCode: string } | { kind: 'IGNORE' };
+}
+
+export interface DatasetNoteAllocation {
+  /**
+   * The document the credit lands on. The allocation whose documentRef is the
+   * note's own againstRef is what issuing auto-applies; any other is a manual
+   * POST /:id/allocations.
+   */
+  documentRef: string;
+  day: number;
+  /** Decimal string. */
+  amount: string;
+}
+
+export interface DatasetNote {
+  ref: string;
+  kind: 'CREDIT_NOTE' | 'DEBIT_NOTE';
+  counterpartyKey: string;
+  /** The original document — an invoice ref for a credit note, a bill ref for a debit note. */
+  againstRef: string;
+  month: WalkthroughMonth;
+  day: number;
+  reasonCode: 'RETURN' | 'PRICE_ADJUSTMENT' | 'DISCOUNT' | 'DAMAGED' | 'OTHER';
+  /** Credit note: a Revenue account (4800). Debit note: the bill's expense account. */
+  accountCode: string;
+  lineDescription: string;
+  /** Decimal string. */
+  total: string;
+  /** Debit notes only — the vendor's own credit-note number. */
+  vendorCreditReference: string | null;
+  allocations: DatasetNoteAllocation[];
 }
 
 export interface WalkthroughDataset {
@@ -87,6 +124,7 @@ export interface WalkthroughDataset {
   invoices: DatasetDocument[];
   bills: DatasetDocument[];
   noise: DatasetNoiseLine[];
+  notes: DatasetNote[];
 }
 
 export const WALKTHROUGH_DATASET: WalkthroughDataset = {
@@ -280,6 +318,17 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       total: '6700.00', vendorReference: null, tier: 'REVIEW_ANON',
       anonMemo: 'ACH TRANSFER REF 90312', remainder: null,
     },
+    // --- Month 4: returns & adjustments ---
+    {
+      ref: 'I15', counterpartyKey: 'brightline-analytics', month: 4, day: 2, dueDays: 0,
+      accountCode: '4100', lineDescription: 'Product sale — bracket kits, 20 × 600.00',
+      total: '12000.00', vendorReference: null, tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
+    },
+    {
+      ref: 'I16', counterpartyKey: 'ferrous-works', month: 4, day: 10, dueDays: 0,
+      accountCode: '4200', lineDescription: 'Fabrication — conveyor guard panels, run 16',
+      total: '6200.00', vendorReference: null, tier: 'AUTO_2', anonMemo: null, remainder: null,
+    },
   ],
 
   bills: [
@@ -342,6 +391,12 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       accountCode: '5300', lineDescription: 'Outbound freight — August runs',
       total: '3100.00', vendorReference: 'CWF-1044', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
     },
+    // --- Month 4: returns & adjustments ---
+    {
+      ref: 'B12', counterpartyKey: 'ironclad-supply', month: 4, day: 4, dueDays: 0,
+      accountCode: '5100', lineDescription: 'Steel stock, 40mm — 80 bars × 150.00',
+      total: '12000.00', vendorReference: 'INV-IC-9120', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
+    },
   ],
 
   noise: [
@@ -359,5 +414,41 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     { month: 3, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'POST_JOURNAL', accountCode: '6600' } },
     { month: 3, day: 19, description: 'TRANSFER TO SAVINGS', amount: '-4000.00', resolution: { kind: 'IGNORE' } },
     { month: 3, day: 27, description: 'INTEREST PAID', amount: '15.80', resolution: { kind: 'POST_JOURNAL', accountCode: '4300' } },
+    // --- Month 4 ---
+    { month: 4, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'POST_JOURNAL', accountCode: '6600' } },
+    { month: 4, day: 20, description: 'TRANSFER TO SAVINGS', amount: '-2500.00', resolution: { kind: 'IGNORE' } },
+    { month: 4, day: 28, description: 'INTEREST PAID', amount: '16.20', resolution: { kind: 'POST_JOURNAL', accountCode: '4300' } },
+  ],
+
+  // Phase 26 — month 4's correcting documents, in the order they are entered.
+  notes: [
+    {
+      // A sales return on an unpaid invoice: issuing auto-applies all of it to
+      // I15, so Brightline's payment is the net 10,200.00.
+      ref: 'CN1', kind: 'CREDIT_NOTE', counterpartyKey: 'brightline-analytics', againstRef: 'I15',
+      month: 4, day: 3, reasonCode: 'RETURN', accountCode: '4800',
+      lineDescription: '3 bracket kits returned — weld porosity', total: '1800.00',
+      vendorCreditReference: null,
+      allocations: [{ documentRef: 'I15', day: 3, amount: '1800.00' }],
+    },
+    {
+      // A supplier return on an unpaid bill: auto-applies all of it to B12, so
+      // Harbor Point pays Ironclad the net 10,500.00.
+      ref: 'DN1', kind: 'DEBIT_NOTE', counterpartyKey: 'ironclad-supply', againstRef: 'B12',
+      month: 4, day: 5, reasonCode: 'RETURN', accountCode: '5100',
+      lineDescription: '10 bars returned — mill-scale defects', total: '1500.00',
+      vendorCreditReference: 'IC-CR-0231',
+      allocations: [{ documentRef: 'B12', day: 5, amount: '1500.00' }],
+    },
+    {
+      // A price allowance on I13, which was paid in full in month 3: nothing to
+      // auto-apply, so the 500.00 sits as unapplied credit on Ferrous Works'
+      // account until it is applied to their next invoice, I16.
+      ref: 'CN2', kind: 'CREDIT_NOTE', counterpartyKey: 'ferrous-works', againstRef: 'I13',
+      month: 4, day: 6, reasonCode: 'PRICE_ADJUSTMENT', accountCode: '4800',
+      lineDescription: 'Price allowance — run 13 delivered two days late', total: '500.00',
+      vendorCreditReference: null,
+      allocations: [{ documentRef: 'I16', day: 10, amount: '500.00' }],
+    },
   ],
 };

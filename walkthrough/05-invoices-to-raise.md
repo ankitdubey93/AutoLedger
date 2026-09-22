@@ -232,3 +232,37 @@ Raise each of these against the customer named, in the order shown, then **Issue
 
 > After saving, **Issue** the invoice — the matcher only considers an invoice once it is `ISSUED`.
 
+## Month 4 — September 2026
+
+### I15 · Brightline Analytics
+
+| | |
+|---|---|
+| **Issue date** | 2026-09-02 |
+| **Terms** | Due on receipt |
+| **Due date** | 2026-09-02 |
+
+| # | Description | Qty | Unit price | Account |
+|---|---|---|---|---|
+| 1 | Product sale — bracket kits, 20 × 600.00 | 1 | 12,000.00 | 4100 Product Revenue |
+
+**Total: 12,000.00**
+
+> After saving, **Issue** the invoice — the matcher only considers an invoice once it is `ISSUED`.
+
+### I16 · Ferrous Works Ltd
+
+| | |
+|---|---|
+| **Issue date** | 2026-09-10 |
+| **Terms** | Due on receipt |
+| **Due date** | 2026-09-10 |
+
+| # | Description | Qty | Unit price | Account |
+|---|---|---|---|---|
+| 1 | Fabrication — conveyor guard panels, run 16 | 1 | 6,200.00 | 4200 Service Revenue |
+
+**Total: 6,200.00**
+
+> After saving, **Issue** the invoice — the matcher only considers an invoice once it is `ISSUED`.
+

@@ -7,6 +7,7 @@ import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
+import { settledCentsOnClient } from './settlementSql.js';
 import {
   canTransitionPayment,
   isPaymentStatus,
@@ -26,45 +27,15 @@ import {
  * `*OnClient` functions on this service's own checked-out transaction client
  * (guardrails rules 5 and 16).
  *
- * Settlement state is never stored — `allocatedCentsSubquery` below is the
- * one place "how much of a document is paid" is defined, consumed by
- * `invoiceService` and `billService`'s own SELECTs.
+ * Settlement state is never stored — `settlementSql.ts` is the one place
+ * "how much of a document is settled" is defined (payments plus, since Phase
+ * 26, applied credit/debit notes), consumed by every amount-due computation.
  */
 
-/**
- * Sums POSTED allocations against one document. A correlated scalar
- * subquery, not a JOIN + GROUP BY: the outer query (invoiceService's
- * INVOICE_SELECT, billService's BILL_SELECT) already groups by the document
- * row, and a join would fan it out.
- *
- * `p.status = 'POSTED'` is what makes voiding a payment un-settle its
- * documents for free — the allocation rows stay, immutably, and stop
- * counting. Removing this predicate silently makes voided payments settle
- * invoices.
- *
- * `alias` and `column` are compile-time constants supplied by our own code
- * (accountService/billService's SELECT builders), never request input — that
- * is what keeps guardrails rule 4 satisfied despite the string interpolation.
- */
-/**
- * `amountColumn` defaults to the native amount, matching every pre-Phase-8
- * call site exactly. `agingService` passes 'base_amount_cents' explicitly to
- * reconcile against a base-currency GL control balance. Both values are a
- * closed union — never request input — so the interpolation stays within
- * guardrails rule 4's identifier-whitelisting allowance.
- */
-export function allocatedCentsSubquery(
-  alias: string,
-  column: 'invoice_id' | 'bill_id',
-  amountColumn: 'amount_cents' | 'base_amount_cents' = 'amount_cents',
-): string {
-  return `COALESCE((SELECT SUM(pa.${amountColumn})
-                      FROM payment_allocations pa
-                      JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
-                     WHERE pa.org_id = ${alias}.org_id
-                       AND pa.${column} = ${alias}.id
-                       AND p.status = 'POSTED'), 0)::text`;
-}
+// Moved to settlementSql.ts in Phase 26 (so it can sit beside the
+// note-allocation subqueries with no import cycle); re-exported here so every
+// existing `paymentService.allocatedCentsSubquery` call site keeps working.
+export { allocatedCentsSubquery } from './settlementSql.js';
 
 const PG_RAISE_EXCEPTION = 'P0001';
 
@@ -386,17 +357,13 @@ async function lockAndValidateTargets(
     if (documentCurrency !== expectedCurrency) {
       throw new ApiError(422, `A ${expectedCurrency} payment cannot settle a document in ${documentCurrency}`);
     }
-    const { rows: allocatedRows } = await client.query<{ allocated: string }>(
-      `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS allocated
-         FROM payment_allocations pa
-         JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
-        WHERE pa.org_id = $1 AND pa.invoice_id = $2 AND p.status = 'POSTED'`,
-      [orgId, invoiceId],
-    );
+    // Payments and applied notes both settle a document (Phase 26) — an
+    // allocation must fit inside what is left after both.
+    const settled = await settledCentsOnClient(client, orgId, 'invoice_id', invoiceId);
     targets.set(invoiceId, {
       id: invoiceId,
       totalCents: parseCents(row.total_cents),
-      allocatedCents: parseCents(allocatedRows[0]?.allocated ?? '0'),
+      allocatedCents: settled.paidCents + settled.noteAppliedCents,
       counterpartyId: row.customer_id,
       currencyCode: documentCurrency,
       fxRate: row.fx_rate,
@@ -428,17 +395,13 @@ async function lockAndValidateTargets(
     if (documentCurrency !== expectedCurrency) {
       throw new ApiError(422, `A ${expectedCurrency} payment cannot settle a document in ${documentCurrency}`);
     }
-    const { rows: allocatedRows } = await client.query<{ allocated: string }>(
-      `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS allocated
-         FROM payment_allocations pa
-         JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
-        WHERE pa.org_id = $1 AND pa.bill_id = $2 AND p.status = 'POSTED'`,
-      [orgId, billId],
-    );
+    // Payments and applied notes both settle a document (Phase 26) — an
+    // allocation must fit inside what is left after both.
+    const settled = await settledCentsOnClient(client, orgId, 'bill_id', billId);
     targets.set(billId, {
       id: billId,
       totalCents: parseCents(row.total_cents),
-      allocatedCents: parseCents(allocatedRows[0]?.allocated ?? '0'),
+      allocatedCents: settled.paidCents + settled.noteAppliedCents,
       counterpartyId: row.vendor_id,
       currencyCode: documentCurrency,
       fxRate: row.fx_rate,

@@ -1,6 +1,6 @@
 import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
-import { allocatedCentsSubquery } from './paymentService.js';
+import { noteOwnAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { AGING_BUCKETS, AGING_BUCKET_LABELS, type AgingReport } from '../../types/ledger-core.js';
 
 /**
@@ -25,6 +25,9 @@ interface AgingConfig {
   fallbackControlCode: string;
   /** Asset (AR) is debit-normal; Liability (AP) is credit-normal. */
   controlIsDebitNormal: boolean;
+  /** Phase 26 — credit notes (AR) / debit notes (AP), whose unapplied remainder is a negative open item. */
+  noteTable: 'credit_notes' | 'debit_notes';
+  noteSubqueryKind: 'credit' | 'debit';
 }
 
 const AGING_CONFIG: Record<'AR' | 'AP', AgingConfig> = {
@@ -36,6 +39,8 @@ const AGING_CONFIG: Record<'AR' | 'AP', AgingConfig> = {
     allocationColumn: 'invoice_id',
     fallbackControlCode: '1120',
     controlIsDebitNormal: true,
+    noteTable: 'credit_notes',
+    noteSubqueryKind: 'credit',
   },
   AP: {
     table: 'bills',
@@ -45,6 +50,8 @@ const AGING_CONFIG: Record<'AR' | 'AP', AgingConfig> = {
     allocationColumn: 'bill_id',
     fallbackControlCode: '2100',
     controlIsDebitNormal: false,
+    noteTable: 'debit_notes',
+    noteSubqueryKind: 'debit',
   },
 };
 
@@ -59,6 +66,14 @@ const AGING_CONFIG: Record<'AR' | 'AP', AgingConfig> = {
  * figure this CTE produces (and everything derived from it — the buckets,
  * the per-counterparty rows, the totals, and the reconciles check against
  * the base-currency GL control balance) is a base-currency figure.
+ *
+ * Phase 26: an ISSUED credit/debit note's unapplied remainder joins the CTE
+ * as a NEGATIVE open item, always bucketed CURRENT. Without it, a note issued
+ * against an already-settled document would move the control account with
+ * nothing in the subledger to match, and `reconciles` would go false. Every
+ * filter below is therefore `outstanding_cents <> 0`, not `> 0` — a document
+ * can never be over-settled (migration 063's triggers), so only notes are
+ * ever negative.
  */
 function buildOpenDocsCte(config: AgingConfig): string {
   return `open_docs AS (
@@ -66,7 +81,7 @@ function buildOpenDocsCte(config: AgingConfig): string {
            d.due_date,
            d.${config.counterpartyColumn} AS counterparty_id,
            cp.name AS counterparty_name,
-           (d.base_total_cents - ${allocatedCentsSubquery('d', config.allocationColumn, 'base_amount_cents')}::bigint) AS outstanding_cents,
+           (d.base_total_cents - ${settledCentsSubquery('d', config.allocationColumn, 'base_amount_cents')}::bigint) AS outstanding_cents,
            CASE
              WHEN d.due_date >= $2::date THEN 'CURRENT'
              WHEN d.due_date >  $2::date - INTERVAL '30 days' THEN 'D1_30'
@@ -78,6 +93,17 @@ function buildOpenDocsCte(config: AgingConfig): string {
       JOIN ${config.counterpartyTable} cp ON cp.id = d.${config.counterpartyColumn} AND cp.org_id = d.org_id
      WHERE d.org_id = $1
        AND d.status = '${config.openStatus}'
+    UNION ALL
+    SELECT n.id,
+           n.issue_date AS due_date,
+           n.${config.counterpartyColumn} AS counterparty_id,
+           cp.name AS counterparty_name,
+           -(n.base_total_cents - ${noteOwnAppliedCentsSubquery('n', config.noteSubqueryKind, 'base_amount_cents')}::bigint) AS outstanding_cents,
+           'CURRENT' AS bucket
+      FROM ${config.noteTable} n
+      JOIN ${config.counterpartyTable} cp ON cp.id = n.${config.counterpartyColumn} AND cp.org_id = n.org_id
+     WHERE n.org_id = $1
+       AND n.status = 'ISSUED'
   )`;
 }
 
@@ -98,7 +124,7 @@ async function loadBuckets(
             COALESCE(SUM(od.outstanding_cents), 0)::text AS amount_cents,
             COUNT(od.id)::text AS document_count
        FROM (VALUES ('CURRENT'), ('D1_30'), ('D31_60'), ('D61_90'), ('D90_PLUS')) AS b(bucket)
-       LEFT JOIN open_docs od ON od.bucket = b.bucket AND od.outstanding_cents > 0
+       LEFT JOIN open_docs od ON od.bucket = b.bucket AND od.outstanding_cents <> 0
       GROUP BY b.bucket`,
     [orgId, asOf],
   );
@@ -142,15 +168,15 @@ async function loadCounterpartyRows(
   const { rows } = await pool.query<CounterpartyRow>(
     `WITH ${buildOpenDocsCte(config)}
      SELECT counterparty_id, counterparty_name,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'CURRENT' AND outstanding_cents > 0), 0)::text AS current_cents,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D1_30'   AND outstanding_cents > 0), 0)::text AS d1_30_cents,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D31_60'  AND outstanding_cents > 0), 0)::text AS d31_60_cents,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D61_90'  AND outstanding_cents > 0), 0)::text AS d61_90_cents,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D90_PLUS' AND outstanding_cents > 0), 0)::text AS d90_plus_cents,
-            COALESCE(SUM(outstanding_cents) FILTER (WHERE outstanding_cents > 0), 0)::text AS total_cents
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'CURRENT' AND outstanding_cents <> 0), 0)::text AS current_cents,
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D1_30'   AND outstanding_cents <> 0), 0)::text AS d1_30_cents,
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D31_60'  AND outstanding_cents <> 0), 0)::text AS d31_60_cents,
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D61_90'  AND outstanding_cents <> 0), 0)::text AS d61_90_cents,
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket = 'D90_PLUS' AND outstanding_cents <> 0), 0)::text AS d90_plus_cents,
+            COALESCE(SUM(outstanding_cents) FILTER (WHERE outstanding_cents <> 0), 0)::text AS total_cents
        FROM open_docs
       GROUP BY counterparty_id, counterparty_name
-     HAVING COALESCE(SUM(outstanding_cents) FILTER (WHERE outstanding_cents > 0), 0) > 0
+     HAVING COALESCE(SUM(outstanding_cents) FILTER (WHERE outstanding_cents <> 0), 0) > 0
       ORDER BY counterparty_name ASC`,
     [orgId, asOf],
   );

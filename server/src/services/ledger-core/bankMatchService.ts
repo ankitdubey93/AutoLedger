@@ -11,6 +11,7 @@ import {
   type ScoreBreakdown,
 } from '../../utils/matchScore.js';
 import * as paymentService from './paymentService.js';
+import { settledCentsSubquery } from './settlementSql.js';
 import * as journalService from './journalService.js';
 import {
   canTransitionBankTransaction,
@@ -90,7 +91,7 @@ async function loadInvoiceCandidates(
     `SELECT * FROM (
        SELECT i.id, COALESCE(i.invoice_number, i.id::text) AS reference, i.issue_date AS doc_date,
               c.name AS counterparty_name,
-              (i.total_cents - ${paymentService.allocatedCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
+              (i.total_cents - ${settledCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
          FROM invoices i
          JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
         WHERE i.org_id = $1
@@ -115,7 +116,7 @@ async function loadBillCandidates(
     `SELECT * FROM (
        SELECT b.id, b.vendor_reference AS reference, b.bill_date AS doc_date,
               v.name AS counterparty_name,
-              (b.total_cents - ${paymentService.allocatedCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
+              (b.total_cents - ${settledCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
          FROM bills b
          JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
         WHERE b.org_id = $1
@@ -360,14 +361,9 @@ async function loadSuggestions(
             COALESCE(i.issue_date, b.bill_date) AS document_date,
             COALESCE(ci.name, cv.name) AS counterparty_name,
             COALESCE(i.total_cents, b.total_cents) AS document_total_cents,
-            (COALESCE(i.total_cents, b.total_cents) - COALESCE((
-               SELECT SUM(pa.amount_cents) FROM payment_allocations pa
-                 JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
-                WHERE pa.org_id = s.org_id
-                  AND ((s.invoice_id IS NOT NULL AND pa.invoice_id = s.invoice_id) OR
-                       (s.bill_id IS NOT NULL AND pa.bill_id = s.bill_id))
-                  AND p.status = 'POSTED'
-             ), 0)) AS document_amount_due_cents
+            (COALESCE(i.total_cents, b.total_cents)
+               - ${settledCentsSubquery('i', 'invoice_id')}::bigint
+               - ${settledCentsSubquery('b', 'bill_id')}::bigint) AS document_amount_due_cents
        FROM bank_match_suggestions s
        LEFT JOIN invoices i ON i.id = s.invoice_id AND i.org_id = s.org_id
        LEFT JOIN bills b ON b.id = s.bill_id AND b.org_id = s.org_id
@@ -617,7 +613,7 @@ export async function matchTransaction(
         amount_due_cents: string;
       }>(
         `SELECT i.status, i.customer_id, i.total_cents, i.currency_code,
-                (i.total_cents - ${paymentService.allocatedCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
+                (i.total_cents - ${settledCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
            FROM invoices i WHERE i.id = $1 AND i.org_id = $2 FOR UPDATE`,
         [invId, orgId],
       );
@@ -649,7 +645,7 @@ export async function matchTransaction(
         amount_due_cents: string;
       }>(
         `SELECT b.status, b.vendor_id, b.total_cents, b.currency_code,
-                (b.total_cents - ${paymentService.allocatedCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
+                (b.total_cents - ${settledCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
            FROM bills b WHERE b.id = $1 AND b.org_id = $2 FOR UPDATE`,
         [bId, orgId],
       );

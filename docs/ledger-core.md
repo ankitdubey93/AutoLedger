@@ -240,7 +240,7 @@ A fifth half-step. **No renumbering** — Phase 4 is otherwise unaffected. This 
 
 **Acceptance ✅ — all verified.** Approving a bill posts a balanced entry debiting each distinct expense account and crediting payable; an `ACCOUNTANT` attempting `/approve` is rejected with `403` at the route's role gate. Recording a payment posts a balanced entry and immediately reduces the target document's `amountDueCents`; voiding that payment restores it with no second write. A payment inserted with no allocations succeeds at `INSERT` and fails at `COMMIT`; a second payment allocating past a document's remaining balance succeeds at `INSERT` and fails at its own `COMMIT`, with a `SELECT ... FOR UPDATE` row lock (taken in `paymentService`, ahead of either transaction's deferred trigger) closing the race a purely deferred check alone would not. AR and AP aging both reconcile (`reconciles === true`) against their control accounts for a non-trivial fixture. 442 server tests (up from 340), 107 client tests (up from 94).
 
-**What this phase does *not* claim.** No expense-claim/employee-reimbursement document — there is no such thing in AutoLedger; the bill-approval queue is unapproved vendor bills, not employee expenses. No credit notes, no vendor credits, no partial void. No PDF export, no multi-currency invoices or bills (needs Phase 8), no fiscal-period posting lock, no audit trail (Phase 5, delivered since). Aging/overdue comparisons use UTC calendar dates, ignoring `ledger_settings.timezone`.
+**What this phase does *not* claim.** No expense-claim/employee-reimbursement document — there is no such thing in AutoLedger; the bill-approval queue is unapproved vendor bills, not employee expenses. No credit notes, no vendor credits, no partial void *(credit notes and debit notes/vendor credits since shipped in Phase 26; partial void still not)*. No PDF export, no multi-currency invoices or bills (needs Phase 8), no fiscal-period posting lock, no audit trail (Phase 5, delivered since). Aging/overdue comparisons use UTC calendar dates, ignoring `ledger_settings.timezone`.
 
 ### Phase 4 — live statements
 
@@ -328,6 +328,28 @@ A direct feature request, numbered like Phase 24. See [Phase 25, as delivered](r
 
 **Acceptance ✅ — verified.** For every customer and vendor, ledger closing balance = open-items outstanding, and the sum over parties = the aging report's total = the control account's GL balance (`partyLedger.test.ts`). Both 422s, the rollback, and the cross-tenant cases are covered in `controlAccountGuard.test.ts`.
 
+### Phase 26 — credit & debit notes ✅ shipped
+
+The two documents that correct a posted invoice or bill **without touching it**.
+
+| Document | Issued by | Effect | Journal entry on issue | When you need one |
+|---|---|---|---|---|
+| **Credit note** | us → customer | AR ↓ | DR revenue (usually `4800 Sales Returns & Allowances`) + DR sales tax / CR `1120` AR | goods returned, a price allowance, a post-sale discount, damaged goods, part of an invoice wrongly charged |
+| **Debit note** | us → vendor | AP ↓ | DR `2100` AP / CR the expense (or asset) account + CR input tax | goods returned to the vendor, an overcharge, a short delivery |
+
+When you **don't** need one: the whole invoice was wrong and nothing was paid — void it; the customer will never pay — that's a bad-debt write-off (not built); the customer owes *more* — issue another invoice (the GST-sense "supplier debit note" that increases an invoice is not built).
+
+- [x] Note references its original (invoice `ISSUED` / bill `POSTED`); party, currency and frozen `fx_rate` are copied from it — posting at the original's rate makes applying the note to it FX-neutral
+- [x] DRAFT → ISSUED → VOID (`NOTE_TRANSITIONS`), DB-enforced immutability once issued; `CN-`/`DN-` gapless series allocated at issue
+- [x] Issue auto-applies to the original up to the amount still due; the remainder is **unapplied credit** — a negative open item on the party's account and in AR/AP aging
+- [x] Apply unapplied credit to another open document of the same party and currency — **posts no journal entry** (both already sit in the control account)
+- [x] Cumulative cap (Σ issued notes ≤ original total) and settlement cap (payments + notes ≤ total), each enforced in the service under a row lock and by a deferred DB trigger
+- [x] Settlement redefined once (`settlementSql.ts`): every amount-due computation subtracts applied notes as well as payments — invoice/bill reads, payment validation, bank-match candidates, FX revaluation, aging, party open items
+- [x] An original cannot be voided while a note is issued against it or applied to it; voiding a note re-opens every document it settled
+- [x] Walkthrough month 4 (`walkthrough/08-returns-and-adjustments.md`), replayed through the real API cent for cent
+
+Full detail: [roadmap.md § Phase 26, as delivered](roadmap.md#phase-26-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-26--credit--debit-notes-ledgercore--applied).
+
 ### Phase 17 — QuickBooks sync
 
 - [ ] OAuth 2.0 authorization-code flow, encrypted token storage, refresh handling
@@ -345,7 +367,8 @@ A direct feature request, numbered like Phase 24. See [Phase 25, as delivered](r
 - **Audit trail and `verify:integrity` are both shipped** — see the [showcase section above](#1-audit-trail--internal-controls--the-cfo-safety-net---shipped-phase-5), no longer a target description. This closes the compliance gap every earlier phase note in this file flagged.
 - **Bank reconciliation is shipped** (Phase 6) — CSV import, the 40/30/30 confidence engine, the approval queue, and the reconciliation report all exist. **Posting a journal entry directly from an unmatched line, for a fee/interest/opening-capital line with no counterpart document, is also shipped** (Phase 6.1, `POST /bank-transactions/:id/post-journal`) — `IGNORE` remains for a line that should never reach the GL at all (e.g. a transfer to another of the organization's own accounts), while a line that genuinely moves cash but names no invoice or bill now settles by posting a balanced two-line entry, `sourceType: 'bank_line'`, reversible (never deletable) the same way a matched payment is. Still not built within Phase 6/6.1: a bank line settling more than one document (or several lines settling one) in a single match, and bank feeds/OFX/QIF/MT940 beyond CSV, and multi-currency statements.
 - **The FX engine is shipped** (Phase 8) — `fx_rates` with the latest-on-or-before lookup, foreign-currency invoices/bills/payments, realized settlement gain/loss, and period-end unrealized revaluation with an automatic next-day reversal. Not built within it: an external rate-feed integration (rates are entered by hand or imported as a batch — `fx_rates.source` distinguishes them — but nothing calls out to a live provider), FX on bank matching (bank statements remain base-currency-only, a Phase 6 limit this phase does not lift), a currency on an *account* itself (a cash account's balance is reported in base currency even though it may have received lines in several currencies), and consolidation-style translation of a whole subsidiary's trial balance (this phase revalues open AR/AP balances, not a full set of books).
-- **Customer & vendor accounts are shipped** (Phase 25). Not built within it: credit notes / bad-debt write-offs (an AR/AP adjustment now needs a document, and none exists), party tagging on journal lines, PDF/emailed statements, statements in the party's own currency, unapplied/on-account payments — see [Phase 25, as delivered](roadmap.md#phase-25-as-delivered).
+- **Credit notes and debit notes are shipped** (Phase 26). Not built within it: cash refunds of unapplied credit, a bad-debt write-off document, the GST-sense supplier debit note, applying a foreign-currency note to anything but its original, webhooks/PDF/email for notes, re-scoring bank suggestions when a note is issued after a statement import — see [Phase 26, as delivered](roadmap.md#phase-26-as-delivered).
+- **Customer & vendor accounts are shipped** (Phase 25). Not built within it: a bad-debt write-off document (credit notes arrived in Phase 26), party tagging on journal lines, PDF/emailed statements, statements in the party's own currency, unapplied/on-account payments — see [Phase 25, as delivered](roadmap.md#phase-25-as-delivered).
 - **Payment terms, item catalogue and party import are shipped** (Phase 24). Not built within it: discount/end-of-month terms ("2/10 Net 30" — net-days only; a discount needs a second term kind and a GL posting), any inventory mechanic on `items` (on-hand quantity, stock movement, COGS posting, item-level reporting — it is a catalogue, not inventory), an importer for anything other than customers and vendors (no contacts, no products, no opening AR/AP balances via this path). The UI-only "Expense" label is a deliberate half-measure, not a gap: the schema, API, types and every test still say `bills` — see [Phase 24, as delivered](roadmap.md#phase-24-as-delivered).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

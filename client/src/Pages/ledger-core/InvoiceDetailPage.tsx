@@ -6,8 +6,10 @@ import {
   getInvoice,
   getInvoiceSettings,
   issueInvoice,
+  listCreditNotes,
   listPayments,
   voidInvoice,
+  type CreditNote,
   type Invoice,
   type InvoiceSettings,
   type Payment,
@@ -47,6 +49,7 @@ export default function InvoiceDetailPage() {
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -60,6 +63,15 @@ export default function InvoiceDetailPage() {
     setInvoice(null);
     setNotFound(false);
     setError(null);
+
+    // Phase 26 — the credit notes raised against this invoice.
+    listCreditNotes({ originalId: invoiceId, limit: 100 })
+      .then((res) => {
+        if (!ignore) setCreditNotes(res.creditNotes);
+      })
+      .catch(() => {
+        if (!ignore) setCreditNotes([]);
+      });
 
     Promise.all([getInvoice(invoiceId), getInvoiceSettings()])
       .then(([invoiceRes, settingsRes]) => {
@@ -175,6 +187,14 @@ export default function InvoiceDetailPage() {
             >
               Record payment
             </button>
+          )}
+          {invoice.status === 'ISSUED' && (
+            <Link
+              to={`${base}/credit-notes/new?invoiceId=${invoice.id}`}
+              className="px-3 py-1.5 rounded-md text-sm no-underline text-[var(--muted)] hover:text-[var(--text)] border border-[var(--border)]"
+            >
+              Create credit note
+            </Link>
           )}
           {(invoice.status === 'DRAFT' || invoice.status === 'ISSUED') && (
             <button
@@ -301,6 +321,12 @@ export default function InvoiceDetailPage() {
                 <span className="text-[var(--muted)] min-w-0">Paid</span>
                 <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.allocatedCents)}</span>
               </div>
+              {invoice.creditedCents > 0 && (
+                <div className="flex justify-between gap-6 w-full">
+                  <span className="text-[var(--muted)] min-w-0">Credits applied</span>
+                  <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.creditedCents)}</span>
+                </div>
+              )}
               <div className="flex justify-between gap-6 w-full font-semibold">
                 <span className="min-w-0">Amount due</span>
                 <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.amountDueCents)}</span>
@@ -365,6 +391,36 @@ export default function InvoiceDetailPage() {
                         payment.allocations.find((a) => a.invoiceId === invoice.id)?.amountCents ?? 0,
                       )}
                     </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {creditNotes.length > 0 && (
+        <div className="no-print flex flex-col gap-2">
+          <h3 className="text-sm font-semibold m-0">Credit notes</h3>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[30rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-2 font-medium">Number</th>
+                  <th className="p-2 font-medium">Date</th>
+                  <th className="p-2 font-medium">Status</th>
+                  <th className="p-2 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {creditNotes.map((note) => (
+                  <tr key={note.id} className="border-t border-[var(--border)]">
+                    <td className="p-2 font-mono text-xs">
+                      <Link to={`${base}/credit-notes/${note.id}`}>{note.creditNoteNumber ?? 'Draft'}</Link>
+                    </td>
+                    <td className="p-2 tabular-nums">{note.issueDate}</td>
+                    <td className="p-2">{note.status === 'DRAFT' ? 'Draft' : note.status === 'ISSUED' ? 'Issued' : 'Void'}</td>
+                    <td className="p-2 text-right tabular-nums">{formatCents(note.totalCents)}</td>
                   </tr>
                 ))}
               </tbody>

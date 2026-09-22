@@ -6,7 +6,7 @@
  * is provably the score the real matcher will produce, not a guess.
  */
 import { WALKTHROUGH_DATASET, type DatasetDocument, type Tier } from './walkthroughDataset.js';
-import type { AnchorMonth } from './walkthroughDates.js';
+import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
 import { resolveDate } from './walkthroughDates.js';
 import { scoreMatch } from '../utils/matchScore.js';
 import { parseMoneyText } from '../utils/money.js';
@@ -17,13 +17,30 @@ export interface SettlementLine {
   /** The document this line settles — always the DatasetDocument's own ref. */
   documentRef: string;
   kind: 'invoice' | 'bill';
-  month: 1 | 2 | 3;
+  month: WalkthroughMonth;
   day: number;
   /** Signed: positive for an invoice settlement, negative for a bill settlement. */
   amountCents: number;
   description: string;
   /** The score this line is expected to get against its own document, computed via the real scoreMatch. */
   expectedScore: number;
+}
+
+/**
+ * Phase 26 — how much of a document's total credit/debit notes settle by the
+ * end of `throughMonth`: the sum of every note allocation landing on it. The
+ * bank line that settles the document is for the total minus this, which is
+ * also the amount due the real matcher scores against.
+ */
+export function noteAppliedCents(documentRef: string, throughMonth: WalkthroughMonth): number {
+  let appliedCents = 0;
+  for (const note of WALKTHROUGH_DATASET.notes) {
+    if (note.month > throughMonth) continue;
+    for (const allocation of note.allocations) {
+      if (allocation.documentRef === documentRef) appliedCents += parseMoneyText(allocation.amount);
+    }
+  }
+  return appliedCents;
 }
 
 const TIER_DATE_SHIFT: Partial<Record<Tier, number>> = {
@@ -56,7 +73,12 @@ export function buildSettlementLines(): SettlementLine[] {
   ];
 
   for (const { doc, kind } of documents) {
-    const totalCents = parseMoneyText(doc.total);
+    // Net of any note applied to it in its own month (Phase 26) — the one
+    // month-4 invoice/bill pair with notes is settled for the net amount.
+    const totalCents = parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month);
+    if (totalCents <= 0) {
+      throw new Error(`walkthrough fixture: ${doc.ref} is fully credited, no settlement line`);
+    }
     const sign = kind === 'invoice' ? 1 : -1;
 
     if (doc.tier === 'REVIEW_PARTIAL') {
@@ -193,7 +215,7 @@ export function verifyExpectedScores(anchor: AnchorMonth): { lineRef: string; ex
     // the remainder line itself settles — computed directly rather than
     // re-deriving "already settled" generically, since there is exactly
     // one REVIEW_PARTIAL document in this dataset.
-    const totalCents = parseMoneyText(doc.total);
+    const totalCents = parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month);
     const resolvedAmountDue = line.lineRef === `${doc.ref}-remainder` ? Math.abs(line.amountCents) : totalCents;
 
     const breakdown = scoreMatch(

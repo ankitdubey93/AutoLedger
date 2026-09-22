@@ -118,6 +118,7 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
       },
     ],
     allocatedCents: 0,
+    creditedCents: 0,
     amountDueCents: 0,
     settlementStatus: 'NOT_APPLICABLE',
     ...overrides,
@@ -415,6 +416,21 @@ describe('NewInvoicePage', () => {
 });
 
 describe('InvoiceDetailPage', () => {
+  it('offers Create credit note only on an issued invoice (Phase 26)', async () => {
+    const issued = baseInvoice({ status: 'ISSUED', invoiceNumber: 'INV-000001', journalEntryId: 'entry-1', amountDueCents: 29500 });
+    mockDetailRoutes(issued);
+    const { unmount } = renderInvoiceDetailPage(issued.id);
+    const link = await screen.findByRole('link', { name: 'Create credit note' });
+    expect(link).toHaveAttribute('href', '/app/ledger-core/credit-notes/new?invoiceId=inv-1');
+    unmount();
+
+    const draft = baseInvoice();
+    mockDetailRoutes(draft);
+    renderInvoiceDetailPage(draft.id);
+    await screen.findByRole('button', { name: 'Issue' });
+    expect(screen.queryByRole('link', { name: 'Create credit note' })).toBeNull();
+  });
+
   it('Issue asks for confirmation before calling the API', async () => {
     const invoice = baseInvoice();
     mockDetailRoutes(invoice);
@@ -480,7 +496,9 @@ describe('InvoiceDetailPage', () => {
     renderInvoiceDetailPage(invoice.id);
 
     await screen.findByText('Issued');
-    expect(screen.queryByRole('link', { name: /edit/i })).toBeNull();
+    // Word-bounded: "Create credit note" (Phase 26) contains the letters
+    // "edit" but is not an edit control.
+    expect(screen.queryByRole('link', { name: /\bedit\b/i })).toBeNull();
   });
 
   it('links to the posted journal entry', async () => {

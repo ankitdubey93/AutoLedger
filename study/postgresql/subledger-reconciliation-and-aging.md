@@ -132,6 +132,28 @@ Because it reads the *GL lines* rather than the documents, the party ledger is a
 
 This codebase takes SAP's route: `journalService.assertNotControlAccountsOnClient` makes `POST /journals` and `POST /bank-transactions/:id/post-journal` return **422** for any line on the configured (or default `1120`/`2100`) control account, while `createEntryOnClient` — the path invoices, bills, payments and FX revaluation use — is deliberately left unguarded. Reversals stay allowed: a reversal of a legacy manual AR entry can only move the books back toward agreement. (Sources: SAP KB 3091350 for F5354; QuickBooks Community threads for the Name requirement — product behavior as documented in September 2026, not independently tested against either product.)
 
+### Negative open items: when a subledger item can owe the other way (Phase 26)
+
+Until Phase 26 every open item was a document with something still owed on it, so every aging query filtered `outstanding_cents > 0` and that was correct. Credit and debit notes broke the assumption. A credit note issued against an invoice that was already paid in full has nothing to apply to, so it posts DR revenue / CR AR for its whole amount and the customer's account now shows a **credit balance**.
+
+The control account moved; if the subledger doesn't move too, `reconciles` goes false by exactly the note amount. So the open-documents CTE in both `agingService` and `partyLedgerService.openItems` now `UNION ALL`s one row per ISSUED note:
+
+```sql
+SELECT n.id, n.issue_date AS due_date, n.customer_id AS counterparty_id, cp.name,
+       -(n.base_total_cents - <Σ this note's own allocations, base>) AS outstanding_cents,
+       'CURRENT' AS bucket
+  FROM credit_notes n JOIN customers cp ON …
+ WHERE n.org_id = $1 AND n.status = 'ISSUED'
+```
+
+Three decisions are in there:
+
+- **Sign.** The unapplied remainder enters *negated*, so a customer with a 6,200.00 invoice and a 500.00 unapplied credit shows 5,700.00. That's what the control account holds for them.
+- **Bucket.** An unapplied credit is never overdue, so it is always CURRENT. `overdueCents` stays a sum of genuinely late receivables.
+- **Filters.** Every `outstanding_cents > 0` (the bucket `LEFT JOIN`, each per-counterparty `FILTER`, the `HAVING`) became `<> 0`. That is behaviour-preserving for documents, because a document can never be over-settled (deferred triggers enforce payments + notes ≤ total), so only notes are ever negative. The walkthrough and `noteSettlement.test.ts` both assert `reconciles: true` with an unapplied credit on the books.
+
+The *applied* part of a note is handled on the document side instead: each invoice's outstanding subtracts `settledCentsSubquery` (payments **and** ISSUED note allocations). Every note amount is therefore counted exactly once: applied, it reduces its invoice; unapplied, it appears as its own negative item.
+
 ---
 
 ## Why we chose it here
@@ -212,7 +234,10 @@ A: Because a journal line on AR says nothing about *which* customer it belongs t
 A: Two independently-derived numbers per customer. The ledger reads GL lines on the control account attributed to that customer; open items reads the customer's open invoices minus their allocations. The test asserts those are equal for each customer, that their sum equals the aging report's total, and that that equals the control account's GL balance — all integer equality. It holds because a document with payments applied can't be voided, so there's never a payment on the GL side without an open document explaining it.
 
 **Q: If you later needed write-offs or party-tagged journals, what would you change?**
-A: Write-offs are a document problem — the right fix is a credit note that posts to AR through the same document path, so it shows up on the customer's ledger and in aging. If party-tagged journals became a requirement, I'd add nullable `customer_id`/`vendor_id` columns to `ledger_lines` with a CHECK that at most one is set and a trigger requiring one when the account is a control account, backfill them from the documents via the same attribution join, and make aging read party balances from the GL instead of documents — at that point the GL is the subledger and the document-vs-GL check changes meaning.
+A: Write-offs are a document problem — the right fix is a credit note that posts to AR through the same document path, so it shows up on the customer's ledger and in aging. (Credit notes were built in Phase 26 — see [credit-and-debit-notes.md](../architecture/credit-and-debit-notes.md); a dedicated bad-debt write-off document, posting to bad-debt expense rather than contra-revenue, is still not built.) If party-tagged journals became a requirement, I'd add nullable `customer_id`/`vendor_id` columns to `ledger_lines` with a CHECK that at most one is set and a trigger requiring one when the account is a control account, backfill them from the documents via the same attribution join, and make aging read party balances from the GL instead of documents — at that point the GL is the subledger and the document-vs-GL check changes meaning.
+
+**Q: Your aging report filtered `outstanding > 0`. What broke when credit notes arrived, and how did you fix it?**
+A: A credit note against an already-paid invoice has nothing to apply to, so it sits on the customer's account as a credit balance. The GL control account reflected it immediately, but the aging report only listed documents with a positive balance, so the two independently-computed totals disagreed by exactly the note amount and `reconciles` would have gone false. The fix was to make the note an open item in its own right: the unapplied remainder of every issued note is `UNION ALL`-ed into the open-documents CTE as a negative amount in the CURRENT bucket, and the `> 0` filters became `<> 0`. That was safe for existing documents because the database already guarantees they can't be over-settled, so only notes are ever negative.
 
 ---
 

@@ -1,6 +1,6 @@
 # Bank statements
 
-Three months, three different banks, three different export formats. Import each one against `1110 Operating Cash` **only after** that month's bills are approved and invoices are issued — suggestions are generated at import time against documents that are open at that moment.
+Four months, three different banks, three different export formats. Import each one against `1110 Operating Cash` **only after** that month's bills are approved and invoices are issued — suggestions are generated at import time against documents that are open at that moment.
 
 ## Statement 1 — Northwind Bank (`statements/month-1-northwind-ISO.csv`)
 
@@ -22,6 +22,10 @@ Comma-delimited, month-first dates (`MM/DD/YYYY`), `$` amounts with accounting-s
 | Reference | `Check No` |
 
 and pick **date format: MDY**.
+
+## Statement 4 — Northwind Bank again (`statements/month-4-northwind-ISO.csv`)
+
+Statement 1's format — comma-delimited, ISO dates, one signed `Amount` column; pick **date format: ISO**. Two deposits and one withdrawal this month are for **less** than the document total: the matcher scores each line against the amount still due *after* credit and debit notes, which is why you issue the notes in `08-returns-and-adjustments.md` **before** importing this statement.
 
 ---
 
@@ -92,6 +96,23 @@ After resolving every line above, **Reports → Bank reconciliation** for `1110 
 Closing balance to type into the import form: **173,783.30**, dated 2026-08-31.
 
 After resolving every line above, **Reports → Bank reconciliation** for `1110 Operating Cash` as of `2026-08-31` must show **Difference = 0.00** and **Unmatched = 0**.
+
+---
+
+## Month 4's lines
+
+| Date | Memo | Amount | Expected score | What to do |
+|---|---|---|---|---|
+| 2026-09-02 | MONTHLY SERVICE CHARGE | -38.00 | — | Post journal → 6600 Bank Fees |
+| 2026-09-05 | ACH CREDIT BRIGHTLINE ANALYTICS | 10,200.00 | 77 | Review the suggestion, then Match — should match I15 |
+| 2026-09-07 | ACH DEBIT IRONCLAD SUPPLY CO | -10,500.00 | 77 | Review the suggestion, then Match — should match B12 |
+| 2026-09-12 | ACH CREDIT FERROUS WORKS LTD | 5,700.00 | 85 | Accept the suggestion (auto) — should match I16 |
+| 2026-09-20 | TRANSFER TO SAVINGS | -2,500.00 | — | Ignore — no GL entry |
+| 2026-09-28 | INTEREST PAID | 16.20 | — | Post journal → 4300 Interest Income |
+
+Closing balance to type into the import form: **179,161.50**, dated 2026-09-30.
+
+After resolving every line above, **Reports → Bank reconciliation** for `1110 Operating Cash` as of `2026-09-30` must show **Difference = 0.00** and **Unmatched = 0**.
 
 ---
 

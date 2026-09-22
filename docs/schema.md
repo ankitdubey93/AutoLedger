@@ -234,7 +234,7 @@ Constraints: `chk_allocation_one_target` · `ux_allocation_payment_invoice` / `u
 
 Neither `invoices` nor `bills` gained a `PAID` status or an `amount_paid_cents` column. `allocatedCents`/`amountDueCents`/`settlementStatus` are computed on every read from `payment_allocations`, filtered to `POSTED` payments — the same no-summary-table discipline `reportService`/`dashboardService` already follow. See [study/architecture/derived-vs-stored-state.md](../study/architecture/derived-vs-stored-state.md).
 
-**Not built in this phase:** an expense-claim/employee-reimbursement document, credit notes, vendor credits, partial void, PDF export, multi-currency payments, fiscal-period posting locks, audit trail. None of these are silently implied by anything above.
+**Not built in this phase:** an expense-claim/employee-reimbursement document, credit notes, vendor credits, partial void, PDF export, multi-currency payments, fiscal-period posting locks, audit trail. None of these are silently implied by anything above. (Credit notes and vendor credits — debit notes — landed in [Phase 26](#phase-26--credit--debit-notes-ledgercore--applied); settlement then became payments **plus** applied notes.)
 
 ---
 
@@ -681,6 +681,31 @@ See [api.md](api.md#ledgercore--apiv1ledger-core) for the routes and [ledger-cor
 ## Phase 25 — customer & vendor accounts (LedgerCore) — no migration
 
 **No schema change.** A customer's or vendor's account is derived on read: a control-account `ledger_lines` row belongs to a party when its `journal_entry_id` equals the `journal_entry_id` or `void_journal_entry_id` of that party's `invoices`/`bills`/`payments` row. All six are existing columns with composite `(org_id, …)` FKs into `journal_entries`, and each already has its own index (`idx_invoices_journal_entry`, `idx_invoices_void_journal_entry`, `idx_payments_journal_entry`, `idx_payments_void_journal_entry` and the `bills` equivalents). `ledger_lines` deliberately carries **no** `customer_id`/`vendor_id`. Instead of party-tagging, manual and bank-line journals are refused on the control accounts at the service layer (`journalService.assertNotControlAccountsOnClient`); there is no database trigger for this rule, because the document posting path must still write to those accounts. See [roadmap.md § Phase 25](roadmap.md#phase-25-as-delivered).
+
+## Phase 26 — credit & debit notes (LedgerCore) — applied
+
+`063_ledger-core_credit_debit_notes.sql`, one migration. A **credit note** reduces what a customer owes on an `ISSUED` invoice; a **debit note** reduces what we owe on a `POSTED` bill. Both reference their original, copy its party/currency/`fx_rate`, and settle it through an insert-only allocation table — the same shape as `payment_allocations`.
+
+**`credit_notes`** — `id` UUID PK · `org_id` FK → `organizations` ON DELETE RESTRICT (a posted document, like `invoices`) · `customer_id` composite FK → `customers (org_id, id)` RESTRICT · `invoice_id` **NOT NULL** composite FK → `invoices (org_id, id)` RESTRICT · `credit_note_number` TEXT NULL until issue, `UNIQUE (org_id, credit_note_number)` · `status` CHECK IN (`DRAFT`, `ISSUED`, `VOID`) — exactly `NOTE_TRANSITIONS` in `types/ledger-core.ts` · `reason_code` CHECK IN (`RETURN`, `PRICE_ADJUSTMENT`, `DISCOUNT`, `DAMAGED`, `OTHER`) · `reason` ≤ 500 · `issue_date` · `currency_code` CHAR(3) · `fx_rate` NUMERIC(18,8) (`> 0`, `<= 1,000,000`; copied from the invoice) · `customer_name_snapshot`/`_address_snapshot`/`_tax_number_snapshot` (the invoice's own snapshot) · `notes` · `subtotal_cents`/`tax_cents`/`total_cents` BIGINT `>= 0`, `chk_credit_notes_total` (`total = subtotal + tax`) · `base_subtotal_cents`/`base_tax_cents`/`base_total_cents` BIGINT · `journal_entry_id`/`void_journal_entry_id` composite FKs → `journal_entries` RESTRICT · `issued_at`/`voided_at` · `created_by` FK → `users` RESTRICT · `created_at`/`updated_at`. `chk_credit_notes_issued_complete`: an `ISSUED` row has a number, a journal entry, `issued_at`, and `total_cents > 0`. Indexed on `(org_id, status, issue_date DESC)` and every FK column.
+
+**`credit_note_lines`** — the `invoice_lines` shape (`line_number`, `description`, `quantity_milli`, `unit_price_cents`, `revenue_account_id` composite FK → `accounts` RESTRICT, `tax_rate_bp`, `net_cents`, `tax_cents`), parent FK `ON DELETE CASCADE` (a draft's lines go with it), `UNIQUE (credit_note_id, line_number)`. No `item_id`.
+
+**`credit_note_allocations`** — `id` · `org_id` · `credit_note_id` composite FK RESTRICT · `invoice_id` composite FK RESTRICT (the original, or any other invoice of the same customer it was applied to) · `amount_cents` BIGINT `> 0` · `base_amount_cents` BIGINT `>= 0` (at the note's rate) · `allocation_date` DATE · `created_by` FK → `users` RESTRICT · `created_at`. No `UNIQUE` on `(note, invoice)` — a note may be applied to the same invoice in two steps.
+
+**`debit_notes`**, **`debit_note_lines`**, **`debit_note_allocations`** — the exact mirror with `vendor_id` → `vendors`, `bill_id` → `bills`, `debit_note_number`, `vendor_*_snapshot`, `expense_account_id` on lines, and one extra column: `debit_notes.vendor_credit_reference` TEXT ≤ 100 (the vendor's own credit-note number).
+
+**`ledger_invoice_settings`** gains `credit_note_prefix` (default `'CN-'`), `credit_note_next_number`, `debit_note_prefix` (default `'DN-'`), `debit_note_next_number` — the same counter-row-with-lock pattern as the invoice number, allocated inside the issuing transaction; padding reuses `number_padding`.
+
+**Triggers.**
+- `reject_issued_note_mutation()` on both note tables (`trg_credit_notes_immutable`, `trg_debit_notes_immutable`) — `09`'s rule: DRAFT is editable/deletable, otherwise only `ISSUED -> VOID` touching `status`/`voided_at`/`void_journal_entry_id` (the `to_jsonb` row-diff). `0A000`.
+- `reject_non_draft_note_line_mutation()` on both line tables — lines change only while the parent is DRAFT. `0A000`.
+- `reject_note_allocation_mutation()` — allocations are insert-only, always. `0A000`. Voiding a note leaves them in place; they stop counting because every settlement read filters `status = 'ISSUED'`.
+- `assert_note_allocation_within_limits()` — deferred constraint trigger on both allocation tables: a note never applies more than its total, and payments + applied notes never exceed the document total. `P0001`.
+- `assert_notes_within_original()` — deferred constraint trigger on both note tables: Σ `ISSUED` notes against one original ≤ its total. `P0001`. The service additionally holds the original's row lock while it sums, which is what makes the check race-free.
+- `assert_no_overallocation()` — **replaced** by `063` (`CREATE OR REPLACE`, the trigger from `014` is untouched): a payment allocation must now fit inside total − payments − applied notes.
+- `set_updated_at()` and `audit_row_change('ledger-core')` on both note tables (parents only).
+
+**Settlement is still derived, never stored** — now from two sources: `amount due = total − Σ POSTED payment allocations − Σ ISSUED note allocations`, defined once in `services/ledger-core/settlementSql.ts`. An ISSUED note's *unapplied* remainder is a negative open item in AR/AP aging and party open items.
 
 ## Phase 17 — target tables
 

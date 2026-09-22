@@ -105,6 +105,7 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
       },
     ],
     allocatedCents: 0,
+    debitedCents: 0,
     amountDueCents: 0,
     settlementStatus: 'NOT_APPLICABLE',
     ...overrides,
@@ -239,6 +240,21 @@ function renderBillDetailPage(billId: string) {
 }
 
 describe('BillDetailPage', () => {
+  it('offers Create debit note only on an approved expense (Phase 26)', async () => {
+    const posted = baseBill({ id: 'bill-posted', status: 'POSTED', journalEntryId: 'entry-1', amountDueCents: 1000 });
+    mockDetailRoutes(posted);
+    const { unmount } = renderBillDetailPage(posted.id);
+    const link = await screen.findByRole('link', { name: 'Create debit note' });
+    expect(link).toHaveAttribute('href', '/app/ledger-core/debit-notes/new?billId=bill-posted');
+    unmount();
+
+    const review = baseBill({ id: 'bill-review', status: 'AWAITING_APPROVAL', submittedAt: new Date().toISOString() });
+    mockDetailRoutes(review);
+    renderBillDetailPage(review.id);
+    await screen.findByRole('button', { name: 'Approve' });
+    expect(screen.queryByRole('link', { name: 'Create debit note' })).toBeNull();
+  });
+
   it('shows Approve for an AWAITING_APPROVAL bill and confirms before posting', async () => {
     const bill = baseBill({ id: 'bill-review', status: 'AWAITING_APPROVAL', submittedAt: new Date().toISOString() });
     mockDetailRoutes(bill);
