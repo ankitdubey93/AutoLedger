@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { listApps, type AppSummary } from '../services/fetchServices';
+import { getOrganizationApps, type AppSummary } from '../services/fetchServices';
 
 export type ActiveAppState =
   | { status: 'loading' }
@@ -8,7 +8,9 @@ export type ActiveAppState =
   | { status: 'found'; app: AppSummary };
 
 /**
- * Resolves the `:appSlug` route param against the registry.
+ * Resolves the `:appSlug` route param against the registry, as seen by the
+ * active organization: an app it has not enabled (Phase 27) reads as
+ * `not-found`, so AppFrame redirects home rather than opening it.
  *
  * A hook rather than a context: the slug already lives in the URL, so there
  * is nothing to provide — every consumer that needs it is already inside a
@@ -22,11 +24,11 @@ export function useActiveApp(): ActiveAppState {
     let ignore = false;
     setState({ status: 'loading' });
 
-    listApps()
+    getOrganizationApps()
       .then((res) => {
         if (ignore) return;
         const app = res.apps.find((a) => a.slug === appSlug);
-        setState(app === undefined ? { status: 'not-found' } : { status: 'found', app });
+        setState(app === undefined || !app.enabled ? { status: 'not-found' } : { status: 'found', app });
       })
       .catch(() => {
         if (!ignore) setState({ status: 'not-found' });

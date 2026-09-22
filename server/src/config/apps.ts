@@ -20,6 +20,7 @@ export const APPS = [
     tagline: 'Double-entry ledger, multi-currency, QuickBooks sync.',
     skills: ['Double-entry integrity', 'DB constraints', 'Multi-currency', 'QuickBooks API sync'],
     status: 'building',
+    requires: [],
   },
   {
     slug: 'taxguard',
@@ -28,6 +29,7 @@ export const APPS = [
     tagline: 'RAG over tax law with PII-safe retrieval.',
     skills: ['RAG', 'Vector databases', 'PII redaction', 'Tax act parsing'],
     status: 'building',
+    requires: [],
   },
   {
     slug: 'ap-flow',
@@ -42,6 +44,7 @@ export const APPS = [
       'Confidence-gated auto-posting',
     ],
     status: 'building',
+    requires: ['ledger-core'],
   },
   {
     slug: 'fpa-engine',
@@ -50,6 +53,7 @@ export const APPS = [
     tagline: 'A linked 3-statement model you can stress-test.',
     skills: ['3-statement financial linking', 'Scenario modeling', 'Cash runway forecasting'],
     status: 'building',
+    requires: ['ledger-core'],
   },
   {
     slug: 'unitecon',
@@ -58,6 +62,7 @@ export const APPS = [
     tagline: 'Cohort retention and unit economics at a glance.',
     skills: ['Cohort retention matrices', 'LTV/CAC ratios', 'Price-Volume-Mix variance'],
     status: 'building',
+    requires: ['ledger-core'],
   },
   {
     slug: 'boarddeck',
@@ -66,6 +71,7 @@ export const APPS = [
     tagline: 'Close the books, generate the board deck.',
     skills: ['Monthly close automation', 'BvA variance', 'Automated .pptx deck generation'],
     status: 'building',
+    requires: ['ledger-core'],
   },
   {
     slug: 'forecaster',
@@ -74,6 +80,7 @@ export const APPS = [
     tagline: 'Driver-based rolling forecasts and headcount plans.',
     skills: ['Driver-based rolling forecasting', 'Headcount planning', 'Zero-based budgeting'],
     status: 'building',
+    requires: ['ledger-core'],
   },
 ] as const satisfies readonly AppDefinition[];
 

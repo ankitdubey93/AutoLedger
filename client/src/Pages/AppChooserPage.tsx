@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { listApps, type AppSummary } from '../services/fetchServices';
+import { Link, Navigate } from 'react-router-dom';
+import { getOrganizationApps, type AppSummary, type OrganizationAppsResponse } from '../services/fetchServices';
+import { useOrg } from '../context/OrgContext';
 import SetupChecklist from './SetupChecklist';
 import SandboxCard from './SandboxCard';
 
@@ -11,18 +12,24 @@ import SandboxCard from './SandboxCard';
  *
  * A `building` app is a real link. A `planned` app renders as a disabled
  * card — visibly part of the portfolio, but not clickable, the same
- * "disabled rather than a lie" rule AccountPage's module list already uses.
+ * "disabled rather than a lie" rule AccountPage uses.
+ *
+ * Phase 27: only the apps this organization has enabled are shown. An
+ * organization that has never chosen (`selectionCompletedAt === null`) is
+ * sent to the picker at /welcome first. OWNER/ADMIN get a link to Account's
+ * Apps panel to change the set.
  */
 export default function AppChooserPage() {
-  const [apps, setApps] = useState<AppSummary[] | null>(null);
+  const { role } = useOrg();
+  const [data, setData] = useState<OrganizationAppsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
 
-    listApps()
+    getOrganizationApps()
       .then((res) => {
-        if (!ignore) setApps(res.apps);
+        if (!ignore) setData(res);
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load apps');
@@ -33,15 +40,23 @@ export default function AppChooserPage() {
     };
   }, []);
 
+  if (data !== null && data.selectionCompletedAt === null) return <Navigate to="/welcome" replace />;
+
+  const apps = data === null ? null : data.apps.filter((a) => a.enabled);
+  const count = apps?.length ?? 0;
+
   return (
     <div className="dashboard">
       <header>
         <h1>Choose an app</h1>
-        <p className="subtitle">Seven apps, one organization, one ledger underneath.</p>
+        <p className="subtitle">
+          {count} {count === 1 ? 'app' : 'apps'}, one organization, one ledger underneath.
+        </p>
+        {(role === 'OWNER' || role === 'ADMIN') && <Link to="/account#apps">Add or remove apps</Link>}
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {apps === null && error === null && <p className="muted">Loading…</p>}
+      {data === null && error === null && <p className="muted">Loading…</p>}
 
       {apps !== null && (
         <div className="app-grid">
@@ -51,7 +66,7 @@ export default function AppChooserPage() {
         </div>
       )}
 
-      <SetupChecklist />
+      <SetupChecklist enabledSlugs={new Set((apps ?? []).map((a) => a.slug))} />
       <SandboxCard />
     </div>
   );

@@ -141,6 +141,8 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | GET | `/` | any member | The caller's active organization |
 | GET | `/members` | `OWNER`, `ADMIN` | Everyone in the active organization |
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
+| GET | `/apps` | any member | Every app, flagged enabled or not for the active organization — Phase 27 |
+| PUT | `/apps` | `OWNER`, `ADMIN` | Replace the organization's enabled-app set — Phase 27 |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 
@@ -149,6 +151,22 @@ The active organization comes **only** from the verified access token. `orgId` i
 `PATCH /` (Phase 3.5) is the platform half of LedgerCore's onboarding — organization name and `base_currency` are platform fields, not LedgerCore ones, so they are edited here rather than under `/ledger-core/settings`. Phase 3.8 adds `taxNumber` and `businessNumber` (each `string | null`, max 64 chars) — a business's tax and legal-entity registration numbers, also platform fields since they identify the legal entity rather than any one app. Whether they print on a LedgerCore invoice is a separate, app-owned choice — see `/ledger-core/settings/invoicing`'s `showTaxNumber`/`showBusinessNumber`. All fields optional, at least one required (`400 No fields to update`).
 
 **The base-currency lock (Phase 9a).** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` here returns `422 Base currency cannot be changed once journal entries exist` — the identical message and status `POST /ledger-core/settings/onboarding` has always returned (see the LedgerCore Settings section below). Before Phase 9a this route had no such check, leaving a gap where a base-currency change could bypass the lock entirely; the guard and the write now run inside one transaction here too. Re-submitting the *same* currency is always accepted.
+
+**App selection (Phase 27).** `GET /apps` returns every app in registry order, each extended with `enabled` and `enabledAt`, plus `selectionCompletedAt` — when the org last saved its selection (the `'platform'` onboarding row's `completed_at`), or `null` if it never has, which is what sends the client to `/welcome`:
+
+```json
+{
+  "success": true,
+  "selectionCompletedAt": "2026-09-22T10:00:00.000Z",
+  "count": 7,
+  "apps": [
+    { "slug": "ledger-core", "name": "LedgerCore", "…": "every /api/v1/apps field", "requires": [], "enabled": true, "enabledAt": "2026-09-22T10:00:00.000Z" },
+    { "slug": "ap-flow", "name": "AP-Flow", "…": "…", "requires": ["ledger-core"], "enabled": false, "enabledAt": null }
+  ]
+}
+```
+
+`PUT /apps` takes `{ "appSlugs": string[] }` (1–20 entries, each 1–40 chars; else `400`) and **replaces** the whole set, returning the same shape with `200`. Duplicates are collapsed. `422` for `Unknown app "<slug>"`, `<App> is not available yet` (a `planned` app), or `<App> requires <App>` (a `requires` entry missing from the same set — e.g. `AP-Flow requires LedgerCore`). An app that stays enabled keeps its original `enabledAt`. Removing an app deletes nothing but its selection row. Every save also marks the `'platform'` onboarding row `COMPLETED`, in the same transaction. **This is visibility, not access control:** a disabled app's own routes still answer — the client hides the app and redirects away from its URL.
 
 ---
 
@@ -169,13 +187,14 @@ The active organization comes **only** from the verified access token. `orgId` i
       "domain": "Core Accounting & Systems",
       "tagline": "Double-entry ledger, multi-currency, QuickBooks sync.",
       "skills": ["Double-entry integrity", "DB constraints", "Multi-currency", "QuickBooks API sync"],
-      "status": "building"
+      "status": "building",
+      "requires": []
     }
   ]
 }
 ```
 
-Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. This is a static list today, not a per-org entitlement — every organization sees the same seven apps. See [roadmap.md](roadmap.md#app-map).
+Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow, FP&A Engine, UnitEcon, BoardDeck and ForecasterPro each require `ledger-core`. This is the static registry — every organization sees the same seven apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
 
 ---
 

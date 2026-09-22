@@ -287,7 +287,7 @@ function renderExpectedResults(expected: ExpectedMonth[]): string {
 function renderSetup(): string {
   return (
     `# Setup\n\n` +
-    `1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 45-account chart automatically.\n` +
+    `1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 45-account chart automatically. On the next screen, choose at least **LedgerCore** and click **Continue**.\n` +
     `2. Go to **Accounts** and create one new account:\n\n` +
     `   | Field | Value |\n   |---|---|\n   | Code | \`4300\` |\n   | Name | Interest Income |\n   | Type | Revenue |\n   | Parent | \`4000 Revenue\` |\n   | Postable | Yes |\n\n` +
     `3. Do **not** run the sandbox demo loader or the opening-balance importer into this organization — the scenario assumes zero opening cash, and both of those would add balances this pack's answer key does not account for.\n`
@@ -365,7 +365,8 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `Read \`00-the-business.md\` first if you have not already — it is one page and tells you what the company ` +
     `does and which accounts you'll touch.\n\n---\n\n` +
     `## Step 0 — set up the organization\n\n` +
-    `Follow \`01-setup.md\`: register a fresh org (base currency USD), then create one account by hand, ` +
+    `Follow \`01-setup.md\`: register a fresh org (base currency USD), choose at least LedgerCore on the app ` +
+    `picker that follows, then create one account by hand, ` +
     `\`4300 Interest Income\`. Registration already seeds the other 45 accounts, so this is the only one you ` +
     `create yourself.\n\n` +
     `> **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" ` +

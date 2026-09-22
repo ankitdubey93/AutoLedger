@@ -74,14 +74,13 @@ export async function getChecklist(orgId: string): Promise<OnboardingChecklistIt
   const { rows } = await pool.query<StateRow>(`${STATE_SELECT} WHERE org_id = $1`, [orgId]);
   const byslug = new Map(rows.map((row) => [row.app_slug, toState(row)]));
 
-  // 'platform' is marked 'planned' here deliberately: the row it tracks is
-  // real (this phase creates it), but no suite-level onboarding UI has been
-  // built yet — only LedgerCore's app-level wizard has. Marking it
-  // 'building' would make SetupChecklist link to a page that does not
-  // exist. Update this the phase a suite-level wizard actually ships.
+  // 'platform' is the suite-level wizard: since Phase 27 that is the app
+  // picker at /welcome (organizationAppService.setOrganizationApps completes
+  // this row). SetupChecklist lists only enabled apps, so the 'platform'
+  // item never renders as an "/app/platform/onboarding" link.
   const slugs: { slug: OnboardingSlug; name: string; status: 'building' | 'planned' }[] = [
     ...APPS.map((app) => ({ slug: app.slug, name: app.name, status: app.status })),
-    { slug: 'platform', name: 'AutoLedger', status: 'planned' },
+    { slug: 'platform', name: 'AutoLedger', status: 'building' },
   ];
 
   return slugs.map(({ slug, name, status }) => {

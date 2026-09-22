@@ -1,6 +1,6 @@
 # Setup
 
-1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 45-account chart automatically.
+1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 45-account chart automatically. On the next screen, choose at least **LedgerCore** and click **Continue**.
 2. Go to **Accounts** and create one new account:
 
    | Field | Value |

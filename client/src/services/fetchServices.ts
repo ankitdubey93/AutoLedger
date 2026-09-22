@@ -225,6 +225,8 @@ export interface AppSummary {
   tagline: string;
   skills: string[];
   status: AppStatus;
+  /** Slugs of apps this one needs — choosing it requires choosing those. */
+  requires: string[];
 }
 
 /** GET /apps — the suite's app registry, shown on the chooser. */
@@ -234,6 +236,30 @@ export function listApps(signal?: AbortSignal): Promise<{
   apps: AppSummary[];
 }> {
   return apiFetch('/apps', { signal: signal ?? null });
+}
+
+/** Mirrors server/src/types/apps.ts's OrganizationAppEntry. */
+export interface OrganizationAppEntry extends AppSummary {
+  enabled: boolean;
+  enabledAt: string | null;
+}
+
+export interface OrganizationAppsResponse {
+  success: boolean;
+  /** null = this organization has never chosen its apps (send it to /welcome). */
+  selectionCompletedAt: string | null;
+  count: number;
+  apps: OrganizationAppEntry[];
+}
+
+/** GET /organizations/apps — any member. */
+export function getOrganizationApps(signal?: AbortSignal): Promise<OrganizationAppsResponse> {
+  return apiFetch('/organizations/apps', { signal: signal ?? null });
+}
+
+/** PUT /organizations/apps — OWNER/ADMIN; replaces the whole set. */
+export function setOrganizationApps(appSlugs: string[]): Promise<OrganizationAppsResponse> {
+  return apiFetch('/organizations/apps', { method: 'PUT', body: JSON.stringify({ appSlugs }) });
 }
 
 /* -------------------------------------------------------------- ledger-core */

@@ -707,6 +707,20 @@ See [api.md](api.md#ledgercore--apiv1ledger-core) for the routes and [ledger-cor
 
 **Settlement is still derived, never stored** — now from two sources: `amount due = total − Σ POSTED payment allocations − Σ ISSUED note allocations`, defined once in `services/ledger-core/settlementSql.ts`. An ISSUED note's *unapplied* remainder is a negative open item in AR/AP aging and party open items.
 
+## Phase 27 — organization app selection (platform) — applied
+
+`064_platform_organization_apps.sql` adds `organization_apps`: one row per app an organization has enabled, no row = not enabled.
+
+**`organization_apps`** — `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `app_slug` TEXT NOT NULL (non-blank CHECK, `<= 40` chars) · `enabled_by` UUID nullable FK → `users` ON DELETE RESTRICT · `enabled_at` TIMESTAMPTZ NOT NULL DEFAULT `now()`. `ux_organization_apps_org_app` — `UNIQUE (org_id, app_slug)`. `idx_organization_apps_org` on `org_id`, `idx_organization_apps_enabled_by` on `enabled_by`. `trg_organization_apps_audit` (`audit_row_change('platform')`), so every enable and removal lands in `audit_logs`.
+
+`app_slug` has no `REFERENCES` and no enumerated CHECK — validated against `config/apps.ts` in `organizationAppService`, the same call 017 and 027 made. Rows are inserted or deleted, never updated, so there is no `updated_at`; a saved selection replaces the set (delete the apps dropped, `INSERT … ON CONFLICT DO NOTHING` the apps added, so a kept app keeps its first `enabled_at`). `enabled_by` is nullable **only** for backfilled rows; every service write sets it.
+
+**Backfill.** Every organization that existed at migration time gets all seven apps (a hard-coded snapshot of `config/apps.ts` at 2026-09-22) and a `COMPLETED` `onboarding_states` row for `app_slug = 'platform'` — the suite-level step the app picker completes — so no existing user is sent to `/welcome`. Both inserts are `ON CONFLICT DO NOTHING`.
+
+**Visibility, not access control.** No app route consults this table — see [roadmap.md § Phase 27](roadmap.md#phase-27-as-delivered).
+
+---
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

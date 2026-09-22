@@ -11,14 +11,14 @@ const STATUS_LABEL: Record<OnboardingChecklistItem['status'], string> = {
 
 /**
  * The suite-level setup checklist — Phase 9a. Lists only apps that actually
- * have a wizard to run (`appStatus === 'building'`); a `planned` app, and the
- * `'platform'` sentinel (no suite-level wizard UI exists yet), have no
- * onboarding worth showing here.
+ * have a wizard to run (`appStatus === 'building'`) and that this
+ * organization has enabled (Phase 27). The `'platform'` item — the app picker
+ * itself — is never in `enabledSlugs`, so it never renders.
  *
  * Rendered on AppChooserPage, below the app grid, so a fresh organization
  * sees at a glance which of its live apps still need setup.
  */
-export default function SetupChecklist() {
+export default function SetupChecklist({ enabledSlugs }: { enabledSlugs: ReadonlySet<string> }) {
   const [items, setItems] = useState<OnboardingChecklistItem[] | null>(null);
 
   useEffect(() => {
@@ -42,7 +42,9 @@ export default function SetupChecklist() {
 
   if (items === null) return null;
 
-  const buildingItems = items.filter((item) => item.appStatus === 'building');
+  const buildingItems = items.filter(
+    (item) => item.appStatus === 'building' && enabledSlugs.has(item.appSlug),
+  );
   if (buildingItems.length === 0) return null;
 
   return (

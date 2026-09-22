@@ -195,7 +195,9 @@ describe('the suite checklist', () => {
     return render(
       <MemoryRouter>
         <AuthProvider>
-          <AppChooserPage />
+          <OrgProvider>
+            <AppChooserPage />
+          </OrgProvider>
         </AuthProvider>
       </MemoryRouter>,
     );
@@ -236,12 +238,25 @@ describe('the suite checklist', () => {
           }),
         );
       }
+      // Phase 27: the chooser reads GET /organizations/apps and lists only
+      // enabled apps, so the one building app must be enabled here.
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
+          selectionCompletedAt: '2026-09-01T00:00:00.000Z',
           count: 1,
           apps: [
-            { slug: 'ledger-core', name: 'LedgerCore', domain: 'x', tagline: 'y', skills: [], status: 'building' },
+            {
+              slug: 'ledger-core',
+              name: 'LedgerCore',
+              domain: 'x',
+              tagline: 'y',
+              skills: [],
+              status: 'building',
+              requires: [],
+              enabled: true,
+              enabledAt: '2026-09-01T00:00:00.000Z',
+            },
           ],
         }),
       );

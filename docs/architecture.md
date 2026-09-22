@@ -13,6 +13,8 @@ All seven apps share one database, one `organizations` table as the tenant bound
 
 The app slug is a **routing namespace, not a tenancy boundary**. `org_id` remains the only thing that scopes data access — a request to `/api/v1/ap-flow/invoices` is still scoped by the caller's `org_id`, exactly like a platform route. An app never reads another app's tables directly.
 
+**Which apps an organization uses (Phase 27).** The registry (`config/apps.ts`) is the same for everyone; each organization additionally keeps its own enabled set in `organization_apps`, chosen on the post-sign-up picker (`/welcome`) and changed in Account → Apps (`GET`/`PUT /api/v1/organizations/apps`). Each registry entry declares `requires` — the apps it reads from or posts to — and a selection missing one is refused. This is **visibility only**: the chooser and `useActiveApp` hide a disabled app and redirect away from its URL, but no app router checks it, so it is not an authorization boundary. Server-side enforcement (a per-router guard, a `READ_ONLY` state) is the entitlement design in [master-plan.md § 5.6](master-plan.md), not built.
+
 ## Multi-tenancy (foundational)
 
 An ERP is operated by a company, not a person. A warehouse, purchase order, or payroll run belongs to an **organization** that many users with different roles act upon. This is baked into migration 001 — it is not a retrofit. Scoping by `user_id` was the prior build's fatal design error.

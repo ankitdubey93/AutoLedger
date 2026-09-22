@@ -1,14 +1,19 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   getHealth,
+  getOrganizationApps,
   listMembers,
+  setOrganizationApps,
   updateOrganization,
   ApiRequestError,
   type HealthResponse,
+  type OrganizationAppEntry,
   type OrganizationMember,
 } from '../services/fetchServices';
 import { useAuth, useAuthActions } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
+import AppPicker from '../components/AppPicker';
 
 /**
  * The account page: identity, organization, membership, and session details
@@ -22,6 +27,125 @@ import { useOrg } from '../context/OrgContext';
  * that are not built yet are shown as visibly disabled rather than as
  * something that looks clickable and leads to an empty table.
  */
+
+/** A calendar date, spelled out — "22 September 2026" in en-GB. */
+function formatDay(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  return a.size === b.size && [...a].every((slug) => b.has(slug));
+}
+
+/**
+ * Which apps the organization uses — Phase 27. OWNER/ADMIN edit the set with
+ * the same picker /welcome uses; every other role sees a read-only list.
+ * Removing an app only hides it: nothing is deleted.
+ */
+function AppsPanel({ onReady }: { onReady: () => void }) {
+  const { role } = useOrg();
+  const canEdit = role === 'OWNER' || role === 'ADMIN';
+
+  const [apps, setApps] = useState<OrganizationAppEntry[] | null>(null);
+  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [savedOk, setSavedOk] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function seed(entries: OrganizationAppEntry[]) {
+    const enabled = new Set(entries.filter((a) => a.enabled).map((a) => a.slug));
+    setApps(entries);
+    setSaved(enabled);
+    setSelected(new Set(enabled));
+  }
+
+  useEffect(() => {
+    let ignore = false;
+
+    getOrganizationApps()
+      .then((res) => {
+        if (ignore) return;
+        seed(res.apps);
+        onReady();
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load apps');
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [onReady]);
+
+  async function handleSave() {
+    setSaving(true);
+    setError(null);
+    setSavedOk(false);
+    try {
+      const res = await setOrganizationApps([...selected]);
+      seed(res.apps);
+      setSavedOk(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save apps');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="card" id="apps">
+      <h2>Apps</h2>
+
+      {apps === null && error === null && <p className="muted">Loading…</p>}
+
+      {apps !== null && canEdit && (
+        <>
+          <AppPicker
+            apps={apps}
+            selected={selected}
+            onChange={(next) => {
+              setSelected(next);
+              setSavedOk(false);
+            }}
+            disabled={saving}
+          />
+          <p className="muted">
+            Removing an app hides it for everyone in this organization. Its data is kept and returns if you
+            add the app again.
+          </p>
+        </>
+      )}
+
+      {apps !== null && !canEdit && (
+        <>
+          <ul>
+            {apps
+              .filter((a) => a.enabled)
+              .map((a) => (
+                <li key={a.slug}>{a.name}</li>
+              ))}
+          </ul>
+          <p className="muted">Only an owner or admin can change which apps are enabled.</p>
+        </>
+      )}
+
+      {error !== null && <p className="status status--bad">{error}</p>}
+      {savedOk && error === null && <p className="status status--good">Saved.</p>}
+
+      {apps !== null && canEdit && (
+        <button
+          type="button"
+          className="btn"
+          disabled={selected.size === 0 || sameSet(selected, saved) || saving}
+          onClick={() => void handleSave()}
+        >
+          {saving ? 'Saving…' : 'Save'}
+        </button>
+      )}
+    </section>
+  );
+}
 
 /** Formats the remaining access-token lifetime as m:ss, or "expired". */
 function useCountdown(isoTarget: string): string {
@@ -277,28 +401,6 @@ function HealthPanel() {
           <dd>{health.uptimeSeconds}s</dd>
         </dl>
       )}
-
-      <h3 className="panel-subhead">Platform</h3>
-      <ul className="module-list">
-        <li>
-          <span className="status--good">✓</span> Identity &amp; tenancy
-        </li>
-        <li>
-          <span className="status--good">✓</span> App registry
-        </li>
-        <li>
-          <span className="status--good">✓</span> LedgerCore — chart of accounts, journal entries, trial
-          balance
-        </li>
-        <li>
-          <span className="status--good">✓</span> LedgerCore — onboarding, settings &amp; dashboard
-        </li>
-        {/* Disabled, not linked. A link to an empty report would be a lie. */}
-        <li className="module-list__pending">
-          LedgerCore — P&amp;L, balance sheet &amp; fiscal periods{' '}
-          <span className="chip chip--muted">Phase 4</span>
-        </li>
-      </ul>
     </section>
   );
 }
@@ -306,9 +408,21 @@ function HealthPanel() {
 export default function AccountPage() {
   const auth = useAuth();
   const { organization, role } = useOrg();
+  const { hash } = useLocation();
+  const [appsReady, setAppsReady] = useState(false);
+  const markAppsReady = useCallback(() => setAppsReady(true), []);
+
+  // The chooser links to /account#apps. The router does not scroll to a hash
+  // by itself, and the panel's height is only final once its apps load.
+  useEffect(() => {
+    if (hash === '#apps' && appsReady) document.getElementById('apps')?.scrollIntoView();
+  }, [hash, appsReady]);
 
   // PlatformLayout renders behind ProtectedRoute, so this is defensive only.
   if (auth.status !== 'authenticated') return null;
+
+  // When the caller joined the active organization — their membership row.
+  const joinedAt = auth.memberships.find((m) => m.orgId === organization?.id)?.joinedAt;
 
   return (
     <div className="dashboard">
@@ -334,8 +448,8 @@ export default function AccountPage() {
                 <span className="muted">not verified — verification arrives in a later phase</span>
               )}
             </dd>
-            <dt>Member since</dt>
-            <dd>{new Date(auth.user.createdAt).toLocaleDateString()}</dd>
+            <dt>Account created</dt>
+            <dd>{formatDay(auth.user.createdAt)}</dd>
           </dl>
         </section>
 
@@ -357,11 +471,17 @@ export default function AccountPage() {
               <dd>
                 <span className="chip">{role ?? '—'}</span>
               </dd>
+              <dt>Organization created</dt>
+              <dd>{formatDay(organization.createdAt)}</dd>
+              <dt>You joined</dt>
+              <dd>{joinedAt === undefined ? '—' : formatDay(joinedAt)}</dd>
               <dt>Organizations</dt>
               <dd>{auth.memberships.length}</dd>
             </dl>
           )}
         </section>
+
+        <AppsPanel onReady={markAppsReady} />
 
         <MembersPanel />
         <BusinessIdentificationPanel />

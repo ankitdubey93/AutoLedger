@@ -2,6 +2,7 @@ import request from 'supertest';
 import { createApp } from '../../app.js';
 import { closePool } from '../../db/connect.js';
 import { APPS, isAppSlug } from '../../config/apps.js';
+import type { AppDefinition } from '../../types/apps.js';
 import { createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 
 /**
@@ -50,7 +51,7 @@ describe('GET /api/v1/apps', () => {
     const first = res.body.apps[0];
 
     expect(Object.keys(first).sort()).toEqual(
-      ['domain', 'name', 'skills', 'slug', 'status', 'tagline'].sort(),
+      ['domain', 'name', 'requires', 'skills', 'slug', 'status', 'tagline'].sort(),
     );
     expect(['building', 'planned']).toContain(first.status);
   });
@@ -62,5 +63,16 @@ describe('isAppSlug', () => {
       expect(isAppSlug(app.slug)).toBe(true);
     }
     expect(isAppSlug('not-a-real-app')).toBe(false);
+  });
+
+  it('every requires entry is a known slug and never the app itself', () => {
+    // Widened to AppDefinition the same way config/apps.ts's own helpers do:
+    // under `as const`, an empty `requires` is the tuple `readonly []`.
+    for (const app of APPS as readonly AppDefinition[]) {
+      for (const req of app.requires) {
+        expect(isAppSlug(req)).toBe(true);
+        expect(req).not.toBe(app.slug);
+      }
+    }
   });
 });

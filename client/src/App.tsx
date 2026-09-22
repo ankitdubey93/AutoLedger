@@ -8,6 +8,7 @@ import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
 import AppChooserPage from './Pages/AppChooserPage';
 import AccountPage from './Pages/AccountPage';
+import WelcomeAppsPage from './Pages/WelcomeAppsPage';
 import DocumentsPage from './Pages/DocumentsPage';
 import IntegrationsPage from './Pages/IntegrationsPage';
 import NotFoundPage from './Pages/NotFoundPage';
@@ -25,8 +26,9 @@ import ActiveAppRoutes from './apps/ActiveAppRoutes';
  * stored separately — see context/OrgContext.tsx.
  *
  * Two sibling shells inside ProtectedRoute, not nested: PlatformLayout is the
- * suite shell (brand, org switcher, account, sign out), used only by the
- * chooser at "/" and /account. AppFrame is the per-app shell, mounted at
+ * suite shell (brand, org switcher, account, sign out), used by the
+ * chooser at "/", the post-sign-up app picker at /welcome (Phase 27), and
+ * /account. AppFrame is the per-app shell, mounted at
  * /app/:appSlug — inside an app, the suite header does not render at all;
  * AppFrame's own AppTopBar shrinks AutoLedger to a small mark-and-link and
  * gives the app itself top billing.
@@ -44,6 +46,7 @@ export default function App() {
             <Route element={<ProtectedRoute />}>
               <Route element={<PlatformLayout />}>
                 <Route path="/" element={<AppChooserPage />} />
+                <Route path="/welcome" element={<WelcomeAppsPage />} />
                 <Route path="/account" element={<AccountPage />} />
                 <Route path="/documents" element={<DocumentsPage />} />
                 <Route path="/integrations" element={<IntegrationsPage />} />

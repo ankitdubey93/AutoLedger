@@ -1,14 +1,16 @@
 import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AppChooserPage from '../Pages/AppChooserPage';
 import { AuthProvider } from '../context/AuthContext';
+import { OrgProvider } from '../context/OrgContext';
+import type { Role } from '../services/fetchServices';
 
 /**
- * The chooser is the new post-login landing page — it replaced the single-app
- * dashboard. What matters: a `building` app is a real link, a `planned` app
- * is visibly disabled rather than a link to nothing, and a failed fetch shows
- * an error instead of a silently empty grid.
+ * The chooser is the post-login landing page. Since Phase 27 it lists only
+ * the apps the organization has enabled (GET /organizations/apps), sends an
+ * organization that has never chosen to /welcome, and still shows an error
+ * instead of a silently empty grid when the fetch fails.
  */
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -18,9 +20,40 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
+function session(role: Role) {
+  return {
+    success: true,
+    user: { id: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: false, createdAt: new Date().toISOString() },
+    organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: new Date().toISOString() },
+    role,
+    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, joinedAt: new Date().toISOString() }],
+    accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
+  };
+}
+
 const apps = [
-  { slug: 'ledger-core', name: 'LedgerCore', domain: 'Core Accounting & Systems', tagline: 'x', skills: ['a'], status: 'building' },
-  { slug: 'taxguard', name: 'TaxGuard AI', domain: 'Compliance & AI Workflows', tagline: 'y', skills: ['b'], status: 'planned' },
+  {
+    slug: 'ledger-core',
+    name: 'LedgerCore',
+    domain: 'Core Accounting & Systems',
+    tagline: 'x',
+    skills: ['a'],
+    status: 'building',
+    requires: [],
+    enabled: true,
+    enabledAt: '2026-09-01T00:00:00.000Z',
+  },
+  {
+    slug: 'taxguard',
+    name: 'TaxGuard AI',
+    domain: 'Compliance & AI Workflows',
+    tagline: 'y',
+    skills: ['b'],
+    status: 'building',
+    requires: [],
+    enabled: false,
+    enabledAt: null,
+  },
 ];
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -35,63 +68,61 @@ afterEach(() => {
 });
 
 /**
- * Wrapped in AuthProvider because the chooser now renders SandboxCard
- * (Phase 18), which reads the session to decide whether to show its
- * OWNER-only actions — the same provider the real app always mounts this
- * page inside. The provider renders its children in every session state,
- * so the assertions below are unaffected by which state it settles on.
+ * `/organizations/apps` also contains `/apps`, so it is matched first. A
+ * fresh Response per call: the chooser, its checklist and SandboxCard all
+ * fetch concurrently, and a Response body can only be read once.
  */
+function mockRoutes(orgApps: { status: number; body: unknown }) {
+  fetchMock.mockImplementation((input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input.toString();
+    if (url.includes('/organizations/apps')) return Promise.resolve(jsonResponse(orgApps.status, orgApps.body));
+    if (url.includes('/onboarding')) {
+      return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
+    }
+    if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session('OWNER')));
+    return Promise.resolve(jsonResponse(404, { success: false, error: `unmocked ${url}` }));
+  });
+}
+
 function renderChooser() {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
-        <AppChooserPage />
+        <OrgProvider>
+          <Routes>
+            <Route path="/" element={<AppChooserPage />} />
+            <Route path="/welcome" element={<p>WELCOME</p>} />
+          </Routes>
+        </OrgProvider>
       </AuthProvider>
     </MemoryRouter>,
   );
 }
 
 describe('AppChooserPage', () => {
-  it('renders one card per app', async () => {
-    // A fresh Response per call: AppChooserPage now fires a second, concurrent
-    // request for the setup checklist (Phase 9a), and a Response body can
-    // only be read once — mockResolvedValue would hand both callers the same
-    // consumed stream.
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/onboarding')) {
-        return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
-      }
-      return Promise.resolve(jsonResponse(200, { success: true, count: 2, apps }));
-    });
-
-    renderChooser();
-
-    expect(await screen.findByText('LedgerCore')).toBeInTheDocument();
-    expect(screen.getByText('TaxGuard AI')).toBeInTheDocument();
-  });
-
-  it('links a building app but not a planned one', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/onboarding')) {
-        return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
-      }
-      return Promise.resolve(jsonResponse(200, { success: true, count: 2, apps }));
+  it('shows only enabled apps', async () => {
+    mockRoutes({
+      status: 200,
+      body: { success: true, selectionCompletedAt: '2026-09-01T00:00:00.000Z', count: 2, apps },
     });
 
     renderChooser();
 
     const ledgerCard = (await screen.findByText('LedgerCore')).closest('a');
     expect(ledgerCard).toHaveAttribute('href', '/app/ledger-core');
+    expect(screen.queryByText('TaxGuard AI')).not.toBeInTheDocument();
+  });
 
-    const taxguardCard = screen.getByText('TaxGuard AI').closest('a');
-    expect(taxguardCard).toBeNull();
-    expect(screen.getByText('Coming soon')).toBeInTheDocument();
+  it('redirects to /welcome when no selection has been saved', async () => {
+    mockRoutes({ status: 200, body: { success: true, selectionCompletedAt: null, count: 2, apps } });
+
+    renderChooser();
+
+    expect(await screen.findByText('WELCOME')).toBeInTheDocument();
   });
 
   it('shows an error instead of a blank grid when the API call fails', async () => {
-    fetchMock.mockImplementation(() => Promise.resolve(jsonResponse(500, { success: false, error: 'boom' })));
+    mockRoutes({ status: 500, body: { success: false, error: 'boom' } });
 
     renderChooser();
 
