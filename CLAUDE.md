@@ -114,6 +114,7 @@ Read the relevant file before working — they are not in context by default.
 | [docs/development.md](docs/development.md) | Running the stack, env vars, Docker, adding a dependency |
 | [docs/testing.md](docs/testing.md) | Writing tests — unit vs integration tiers and what each must cover |
 | [docs/study-notes.md](docs/study-notes.md) | Writing a study note — required sections and the accuracy bar |
+| [docs/master-plan.md](docs/master-plan.md) | Discussing product direction, new apps, or the business model — a **proposal**, nothing in it is built or approved |
 
 ## Keeping docs honest
 
