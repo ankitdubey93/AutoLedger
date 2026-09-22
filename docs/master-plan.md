@@ -222,9 +222,101 @@ None of this is glamorous. All of it comes before the first rupee.
 - **Every report gains a dimension filter and a dimension pivot.** The trial balance by department is the acceptance test.
 - Mandatory-dimension rules per account ("every 6xxx expense line needs a Cost Centre"), enforced in the service.
 
-### 5.6 Master data layer (folds into reserved Phase 21, "app enablement & cross-app connections")
-- Items, customers, vendors, employees, dimensions and payment terms are **shared master data** that StockLedger, ProcureFlow, OrderDesk and CostLens all need.
-- Rule 16 forbids reading another app's tables, but the Drive dispatcher precedent (19.3) allows calling another app's **service**. The plan: LedgerCore's `itemService`, `customerService` and `vendorService` become the sanctioned read and write API for master data, with a typed interface other apps import. **No table moves and no migration churn** (Decision D5).
+### 5.6 Composable apps: standalone, connected, or connected to someone else's system (reserved Phase 21, "app enablement & cross-app connections")
+
+**The requirement.** Any app can be sold and used **on its own** (a trading firm buys only StockLedger), **connected** to other AutoLedger apps (StockLedger + LedgerCore, with COGS posting automatically), or **connected to the customer's existing system** (StockLedger or FP&A on top of Tally, QuickBooks, Xero or Zoho). Customers start with one app and grow into the suite, and they never have to rip out their current ledger to buy from us. This is how Zoho sells its suite, and it's the opposite of SAP's all-or-nothing implementation.
+
+**Why today's code can't do this.** Every app is on for every org, and apps call LedgerCore directly. AP-Flow imports `ledger-core/billService` and `vendorService`; BoardDeck imports `fiscalPeriodService` and `reportService`; UnitEcon, ForecasterPro and FP&A import `reportService` and `accountService`. Every app therefore **assumes LedgerCore exists**. Rule 16 kept apps out of each other's *tables*, which was the right first step, but not out of each other's *code*.
+
+#### The design: a modular monolith with a kernel, capability ports, and swappable adapters
+
+```
+┌──────────────────────────── PLATFORM KERNEL (always on, every org) ───────────────────────────┐
+│ identity · tenancy · RBAC · entitlements · MASTER DATA (parties, items, UoM, dimensions,       │
+│ currencies, payment terms) · documents · audit · jobs/outbox · domain events · connections     │
+└────────────────────────────────────────────────────────────────────────────────────────────────┘
+        ▲ every app depends on the kernel, never on another app
+┌───────┴──────┐  requires GeneralLedgerPort   ┌───────────────────────── adapters (chosen per org) ────┐
+│ StockLedger  │ ─────────────────────────────►│ native:   LedgerCore journalService (same transaction) │
+│ (consumer)   │                               │ external: Tally / QuickBooks / Xero / Zoho connector  │
+└──────────────┘                               │ none:     record events only, post or export later    │
+                                               └───────────────────────────────────────────────────────┘
+```
+
+**1. Platform kernel: master data moves out of LedgerCore.**
+A firm that buys only StockLedger still needs items, customers, vendors and units of measure, and it must not need LedgerCore to get them. So `customers`, `vendors`, `items`, payment terms, dimensions and UoM become **platform master data**, owned by a kernel service (`services/platform/masterData/`). **The tables stay where they are.** No data moves and no rename happens; only *ownership* of the service code changes, so rule 13 (never edit an applied migration) isn't touched. App-specific attributes live in app-owned extension tables keyed to the master row (`stock_item_settings`, `ledger_party_settings`, etc.). **This reverses my earlier D5 recommendation**, which kept master data in LedgerCore; standalone apps make that untenable.
+
+**2. Entitlements: which apps an org has.**
+- `organization_apps (org_id, app_slug, status: ENABLED | READ_ONLY | DISABLED, plan, enabled_at, enabled_by)`, with an FSM (rule 10).
+- A `requireApp('stock')` middleware on every app router: `403 APP_NOT_ENABLED` otherwise. It checks a claim in the access token, the same "no DB query per request" trade-off the auth middleware already makes; enabling an app issues a fresh token.
+- The client's app chooser and navigation show only enabled apps. Enabling runs that app's onboarding (Phase 9's per-app onboarding state already exists).
+- **Disabling never deletes data.** The app goes `READ_ONLY`, so history stays viewable and exportable, and financial records stay immutable.
+- The sandbox and existing orgs get every current app enabled by a backfill migration, so nothing changes for them.
+
+**3. Capability ports: typed contracts instead of direct imports.**
+Each cross-app need becomes a small TypeScript interface in `services/ports/`. The main ones:
+
+| Port | Operations (sketch) | Native provider | Consumers |
+|---|---|---|---|
+| `GeneralLedgerPort` (write) | `postEntry(client, orgId, event)`, `reverseEntry(...)`, `assertPeriodOpen(...)` | LedgerCore | StockLedger, AP-Flow, AssetBook, CostLens, TaxGuard, OrderDesk, ProcureFlow, PeopleCost |
+| `FinancialDataPort` (read) | `trialBalance(period, dimensions?)`, `accountActivity(...)`, `periods()` | LedgerCore | FP&A, ForecasterPro, UnitEcon, BoardDeck, CostLens |
+| `PayablesPort` / `ReceivablesPort` | create a bill or invoice from an upstream document; read open items | LedgerCore | AP-Flow, ProcureFlow, OrderDesk, CashOps |
+| `StockPort` | `receive`, `issue`, `reserve`, `onHand` | StockLedger | ProcureFlow, OrderDesk, MakeFlow |
+| `TaxPort` | `determineTax(transaction, asOf)` | TaxGuard (T-M2) | LedgerCore invoices and bills, OrderDesk, ProcureFlow |
+| `HeadcountPort` | headcount by dimension and period | ForecasterPro, PeopleCost | CostLens, FP&A |
+
+Every app declares in `config/apps.ts` what it **provides**, **requires** and **optionally uses**. That keeps the file the single source of truth, extended from "which slugs exist" to "how they compose":
+
+```ts
+{ slug: 'stock', provides: ['StockPort'], requires: [], optional: ['GeneralLedgerPort', 'TaxPort'] }
+{ slug: 'boarddeck', provides: [], requires: ['FinancialDataPort'], optional: ['HeadcountPort'] }
+```
+
+A **required** port must have *some* adapter (native or external) before the app can be enabled. An **optional** port degrades gracefully: without `TaxPort`, StockLedger simply has no tax fields.
+
+**4. Adapters: three ways to satisfy a port, chosen per org.**
+- **Native.** The AutoLedger app providing the port is enabled, so calls go straight to its service **inside the caller's transaction**. This is why the architecture stays a monolith: a stock issue and its COGS journal commit or roll back together, which keeps Phase 25's invariant (Σ stock value = GL inventory control) true by construction.
+- **External.** A connector to the customer's own system: push journals to Tally, QuickBooks, Xero or Zoho, and pull the trial balance back for FP&A, BoardDeck and UnitEcon. Writes go through the outbox (rule 5), with retries and a sync-status screen, because an external system can't join our transaction. **This is how you sell FP&A or StockLedger to a QuickBooks shop without asking them to switch ledgers**, and it's where re-scoped Phase 17 fits.
+- **None (record only).** The app still works. Its financial effects are written as **accounting events** in a platform table, and they can be exported as a file or posted later.
+
+**5. Accounting events: the key to "standalone now, connected later".**
+- An app never builds journal lines against *account ids*. It emits an **accounting event** with lines against **account roles**: `INVENTORY_ASSET`, `COGS`, `GRNI`, `INVENTORY_SHRINKAGE`, `AP_CONTROL`, and so on. A standalone StockLedger has no chart of accounts, but it always knows *what kind* of amount it produced.
+- `accounting_events (org_id, source_app, source_type, source_id, event_date, lines jsonb [role, debit/credit cents, currency, dimensions], status: PENDING | POSTED | EXPORTED | SKIPPED, posted_ref)`, append-only and immutable once posted, like every other financial record.
+- A **connection** maps roles to real accounts: `app_connections (org_id, consumer_app, port, adapter: NATIVE | EXTERNAL | NONE, role_map jsonb, effective_from)`. The native adapter resolves each role to a LedgerCore account and posts through `journalService`. The external adapter maps roles to the external system's account codes.
+- **Connecting later is a backfill, not a migration project.** When a StockLedger-only firm enables LedgerCore, the connection wizard maps roles to accounts, shows the `PENDING` events, and either posts them period by period or posts one opening-balance entry at a cut-over date (the Phase 9 opening-balance importer), whichever the accountant chooses. A connection only changes adapter **at a period boundary**, so a single period is never half-posted to two ledgers.
+- This is the **subledger → GL posting** pattern (SAP's account determination; Oracle's Subledger Accounting). It demonstrates finance-systems design well, and it gives the "inventory only" customer a clean path to the rest of the suite.
+
+**6. Two ways apps talk, with a rule for which to use.**
+- **Synchronous port call in the same transaction** when two records *must* agree: stock movement + GL journal, bill + AP control, tax lines + invoice.
+- **Asynchronous domain event through the outbox** when the other app only *reacts*: invoice issued → UnitEcon refreshes cohorts; period closed → BoardDeck starts a close run; bill posted → CashOps updates the cash forecast. Consumers subscribe per org, only when the app is enabled.
+- The rule, stated as one line for guardrails.md: *consistency needs a port call; reaction needs an event.*
+
+**7. Enforcement, so the boundary survives the next 50 phases.**
+- A lint rule (a dependency-cruiser or `import/no-restricted-paths` configuration, chosen at phase start) **fails the build** if `services/<app>/` imports from `services/<another-app>/`. The only permitted cross-app imports are `services/ports/` and the kernel.
+- **Every app's test suite runs in at least two modes:** standalone (no providers; ports resolve to the record-only adapter) and connected (native providers). Each adapter gets **contract tests**, one shared suite that every implementation of a port must pass, native or external.
+- A cross-tenant isolation test per app still applies (rule 15). A new test type is added: **"an app that isn't enabled returns 403 and emits nothing."**
+
+**8. What the current apps need to change.** Mostly mechanical refactoring, no schema changes except the new platform tables:
+
+| App | Today | After Phase 21 |
+|---|---|---|
+| AP-Flow | Imports `billService`, `vendorService` | `PayablesPort` + kernel vendors. Standalone mode = extracted, reviewed bills exported, or pushed to an external ledger |
+| BoardDeck | Imports `fiscalPeriodService`, `reportService` | `FinancialDataPort`. It can run on a QuickBooks or Tally trial-balance feed |
+| UnitEcon, FP&A, ForecasterPro | Import `reportService`, `accountService` | `FinancialDataPort` |
+| TaxGuard | Advisory has no LedgerCore dependency today | Provides `TaxPort`; the compliance modules consume `FinancialDataPort` + `PayablesPort`/`ReceivablesPort` |
+| LedgerCore | Owns `customers`/`vendors`/`items` services | Hands them to the kernel; provides `GeneralLedgerPort`, `FinancialDataPort`, `PayablesPort`, `ReceivablesPort` |
+
+**9. Rejected alternatives.**
+- **Microservices, one per app.** Every connected flow that needs atomicity (stock + COGS, bill + AP) would become a saga with compensating transactions, and every report a distributed query. The operational cost is far too high for a small team, and it would break the "can't be out of balance" guarantee that's the product's core promise. Ports keep the boundaries clean enough to extract a service later **if** one ever needs independent scaling.
+- **A separate database per app.** Same problem: consolidation and atomic posting become cross-database. `org_id` and ports already give the isolation that matters.
+- **Feature flags only, with no ports.** Hiding UI is easy, but the code would still assume LedgerCore exists, and standalone mode would break the first time someone clicked an edge case.
+- **"Everything requires LedgerCore."** The simplest option, but it gives up the land-and-expand sales motion and the "keep your QuickBooks, add our FP&A" market.
+
+**10. Commercial effect.** Every app is a product with its own price (outcome-based where it makes sense, §3). Bundles are just sets of entitlements. Upgrades are self-serve: enable an app, map the roles, backfill. The external adapters mean each app is also an **integration story**, "AutoLedger inventory for Tally users" for example, which is a much easier first sale than "replace your accounting system".
+
+**Rule changes this needs (Decision D5, rewritten):**
+- **Rule 16** changes from "cross-app effects go through LedgerCore's GL via `source_type`/`source_id`" to "**cross-app effects go through capability ports; an app never imports another app's code or reads its tables; financial effects are accounting events posted through `GeneralLedgerPort`.**"
+- A new guardrail: "consistency needs a port call; reaction needs an event."
 
 ### 5.7 Importers from incumbents (reprioritise Phase 17)
 - **Tally import (XML export: masters + vouchers) comes first.** It is the migration path for the beachhead.
@@ -317,7 +409,7 @@ The two you asked about, inventory and management accounting, are specified at g
 | Table | Notes |
 |---|---|
 | `stock_warehouses`, `stock_locations` | Locations are hierarchical (warehouse → zone → bin), resolved with a recursive CTE |
-| `stock_item_settings` | Per-item stock policy on top of LedgerCore's `items`: tracked flag, base unit, valuation method, reorder point, lot/serial tracking. **A separate table, not new columns on `items`** (rule 16; master data stays LedgerCore's) |
+| `stock_item_settings` | Per-item stock policy on top of the kernel's `items` master (§5.6): tracked flag, base unit, valuation method, reorder point, lot/serial tracking. **An app-owned extension table, not new columns on `items`**, so StockLedger works with or without LedgerCore |
 | `stock_uoms`, `stock_uom_conversions` | Box of 12 → each; integer milli-quantities like `quantity_milli` already used on invoice lines |
 | `stock_movements` | **Append-only.** Signed `quantity_milli`, `value_cents`, `movement_type` (RECEIPT, ISSUE, TRANSFER_OUT, TRANSFER_IN, ADJUSTMENT, COUNT_VARIANCE, REVALUATION), `source_type`/`source_id` (GRN, delivery, count), `org_id`, `posted_at`. Immutable by trigger, like `ledger_lines` |
 | `stock_cost_layers` | For FIFO: one layer per receipt with `remaining_quantity_milli` and `remaining_value_cents`. Consumption records which layers it drew from (`stock_layer_consumptions`) |
@@ -333,13 +425,13 @@ The two you asked about, inventory and management accounting, are specified at g
 2. **Exact integer valuation.** A layer holds 3 units worth ₹100.00 (10,000 cents). Issuing 1 unit costs 3,333 cents, and the last unit costs 3,334. **The rule: the value consumed is the difference between the layer's remaining value before and after, computed so the final unit takes the remainder.** This keeps Σ issued = Σ received to the paisa. It is the same discipline as `scaleCents`, and the same "no epsilon" stance as rule 3.
 3. **Backdated movements.** A receipt dated 3 days ago changes the moving average of every issue after it. **The ruling:** backdating is allowed only within an open fiscal period (Phase 4's lock already exists), and it triggers a **revaluation job** that recomputes affected issues and posts one adjusting COGS journal. It never edits posted movements. NetSuite and Odoo both struggle with this case, and it is an excellent design-doc topic.
 4. **Negative stock policy** per org: refuse (the default), or allow with a pending-cost correction when the receipt arrives.
-5. **GL integration through LedgerCore's journal service** (rule 16):
+5. **GL integration through `GeneralLedgerPort`** (§5.6). StockLedger emits accounting events against account *roles*. When connected to LedgerCore they post in the same transaction; standalone, they're recorded for export or later posting; with an external ledger, they're pushed to it:
    - Goods receipt: DR Inventory · CR GRNI (`source_type = 'stock_receipt'`)
    - Vendor bill matched: DR GRNI · CR AP, with the price difference to PPV or inventory
    - Delivery: DR COGS · CR Inventory
    - Count variance: DR/CR Inventory Shrinkage
    - NRV write-down: DR Inventory Write-down · CR Inventory Provision
-6. **The reconciliation invariant**, extending Phase 25's pattern: **Σ `stock_balances.value` = GL inventory control balance** at every point in time. It is tested and checked by the integrity script. Direct manual journals to the inventory control account are refused (the control-account rule from Phase 25).
+6. **The reconciliation invariant**, extending Phase 25's pattern: **Σ `stock_balances.value` = GL inventory control balance** at every point in time **when connected natively to LedgerCore**. Standalone, the same check runs against Σ of the `INVENTORY_ASSET` accounting events instead. It is tested and checked by the integrity script. Direct manual journals to the inventory control account are refused (the control-account rule from Phase 25).
 
 **Planning features:** ABC classification (Pareto on consumption value); reorder point = average daily demand × lead time + safety stock, where **safety stock = z × σ(daily demand) × √(lead time)**; EOQ = √(2DS/H); inventory turnover and days of inventory; slow-moving and ageing reports.
 
@@ -598,7 +690,7 @@ Reserved Phases 20–23 keep their names and are absorbed where they fit. New wo
 | **31** | Dimensions (§5.5) | Blocks CostLens and much else |
 | **17** (re-scoped) | Tally importer, then Zoho/QuickBooks import (§5.7) | Migration cost decides adoption |
 | **T1–T4** | TaxGuard: calendar and multi-client view → GST determination → returns, ITC and 2B reconciliation → notices and litigation (§7.3). T5–T8 (TDS, e-invoicing, direct tax, corpus) follow in Horizon 2 | The anchor product for the beachhead |
-| **21** (reserved) | Master-data service interface + cross-app connections (§5.6) | Before any operations app |
+| **21** (reserved) | Composable apps (§5.6): kernel master data, entitlements, capability ports, accounting events and adapters; refactor the existing apps off direct LedgerCore imports; the lint boundary | Before any operations app; every new app is built on it |
 | **23** (reserved) | Autopilot runtime + the bank reconciliation agent + eval harness (§6) | First touchless outcome |
 | **32** | Ops Console + `outcomes` table + multi-client dashboard (§5.8) | The outcome business itself |
 
@@ -660,7 +752,7 @@ These change standing rules or recorded decisions. Nothing proceeds on them unti
 | **D2** | Beachhead market | **Indian SMEs through CA firms** | The TaxGuard suite becomes P0 and the anchor product; Tally import comes first |
 | **D3** | Amend **rule 14** so AI is a platform runtime (Autopilot) usable by any app, under the §6 contract | **Yes**, and add the §6 non-negotiables as a new hard rule | CLAUDE.md rule 14 rewritten; guardrails.md gains an agent section |
 | **D4** | Present apps to customers as 5 products while keeping per-app slugs | **Yes** | A presentation layer over `config/apps.ts`; no data change |
-| **D5** | Master data stays in LedgerCore behind a service interface, rather than moving to a platform schema | **Yes**, following the rule-16 service-call precedent | Phase 21 scope |
+| **D5** | Composable apps (§5.6): master data promoted to the platform kernel; cross-app effects through capability ports and accounting events; each app enable-able alone | **Yes**. This reverses my first draft, which kept master data in LedgerCore; standalone apps make that untenable | Rule 16 rewritten; a new guardrail; Phase 21 scope |
 | **D6** | Re-scope Phase 17 from "QuickBooks push" to "import from Tally/Zoho/QuickBooks" | **Yes** | Roadmap Phase 17 rewritten |
 | **D7** | Multi-entity: entities inside one org (company codes) or separate orgs | Lean toward **inside one org**; decide at GroupClose's phase start with a design spike | Schema design for GroupClose |
 | **D8** | Outcome pricing vs seat pricing for the first pilots | **Outcome pricing from day one**, with a floor platform fee | Ops Console and `outcomes` table are P0 |
