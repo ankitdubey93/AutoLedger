@@ -104,7 +104,11 @@ A new entrant can't be a "SAP killer" on day one. It gets there by winning one s
 | **Bills processed** | per bill posted to the ledger | AP-Flow capture → AI extract → confidence gate → human review of exceptions | Phases 10, 11, 19, 19.x | ₹15–40 per bill |
 | **Bank reconciled** | per bank account per month | Bank feed → matching engine → agent proposes → human approves | Phases 6, 6.1 | ₹500–1,500 per account per month |
 | **Books closed** | per entity per month, with an SLA of "business day N" | Close agent runs the checklist; human signs off | Phase 15 close checks | ₹5,000–25,000 per month by complexity |
-| **GST filed** | per return (GSTR-1, 3B) including 2B reconciliation | Tax engine + reconciliation agent + human practitioner files | New (Phase T1) | ₹1,000–3,000 per return |
+| **GST filed** | per return (GSTR-1, 3B) including 2B reconciliation | Tax engine + reconciliation agent + human practitioner files | New (TaxGuard T3) | ₹1,000–3,000 per return |
+| **TDS compliant** | per TAN per quarter: deductions, challans, return, Form 16/16A | Withholding engine + human review | New (TaxGuard T5) | ₹2,000–6,000 per quarter |
+| **Notice handled** | per notice: triage, reconciliation, drafted reply, tracking to closure | Notice agent + CA edits and signs | New (TaxGuard T4) | ₹3,000–25,000 by notice type |
+| **Compliance monitored** | per entity per month: calendar, cost-of-delay alerts, nothing missed | TaxGuard calendar | New (TaxGuard T1) | ₹500–1,500 per month |
+| **Tax audit pack** | per entity per year: Form 3CD workpapers from the ledger | TaxGuard direct tax + human auditor | New (TaxGuard T7) | ₹10,000–50,000 per year |
 | **Collections run** | per active debtor per month | Collections agent drafts, human approves, sends | Phase 25 party ledger, open items | ₹50–150 per debtor per month |
 | **Board pack delivered** | per pack | BoardDeck + variance-commentary agent + human review | Phase 15 | ₹10,000–30,000 per pack |
 | **Month-end management accounts** | per month | CostLens allocations + segment P&L + commentary | New (§7.2) | Bundled into "Books closed" (premium tier) |
@@ -157,7 +161,7 @@ The suite grows from 7 apps to about 17, grouped so a customer sees **five produ
 |---|---|---|
 | **Core Finance** | LedgerCore · AssetBook · GroupClose · RevStream | LedgerCore built; the others are new |
 | **Operations** | StockLedger · ProcureFlow · OrderDesk · AP-Flow · MakeFlow (later) · ProjectLedger (later) | AP-Flow built; the others are new |
-| **Tax & Compliance** | TaxGuard AI (advisory + compliance) · ControlTower | TaxGuard advisory built; compliance and ControlTower are new |
+| **Tax & Compliance** | TaxGuard (the full tax procedures suite: registrations, determination, withholding, returns, reconciliations, direct tax, notices & litigation, advisory) · ControlTower | TaxGuard advisory (RAG) built; the other eleven modules and ControlTower are new |
 | **Performance & Planning** | CostLens · FP&A Engine · ForecasterPro · UnitEcon · BoardDeck | CostLens new; four built |
 | **Cash & People** | CashOps · PeopleCost (later) | New |
 | *Platform (invisible)* | Autopilot (agent runtime) · Ops Console · Client Portal · Integrations hub · Billing | Pieces exist (queues, Drive intake, AI metering) |
@@ -167,7 +171,7 @@ The suite grows from 7 apps to about 17, grouped so a customer sees **five produ
 | Priority | App | Slug (proposed) | Why this priority |
 |---|---|---|---|
 | **P0** | Dimensions (a LedgerCore upgrade, not an app) | — | Blocks CostLens, segment reporting, departmental budgets, and project accounting |
-| **P0** | TaxGuard Compliance (GST/TDS/e-invoicing) | `taxguard` (extended) | The beachhead can't adopt without it |
+| **P0** | TaxGuard tax procedures suite (§7.3) | `taxguard` (expanded) | Tax procedure is the CA firm's core business, so this is the anchor product for the beachhead |
 | **P0** | Autopilot + Ops Console | platform | The outcome model can't be delivered without it |
 | **P1** | **StockLedger**: inventory & warehousing | `stock` | Most Indian SMEs trade goods, and inventory is where Tally keeps them |
 | **P1** | **CostLens**: management accounting | `costlens` | Main finance-skill showcase; the premium outcome tier |
@@ -281,7 +285,9 @@ Today, AI lives inside two apps by rule (rule 14), and each app wires its own mo
 | **Collections agent** | Collections run | Dunning emails with a statement attached, escalation level | Open items (Phase 25); nothing sent without an approval policy |
 | **Variance commentary agent** | Board pack, management accounts | A narrative for each material variance, **citing drill-down lines** | Every number in the narrative must match a computed figure. Reject otherwise. |
 | **Ask-your-books** | Every customer | Answers built from typed report functions ("show departmental opex vs budget for Q2") | The answer's numbers come from report functions, never the model's arithmetic |
-| **TaxGuard advisory** (exists) | Compliance | Cited answers | Citation grounding (Phase 16) |
+| **Notice agent** (TaxGuard T4) | Notice handled | Notice type, deadline, demand, linked periods, a drafted reply | The deadline becomes a calendar obligation; every citation resolves to a corpus chunk; every figure resolves to return lineage; nothing is filed without a non-drafter approver |
+| **Withholding agent** (TaxGuard T5) | TDS compliant | TDS section per bill, 26AS/AIS mismatch follow-ups | Rules table + per-party threshold tracker |
+| **TaxGuard advisory** (exists) | All tax outcomes | Cited, date-aware answers | Citation grounding (Phase 16); determination trace (T-M2) |
 
 ### Evals: the part most AI-finance products skip
 
@@ -398,15 +404,139 @@ The two you asked about, inventory and management accounting, are specified at g
 
 ---
 
-### 7.3 TaxGuard Compliance: GST, TDS, e-invoicing (extends `taxguard`)
+### 7.3 TaxGuard: the tax procedures suite (`taxguard`, expanded)
 
-- **Tax codes and determination:** HSN/SAC on items; place-of-supply rules deciding **CGST+SGST vs IGST**; reverse charge; exempt, nil-rated, zero-rated and export (LUT) supplies; composition dealers. Tax lines post to separate output and input accounts per tax component, replacing today's single `1180`/`2140` pair. This needs a migration plan, because existing invoices stay as they are (immutability).
-- **Input tax credit (ITC) ledger** with eligibility (blocked credits under section 17(5)), reversal rules, and the GSTR-2B match.
-- **Return preparation:** GSTR-1 (outward), GSTR-3B (summary), and the reconciliation workbench. **The GSTR-2B reconciliation reuses the Phase 6 confidence engine** with GSTIN + invoice number + amount + date scoring. This is a strong reuse story.
-- **E-invoicing:** IRN generation through an Invoice Registration Portal (via a GST Suvidha Provider API or a direct API), signed QR code on the PDF, and a 30-day reporting window check for large taxpayers. **E-way bill** for goods movement, which links to StockLedger transfers.
-- **TDS/TCS:** section-wise deduction on bills and payments, challans, quarterly return preparation (24Q/26Q), and Form 16A generation.
-- **Advisory stays RAG** (Phase 16), now able to cite the specific transaction it's asked about.
-- **Thresholds and dates change often.** Every rate, threshold and due date lives in a versioned, effective-dated rules table, never in code. Verify current values at build time; don't rely on this document.
+**Purpose.** TaxGuard stops being a question-answering tool and becomes the place where a company's **entire tax lifecycle** runs: registration, determination on every transaction, withholding, reconciliation, computation, returns and payment, notices, and litigation. The ledger is the single source of truth throughout. The Phase 16 RAG becomes one module (advisory) inside a suite that does the tax *work*, not just explains it.
+
+This is also what a CA firm actually spends its hours on. Tax procedure, more than bookkeeping, is the CA firm's core business, which makes TaxGuard the **anchor product for the beachhead** (D2), not a side app.
+
+#### The lifecycle TaxGuard covers
+
+```
+REGISTER ──► DETERMINE ──► WITHHOLD ──► RECONCILE ──► COMPUTE & PROVIDE ──► RETURN & PAY ──► RESPOND ──► LITIGATE
+ GSTIN/PAN/   on every      TDS/TCS on   books vs      direct tax, advance   prepare, maker-   notices,    appeals,
+ TAN, LUT,    invoice,      bills and    portals,      tax, deferred tax,    checker, file,    scrutiny,   hearings,
+ counterparty bill, credit  payments     2B, 26AS/AIS  tax audit             acknowledge       demands     contingent
+ validation   note, journal                                                                                liabilities
+                   ▲                                                                                    │
+                   └──────────── compliance calendar · penalty engine · evidence vault ─────────────────┘
+```
+
+#### Architecture: one engine, jurisdiction packs
+
+- **Tax engine core (jurisdiction-agnostic):** determination, obligations, returns, reconciliation, notices and evidence. It knows nothing about GST specifically.
+- **Jurisdiction packs:** each pack bundles effective-dated rules tables, form schemas, calendar rules, validations, and a filing adapter. **India first** (GST + Income-tax, including TDS/TCS). Later packs could be UAE VAT, UK VAT (MTD), and US sales tax through an integration rather than rules we maintain ourselves. The engine/pack split keeps the second country from being a rewrite.
+- **Rules are data, never code.** Rates, thresholds, due dates, section mappings and form versions live in effective-dated tables. **They need to be bitemporal**: *valid time* (when the rule applies in law) and *recorded time* (when we learned of it), because tax notifications often take retrospective effect. A return must be reproducible years later with the exact rule version that produced it.
+- **Two statutes at once.** India's Income-tax Act, 2025 replaces the 1961 Act for later tax years (flagged for verification: my understanding is that it takes effect from 1 April 2026, with sections renumbered). Assessments and notices for earlier years still cite 1961 sections. The rules layer therefore maps **statute version → section**, and every section reference in this spec below uses 1961-Act numbering and must be re-verified at build time.
+
+#### The modules
+
+**T-M1 · Tax masters & registrations.**
+- The entity's registrations: PAN, TAN, and **one GSTIN per state**. Under GST each state registration is a "distinct person", so one legal entity may hold several, each with its own returns and credit ledger. Also LUT for exports, and composition status.
+- Counterparty validation: GSTIN/PAN format checksums, live registration status through a provider API, and a **vendor compliance rating** based on how regularly they file (a vendor who doesn't file puts your ITC at risk).
+
+**T-M2 · GST determination engine.**
+- HSN/SAC on items; place-of-supply rules decide **CGST+SGST vs IGST**; reverse charge; exempt, nil-rated, zero-rated (with or without LUT) and non-GST supplies; composition dealers; cess.
+- Implemented as a **pure function** `determineTax(transaction, rulesAsOf) → { lines, trace }`, following the pure-function precedent of `fpaProjection.ts` and `taxActParse.ts`. The **trace** records every rule that fired, so "why was this taxed as IGST?" has an exact answer.
+- Tax lines post to separate accounts per component (CGST/SGST/IGST/cess, output and input, per GSTIN), replacing today's single `1180`/`2140` pair. Existing posted invoices stay as they are (immutability). New tax accounts apply from a cut-over date, with a documented opening reclassification journal.
+
+**T-M3 · Input tax credit (ITC) management.**
+- An ITC register with eligibility decisions: blocked credits (s.17(5)), common-credit apportionment (Rules 42/43), and reversal when a supplier isn't paid within 180 days (Rule 37), which is computed from Phase 25's open items.
+- Tracks the ITC register → claimed in 3B → electronic credit ledger balance, with every difference explained.
+
+**T-M4 · E-invoicing & e-way bills.**
+- IRN generation through the Invoice Registration Portal, via a GST Suvidha Provider (GSP) or a direct API. Signed QR code on the invoice PDF (Phase 30). Cancellation within the allowed window; the reporting-window check for large taxpayers.
+- E-way bills generated from OrderDesk deliveries and StockLedger transfers, with Part-B vehicle updates and validity tracking.
+- **Idempotent submission:** every call to a government portal carries an idempotency key and is recorded before it is sent (the outbox pattern from Phase 7), so a retry can never create a second IRN.
+
+**T-M5 · Withholding: TDS & TCS.**
+- Section determination on bills and payments (contract, professional fees, rent, purchase of goods, and so on) with a **per-party, per-financial-year threshold tracker**, lower-deduction certificates, and the higher rate when the party has no PAN.
+- Challan generation and matching; quarterly returns (24Q/26Q/27Q/27EQ); Form 16/16A generation.
+- **The receivable side:** TDS deducted *by customers* sits as TDS receivable, reconciled against Form 26AS/AIS. Unmatched credits get chased through the collections agent, because unclaimed TDS is real money lost.
+
+**T-M6 · Returns workbench.**
+- GSTR-1, GSTR-3B, annual GSTR-9/9C, TDS returns, and later the income-tax return.
+- An FSM: DRAFT → PREPARED → REVIEWED → APPROVED → FILED → ACKNOWLEDGED, with **maker-checker** (the preparer can't approve), using the §5.3 approval engine.
+- **A filed return is immutable.** Corrections go into a later period's return, which is how GST law works anyway. This is a direct parallel to rule 6's reversal-not-edit principle, and a neat interview point.
+- **Return lineage:** every figure in a return links to the exact ledger lines that produced it, and the rule version is snapshotted. Drill down from a GSTR-3B cell to the invoices behind it.
+
+**T-M7 · Reconciliations.** One workbench, and the Phase 6 confidence engine reused for each pair:
+- Books vs GSTR-1 vs e-invoice (IRN) vs e-way bill, for outward supplies
+- Purchase register vs **GSTR-2B**, for ITC
+- GSTR-3B vs books, and 3B vs GSTR-1 (liability mismatch is a common notice trigger)
+- TDS receivable vs **26AS/AIS**; TDS payable vs challans vs returns
+- The GST electronic cash and credit ledgers vs the GL tax accounts
+
+**T-M8 · Direct tax.**
+- **Taxable income computation from the books:** book profit → add-backs and deductions (for example, disallowance for TDS not deducted, and payment-basis items such as statutory dues), with **tax depreciation from AssetBook's Income-tax book**. Every adjustment is a line with a citation and a link to its evidence.
+- Advance tax instalment estimates, with interest on shortfall computed from the rules table. Regime choice captured as a rule, not hard-coded.
+- **Tax provision and deferred tax** (Ind AS 12 / AS 22): current tax and deferred tax on temporary differences (for example book vs tax depreciation), posted as journals with `source_type = 'taxguard_provision'`.
+- **Tax audit support** (s.44AB / Form 3CD): many clauses are pure data pulls from the ledger (for example payments above cash limits, TDS defaults, and related-party transactions). TaxGuard produces a draft clause-by-clause workpaper for the tax auditor to review. This is one of the most labour-intensive jobs a CA firm does each year.
+
+**T-M9 · Compliance calendar & penalty engine.**
+- Obligations are **generated** from each entity's registrations and the rules tables: every return, payment and filing, per GSTIN, TAN and PAN, with due dates, owner, status and evidence.
+- A **cost-of-delay calculator:** interest and late fees per obligation (GST interest, return late fees, TDS late-filing fees), computed from the rules tables and shown in money terms. "Filing this today instead of on the 20th costs ₹X" is what gets attention.
+- **The multi-client view for CA firms:** every client, every obligation, one screen, red/amber/green. This is cheap to build and very valuable, so it comes first (T1 below).
+
+**T-M10 · Notices & litigation.** Probably the largest unaddressed pain point in Indian tax practice.
+- **Intake:** notices arrive as PDFs (by upload, Drive intake, or email) and go through the AP-Flow-style capture pipeline, **with PII redaction before any model call**.
+- **Triage:** classify the notice type (for example GST scrutiny ASMT-10 or show-cause DRC-01; income-tax intimation s.143(1), inquiry s.142(1), or reassessment s.148); extract the **response deadline**, the demand amount, and the periods in question; create a calendar obligation with an owner.
+- **Link to the data:** attach the periods, returns and transactions the notice refers to, and run the relevant reconciliation automatically. For example, a 3B-vs-GSTR-1 mismatch notice runs T-M7's comparison for those months.
+- **Draft the reply:** the agent drafts a response grounded in statute and circulars (RAG with citations, Phase 16) **and** in evidence from the ledger (return lineage). A CA edits and approves it. Nothing is ever sent to a portal without human approval.
+- **Track proceedings:** hearings, adjournments, orders, appeals up the appellate chain, demands paid under protest, stays.
+- **Accounting consequence:** each open matter carries a probability assessment. It posts a **provision** when an outflow is probable, or produces a **contingent-liability disclosure** when it's only possible (Ind AS 37), feeding BoardDeck and the financial statements.
+
+**T-M11 · Advisory** (the existing Phase 16 RAG, extended).
+- A corpus beyond statutes: rules, circulars, notifications and selected case law, each with **effective dates and supersession links** ("superseded by Notification N/2025"). Retrieval respects the transaction date, so an answer for FY 2023-24 cites the law as it stood then.
+- **Transaction-aware:** "Is ITC available on this bill?" answers with the bill in context and cites both the section and T-M2's determination trace.
+
+**T-M12 · Evidence vault & audit pack.**
+- Every filed return, acknowledgement, challan, notice, reply and order is stored immutably in the Document Vault, linked to its obligation and its source ledger lines.
+- One-click **assessment pack**: for a given year and tax, the returns, lineage, reconciliations, workpapers and correspondence. An assessment five years later can then reproduce every figure exactly.
+
+#### Where AI helps, and where it doesn't
+
+| AI does (proposes; a human or verifier decides) | AI never does |
+|---|---|
+| Suggests HSN/SAC codes from item descriptions, checked against the HSN master | Decide a tax amount. Determination is deterministic (T-M2); AI only *explains* it |
+| Suggests the TDS section for a bill, checked against the vendor's history and the rules table | File a return or respond on a portal without human approval |
+| Triages notices and extracts deadlines and demands | Invent a citation. Every citation must resolve to a corpus chunk (Phase 16's rule) |
+| Drafts notice replies with statute and ledger evidence | Interpret law where the corpus is silent. In that case it says so and routes to a human |
+| Explains ITC mismatches and drafts vendor follow-ups | Touch a filed return |
+| Drafts Form 3CD clause workpapers | |
+
+#### Professional & legal constraints (flagged, not legal advice)
+
+- Filing GST returns through software requires a **GSP** relationship or the taxpayer's own credentials. Income-tax e-filing through software requires registration as an **e-Return Intermediary** or filing via the taxpayer or CA.
+- Representation before tax authorities is restricted to authorised representatives (CAs, advocates, and others as the statute allows). TaxGuard prepares; the licensed professional signs and appears. **This is exactly why the CA-firm channel fits.**
+- Build every portal integration behind a `FilingAdapter` interface, so "export a file for manual upload" works on day one and direct API filing is added when the partnership exists.
+
+#### What it demonstrates
+
+- **Finance/tax:** GST mechanics end to end, ITC law, TDS, direct-tax computation, deferred tax, provisions vs contingent liabilities, and tax audit.
+- **Engineering:** bitemporal rules tables; pure determination functions with explanation traces; maker-checker FSMs; data lineage from filing to ledger line; idempotent external submissions; obligation generation.
+- **AI:** document triage, grounded drafting with dual grounding (law + ledger), and a clear line between what AI decides and what it drafts.
+
+#### Build ladder (about 8 phases, in value order for the CA-firm beachhead)
+
+| Phase | Scope | Why this order |
+|---|---|---|
+| **T1** | Tax masters & registrations + compliance calendar + penalty engine + multi-client view | Cheapest, immediately useful to a CA firm, and no determination needed yet |
+| **T2** | GST determination engine + per-component tax accounts + HSN/SAC on items | Everything downstream needs correctly taxed transactions |
+| **T3** | ITC register + returns workbench (GSTR-1, 3B) + 2B reconciliation + return lineage | The first filed-return outcome |
+| **T4** | Notices & litigation (intake, triage, linking, drafted replies, provisions) | The largest pain point; it reuses AP-Flow capture and Phase 16 RAG |
+| **T5** | TDS/TCS + 26AS/AIS reconciliation | The second statutory stream |
+| **T6** | E-invoicing + e-way bills (behind `FilingAdapter`) | Needs a GSP partnership; the export-file mode ships first |
+| **T7** | Direct tax: computation, advance tax, provision and deferred tax, Form 3CD workpapers | Needs AssetBook for tax depreciation |
+| **T8** | Advisory corpus expansion: circulars, case law, supersession, date-aware retrieval | Deepens the existing RAG |
+
+**Acceptance criteria (sample):**
+- A determination for an inter-state B2B supply produces IGST, and the trace names the place-of-supply rule that fired.
+- A GSTR-3B cell drills down to exactly the ledger lines that produced it, and Σ lines = the cell.
+- Re-generating a return for a past period after a rule change, *as recorded at the original filing date*, reproduces the filed figures exactly (the bitemporal test).
+- Submitting an IRN request twice with the same idempotency key creates one IRN.
+- A notice's extracted deadline creates a calendar obligation, and a reply can't reach FILED without an approver who isn't its drafter.
+- A cross-tenant isolation test for every new table (rule 15).
 
 ### 7.4 ProcureFlow: purchasing (`procure`)
 Purchase requisition → approval (the §5.3 matrix) → PO → goods receipt (StockLedger) → **3-way match** (PO × GRN × bill, with tolerance rules; AP-Flow supplies the bill side) → payment run (CashOps). Also vendor onboarding with GSTIN/PAN validation, blanket POs, budget checks against ForecasterPro at requisition time, and a vendor scorecard (on-time delivery, price variance). The FSM on PO status is the rule-10 showcase. An AI agent drafts POs from reorder proposals and flags off-contract prices.
@@ -445,7 +575,7 @@ A controls library (key controls mapped to the automatic checks that test them);
 |---|---|
 | **LedgerCore** | Dimensions; recurring journals and accrual/prepaid schedules; year-end closing entry (a named gap); bad-debt write-off; cash refunds; discount payment terms ("2/10 Net 30", a named gap); PDF and email documents; external FX rate feed; the master-data service interface |
 | **AP-Flow** | Per-org AI provider choice (a named gap); GST fields (GSTIN, HSN, tax components); dimension prediction; 3-way-match hand-off to ProcureFlow; migration onto the Autopilot runtime |
-| **TaxGuard AI** | The compliance module (§7.3); US IRC heading support only when entering the US (a named gap); transaction-aware answers |
+| **TaxGuard AI** | Becomes the full tax procedures suite (§7.3): the RAG becomes module T-M11, gaining date-aware retrieval, supersession, and transaction context; in-place re-ingest (a named gap); US IRC heading support only when a US pack is built (a named gap) |
 | **FP&A Engine** | Scenario cloning (a named gap); capex, depreciation and debt schedules from AssetBook (a named gap); fiscal-period alignment; XLSX export |
 | **ForecasterPro** | A formula language for cross-line references (a named gap; a good parser/evaluator interview topic, using a safe expression AST, never `eval`); driver import; seasonality curves; budgets by dimension |
 | **UnitEcon** | Real subscription data from RevStream; cost side from CostLens for customer profitability; a churn and survival model (a named gap; Kaplan–Meier is an honest first step) |
@@ -467,7 +597,7 @@ Reserved Phases 20–23 keep their names and are absorbed where they fit. New wo
 | **30** | PDF, email, exports (§5.4) | Customers need documents out |
 | **31** | Dimensions (§5.5) | Blocks CostLens and much else |
 | **17** (re-scoped) | Tally importer, then Zoho/QuickBooks import (§5.7) | Migration cost decides adoption |
-| **T1–T3** | TaxGuard Compliance: tax codes and GST determination → returns and 2B reconciliation → e-invoicing and TDS (§7.3) | Beachhead requirement |
+| **T1–T4** | TaxGuard: calendar and multi-client view → GST determination → returns, ITC and 2B reconciliation → notices and litigation (§7.3). T5–T8 (TDS, e-invoicing, direct tax, corpus) follow in Horizon 2 | The anchor product for the beachhead |
 | **21** (reserved) | Master-data service interface + cross-app connections (§5.6) | Before any operations app |
 | **23** (reserved) | Autopilot runtime + the bank reconciliation agent + eval harness (§6) | First touchless outcome |
 | **32** | Ops Console + `outcomes` table + multi-client dashboard (§5.8) | The outcome business itself |
@@ -499,7 +629,7 @@ Every phase should be worth something twice: as product, and as proof of skill f
 |---|---|---|---|
 | StockLedger | Inventory valuation, COGS, GRNI, NRV | Row locking, deadlock ordering, append-only ledgers, derived caches with integrity checks | Knowing when *not* to use an LLM (statistical forecasting) |
 | CostLens | Allocation methods, ABC, CVP, standard costing variances | Exact rational arithmetic, largest-remainder rounding, versioned rule engines, idempotent reruns | Grounded narrative generation with numeric verification |
-| TaxGuard Compliance | GST place of supply, ITC, returns, TDS | Effective-dated rules tables, external API integration (e-invoicing), reconciliation scoring | RAG + transaction-aware advisory |
+| TaxGuard suite | GST end to end, ITC law, TDS/TCS, direct-tax computation, deferred tax, provisions vs contingent liabilities, tax audit, notice and appeal procedure | Bitemporal rules tables, pure determination with explanation traces, filing-to-ledger lineage, maker-checker FSMs, idempotent government-portal submissions, engine/jurisdiction-pack split | Notice triage, drafting grounded in both law and ledger, date-aware RAG, a strict line between AI drafting and deterministic deciding |
 | GroupClose | Consolidation, eliminations, CTA | Multi-entity tenancy design | — |
 | RevStream | Ind AS 115 / ASC 606 | Schedules, waterfalls, contract versioning | — |
 | ControlTower | Internal controls, SoD, audit sampling | Log analytics on JSONB, partitioning, retention | Anomaly detection |
@@ -527,7 +657,7 @@ These change standing rules or recorded decisions. Nothing proceeds on them unti
 | # | Decision | Recommendation | What changes if yes |
 |---|---|---|---|
 | **D1** | Reverse "Dropped from scope": bring back Inventory, P2P, Manufacturing, Payroll and EAM as apps | **Yes**, as StockLedger, ProcureFlow, MakeFlow, PeopleCost and AssetBook | Update roadmap.md's "Dropped from scope" and the app map |
-| **D2** | Beachhead market | **Indian SMEs through CA firms** | TaxGuard Compliance becomes P0; Tally import comes first |
+| **D2** | Beachhead market | **Indian SMEs through CA firms** | The TaxGuard suite becomes P0 and the anchor product; Tally import comes first |
 | **D3** | Amend **rule 14** so AI is a platform runtime (Autopilot) usable by any app, under the §6 contract | **Yes**, and add the §6 non-negotiables as a new hard rule | CLAUDE.md rule 14 rewritten; guardrails.md gains an agent section |
 | **D4** | Present apps to customers as 5 products while keeping per-app slugs | **Yes** | A presentation layer over `config/apps.ts`; no data change |
 | **D5** | Master data stays in LedgerCore behind a service interface, rather than moving to a platform schema | **Yes**, following the rule-16 service-call precedent | Phase 21 scope |
@@ -583,7 +713,7 @@ To turn this plan into phase-level build plans, I need answers that only you can
 **Weeks 7–10: first outcome**
 - Phase 23: the Autopilot runtime + bank reconciliation agent + eval harness, with evals built from `walkthrough/`.
 - Phase 32: a minimal Ops Console and `outcomes` table.
-- TaxGuard Compliance T1 (tax codes and GST determination).
+- TaxGuard T1 (masters, compliance calendar, penalty engine, multi-client view). It's cheap, and it's the first thing to show a CA firm.
 
 **Weeks 11–13: first design partner**
 - Onboard one CA firm with 3–5 client orgs. Deliver "bank reconciled" and "bills processed" as outcomes, at no charge.
