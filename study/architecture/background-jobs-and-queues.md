@@ -3,7 +3,7 @@
 > A queue is two data structures on one Redis instance — a list for "waiting" and a sorted set for "delayed" — plus a Lua script that moves a job between them atomically, so "exactly one worker claims this job" needs no distributed lock.
 
 **Category:** Architecture · Node/Express
-**Introduced by:** Phase 7 — `server/src/queue/`, the outbox drain, the scheduled integrity check; extended Phase 10 — `ap-flow-extract`, the first purely event-driven, non-repeatable queue
+**Introduced by:** Phase 7 — `server/src/queue/`, the outbox drain, the scheduled integrity check; extended Phase 10 — `ap-flow-extract`, the first purely event-driven, non-repeatable queue; extended 2026-09-22 — `taxguard-embed`'s in-handler retry and token-budget batching against a rate-limited provider
 **Verified against:** `bullmq` ^6.3.4, `ioredis` ^6.0.0, Redis 7, Node 22
 
 ---
@@ -111,6 +111,21 @@ await new Queue('ap-flow-drive-sweep', { connection: createRedisConnection() })
 
 The general lesson: **a repeatable job's state is data, not code.** Deleting or renaming the code that manages a scheduler is not the same operation as deleting the scheduler — those live in different places, updated by different mechanisms, and a rename migration that only touches TypeScript source has to remember to also clean up the Redis-resident state the old code left behind.
 
+### Retrying inside the handler vs letting the queue retry, and batching to a rate limit
+
+Queue-level retry (`attempts` + `backoff`) re-runs the **whole job**. That only helps if the job is safe to re-run from the start, *and* its own guards let the second run through. `taxguard-embed` fails the second test. The handler begins with a status guard (`PENDING → PARSING`, a conditional `UPDATE`). On failure it writes `FAILED`, a terminal state. So every BullMQ retry finds the row already past `PENDING` and returns early as a no-op. The guard does exactly what it was written for (duplicate-delivery idempotency, see above), and as a side effect it disables queue-level retry. A transient provider error was therefore always fatal.
+
+The fix retries at the level of the **unit that failed**, one embeddings request, inside the handler (`embedBatchWithRetry` in `embeddingService.ts`):
+
+- **Classify before retrying.** The HTTP client throws an `EmbeddingsProviderError` with a `retryable` flag. It is true for `429`, `5xx`, and a network/timeout failure (`fetch` rejected), and false for `401/403` and malformed responses. Retrying a bad API key six times just delays the same answer.
+- **Capped exponential backoff:** `min(60s, 15s × 2^attempt)`. Voyage sends no `Retry-After` header (checked against a live 429, 2026-09-22), so the delay has to be ours.
+- **Opt-in per caller.** Background ingestion passes `{ maxRetries: 6 }`. A question-time query embedding runs inside an HTTP request, and a minute of backoff there is a hung request, so it keeps the default of 0 and fails fast.
+- **Injectable `sleep`**, so tests assert the exact backoff schedule without waiting it out.
+
+**Retry alone could not have fixed the real failure.** The account was on Voyage's no-payment-method tier: 3 requests/min and **10K tokens/min**. The handler sent all 64 chunks (~75K tokens) in one request. A single request larger than the per-minute budget is refused however long you wait, so backoff only postpones the same 429. The request had to become smaller than the budget. `batchTexts` therefore closes a batch at 64 inputs **or** 8,000 estimated tokens, whichever comes first. A single oversized text is still sent, alone, rather than dropped. Batching by *count* is the usual default, but a rate limit measured in *tokens* needs a batch cap measured in tokens.
+
+A long-sleeping handler doesn't lose its job: BullMQ renews the job lock on a timer while the handler is awaiting (the lock is lost only if the event loop is *blocked*, and `setTimeout`-based sleeping doesn't block it). *Unverified detail: BullMQ's default `lockDuration` is 30 s, renewed at roughly half that interval. Check the docs for the version you use before quoting the numbers.*
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -138,6 +153,8 @@ The general lesson: **a repeatable job's state is data, not code.** Deleting or 
 - **Trusting the job payload as data.** A payload is a hint about *what* to process, not a cache of *what it contained* — always re-read from Postgres, both for correctness (data may have changed) and for the tenant-safety property described in `webhookDeliveryService`'s worker-side reads.
 - **Forgetting to close `Queue`/`Worker` instances in tests.** Vitest hangs for ~10s reporting a vague "something prevents Vite server from exiting" — the real cause is an open Redis connection.
 - **Advancing a poll cursor past a batch that wasn't fully or cleanly processed.** A cap-truncated listing or one file's transient failure both mean "don't move the floor" — moving it anyway makes the unprocessed item permanently invisible to every future tick, not just delayed.
+- **A terminal-status guard silently disables queue-level retry.** If a handler marks its row `FAILED` and a retry's first step requires the pre-failure status, every retry is a no-op. Retry the failing unit inside the handler instead, or retry only before the terminal write.
+- **A batch bigger than a per-minute budget can never succeed.** Backoff doesn't help a request that exceeds the rate limit on its own. Cap the batch in the limit's own unit (tokens, not items).
 - **A queue or scheduler rename in source code is not a rename in Redis.** The old `schedulerId` keeps firing against whatever queue it always targeted until something explicitly calls `removeJobScheduler` on it — renaming the TypeScript constant is necessary but not sufficient.
 
 ## Interview Q&A
@@ -174,6 +191,12 @@ A: Claim-at-start means the very first thing that happens is a write that says "
 
 **Q: If you rename a queue in your code, is the old scheduled job actually gone?**
 A: No, and that surprised me the first time I hit it. A repeatable job scheduler lives entirely in Redis, identified by a string id you chose — it has no ongoing relationship to the source file that created it. Rename the queue, delete the old handler, ship the change: none of that touches the scheduler already sitting in Redis under its old id. It keeps firing, forever, enqueueing jobs onto a queue nothing consumes anymore, until something explicitly calls `removeJobScheduler` with that exact old id. The lesson is that a scheduler's identity is data, not code — a migration of the code has to remember to also clean up the state the old code left behind, the same way a database migration has to handle existing rows, not just the schema going forward.
+
+**Q: A job calls a third-party API that sometimes returns 429. You have BullMQ `attempts: 5` configured. Is that enough?**
+A: Not necessarily, for two reasons we hit in `taxguard-embed`. First, a queue retry re-runs the whole job, and our handler's idempotency guard (a conditional `PENDING → PARSING` update) meant a retry after the row was marked `FAILED` did nothing. So the queue setting gave no protection at all. Second, a queue retry repeats the whole job, including work that already succeeded. The better place is around the individual call: classify the error (429, 5xx and network errors are retryable; 401 and malformed responses are not), back off exponentially with a cap, and give up after a bounded number of tries with a message that includes the status and the provider's explanation. And only do that in background work. In a request path, fail fast.
+
+**Q: The provider's rate limit is 10K tokens per minute and your retry has exponential backoff up to a minute. Why was it still failing every time?**
+A: Because one request was about 75K tokens. The limit applies per request as well as over time: a request larger than the whole per-minute budget is refused no matter when you send it, so backoff only schedules the same refusal later. The fix was on the sending side. Batches now close at a token budget (8K estimated tokens, under the 10K limit) as well as at an item count, so each request can succeed once the window allows. The general rule: cap batches in the same unit the limit is measured in.
 
 ## Follow-ups they'll dig into
 

@@ -640,6 +640,13 @@ Client: `TaxGuardCorpusPage` (a status badge per document; "Add to corpus" **hid
 
 **Deliberately not built:** in-place re-ingest of a corpus document — a re-ingest is a new row, the prior one deleted first; cross-jurisdiction retrieval in a single question; hybrid keyword+vector search; a reranking pass over retrieved chunks; streaming answers; answer feedback or rating; corpus sharing between organizations; chunk-level access control below `org_id`; a measured retrieval-precision figure, and therefore **no "the answer is always grounded" claim** — the honest claim is "retrieval-grounded answering implemented with citations," the same posture Phase 10 took on PII recall; and, for the identical reason, **no "no PII reaches the provider" claim** — see the ask-pipeline paragraph above. **Also not written: the study notes this phase would otherwise owe** — pgvector and HNSW indexing, embedding dimensionality and the cosine operator, the RAG chunk/retrieve/cite pipeline, and the `fetch`-based injectable provider seam — explicitly skipped for this phase at the user's direction, recorded here as debt rather than silently dropped, the same pattern Phases 12–15 each recorded for their own skipped notes.
 
+
+**Follow-up, 2026-09-22 — embeddings on a free provider tier.** A real 50-page Income Tax Act failed ingestion with `Embeddings provider returned an unexpected response`. Voyage was actually returning `429`: an account with no payment method is limited to 3 requests and 10K tokens per minute, and the handler sent all 64 chunks (~75K tokens) as a single request. A request that large can never succeed under that limit. Three fixes:
+1. Batches are now capped at 8,000 estimated tokens as well as 64 inputs.
+2. Ingestion retries `429`/`5xx`/network failures per batch with capped exponential backoff. Query embeddings still fail fast. BullMQ-level retry could never have helped, because the row is already `FAILED` and the `PENDING` guard turns every retry into a no-op.
+3. Provider errors now carry the HTTP status and the provider's own message.
+
+A second provider was added, **Gemini `gemini-embedding-001`** via `TAXGUARD_EMBEDDING_PROVIDER=gemini` on the existing `GEMINI_API_KEY`: the same document embeds in under a minute on its free tier, against ~16 minutes on Voyage's. No migration, since both produce 1024 dimensions. Switching providers requires re-adding every corpus document. See [taxguard.md](taxguard.md) step 5 and the provider paragraph.
 ---
 
 ## Phase 18, as delivered
@@ -686,7 +693,7 @@ The system of record every other app posts into. Double-entry integrity enforced
 
 Tax-law question answering grounded in real statute text, not model recall. Full spec: [taxguard.md](taxguard.md).
 
-*Pattern:* RAG over `pgvector` — a tax act PDF is parsed into citation-labelled chunks by a pure function (`utils/taxActParse.ts`), embedded in the background (Voyage AI over plain `fetch`, no SDK), and retrieved by cosine similarity for a forced-tool-call cited answer (`@anthropic-ai/sdk`, already installed since Phase 10). A user's question is redacted via `utils/pii.ts`'s `redactText` **before** it is embedded or sent to the answer model — the text counterpart of the image-only `redactionService.ts` the [Phase renumbering](#phase-renumbering--2026-09-01) entry promoted, added to the shared `utils/pii.ts` rather than forked, since `redactionService.ts` itself has no text path.
+*Pattern:* RAG over `pgvector` — a tax act PDF is parsed into citation-labelled chunks by a pure function (`utils/taxActParse.ts`), embedded in the background (Voyage AI or Gemini, env-selected, over plain `fetch`, no SDK), and retrieved by cosine similarity for a forced-tool-call cited answer (`@anthropic-ai/sdk`, already installed since Phase 10). A user's question is redacted via `utils/pii.ts`'s `redactText` **before** it is embedded or sent to the answer model — the text counterpart of the image-only `redactionService.ts` the [Phase renumbering](#phase-renumbering--2026-09-01) entry promoted, added to the shared `utils/pii.ts` rather than forked, since `redactionService.ts` itself has no text path.
 
 ### AP-Flow — Operational Accounting — Phases 10–11
 

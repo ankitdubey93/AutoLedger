@@ -291,19 +291,46 @@ export const GOOGLE_HTTP_TIMEOUT_MS = 30_000;
 
 // ------------------------------------------------------------ taxguard (16)
 
-/** Voyage AI's embedding model. One place, so a change is one line. */
-export const TAXGUARD_EMBEDDING_MODEL = 'voyage-3.5';
-
-/** Fixed at 1024 in migration 045's vector(1024) column — changing this is a new migration and a full re-embed. */
+/** Fixed at 1024 in migration 045's vector(1024) column — changing this is a new migration and a full re-embed. Both providers are asked for exactly this many dimensions. */
 export const TAXGUARD_EMBEDDING_DIMENSIONS = 1024;
 
-export const TAXGUARD_EMBEDDING_URL = 'https://api.voyageai.com/v1/embeddings';
+/** Voyage AI's embedding model. One place, so a change is one line. */
+export const TAXGUARD_VOYAGE_EMBEDDING_MODEL = 'voyage-3.5';
+export const TAXGUARD_VOYAGE_EMBEDDING_URL = 'https://api.voyageai.com/v1/embeddings';
+
+/**
+ * Gemini's embedding model, called over fetch with GEMINI_API_KEY (the same
+ * key AP-Flow uses). Native output is 3072 dimensions; `outputDimensionality`
+ * truncates to 1024 (Matryoshka-trained, so a prefix is a valid embedding).
+ * Truncated vectors are not unit-length, which retrieval's cosine `<=>`
+ * ignores. Input limit is 2,048 tokens per text.
+ */
+export const TAXGUARD_GEMINI_EMBEDDING_MODEL = 'gemini-embedding-001';
+export const TAXGUARD_GEMINI_EMBEDDING_URL =
+  'https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents';
 
 /** An embedding call that has not answered in 60s is not going to. */
 export const TAXGUARD_EMBEDDING_TIMEOUT_MS = 60_000;
 
-/** Batch size per Voyage request during ingestion. */
+/** Maximum inputs per embeddings request during ingestion (Voyage allows 1,000, Gemini 100). */
 export const TAXGUARD_EMBEDDING_BATCH_SIZE = 64;
+
+/**
+ * Maximum estimated tokens (taxActParse's chars/4 estimate, which runs ~10%
+ * above Voyage's real count) per embeddings request. A Voyage account with no
+ * payment method on file is limited to 10K tokens per minute — a single
+ * request over that is refused with a 429 no matter how long you wait, so a
+ * batch must fit under it. Well below Voyage's 320K per-request cap; Gemini's
+ * free tier accepts it comfortably.
+ */
+export const TAXGUARD_EMBEDDING_MAX_BATCH_TOKENS = 8_000;
+
+/** Ingestion retries a rate-limited (429), 5xx or network-failed batch this many times. */
+export const TAXGUARD_EMBEDDING_MAX_RETRIES = 6;
+
+/** Backoff between ingestion retries: base × 2^attempt, capped — neither provider's 429 carries a Retry-After header we rely on. */
+export const TAXGUARD_EMBEDDING_RETRY_BASE_MS = 15_000;
+export const TAXGUARD_EMBEDDING_RETRY_MAX_MS = 60_000;
 
 /** Top-K chunks returned per retrieval. */
 export const TAXGUARD_RETRIEVAL_TOP_K = 8;

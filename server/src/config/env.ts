@@ -139,10 +139,13 @@ const parsed = {
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
   AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-3.6-flash'),
 
-  // Phase 16 — TaxGuard AI's embeddings provider (Voyage AI). Optional by
-  // design, exactly as ANTHROPIC_API_KEY: the server and worker both boot
-  // without it, and embeddingService throws 503 only when an embedding is
-  // actually attempted.
+  // Phase 16 — TaxGuard AI's embeddings provider: voyage | gemini. Only the
+  // selected provider's key is needed (gemini reuses GEMINI_API_KEY above).
+  // Optional by design, exactly as ANTHROPIC_API_KEY: the server and worker
+  // both boot without a key, and embeddingService throws 503 only when an
+  // embedding is actually attempted. Vectors from different providers are
+  // not comparable — switching means re-ingesting every corpus document.
+  TAXGUARD_EMBEDDING_PROVIDER: oneOf('TAXGUARD_EMBEDDING_PROVIDER', ['voyage', 'gemini'] as const, 'voyage'),
   VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),
 
   // Phase 19.3 — the Drive integration's service account, the recommended way

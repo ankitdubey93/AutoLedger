@@ -5,6 +5,7 @@ import { embedTexts } from '../../services/taxguard/embeddingService.js';
 import type { EmbeddingsClient } from '../../services/taxguard/embeddingService.js';
 import { parseTaxAct } from '../../utils/taxActParse.js';
 import type { JobPayloads } from '../../types/jobs.js';
+import { TAXGUARD_EMBEDDING_MAX_RETRIES } from '../../config/constants.js';
 
 /**
  * TaxGuard AI's ingestion job handler (Phase 16). Runs in the worker
@@ -89,6 +90,9 @@ export async function handleTaxGuardEmbed(
         unembedded.map((chunk) => chunk.content),
         'document',
         client,
+        // Background work — riding out a provider rate limit here is fine,
+        // and a BullMQ retry cannot help once the row is marked FAILED.
+        { maxRetries: TAXGUARD_EMBEDDING_MAX_RETRIES },
       );
       for (let i = 0; i < unembedded.length; i += 1) {
         const chunk = unembedded[i];
