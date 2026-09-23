@@ -55,7 +55,7 @@ it('ignores a forged org id in the body', async () => {
     .post('/api/v1/ledger-core/journals')
     .set('Cookie', tokenFor(userA, orgA))
     .send({ ...validPayload, org_id: orgB.id });
-  const row = await db.query('SELECT org_id FROM journal_entries WHERE id = $1', [res.body.entry.id]);
+  const row = await db.query('SELECT org_id FROM journal_entries WHERE id = ${1}', [res.body.entry.id]);
   expect(row.rows[0].org_id).toBe(orgA.id);
 });
 ```
@@ -84,7 +84,7 @@ Bypass the service and insert directly, so the constraint itself is what rejects
 it('rejects a line with both sides populated', async () => {
   await expect(
     db.query(`INSERT INTO ledger_lines (org_id, journal_entry_id, account_id, debit_cents, credit_cents)
-              VALUES ($1,$2,$3, 100, 100)`, [orgA.id, entry.id, account.id])
+              VALUES (${1},${2},${3}, 100, 100)`, [orgA.id, entry.id, account.id])
   ).rejects.toThrow(/chk_exclusive_debit_credit/);
 });
 ```
@@ -124,3 +124,5 @@ cd server && npm run test:coverage   # target ≥ 80% on services/ and utils/
 ```
 
 These need a live PostgreSQL — `docker compose up postgres`, or the full stack. If the DB is unavailable, say the tests were not run. Never report a suite as passing on the basis of having written it.
+
+> **Note:** `${1}`, `${2}` in this file mean the literal SQL placeholders `$1`, `$2`. Skill arguments are substituted into this file as plain text, so a bare `$1` would be overwritten by the first word of the invocation.

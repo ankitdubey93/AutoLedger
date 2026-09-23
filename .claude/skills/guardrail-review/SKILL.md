@@ -31,7 +31,7 @@ grep -rn "FROM \|JOIN \|UPDATE \|DELETE FROM \|INSERT INTO " server/src/services
 ```
 
 - A `SELECT`/`UPDATE`/`DELETE` without an `org_id` predicate is a **tenant data leak** — report it as the top finding regardless of what else is in the diff.
-- `WHERE id = $1` alone is wrong even when the id came from a previous scoped query. Scope every statement.
+- `WHERE id = ${1}` alone is wrong even when the id came from a previous scoped query. Scope every statement.
 - An `INSERT` must write `org_id` from `req.user.orgId`, never from the body.
 - `user_id` used as an access check is a bug. It is `created_by` only.
 
@@ -150,3 +150,5 @@ grep -rln "req.params.appSlug\|req.params.app" server/src/services/ server/src/c
 Order findings by blast radius: tenant leaks → money correctness → transaction/immutability → constraints → tests → style. For each: file:line, which rule, the concrete failure it causes, and the fix.
 
 State plainly if the diff is clean. Do not manufacture findings to look thorough.
+
+> **Note:** `${1}`, `${2}` in this file mean the literal SQL placeholders `$1`, `$2`. Skill arguments are substituted into this file as plain text, so a bare `$1` would be overwritten by the first word of the invocation.

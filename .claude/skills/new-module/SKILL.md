@@ -58,7 +58,7 @@ const client = await pool.connect();
 try {
   await client.query('BEGIN');
   // every query below uses `client`, never `pool`
-  await client.query('INSERT ... WHERE org_id = $1', [orgId]);
+  await client.query('INSERT ... WHERE org_id = ${1}', [orgId]);
   await client.query('COMMIT');
   return result;
 } catch (e) {
@@ -129,3 +129,5 @@ Only after the API works. Calls go through `services/fetchServices.ts` with `fet
 ## Finish
 
 Run the `guardrail-review` skill over the diff before reporting the module complete. Report what is tested and passing versus what is written but unverified — do not blur the two.
+
+> **Note:** `${1}`, `${2}` in this file mean the literal SQL placeholders `$1`, `$2`. Skill arguments are substituted into this file as plain text, so a bare `$1` would be overwritten by the first word of the invocation.
