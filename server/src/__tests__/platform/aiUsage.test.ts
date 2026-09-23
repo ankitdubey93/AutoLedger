@@ -134,7 +134,7 @@ describe('aiUsageService', () => {
 
   it('getUsageSummary filters by appSlug', async () => {
     await recordCall(orgA, callRecord({ appSlug: 'ap-flow' }));
-    await recordCall(orgA, callRecord({ appSlug: 'taxguard' }));
+    await recordCall(orgA, callRecord({ appSlug: 'stock' }));
 
     const usage = await getUsageSummary(orgA, { from: null, to: null, appSlug: 'ap-flow' });
     expect(usage.totals.callCount).toBe(1);

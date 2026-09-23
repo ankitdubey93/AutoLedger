@@ -3,7 +3,6 @@ import { Link, Navigate } from 'react-router-dom';
 import { getOrganizationApps, type AppSummary, type OrganizationAppsResponse } from '../services/fetchServices';
 import { useOrg } from '../context/OrgContext';
 import SetupChecklist from './SetupChecklist';
-import SandboxCard from './SandboxCard';
 
 /**
  * The post-login landing page: one card per app in the suite. This replaced
@@ -67,7 +66,6 @@ export default function AppChooserPage() {
       )}
 
       <SetupChecklist enabledSlugs={new Set((apps ?? []).map((a) => a.slug))} />
-      <SandboxCard />
     </div>
   );
 }

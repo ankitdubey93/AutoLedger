@@ -48,7 +48,7 @@ function entry(slug: string, name: string, requires: string[] = []) {
 const apps = [
   entry('ledger-core', 'LedgerCore'),
   entry('ap-flow', 'AP-Flow', ['ledger-core']),
-  entry('taxguard', 'TaxGuard AI'),
+  entry('stock', 'StockLedger'),
 ];
 
 let fetchMock: ReturnType<typeof vi.fn>;

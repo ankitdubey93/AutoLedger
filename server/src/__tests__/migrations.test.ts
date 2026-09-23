@@ -46,7 +46,7 @@ describe('migration filename contract', () => {
   it('accepts an app-tagged filename with a hyphenated slug', () => {
     // Every app slug in config/apps.ts may contain a hyphen. Rejecting these
     // would make the NNN_<app-slug>_<subject>.sql convention in docs/schema.md
-    // unusable for ledger-core, ap-flow and fpa-engine alike.
+    // unusable for ledger-core, ap-flow and stock alike.
     expect(MIGRATION_FILENAME.test('002_ledger-core_accounts.sql')).toBe(true);
     expect(MIGRATION_FILENAME.test('010_ap-flow_documents.sql')).toBe(true);
   });

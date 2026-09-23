@@ -7,9 +7,11 @@
 services:
 
   postgres:
-    # pgvector/pgvector:pg16 is postgres:16 plus the `vector` extension, so the
-    # existing postgres-data volume is binary-compatible — Phase 16 (TaxGuard AI)
-    # needs `CREATE EXTENSION vector` and the stock image cannot provide it.
+    # pgvector/pgvector:pg16 is postgres:16 plus the `vector` extension. The
+    # extension itself is no longer used — Phase 29 retired TaxGuard AI and
+    # migration 068 drops it — but migration 044 still runs on a fresh database
+    # and still calls CREATE EXTENSION vector, so the image cannot go back to
+    # stock postgres:16 without breaking a from-scratch migrate.
     image: pgvector/pgvector:pg16
     container_name: autodb_postgres
     restart: unless-stopped

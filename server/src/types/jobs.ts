@@ -10,8 +10,6 @@ export const QUEUE_NAMES = [
   'ap-flow-extract',
   'integration-drive-sweep',
   'integration-drive-sync',
-  'boarddeck-generate',
-  'taxguard-embed',
   'dead-letter',
 ] as const;
 
@@ -35,8 +33,6 @@ export interface JobPayloads {
   'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
   'integration-drive-sweep': Record<string, never>;
   'integration-drive-sync': { orgId: string; folderId: string };
-  'boarddeck-generate': { orgId: string; deckId: string };
-  'taxguard-embed': { orgId: string; corpusDocumentId: string };
   'dead-letter': {
     queue: QueueName;
     jobId: string;

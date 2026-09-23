@@ -40,9 +40,9 @@ const app = { slug: 'ledger-core', status: 'building' } as const;
 
 export const APPS = [
   { slug: 'ledger-core', status: 'building' },
-  { slug: 'taxguard', status: 'planned' },
+  { slug: 'ap-flow', status: 'building' },
 ] as const;
-// readonly [{ readonly slug: 'ledger-core'; ... }, { readonly slug: 'taxguard'; ... }]
+// readonly [{ readonly slug: 'ledger-core'; ... }, { readonly slug: 'ap-flow'; ... }]
 ```
 
 This is what makes deriving a union possible at all — without it, `slug` is `string` everywhere and there is no finite set of values to extract.
@@ -53,7 +53,8 @@ Once `APPS` is a `readonly` tuple of literal-typed objects, indexing its type by
 
 ```ts
 export type AppSlug = (typeof APPS)[number]['slug'];
-// 'ledger-core' | 'taxguard' | 'ap-flow' | 'fpa-engine' | 'unitecon' | 'boarddeck' | 'forecaster'
+// 'ledger-core' | 'ap-flow' | 'stock'
+// (five further slugs once belonged to this union — Phase 29 removed those apps and shrank the registry to three)
 ```
 
 `(typeof APPS)[number]` is the same trick as the more commonly seen `typeof ROLES[number]` for a plain string array (see `types/auth.ts`'s `Role`) — it just also works through an object shape because `as const` froze the object's properties too, not only the array's elements.
@@ -154,7 +155,7 @@ A: `zod` earns its place when you're validating something that crosses a runtime
 A: You can't cast your way there safely — `as AppSlug` compiles but proves nothing, since the compiler trusts the assertion instead of checking it, and a caller could hit the route with any string. You need a type predicate function: `function isAppSlug(v: string): v is AppSlug`, whose body actually compares `v` against the known slugs (iterating `APPS`, or a `Set`). Calling it inside an `if` narrows the type in that branch — the compiler trusts the *function's control flow*, not the mere claim of the return type, because the function's implementation is what got checked.
 
 **Q: Tell me about a time a widened type caused a bug, or would have.**
-A: On AutoLedger, the app registry (`APPS`) needs a derived `AppSlug` union so that route params and the client's app-chooser routing can be checked against exactly the seven real slugs, not an arbitrary string. If `APPS` were given a plain `AppDefinition[]` annotation instead of `as const satisfies AppDefinition[]`, every field — including `slug` — would widen to its declared type, `string`. `AppSlug` derived from that would just be `string`, and `isAppSlug`, route matching, and the client-side `useActiveApp` hook would all lose the compile-time guarantee that a slug is one of the seven — a typo'd slug anywhere in the app would compile cleanly and fail only at runtime, as a silent no-match instead of a caught error.
+A: On AutoLedger, the app registry (`APPS`) needs a derived `AppSlug` union so that route params and the client's app-chooser routing can be checked against exactly the real slugs (three today — `ledger-core`, `ap-flow`, `stock`; it was seven before Phase 29 retired five apps), not an arbitrary string. If `APPS` were given a plain `AppDefinition[]` annotation instead of `as const satisfies AppDefinition[]`, every field — including `slug` — would widen to its declared type, `string`. `AppSlug` derived from that would just be `string`, and `isAppSlug`, route matching, and the client-side `useActiveApp` hook would all lose the compile-time guarantee that a slug is one of the known ones — a typo'd slug anywhere in the app would compile cleanly and fail only at runtime, as a silent no-match instead of a caught error.
 
 **Q: You've got one FSM transition table (`STOCK_SERIAL_TRANSITIONS`) declared with a plain `Record<Key, Value>` annotation, right next to a config array (`STOCK_INDUSTRY_PROFILES`) that uses `as const satisfies`. Is that an inconsistency?**
 A: No — they're solving different problems. `as const satisfies` is for when you want a value checked against a shape *and* you need its literal types preserved afterward, typically because something downstream derives a union from it. The transition table's only consumer compares `to`/`via` fields against caller-supplied union-typed values with `===` — nothing ever needs to read back the literal `'ISSUED'` specifically from a fixed array index. What the transition table does need is exhaustiveness: every member of `StockSerialStatus` must appear as a key, or a status with no defined transitions would make a lookup silently return `undefined` and crash later. A plain `Record<StockSerialStatus, ...>` annotation gives you exactly that check, directly, with no `as const` ceremony buying anything unused. Choosing between the two isn't about consistency for its own sake — it's about which specific guarantee the value actually needs.

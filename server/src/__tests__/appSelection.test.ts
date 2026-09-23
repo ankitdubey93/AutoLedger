@@ -39,6 +39,6 @@ describe('validateAppSelection', () => {
   });
 
   it('accepts an app with no requirements on its own', () => {
-    expect(validateAppSelection(['taxguard'])).toEqual(['taxguard']);
+    expect(validateAppSelection(['stock'])).toEqual(['stock']);
   });
 });

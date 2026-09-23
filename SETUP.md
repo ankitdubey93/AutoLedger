@@ -39,9 +39,8 @@ Only `server/.env` really matters. The two token secrets can be regenerated
 (existing sessions just get logged out), but these cannot be regenerated for
 free and would have to be re-issued from each provider's console:
 
-- `ANTHROPIC_API_KEY` — AP-Flow vision extraction, TaxGuard answers
+- `ANTHROPIC_API_KEY` — AP-Flow vision extraction
 - `GEMINI_API_KEY` — AP-Flow's alternate provider
-- `VOYAGE_API_KEY` — TaxGuard embeddings
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — Drive intake
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `INTEGRATION_ENCRYPTION_KEY` — Drive OAuth path
 
@@ -50,8 +49,7 @@ If you also downloaded a Google service-account JSON key file, save that too.
 ### 0.3 Dump the database, if you want your data back
 
 The dev data lives in the Docker volume `postgres-data`, which a format
-destroys. Skip this if you're happy starting from an empty database and
-re-seeding the sandbox (§7) — that is the easier path.
+destroys. Skip this if you're happy starting from an empty database — the easier path.
 
 ```bash
 docker compose up -d postgres          # if not already running
@@ -226,9 +224,8 @@ breaks, and the test suite never needs any of them.
 
 | Unset | What stops working | What still works |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | AP-Flow AI extraction; TaxGuard cited answers | AP-Flow upload, rasterization, local OCR, PII masking, manual review, posting |
+| `ANTHROPIC_API_KEY` | AP-Flow AI extraction | AP-Flow upload, rasterization, local OCR, PII masking, manual review, posting |
 | `GEMINI_API_KEY` | only matters if `AP_FLOW_AI_PROVIDER=gemini` | the Anthropic path (the default) |
-| `VOYAGE_API_KEY` | TaxGuard corpus ingestion + question answering | TaxGuard upload, parse, chunk, browse |
 | `GOOGLE_SERVICE_ACCOUNT_*` | Drive folder intake | direct upload into AP-Flow |
 
 Drive intake needs a one-time Google Cloud setup (service account, JSON key,
@@ -291,7 +288,7 @@ A `503` means Postgres is unreachable. Redis being down is `200` +
 `"status":"degraded"` — reads all still work, only background jobs stop.
 
 Then open **http://localhost:5173**, register an organization, and you land on
-the app chooser with all seven apps.
+the app chooser with the three available apps.
 
 Use `localhost` everywhere — never mix `localhost` and `127.0.0.1` between the
 page origin and `VITE_API_BASE_URL`. They are different sites to the browser,
@@ -314,26 +311,11 @@ tar xzf ~/autoledger-storage.tar.gz -C server     # restores server/storage/
 ```
 
 If you skipped the dump: nothing to do. `./dev.sh` migrates an empty database
-and you register fresh (§5.1) — then load the sandbox below.
+and you register fresh (§5.1).
 
 ---
 
 ## 7. Sample data
-
-Two independent things, both optional.
-
-**The sandbox dataset (Phase 18)** — a 24-month demo across all seven apps,
-seeded through the real services so every trigger, FSM and audit row fires for
-real:
-
-```bash
-cd server && npm run seed:demo
-# or a specific org:  npm run seed:demo -- "Acme Inc"
-```
-
-Also reachable in the app: the `OWNER`-only "Load sample data" card on the app
-chooser, or `POST /api/v1/sandbox/load`. It refuses to run when
-`NODE_ENV=production`.
 
 **The walkthrough (Phase 6.1)** — `walkthrough/` at the repo root is a committed,
 hand-enterable three-month accounting scenario (Harbor Point Fabrication) with a
@@ -428,7 +410,6 @@ npm run migrate                           # apply pending migrations
 npm run typecheck                         # tsx does NOT type-check
 npm test                                  # needs postgres-test + redis
 npm run verify:integrity                  # debits == credits, across the whole DB
-npm run seed:demo                         # 24-month sandbox
 npm run db:reset                          # DESTRUCTIVE — drop schema, re-migrate
 npm run walkthrough                       # regenerate walkthrough/
 

@@ -154,7 +154,7 @@ Cost of Goods Sold is the one that tempts people into a sixth type. It is not on
 
 ## 14. No dependency before the phase that needs it
 
-Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies. Redis was provisioned since Phase 0 and wired up in Phase 7 (`bullmq` + `ioredis`, the worker process, the webhook dispatcher); any LLM/embeddings SDK remains gated. The LLM carve-out covers exactly two apps, **AP-Flow's vision extraction (Phase 10)** and **TaxGuard AI's RAG (Phase 16)**, and nothing else; both are recorded in [roadmap.md](roadmap.md#phase-renumbering--2026-09-01). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
+Do not add a package, an external service connection, or a Postgres extension speculatively. One module, one change, only its dependencies. Redis was provisioned since Phase 0 and wired up in Phase 7 (`bullmq` + `ioredis`, the worker process, the webhook dispatcher); any LLM/embeddings SDK remains gated. The LLM carve-out covers exactly one app, **AP-Flow's vision extraction and classification (Phases 10, 19)**, and nothing else — a second app's RAG pipeline carried the same carve-out until it was removed in [Phase 29](roadmap.md#phase-29-as-delivered). Full policy and the approved-for-later table: [development.md](development.md#dependency-policy).
 
 ## 15. Every module ships tests, including a cross-tenant isolation test
 

@@ -44,9 +44,9 @@ const apps = [
     enabledAt: '2026-09-01T00:00:00.000Z',
   },
   {
-    slug: 'taxguard',
-    name: 'TaxGuard AI',
-    domain: 'Compliance & AI Workflows',
+    slug: 'stock',
+    name: 'StockLedger',
+    domain: 'Inventory & Warehousing',
     tagline: 'y',
     skills: ['b'],
     status: 'building',
@@ -69,7 +69,7 @@ afterEach(() => {
 
 /**
  * `/organizations/apps` also contains `/apps`, so it is matched first. A
- * fresh Response per call: the chooser, its checklist and SandboxCard all
+ * fresh Response per call: the chooser and its checklist both
  * fetch concurrently, and a Response body can only be read once.
  */
 function mockRoutes(orgApps: { status: number; body: unknown }) {
@@ -110,7 +110,7 @@ describe('AppChooserPage', () => {
 
     const ledgerCard = (await screen.findByText('LedgerCore')).closest('a');
     expect(ledgerCard).toHaveAttribute('href', '/app/ledger-core');
-    expect(screen.queryByText('TaxGuard AI')).not.toBeInTheDocument();
+    expect(screen.queryByText('StockLedger')).not.toBeInTheDocument();
   });
 
   it('redirects to /welcome when no selection has been saved', async () => {

@@ -93,11 +93,11 @@ A conditional `resetTables()` (probe with `EXISTS`, truncate only dirty tables) 
 
 ### Expensive fixtures: pay once, not per test
 
-`sandbox.test.ts` loads the full 24-month Phase 18 dataset through the real services — ~30s a time, and legitimately so. It originally reset and re-seeded in `beforeEach`, paying for **14 loads** and taking 5.1 minutes by itself.
+**Historical example, the file no longer exists (Phase 29 deleted the Phase 18 sandbox dataset it tested), the lesson still applies.** `sandbox.test.ts` loaded a 24-month dataset through the real services — ~30s a time, and legitimately so. It originally reset and re-seeded in `beforeEach`, paying for **14 loads** and taking 5.1 minutes by itself.
 
-It is now organised by *how many loads it must pay for* rather than by endpoint: a `with nothing loaded` block (role gates and empty-state responses never needed a dataset), a `with org A's dataset loaded` block that seeds **once** in `beforeAll` and shares it across every read-only assertion, and an `unload and reload` block that pays for its own because it destroys the marker it tests. Three loads, 74.8s.
+It was reorganised by *how many loads it must pay for* rather than by endpoint: a `with nothing loaded` block (role gates and empty-state responses never needed a dataset), a `with org A's dataset loaded` block that seeded **once** in `beforeAll` and shared it across every read-only assertion, and an `unload and reload` block that paid for its own because it destroyed the marker it tested. Three loads, 74.8s, down from fourteen.
 
-Where a block shares one seed, any case that writes must be last and must say so — see the comment on the org-B case. That ordering is load-bearing; it is the price of not re-seeding.
+Where a block shares one seed, any case that writes must be last and must say so. That ordering is load-bearing; it is the price of not re-seeding — the general pattern to reach for whenever a fixture this expensive shows up again.
 
 ## Two tiers, both required
 

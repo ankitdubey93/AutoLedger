@@ -9,15 +9,9 @@ import webhookRoutes from './webhooks.js';
 import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
-import sandboxRoutes from './sandbox.js';
 import integrationRoutes from './integrations/index.js';
 import ledgerCoreRoutes from './ledger-core/index.js';
 import apFlowRoutes from './ap-flow/index.js';
-import fpaEngineRoutes from './fpa-engine/index.js';
-import forecasterRoutes from './forecaster/index.js';
-import uniteconRoutes from './unitecon/index.js';
-import boarddeckRoutes from './boarddeck/index.js';
-import taxguardRoutes from './taxguard/index.js';
 import stockRoutes from './stock/index.js';
 
 /**
@@ -63,10 +57,6 @@ apiRouter.use('/onboarding', onboardingRoutes);
 // the namespace (guardrails rule 16), exactly as /audit-logs does.
 apiRouter.use('/documents', documentRoutes);
 
-// Phase 18 — the sandbox dataset. Platform-level: it orchestrates every
-// app's own seeder and owns no app's tables (guardrails rule 16).
-apiRouter.use('/sandbox', sandboxRoutes);
-
 // Phase 19.1 — AI token and cost metering. Platform-level: every app that
 // calls a model records here, and `app_slug` on the row carries the
 // namespace (guardrails rule 16), exactly as /audit-logs does.
@@ -86,21 +76,6 @@ apiRouter.use('/ledger-core', ledgerCoreRoutes);
 
 // Phase 10 — AP-Flow, invoice capture & extraction.
 apiRouter.use('/ap-flow', apFlowRoutes);
-
-// Phase 12 — FP&A Engine, the linked 3-statement model.
-apiRouter.use('/fpa-engine', fpaEngineRoutes);
-
-// Phase 13 — ForecasterPro, driver-based rolling forecasting.
-apiRouter.use('/forecaster', forecasterRoutes);
-
-// Phase 14 — UnitEcon, cohort retention and unit economics.
-apiRouter.use('/unitecon', uniteconRoutes);
-
-// Phase 15 — BoardDeck Automator, close automation and board reporting.
-apiRouter.use('/boarddeck', boarddeckRoutes);
-
-// Phase 16 — TaxGuard AI, tax act parsing and RAG over pgvector.
-apiRouter.use('/taxguard', taxguardRoutes);
 
 // Phase 28 — StockLedger, inventory & warehousing.
 apiRouter.use('/stock', stockRoutes);

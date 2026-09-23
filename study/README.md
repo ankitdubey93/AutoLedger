@@ -142,12 +142,12 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 |---|---|---|
 | Event loop, microtasks, thread pool | 0–1 | ✅ |
 | Middleware chain, async error handling | 0–1 | ✅ |
-| Streams & backpressure | 9.5 (Document Vault upload/download), 15 (BoardDeck `.pptx`) | ◐ |
+| Streams & backpressure | 9.5 (Document Vault upload/download); Phase 15 (BoardDeck `.pptx`) also demonstrated this before removal in Phase 29 | ◐ |
 | `worker_threads` vs child processes vs queue consumers | 7 | ✅ |
 | Graceful shutdown, connection draining, `SIGTERM` | 0, 7 (worker process), tooling (one-command dev launcher) | ✅ |
 | `AsyncLocalStorage` for request context | 5 (audit actor) | ✅ |
 | BullMQ: queues, workers, retries, DLQ, idempotent jobs | 7, 10 (the first purely event-driven, non-repeatable queue) | ✅ |
-| Cron scheduling & idempotent batch jobs | 7 (integrity check), 15 (BoardDeck close automation) | ◐ |
+| Cron scheduling & idempotent batch jobs | 7 (integrity check); Phase 15 (BoardDeck close automation) also demonstrated this before removal in Phase 29 | ◐ |
 | Multipart uploads: MIME sniffing, size caps, path traversal | 9.5 (Document Vault) | ✅ |
 | Native image processing (`sharp`/libvips) & headless PDF rasterization | 10 (AP-Flow capture pipeline) | ✅ |
 | Rate limiting: fixed vs sliding window, per-IP vs per-account | 3 | ◐ |
@@ -189,7 +189,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | `EXCLUDE USING GIST` + `btree_gist` for date ranges | 4 (non-overlapping fiscal periods) | ✅ |
 | `JSONB`: operators, indexing, when *not* to use it | 5 (audit snapshots), 6 (score breakdown), 10 (extractions), 28 (per-tenant custom attributes — a dedicated deep-dive) | ✅ |
 | `pg_trgm` fuzzy search | dropped (was CRM) — Phase 6 scores in TypeScript instead | ⬜ |
-| `pgvector`: similarity search, index types (IVFFlat/HNSW) | 16 (TaxGuard AI) | ⬜ |
+| `pgvector`: similarity search, index types (IVFFlat/HNSW) | dropped (was TaxGuard AI, Phase 16, removed in Phase 29 — the `vector` extension migration 068 dropped) | ⬜ |
 | Partitioning strategies | later | ⬜ |
 | Migration design: additive, idempotent, zero-downtime | 0–1 | ✅ |
 | Content-addressed dedupe hashing, `ON CONFLICT DO NOTHING RETURNING` for atomic idempotent ingestion | 6 (bank statement re-import) | ✅ |
@@ -244,13 +244,13 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Schema-driven forms rendered from a runtime field list | 28 (StockLedger — per-org custom attribute definitions) | ✅ |
 | 3-way matching (PO / receipt / invoice) | 11 (AP-Flow) | ⬜ |
 | Recursive tree resolution & cycle detection | 3 (chart of accounts; was MRP/BOM) | ✅ |
-| RAG: chunking, embeddings, retrieval, citation grounding | 16 (TaxGuard AI) | ⬜ — when written, also cover the 2026-09-22 provider switch: vectors from two embedding models live in unrelated spaces even at equal dimension (a switch means re-embedding everything), Matryoshka truncation (3072→1024) and why cosine `<=>` makes the lost unit length irrelevant, asymmetric document/query task types, and the per-text input-token limit silently truncating an oversized chunk |
-| PII redaction before an external model call | 10 (AP-Flow images — done), 16 (TaxGuard text) | ◐ |
+| RAG: chunking, embeddings, retrieval, citation grounding | dropped (was TaxGuard AI, Phase 16, removed in Phase 29 before this note was ever written) | ⬜ |
+| PII redaction before an external model call | 10 (AP-Flow images — done); Phase 16 (TaxGuard text) also had this before removal in Phase 29 | ✅ |
 | Caching strategies & invalidation | 7+ | ⬜ |
 | API versioning & backward compatibility | 0 | ✅ |
 | Transactional outbox: the dual-write problem, at-least-once delivery | 7 (webhook events) | ✅ |
 | Realized/unrealized FX gain-loss: the imbalance-as-plug technique, direction-agnostic sign, period-end revaluation with an automatic reversal | 8 (FX engine) | ✅ |
-| Deterministic demo/fixture generation: seeding through real services vs raw SQL | 18 (the sandbox dataset), 6.1 (`walkthrough/` — the hand-enterable counterpart, and a self-consistency-checked answer key vs one proven against the real product) | ✅ |
+| Deterministic demo/fixture generation: seeding through real services vs raw SQL | 18 (the sandbox dataset, removed in Phase 29 — note kept, marked historical), 6.1 (`walkthrough/` — the hand-enterable counterpart, and a self-consistency-checked answer key vs one proven against the real product) | ✅ |
 | Multi-provider LLM seam: one `StructuredModelClient` interface over forced-tool-call (Anthropic) vs constrained-JSON-output (Gemini) | 19 (AP-Flow automated intake) | ⬜ — **debt**, explicitly skipped at the user's direction mid-execution; see [roadmap.md](../docs/roadmap.md#phase-19-as-delivered) |
 | Control accounts vs. per-party sub-accounts: subsidiary ledgers by document attribution, and refusing journals to a control account | 25 (party accounts) | ✅ |
 | Correcting documents: credit/debit notes, multi-source settlement, unapplied credit | 26 (credit & debit notes) | ✅ |

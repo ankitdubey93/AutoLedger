@@ -38,14 +38,6 @@ export async function resetTables(): Promise<void> {
               documents, document_links,
               ap_flow_documents, ap_flow_pages, ap_flow_extractions,
               ap_flow_line_items, ap_flow_vendor_account_map,
-              fpa_models, fpa_scenarios,
-              forecaster_plans, forecaster_drivers, forecaster_driver_values,
-              forecaster_headcount_roles, forecaster_forecast_lines,
-              forecaster_budget_versions, forecaster_budget_lines,
-              unitecon_settings, unitecon_acquisition_accounts, unitecon_product_lines,
-              boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks,
-              taxguard_corpus_documents, taxguard_chunks, taxguard_questions,
-              sandbox_datasets,
               integration_drive_connections, integration_drive_folders, integration_drive_files,
               stock_settings, stock_uoms, stock_categories, stock_attribute_definitions,
               stock_code_schemes, stock_code_counters, stock_locations, stock_items,
@@ -121,7 +113,7 @@ export async function clearStorage(): Promise<void> {
  * table is built here either.
  *
  * A literal `(` or `)` inside a line must be escaped for the PDF string
- * syntax, hence the replace below — none of TaxGuard's own fixtures need it
+ * syntax, hence the replace below — none of the current fixtures need it
  * but this keeps the helper honest for any caller that does.
  */
 export function buildTestPdf(lines: string[]): Buffer {

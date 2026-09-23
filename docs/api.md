@@ -1,6 +1,6 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ai-usage`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/ledger-core`, `/ap-flow`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ai-usage`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/integrations`, `/ledger-core`, `/ap-flow`, `/stock`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
@@ -158,7 +158,7 @@ The active organization comes **only** from the verified access token. `orgId` i
 {
   "success": true,
   "selectionCompletedAt": "2026-09-22T10:00:00.000Z",
-  "count": 7,
+  "count": 3,
   "apps": [
     { "slug": "ledger-core", "name": "LedgerCore", "…": "every /api/v1/apps field", "requires": [], "enabled": true, "enabledAt": "2026-09-22T10:00:00.000Z" },
     { "slug": "ap-flow", "name": "AP-Flow", "…": "…", "requires": ["ledger-core"], "enabled": false, "enabledAt": null }
@@ -179,7 +179,7 @@ The active organization comes **only** from the verified access token. `orgId` i
 ```json
 {
   "success": true,
-  "count": 7,
+  "count": 3,
   "apps": [
     {
       "slug": "ledger-core",
@@ -194,7 +194,7 @@ The active organization comes **only** from the verified access token. `orgId` i
 }
 ```
 
-Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow, FP&A Engine, UnitEcon, BoardDeck and ForecasterPro each require `ledger-core` — StockLedger (Phase 28) requires nothing, the one app with `requires: []`. This is the static registry — every organization sees the same eight apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
+Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow requires `ledger-core` — LedgerCore and StockLedger (Phase 28) both require nothing, `requires: []`. This is the static registry — every organization sees the same three apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
 
 ---
 
@@ -910,167 +910,6 @@ GL coding is inferred in a fixed order, cheapest and most explainable first, and
 
 ---
 
-### FP&A Engine — `/api/v1/fpa-engine` — Phase 12
-
-Full spec: [fpa-engine.md](fpa-engine.md). Read is open to every member including `VIEWER`; creating or editing a model, scenario, or assumption needs `ACCOUNTANT` and above; deleting a model needs `OWNER`/`ADMIN` only, because it cascades away every scenario and assumption on it. Posts nothing to LedgerCore's GL — every route here is a read or an edit to FP&A's own tables.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/models` | any member | Paginated, optional `?status=DRAFT\|ACTIVE\|ARCHIVED` |
-| POST | `/models` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Creates a model plus its default `Base` scenario, one transaction. `422` if `actualsThrough` is not before `startsOn` |
-| GET | `/models/:id` | any member | One model plus every scenario on it |
-| PATCH | `/models/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update, including `status` — validated against `FPA_MODEL_TRANSITIONS` (`ARCHIVED → ACTIVE` is legal; `ARCHIVED` is not terminal) |
-| DELETE | `/models/:id` | `OWNER`, `ADMIN` | Deletes the model and cascades its scenarios and assumptions |
-| GET | `/models/:id/scenarios` | any member | Every scenario on the model, default first |
-| POST | `/models/:id/scenarios` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Creates a non-default scenario |
-| GET | `/models/:id/comparison` | any member | Every scenario's projection, reduced to a summary — runway, cash-out month, closing cash, totals, `balances` |
-| PATCH | `/scenarios/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update. `isDefault: true` un-defaults the current default first, in the same transaction |
-| DELETE | `/scenarios/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` on the default scenario or the model's last remaining one |
-| GET | `/scenarios/:id/assumptions` | any member | Every assumption on the scenario, joined against the chart in application code (this file's services never query `accounts` directly — rule 16) |
-| PUT | `/scenarios/:id/assumptions/:accountId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Upsert, `200` on both create and update — the resource is fully addressed by `(scenarioId, accountId)`. Body is a discriminated union on `kind` |
-| DELETE | `/scenarios/:id/assumptions/:accountId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Removes the assumption — the account reverts to flat-lining its last actual |
-| GET | `/scenarios/:id/projection` | any member | The scenario's linked 3-statement projection: trailing actuals, then a month-by-month income statement, cash flow, and balance sheet, plus `runwayMonths`/`cashOutMonth`/`averageMonthlyBurnCents` and a `balances` flag |
-
-Failure paths: `400 Invalid request body` (schema — `startsOn`/`actualsThrough` not the first of a month, `horizonMonths` outside 1–60, a kind/payload mismatch on an assumption) · `400 status must be one of DRAFT, ACTIVE, ARCHIVED` · `403` for a write below its role tier · `404 Model not found` / `404 Scenario not found` / `404 Assumption not found` (also another org's) · `409 A model with that name already exists` / `409 A scenario with that name already exists on this model` · `409 Cannot move a model from <status> to <status>` · `409 The default scenario cannot be deleted` · `409 A model must keep at least one scenario` · `422 actualsThrough must be before startsOn` · `422 Assumptions can only be set on a postable, active account` · `422 Assumptions apply to Revenue and Expense accounts only` · `422 A revenue account cannot be a percentage of revenue`.
-
-Every LedgerCore fact this app needs — posted actuals bucketed by month, the opening balance sheet, the cash/receivable/payable control accounts — arrives through two functions exported from LedgerCore's own `reportService` (`monthlyActualsByAccount`, `resolveControlAccounts`), never a direct query against `accounts`/`ledger_lines`/`journal_entries`/`ledger_settings` from this app's services (rule 16), proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|ledger_settings|ledger_invoice_settings)" server/src/services/fpa-engine/ server/src/controllers/fpa-engine/` returns nothing. The projection engine itself (`utils/fpaProjection.ts`) is a pure function with no database import, unit-tested without Postgres. See [fpa-engine.md](fpa-engine.md) for the full arithmetic and why its `balances` flag is a real proof rather than a hard-coded value.
-
----
-
-### ForecasterPro — `/api/v1/forecaster` — Phase 13
-
-Full spec: [forecaster.md](forecaster.md). Read is open to every member including `VIEWER`; creating or editing a plan, driver, headcount role, forecast line, or budget line needs `ACCOUNTANT` and above; deleting a plan needs `OWNER`/`ADMIN` only, since it cascades away every driver, headcount role, forecast line and budget version on it; **approving a budget version needs `OWNER`/`ADMIN` only**, since it is a financial decision of record. Posts nothing to LedgerCore's GL — every route here is a read or an edit to ForecasterPro's own tables.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/plans` | any member | Paginated, optional `?status=DRAFT\|ACTIVE\|ARCHIVED` |
-| POST | `/plans` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `422` if `actualsThrough` is not before `startsOn` |
-| GET | `/plans/:id` | any member | One plan |
-| PATCH | `/plans/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update, including `status` — validated against `FORECASTER_PLAN_TRANSITIONS` (`ARCHIVED → ACTIVE` is legal; `ARCHIVED` is not terminal) |
-| DELETE | `/plans/:id` | `OWNER`, `ADMIN` | Deletes the plan and cascades every driver, headcount role, forecast line and budget version on it |
-| POST | `/plans/:id/roll` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Advances the window one month, `horizonMonths` unchanged; every driver's values shift in the same transaction |
-| GET | `/plans/:id/drivers` | any member | Every driver on the plan |
-| POST | `/plans/:id/drivers` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `kind` is `COUNT`, `CENTS`, or `BPS` |
-| PATCH | `/drivers/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/unit label only — `kind` cannot be changed after creation |
-| DELETE | `/drivers/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` if a forecast line still references it |
-| GET | `/drivers/:id/values` | any member | Every monthly value on the driver, ordered by month |
-| PUT | `/drivers/:id/values` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Bulk upsert, `200` on both create and update — the months named replace only those months |
-| GET | `/plans/:id/headcount` | any member | Every headcount role on the plan |
-| POST | `/plans/:id/headcount` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `accountId` must be a postable, active Expense account |
-| PATCH | `/headcount/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Partial update |
-| DELETE | `/headcount/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | — |
-| GET | `/plans/:id/forecast-lines` | any member | Every forecast line on the plan |
-| POST | `/plans/:id/forecast-lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Body is a discriminated union on `kind` (`DRIVER_PRODUCT`, `DRIVER_PERCENT`, `FIXED_CENTS`) |
-| PATCH | `/forecast-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Restates the whole line — no partial update, so a `kind` change can never leave a stale payload column |
-| DELETE | `/forecast-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | — |
-| GET | `/plans/:id/forecast` | any member | The full driver-and-headcount build-up, month by month, per account — recomputed on every request, `hasMissingDriverValues` never hidden |
-| GET | `/plans/:id/budget-versions` | any member | Every budget version on the plan |
-| POST | `/plans/:id/budget-versions` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Born `DRAFT`, no lines |
-| GET | `/budget-versions/:id` | any member | One version, with its lines |
-| DELETE | `/budget-versions/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the version is still `DRAFT` |
-| POST | `/budget-versions/:id/compile` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Delete-then-reinsert of `DRIVER`/`HEADCOUNT` lines from the forecast build-up; `MANUAL` lines are untouched. `409` unless still `DRAFT` |
-| POST | `/budget-versions/:id/approve` | `OWNER`, `ADMIN` | Freezes the version; supersedes any prior `APPROVED` version on the same plan in the same transaction. `422` with no lines. `409` on an illegal transition |
-| POST | `/budget-versions/:id/lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | A `MANUAL` line — `source` is not settable via this route. `409` unless the version is `DRAFT` |
-| PATCH | `/budget-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the parent version is `DRAFT` |
-| DELETE | `/budget-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `409` unless the parent version is `DRAFT` |
-| GET | `/plans/:id/variance` | any member | Budget-vs-actual for the plan's **approved** version, optional `?from=`/`?to=` (`YYYY-MM-DD`). `422` when the plan has no approved version |
-
-Failure paths: `400 Invalid request body` (schema — `startsOn`/`actualsThrough`/driver-value months not the first of a month, `horizonMonths` outside 1–60, a forecast-line kind/payload mismatch, a blank `justification`) · `400 status must be one of DRAFT, ACTIVE, ARCHIVED` · `403` for a write below its role tier · `404 Plan not found` / `404 Driver not found` / `404 Headcount role not found` / `404 Forecast line not found` / `404 Budget version not found` / `404 Budget line not found` (also another org's) · `409 A plan with that name already exists` / `409 A driver with that name already exists on this plan` / `409 A forecast line with that label already exists on this plan` / `409 A budget version with that label already exists on this plan` / `409 A manual budget line already exists for that account and month` · `409 Cannot move a plan from <status> to <status>` / `409 Cannot move a budget version from <status> to APPROVED` · `409 An archived plan cannot be rolled` · `409 This driver is used by a forecast line and cannot be deleted` · `409 Only a DRAFT budget version can be deleted` / `compiled` / `edited` · `422 actualsThrough must be before startsOn` · `422 A COUNT or BPS driver value cannot be negative` · `422 A headcount role must map to a postable, active account` / `an Expense account` · `422 endsOn must not be before startsOn` · `422 A forecast line must map to a postable, active account` / `a Revenue or Expense account` · `422 A DRIVER_PRODUCT line needs a COUNT quantity driver` / `a CENTS rate driver` · `422 A DRIVER_PERCENT line needs a CENTS source driver` · `422 A forecast line may only reference drivers on its own plan` · `422 A budget line must map to a postable, active account` · `422 A budget version must have at least one line before approval` · `422 This plan has no approved budget version` · `422 from must not be after to`.
-
-The **only** route into LedgerCore anywhere in this app is `reportService.monthlyActualsByAccount`, called once, from `varianceService.ts` — every other account fact comes from `accountService`'s exported functions, never a direct query, proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|ledger_settings|ledger_invoice_settings|fpa_models|fpa_scenarios|fpa_assumptions)" server/src/services/forecaster/ server/src/controllers/forecaster/` returns nothing. The forecast build engine itself (`utils/forecasterBuild.ts`) is a pure function with no database import, unit-tested without Postgres. See [forecaster.md](forecaster.md) for the full arithmetic and the zero-based-budgeting and approval-freeze rulings.
-
----
-
-### UnitEcon — `/api/v1/unitecon` — Phase 14
-
-Full spec: [unitecon.md](unitecon.md). Read is open to every member including `VIEWER`. Writing settings and deleting a product line need `OWNER`/`ADMIN` only — both silently reprice or remove a dimension from every historical report. Creating/editing a product line needs `ACCOUNTANT` and above. Posts nothing to LedgerCore's GL — every route here is a read, or an edit to UnitEcon's own configuration tables.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/cohorts` | any member | `?from=`/`?to=` required, `YYYY-MM-01`. Cohort retention matrix; `excludedPriorCustomers` never hidden |
-| GET | `/settings` | any member | Returns defaults without writing a row if none exists yet |
-| PATCH | `/settings` | `OWNER`, `ADMIN` | `grossMarginBps` and/or `acquisitionAccountIds` (a **replace** set, not a merge — `[]` clears it) |
-| GET | `/unit-economics` | any member | `?from=`/`?to=` required, `YYYY-MM-01`. CAC, LTV (observed, not modelled), LTV:CAC, payback per cohort |
-| GET | `/product-lines` | any member | `?includeInactive=true` to include deactivated lines |
-| POST | `/product-lines` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `revenueAccountId` must be a postable Revenue account |
-| PATCH | `/product-lines/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/unit label/`isActive` only — the account cannot be repointed after creation |
-| DELETE | `/product-lines/:id` | `OWNER`, `ADMIN` | Hard delete — legal, since nothing references this table and nothing here posts to the GL |
-| GET | `/pvm` | any member | `?baseFrom=`/`?baseTo=`/`?compareFrom=`/`?compareTo=` all required, `YYYY-MM-01`. `422` with no product lines configured |
-
-Failure paths: `400 from and to are required (YYYY-MM-01)` / `400 baseFrom, baseTo, compareFrom and compareTo are required (YYYY-MM-01)` · `400 from and to must be the first of a month (YYYY-MM-01)` / `400 Period bounds must be the first of a month (YYYY-MM-01)` · `400 Invalid request body` (schema — `grossMarginBps` outside `0`–`10000`, a non-UUID in `acquisitionAccountIds`, a blank or over-length product-line name/unit label) · `400 acquisitionAccountIds must not contain duplicates` · `400 At least one field must be provided` · `403` for a write below its role tier · `404 Account not found` (a cross-org acquisition or revenue account id) · `404 Product line not found` (also another org's) · `409 This revenue account already has a product line` / `409 A product line with this name already exists` · `422 from must not be after to` · `422 The cohort window may span at most 60 months` · `422 An acquisition account must be an Expense account` · `422 A product line must map to a Revenue account` / `a postable account, not a header account` · `422 Configure at least one product line before running a PVM report`.
-
-The **only** route into LedgerCore anywhere in this app is three `reportService` functions — `customerRevenueByMonth`, `productLineSalesByMonth`, `monthlyActualsByAccount` — plus `accountService.getAccountById` and `organizationService.getById`, proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_models|fpa_scenarios|fpa_assumptions|forecaster_)" server/src/services/unitecon/ server/src/controllers/unitecon/` returns nothing but two prose comments documenting the absence. The cohort and PVM engines (`utils/uniteconCohort.ts`, `utils/uniteconPvm.ts`) are both pure functions with no database import, unit-tested without Postgres. See [unitecon.md](unitecon.md) for the full arithmetic, the LTV-is-observed ruling, and the PVM rounding-residual ruling.
-
-### BoardDeck Automator — `/api/v1/boarddeck` — Phase 15
-
-Monthly close automation, budget-vs-actual variance at board grain, and automated `.pptx` deck generation. Reading is open to every member including `VIEWER`. Creating/re-running a close run and generating/retrying a deck need `ACCOUNTANT` and above. Closing the period and deleting a deck are `OWNER`/`ADMIN` only.
-
-**Close runs** — `boarddeck_close_runs`/`boarddeck_close_checks`, one run per fiscal period (re-running replaces the check rows in place):
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/close-runs` | any member | Every close run for the org, newest first |
-| GET | `/close-runs/:id` | any member | Includes the five check rows |
-| POST | `/close-runs` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ fiscalPeriodId }`. Runs five checks (`TRIAL_BALANCE_BALANCED`, `NO_DRAFT_INVOICES`, `NO_UNPOSTED_BILLS`, `NO_UNMATCHED_BANK_LINES`, `PERIOD_OPEN`) against `reportService.closeReadiness`; `201` with status `READY` if all pass, `BLOCKED` otherwise. `409` if a run already exists for this period |
-| POST | `/close-runs/:id/rerun` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Re-computes all five checks. `409` if the run is already `CLOSED` |
-| POST | `/close-runs/:id/close-period` | `OWNER`, `ADMIN` | Closes the underlying LedgerCore fiscal period via `fiscalPeriodService.closePeriod`. `409` unless the run is `READY` |
-
-**Budget vs Actual** — a thin summarizer over ForecasterPro's own variance:
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/bva?planId=&from=&to=&topN=` | any member | `planId` required. `from`/`to` optional, `YYYY-MM-01`. `topN` optional (default 5, `1`–`20`). Collapses `varianceService.planVariance`'s per-account-per-month rows into four sections (`Revenue`, `Cost of Sales`, `Operating Expenses`, `Other` — always all four) plus the top-N variance drivers by absolute variance |
-
-**Decks** — `boarddeck_decks`, generated asynchronously by the `boarddeck-generate` background job (Phase 7):
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/decks` | any member | Every deck for the org, newest first |
-| GET | `/decks/:id` | any member | One deck's status/metadata |
-| POST | `/decks` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ title, fiscalPeriodId, planId? }`. `202` with status `PENDING` — the row exists, the bytes don't yet |
-| POST | `/decks/:id/retry` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `202`. `409` unless the deck is `FAILED` |
-| GET | `/decks/:id/download` | any member | The `.pptx` bytes, `Content-Disposition: attachment`. `409` unless the deck is `READY` |
-| DELETE | `/decks/:id` | `OWNER`, `ADMIN` | Removes the row only — the stored blob is not deleted, the same accepted cost `documentService.uploadDocument`'s own rollback path carries |
-
-A deck has 4 slides (Title, P&L, Balance Sheet, Close Checklist) when created without a `planId`, or 6 (the same four plus Budget vs Actual and Top Variance Drivers) when a `planId` is given. A plan with no approved budget version does not fail the deck — it silently drops to the 4-slide shape.
-
-Failure paths: `400 planId is required` · `400 from and to must be the first of a month (YYYY-MM-01)` · `400 topN must be an integer between 1 and 20` · `400 Invalid request body` (schema) · `403` for a write below its role tier · `404 Close run not found` / `404 Deck not found` (also another org's, or a malformed uuid) · `409 A close run already exists for this period` · `409 This period has already been closed` · `409 Close run is not READY` · `409 Only a FAILED deck can be retried` · `409 Deck is not ready` · `422 This plan has no approved budget version` (from the plan's own variance route, propagated) · `422 from must not be after to`.
-
-The **only** routes into other apps anywhere in this app are `reportService.closeReadiness`/`profitAndLoss`/`balanceSheet`, `fiscalPeriodService.getPeriodById`/`closePeriod`, `varianceService.planVariance`, `planService.getPlanById`, and `organizationService.getById` — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fiscal_periods|fpa_|forecaster_|unitecon_)" server/src/services/boarddeck/ server/src/controllers/boarddeck/` returns nothing. `utils/boarddeckVariance.ts` is a pure function with no database import, unit-tested without Postgres. No REFERENCES on `fiscal_period_id`/`plan_id` (rules 8 and 16 collide, 16 wins). No outbox event, no webhook, from this phase — a deck finishing is a UI-polled status change, not a financial fact.
-
-### TaxGuard AI — `/api/v1/taxguard` — Phase 16
-
-Tax act parsing, RAG retrieval over `pgvector`, and cited answers. Reading the corpus and asking a question are open to every member including `VIEWER`. Adding/deleting a corpus document needs `ACCOUNTANT` and above for create, `OWNER`/`ADMIN` for delete. Deleting a question is `OWNER`/`ADMIN` only.
-
-**Corpus** — `taxguard_corpus_documents`/`taxguard_chunks`, ingested asynchronously by the `taxguard-embed` background job (Phase 7). A corpus document's tax act PDF is uploaded through the platform Document Vault (`POST /api/v1/documents`) first; its returned `document.id` is what `POST /corpus` takes:
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/corpus` | any member | Every corpus document for the org, newest first |
-| GET | `/corpus/:id` | any member | One corpus document's status/metadata |
-| GET | `/corpus/:id/chunks` | any member | Its chunks in ordinal order, each with a `citation` and `heading`. Never carries an `embedding` vector |
-| POST | `/corpus` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ documentId, title, jurisdiction, actYear? }`. `documentId` must reference an already-uploaded PDF in the Document Vault. `201` with status `PENDING` — the row exists, the chunks don't yet |
-| DELETE | `/corpus/:id` | `OWNER`, `ADMIN` | Removes the corpus document and cascades its chunks |
-
-A corpus document moves `PENDING` → `PARSING` → `EMBEDDING` → `READY` or `FAILED`. Both `READY` and `FAILED` are terminal — there is no in-place re-ingest; re-adding the same `documentId` after a `FAILED` first attempt is refused with `409` (`ux_taxguard_corpus_document`), so retrying means deleting the failed row first.
-
-**Questions** — `taxguard_questions`, answered synchronously inside `POST /questions` (no queue — retrieval and answering are fast enough to run inline):
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/questions` | any member | The org's own question/answer history, newest first (default 50, max 200) |
-| GET | `/questions/:id` | any member | One question with its full answer and citations |
-| POST | `/questions` | any member | `{ questionText, jurisdiction }`. Redacts the question, retrieves the top matching chunks for that jurisdiction, and asks the answer model to cite them. `201` |
-| DELETE | `/questions/:id` | `OWNER`, `ADMIN` | Removes one question from the org's history |
-
-`POST /questions`'s pipeline, in order — **the order is the compliance claim**: (1) the raw `questionText` is redacted via `utils/pii.ts`'s `redactText`; (2) the **redacted** text alone is embedded and used for retrieval; (3) the **redacted** text alone, plus the retrieved chunks, is sent to the answer model. The raw `questionText` is stored in the row for the asker's own history and is never transmitted to either provider. `utils/pii.ts` reliably catches checksum-validated structured identifiers (card numbers, PAN, GSTIN, Aadhaar, SSN) but its name detection is a label-anchored heuristic — the honest claim is "the question is redacted before it leaves the process," not "no PII can reach the provider."
-
-Failure paths: `400 Corpus documents must be PDF` · `400 Invalid request body` (schema — includes a question under 3 characters) · `403` for a write below its role tier · `404 Corpus document not found` / `404 Question not found` (also another org's, or a malformed uuid) · `409 This document is already in the corpus` · `422 No relevant source material found` (retrieval returned zero chunks above the similarity floor for that jurisdiction) · `502 Embeddings provider returned an unexpected response` / `502 Answer model returned an unexpected response` · `503 Embeddings are not configured` / `503 Answering is not configured` (no key for the selected `TAXGUARD_EMBEDDING_PROVIDER` — `VOYAGE_API_KEY` or `GEMINI_API_KEY` — / no `ANTHROPIC_API_KEY`).
-
-The **only** route into the platform anywhere in this app is `documentService.getDocumentById`/`openDocumentStream` — `documents`/`document_links` are platform tables (migration 030), not another app's, so this is not a rule-16 violation. No route into any other app's own tables. `utils/taxActParse.ts` is a pure function with no database import, unit-tested without Postgres. No money column, no GL posting, no outbox event, no webhook from this phase.
-
----
-
 ### StockLedger — `/api/v1/stock` — Phase 28
 
 Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom item/serial attributes, configurable item-code schemes, movements with a moving-average/specific-identification balance cache, QR labels. Reading is open to every member including `VIEWER`. Catalogue configuration (UoMs, categories, attributes, code schemes, locations, applying an industry profile) needs `OWNER`/`ADMIN`. Items, movements and serial changes are bookkeeping, so they need `ACCOUNTANT` and above, matching LedgerCore's own item/document routes. Posts nothing to LedgerCore's GL — every route here reads or writes only StockLedger's own 12 tables.
@@ -1144,29 +983,7 @@ Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom ite
 
 Failure paths: `400 Invalid request body` (schema) · `403` for a write below its role tier · `404` on any StockLedger entity id (also another org's, or a malformed uuid) · `409 StockLedger is already configured for this organization` · `409` on a duplicate UoM/category/scheme/location code or item barcode · `409` on insufficient stock for an issue/transfer-out · `409` on a serial status transition already satisfied · `422` on a category depth/location-kind/attribute-validation/code-pattern violation · `422 A label sheet is limited to 500 labels`.
 
-`services/stock/` and `controllers/stock/` contain no query against any other app's tables — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_|forecaster_|unitecon_|boarddeck_|taxguard_|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/` returns nothing. `utils/stockCodePattern.ts`, `utils/stockAttributes.ts`, `utils/stockValuation.ts` and `utils/gtin.ts` are all pure functions with no database import, unit-tested without Postgres. No GL posting, no outbox event, no webhook from this phase — see [stock.md](stock.md#deliberately-not-built).
-
----
-
-### Sandbox — `/api/v1/sandbox` — Phase 18
-
-A one-click, 24-month demo dataset covering all seven apps, seeded through the real services so every trigger, FSM and audit row fires genuinely — see [schema.md](schema.md#phase-18--the-sandbox-dataset-platform--applied). Platform-level, not namespaced under any app.
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/` | any member | `{ loaded, dataset }` — whether sample data is loaded, and its version/anchor month/counts if so |
-| POST | `/load` | `OWNER` | Seeds the dataset. `201` with the new `dataset` row. Writes two years of financial documents into the organization's own books, which is why this is `OWNER`-only rather than `OWNER`/`ADMIN` |
-| DELETE | `/` | `OWNER` | Removes the load marker only |
-
-`POST /load` and `DELETE /` are both idempotent-safe rather than silently repeatable: a second load returns `409 Sample data is already loaded for this organization` (the database's own `UNIQUE (org_id)` constraint, not a service-level check), and an unload with nothing loaded returns `409 No sample data is loaded for this organization`.
-
-**Unloading does not unpick the ledger.** Posted financial documents are immutable by trigger (rule 6) and stay that way — `DELETE /sandbox` removes only the `sandbox_datasets` marker row. Removing the seeded financial records themselves means deleting the organization; the client states this plainly before an unload, never implies otherwise.
-
-Also reachable from a terminal: `cd server && npm run seed:demo`, which seeds the single organization in the database (or the one named by an argument) and refuses under `NODE_ENV=production`, mirroring `npm run db:reset`'s own posture. On the client, `Pages/SandboxCard.tsx` on the app chooser exposes the same three routes: status to every member, Load and Remove **hidden** below `OWNER` and each gated by a `ConfirmDialog`.
-
-Every business record the load produces is created by calling the real app services — `invoiceService.createInvoice`, `billService.approveBill`, `forecaster/planService.createPlan`, and so on — never a raw `INSERT`. No app's seeder queries another app's tables directly (guardrails rule 16); account ids and similar cross-app facts are resolved once by LedgerCore's own seeder and passed down as plain data.
-
-Failure paths: `403` below `OWNER` on either write · `409` per above.
+`services/stock/` and `controllers/stock/` contain no query against any other app's tables — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/` returns nothing. `utils/stockCodePattern.ts`, `utils/stockAttributes.ts`, `utils/stockValuation.ts` and `utils/gtin.ts` are all pure functions with no database import, unit-tested without Postgres. No GL posting, no outbox event, no webhook from this phase — see [stock.md](stock.md#deliberately-not-built).
 
 ---
 
@@ -1180,4 +997,4 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-TaxGuard AI, AP-Flow, FP&A Engine, ForecasterPro, UnitEcon, and BoardDeck Automator are all documented in the section above. LedgerCore's QuickBooks Online sync (Phase 17) is the only remaining unbuilt surface.
+AP-Flow and StockLedger are fully documented in the section above. LedgerCore's QuickBooks Online sync (Phase 17) is the only remaining unbuilt surface. Five other apps were built and then removed from the suite in Phase 29 — see [roadmap.md](roadmap.md#phase-29-as-delivered) for what they were and why.

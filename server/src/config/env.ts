@@ -139,15 +139,6 @@ const parsed = {
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
   AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-3.6-flash'),
 
-  // Phase 16 — TaxGuard AI's embeddings provider: voyage | gemini. Only the
-  // selected provider's key is needed (gemini reuses GEMINI_API_KEY above).
-  // Optional by design, exactly as ANTHROPIC_API_KEY: the server and worker
-  // both boot without a key, and embeddingService throws 503 only when an
-  // embedding is actually attempted. Vectors from different providers are
-  // not comparable — switching means re-ingesting every corpus document.
-  TAXGUARD_EMBEDDING_PROVIDER: oneOf('TAXGUARD_EMBEDDING_PROVIDER', ['voyage', 'gemini'] as const, 'voyage'),
-  VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),
-
   // Phase 19.3 — the Drive integration's service account, the recommended way
   // to connect. The tenant shares a folder with GOOGLE_SERVICE_ACCOUNT_EMAIL
   // and no consent screen, no Google app verification and no refresh token are
@@ -158,8 +149,8 @@ const parsed = {
   // The address is NOT a secret — it is published to the tenant so they know
   // who to share with, and GET /integrations/drive returns it. The private key
   // is, and is never written to a table, never logged, and never returned by
-  // any route. It stays a plain env var for the same reason GEMINI_API_KEY and
-  // VOYAGE_API_KEY do: encrypting a server-wide secret in the database would
+  // any route. It stays a plain env var for the same reason GEMINI_API_KEY does:
+  // encrypting a server-wide secret in the database would
   // still leave INTEGRATION_ENCRYPTION_KEY sitting in plaintext env, so the
   // ciphertext would protect nothing the env var did not already protect.
   GOOGLE_SERVICE_ACCOUNT_EMAIL: optional('GOOGLE_SERVICE_ACCOUNT_EMAIL', ''),

@@ -7,8 +7,6 @@ import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
 import { handleIntegrationDriveSweep } from './handlers/integrationDriveSweepHandler.js';
 import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandler.js';
-import { handleBoardDeckGenerate } from './handlers/boarddeckGenerateHandler.js';
-import { handleTaxGuardEmbed } from './handlers/taxguardEmbedHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   INTEGRATION_DRIVE_POLL_INTERVAL_MS,
@@ -32,8 +30,6 @@ const HANDLERS: {
   'ap-flow-extract': handleApFlowExtract,
   'integration-drive-sweep': handleIntegrationDriveSweep,
   'integration-drive-sync': handleIntegrationDriveSync,
-  'boarddeck-generate': handleBoardDeckGenerate,
-  'taxguard-embed': handleTaxGuardEmbed,
 };
 
 let workers: Worker[] = [];

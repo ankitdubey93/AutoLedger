@@ -6,7 +6,7 @@ function app(slug: string, name: string, requires: string[] = []): AppSummary {
   return { slug, name, domain: 'd', tagline: 't', skills: [], status: 'building', requires };
 }
 
-const apps = [app('ledger-core', 'LedgerCore'), app('ap-flow', 'AP-Flow', ['ledger-core']), app('taxguard', 'TaxGuard AI')];
+const apps = [app('ledger-core', 'LedgerCore'), app('ap-flow', 'AP-Flow', ['ledger-core']), app('stock', 'StockLedger')];
 
 describe('toggleApp', () => {
   it('ticking an app also ticks what it requires', () => {

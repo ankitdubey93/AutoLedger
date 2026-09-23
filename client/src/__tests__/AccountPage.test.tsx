@@ -53,7 +53,7 @@ function entry(slug: string, name: string, enabled: boolean) {
   };
 }
 
-const apps = [entry('ledger-core', 'LedgerCore', true), entry('taxguard', 'TaxGuard AI', true)];
+const apps = [entry('ledger-core', 'LedgerCore', true), entry('stock', 'StockLedger', true)];
 
 let fetchMock: ReturnType<typeof vi.fn>;
 let putBodies: unknown[];
@@ -126,17 +126,17 @@ describe('AccountPage', () => {
     expect(screen.getByText(day(JOINED))).toBeInTheDocument();
   });
 
-  it('an OWNER unticks TaxGuard AI and saves', async () => {
+  it('an OWNER unticks StockLedger and saves', async () => {
     mockRoutes('OWNER');
     const user = userEvent.setup();
     renderAccount();
 
-    await user.click(await screen.findByRole('checkbox', { name: 'TaxGuard AI' }));
+    await user.click(await screen.findByRole('checkbox', { name: 'StockLedger' }));
     await user.click(within(appsPanel()).getByRole('button', { name: 'Save' }));
 
     expect(await screen.findByText('Saved.')).toBeInTheDocument();
     expect(putBodies).toHaveLength(1);
-    expect((putBodies[0] as { appSlugs: string[] }).appSlugs).not.toContain('taxguard');
+    expect((putBodies[0] as { appSlugs: string[] }).appSlugs).not.toContain('stock');
   });
 
   it('a VIEWER sees a read-only list and no Save button', async () => {
@@ -146,7 +146,7 @@ describe('AccountPage', () => {
     expect(await screen.findByText('Only an owner or admin can change which apps are enabled.')).toBeInTheDocument();
     const panel = within(appsPanel());
     expect(panel.getByText('LedgerCore')).toBeInTheDocument();
-    expect(panel.getByText('TaxGuard AI')).toBeInTheDocument();
+    expect(panel.getByText('StockLedger')).toBeInTheDocument();
     expect(panel.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
   });

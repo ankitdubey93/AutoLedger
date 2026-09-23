@@ -15,20 +15,10 @@
 import type { ComponentType } from 'react';
 import LedgerCoreRoutes from '../Pages/ledger-core/LedgerCoreRoutes';
 import ApFlowRoutes from '../Pages/ap-flow/ApFlowRoutes';
-import FpaRoutes from '../Pages/fpa-engine/FpaRoutes';
-import ForecasterRoutes from '../Pages/forecaster/ForecasterRoutes';
-import UniteconRoutes from '../Pages/unitecon/UniteconRoutes';
-import BoardDeckRoutes from '../Pages/boarddeck/BoardDeckRoutes';
-import TaxGuardRoutes from '../Pages/taxguard/TaxGuardRoutes';
 import StockRoutes from '../Pages/stock/StockRoutes';
 
 export const APP_ELEMENTS: Record<string, ComponentType> = {
   'ledger-core': LedgerCoreRoutes,
   'ap-flow': ApFlowRoutes,
-  'fpa-engine': FpaRoutes,
-  forecaster: ForecasterRoutes,
-  unitecon: UniteconRoutes,
-  boarddeck: BoardDeckRoutes,
-  taxguard: TaxGuardRoutes,
   stock: StockRoutes,
 };

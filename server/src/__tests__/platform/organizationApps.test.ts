@@ -59,21 +59,21 @@ it('GET without a session → 401', async () => {
   expect(res.status).toBe(401);
 });
 
-it('fresh org: GET → 200, selectionCompletedAt null, count 8, every enabled false and enabledAt null', async () => {
+it('fresh org: GET → 200, selectionCompletedAt null, count 3, every enabled false and enabledAt null', async () => {
   const agent = await loginAgent(app, userA);
   const res = await agent.get(BASE);
 
   expect(res.status).toBe(200);
   expect(res.body.success).toBe(true);
   expect(res.body.selectionCompletedAt).toBeNull();
-  expect(res.body.count).toBe(8);
+  expect(res.body.count).toBe(3);
   for (const a of res.body.apps as AppEntry[]) {
     expect(a.enabled).toBe(false);
     expect(a.enabledAt).toBeNull();
   }
 });
 
-it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other six not, selection complete", async () => {
+it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other one not, selection complete", async () => {
   const agent = await loginAgent(app, userA);
   const res = await agent.put(BASE).send({ appSlugs: ['ledger-core', 'ap-flow'] });
 
@@ -81,7 +81,7 @@ it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other six no
   const apps = res.body.apps as AppEntry[];
   expect(enabledSlugs(apps)).toEqual(['ap-flow', 'ledger-core']);
   expect(Number.isNaN(Date.parse(entry(apps, 'ledger-core').enabledAt ?? ''))).toBe(false);
-  expect(apps.filter((a) => !a.enabled)).toHaveLength(6);
+  expect(apps.filter((a) => !a.enabled)).toHaveLength(1);
   expect(Number.isNaN(Date.parse(res.body.selectionCompletedAt as string))).toBe(false);
 });
 
@@ -100,14 +100,14 @@ it('PUT replaces the set, and an app that stays keeps its original enabledAt', a
 
 it("PUT ['ap-flow'] → 422 'AP-Flow requires LedgerCore', previous set unchanged", async () => {
   const agent = await loginAgent(app, userA);
-  await agent.put(BASE).send({ appSlugs: ['taxguard'] });
+  await agent.put(BASE).send({ appSlugs: ['stock'] });
 
   const res = await agent.put(BASE).send({ appSlugs: ['ap-flow'] });
   expect(res.status).toBe(422);
   expect(res.body.error).toBe('AP-Flow requires LedgerCore');
 
   const after = await agent.get(BASE);
-  expect(enabledSlugs(after.body.apps as AppEntry[])).toEqual(['taxguard']);
+  expect(enabledSlugs(after.body.apps as AppEntry[])).toEqual(['stock']);
 });
 
 it("PUT { appSlugs: [] } → 400; PUT ['nope'] → 422 'Unknown app \"nope\"'", async () => {
@@ -143,9 +143,9 @@ it('ACCOUNTANT PUT → 403; VIEWER GET → 200', async () => {
   expect(get.status).toBe(200);
 });
 
-it("cross-tenant: org A enables ['taxguard']; org B sees nothing of it", async () => {
+it("cross-tenant: org A enables ['stock']; org B sees nothing of it", async () => {
   const agentA = await loginAgent(app, userA);
-  await agentA.put(BASE).send({ appSlugs: ['taxguard'] });
+  await agentA.put(BASE).send({ appSlugs: ['stock'] });
 
   const agentB = await loginAgent(app, userB);
   const res = await agentB.get(BASE);
@@ -157,14 +157,14 @@ it("cross-tenant: org A enables ['taxguard']; org B sees nothing of it", async (
 
 it("cross-tenant: org B PUT with header X-Org-Id: <A> leaves org A's set untouched", async () => {
   const agentA = await loginAgent(app, userA);
-  await agentA.put(BASE).send({ appSlugs: ['taxguard'] });
+  await agentA.put(BASE).send({ appSlugs: ['stock'] });
 
   const agentB = await loginAgent(app, userB);
   const put = await agentB.put(BASE).set('X-Org-Id', orgA).send({ appSlugs: ['ledger-core'] });
   expect(put.status).toBe(200);
 
   const a = await agentA.get(BASE);
-  expect(enabledSlugs(a.body.apps as AppEntry[])).toEqual(['taxguard']);
+  expect(enabledSlugs(a.body.apps as AppEntry[])).toEqual(['stock']);
 
   const b = await agentB.get(BASE);
   expect(enabledSlugs(b.body.apps as AppEntry[])).toEqual(['ledger-core']);
@@ -173,7 +173,7 @@ it("cross-tenant: org B PUT with header X-Org-Id: <A> leaves org A's set untouch
 
 it('audit: enabling writes INSERT rows and removing writes a DELETE row, app_slug platform', async () => {
   const agent = await loginAgent(app, userA);
-  await agent.put(BASE).send({ appSlugs: ['ledger-core', 'taxguard'] });
+  await agent.put(BASE).send({ appSlugs: ['ledger-core', 'stock'] });
   await agent.put(BASE).send({ appSlugs: ['ledger-core'] });
 
   const { rows } = await pool.query<{ operation: string; count: string }>(

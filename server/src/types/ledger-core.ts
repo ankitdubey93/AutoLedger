@@ -1257,51 +1257,11 @@ export interface MigrationCommitPreview {
   partiesToMerge: number;
 }
 
-/* ------------------------------------------------ Phase 12 — the FP&A actuals bridge */
-
-/** One row per (account, month) of posted actuals, base currency. */
-export interface MonthlyActualRow {
-  accountId: string;
-  code: string;
-  name: string;
-  type: AccountType;
-  month: string; // 'YYYY-MM-01'
-  debitCents: number;
-  creditCents: number;
-}
-
-/* ------------------------------------------------ Phase 14 — the UnitEcon sales bridge */
-
-/** Per-customer, per-month net (tax-exclusive) revenue in base currency,
- *  from ISSUED invoices only. UnitEcon's cohort input (guardrails rule 16). */
-export interface CustomerRevenueRow {
-  customerId: string;
-  customerName: string;
-  month: string; // 'YYYY-MM-01'
-  netRevenueCents: number;
-}
-
-/** Per-revenue-account, per-month units sold and net revenue, from ISSUED
- *  invoices in the organization's base currency only. UnitEcon's PVM input. */
-export interface ProductLineSalesRow {
-  accountId: string;
-  month: string; // 'YYYY-MM-01'
-  quantityMilli: number; // thousandths of a unit
-  netRevenueCents: number;
-}
-
-export interface ProductLineSalesResult {
-  rows: ProductLineSalesRow[];
-  /** ISSUED invoices in the window in a non-base currency, excluded because
-   *  invoice_lines carries no base-currency column. Never hidden. */
-  excludedForeignCurrencyInvoices: number;
-}
-
 /**
- * The three GL control accounts an FP&A model needs, resolved through
- * LedgerCore so no other app queries ledger_settings, ledger_invoice_settings
- * or accounts directly (guardrails rule 16). `null` means neither a
- * configured setting nor the default-chart code was found.
+ * The three GL control accounts, resolved through LedgerCore so nothing
+ * outside it queries ledger_settings, ledger_invoice_settings or accounts
+ * directly (guardrails rule 16). `null` means neither a configured setting
+ * nor the default-chart code was found.
  */
 export interface ControlAccounts {
   cashAccountId: string | null;

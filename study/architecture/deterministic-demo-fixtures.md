@@ -1,5 +1,7 @@
 # Deterministic Demo Fixtures: Seeding Through the Application, Not Around It
 
+> The sandbox dataset this note describes was removed in Phase 29. The mechanism — deterministic seeding through real services rather than raw inserts — is why the note is kept.
+
 > The obvious way to fill a demo database is a SQL dump or a script of raw `INSERT`s. This codebase's sandbox dataset does neither — it replays 24 months of history through the exact same services the UI calls, which means the data-generation code accidentally became the most thorough exercise of the real business logic this project has ever run in one sitting, and surfaced real bugs a unit test never would have.
 
 **Category:** Architecture

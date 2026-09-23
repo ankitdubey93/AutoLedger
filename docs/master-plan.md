@@ -1,5 +1,7 @@
 # AutoLedger — Master Plan: from portfolio suite to an AI-native ERP business
 
+> **2026-09-23 (Phase 29):** the suite is now three apps — LedgerCore, AP-Flow, StockLedger. Five apps described below as built were removed. Everything in this file remains a proposal.
+
 **Written:** 2026-09-22, after Phase 26 · **Status: PROPOSAL — nothing in this file is built or approved.**
 Nothing here overrides [roadmap.md](roadmap.md), the hard rules in [CLAUDE.md](../CLAUDE.md), or [guardrails.md](guardrails.md). Where this plan wants one of those changed, it says so in [§ 11 — Decisions that need your sign-off](#11-decisions-that-need-your-sign-off). Phase numbers below are **proposals**; the roadmap only assigns a number when a phase starts.
 
