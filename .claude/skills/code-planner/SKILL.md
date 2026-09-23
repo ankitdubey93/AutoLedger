@@ -132,7 +132,7 @@ Rules for filling it in:
 - **Files** — real paths, marked `(new)` or `(edit)`. For `(edit)`, name the function or block to change. A step with no file paths is not a step, it is a wish.
 - **Contract** — **write it out literally, copy-pasteable**: the actual signatures, the actual column list, the actual route table with methods and status codes, the actual error message strings. Do not describe the shape and hope. Services take `orgId` first; money fields are `*Cents: number`.
 - **Guardrails** — cite the numbered rules from [CLAUDE.md](../../../CLAUDE.md) that actually bite *here*. Not all sixteen — the two or three a tired executor would get wrong in this specific file.
-- **Proof** — the exact command plus the expected result. "Tests pass" is not a proof; `npm test -- accounts` with a named cross-tenant 404 assertion is. Every step needs one it can run *before* the next step begins.
+- **Proof** — the exact command plus the expected result. "Tests pass" is not a proof; `npm test -- accounts` with a named cross-tenant 404 assertion is. Every step needs one it can run *before* the next step begins. **The command must be runnable in this environment**: `psql` is not installed on the host and there is no `DATABASE_URL` (`server/.env` uses discrete `PG_*` vars), so direct SQL goes through `docker exec autodb_postgres psql -U autodb_user -d autodb -c '...'`. A proof the executor has to improvise around is not a proof.
 - **If it fails** — the sanctioned recovery, and the forbidden ones (see §7). This field is what keeps a stuck executor from routing around a guardrail.
 - **Owes** — the doc and study-note obligations this step creates, paid in the same step.
 
