@@ -323,6 +323,14 @@ Approved for later phases, add only when the app that needs it is being built:
 
 **Phase 19.3 (service-account auth) added no dependency either.** RFC 7523's JWT-bearer grant needs only an RS256 signature over a JSON payload — `node:crypto`'s `createSign`, no `google-auth-library`. See [study/security-auth/service-accounts-and-jwt-bearer.md](../study/security-auth/service-accounts-and-jwt-bearer.md).
 
+Added in Phase 28:
+
+| Package | Layer | Why |
+|---|---|---|
+| `qrcode` | server | StockLedger's label generation (`services/stock/labelService.ts`) — renders a QR payload to SVG server-side, so the physical label size and print scaling stay lossless and the payload-construction logic (the frontend base URL) never has to ship to the client. `@types/qrcode` alongside it, dev-only |
+
+No client-side dependency this phase — every StockLedger page (`StockSetupPage`, `StockItemsPage`, `StockMovementPage`, `StockLabelsPage`, `AttributeFields`, and the rest) is hand-rolled, matching every other app's pages; the generated QR SVG reaches the client as a string and is rendered as an `<img src="data:image/svg+xml;base64,...">`, never `dangerouslySetInnerHTML`.
+
 ---
 
 ## Troubleshooting

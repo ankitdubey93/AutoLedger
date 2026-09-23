@@ -20,6 +20,7 @@ import ForecasterRoutes from '../Pages/forecaster/ForecasterRoutes';
 import UniteconRoutes from '../Pages/unitecon/UniteconRoutes';
 import BoardDeckRoutes from '../Pages/boarddeck/BoardDeckRoutes';
 import TaxGuardRoutes from '../Pages/taxguard/TaxGuardRoutes';
+import StockRoutes from '../Pages/stock/StockRoutes';
 
 export const APP_ELEMENTS: Record<string, ComponentType> = {
   'ledger-core': LedgerCoreRoutes,
@@ -29,4 +30,5 @@ export const APP_ELEMENTS: Record<string, ComponentType> = {
   unitecon: UniteconRoutes,
   boarddeck: BoardDeckRoutes,
   taxguard: TaxGuardRoutes,
+  stock: StockRoutes,
 };

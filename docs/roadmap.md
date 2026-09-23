@@ -726,6 +726,12 @@ Close the books, generate the board deck.
 
 *Pattern:* five deterministic close-readiness checks against a LedgerCore fiscal period (trial balance balanced, no DRAFT invoices, no unposted bills, no unmatched bank lines, period open), budget-vs-actual (BvA) variance collapsed from ForecasterPro's own per-account variance into four board sections, and automated `.pptx` deck generation via a background job (Phase 7). Reads LedgerCore and ForecasterPro through named bridge functions only, the same rule-16 boundary every other analytics app in this suite established.
 
+### StockLedger — Inventory & Warehousing — Phase 28
+
+Perpetual inventory for retail traders, manufacturers, distributors and real-estate developers alike. Full spec: [stock.md](stock.md).
+
+*Pattern:* an industry-chosen starting catalogue (10 profiles, code copied into the org's own tables, not read live); per-org custom item/serial attributes as JSONB, validated in the service layer against a relational definitions table; a configurable item-code grammar with per-scope-key gapless counters; QR label generation with a deliberately minimal scan payload; moving-average and specific-identification perpetual valuation over an append-only movement ledger with an integrity-checked derived balance cache; deterministic multi-row lock ordering to keep concurrent transfers deadlock-free. `requires: []` — the one app in the suite posting nothing to the GL and reading no other app's tables; the eighth app, not a LedgerCore module.
+
 ---
 
 ## Phase 19, as delivered
@@ -951,6 +957,32 @@ A direct feature request in the Phase 24–26 convention (20–23 stay reserved)
 **Acceptance ✅ — verified.** `organizationApps.test.ts` (12 cases: auth, fresh-org shape, replace semantics and preserved `enabledAt`, `422`/`400` paths, dedupe, RBAC, two cross-tenant cases including a forged `X-Org-Id`, audit `INSERT`/`DELETE` rows, the onboarding link) and `appSelection.test.ts` (5 pure cases); client `appSelection`, `WelcomeAppsPage`, `AccountPage` new and `AppChooserPage` rewritten for the new endpoint. **1799 server tests** (2 skipped — the pre-existing gated live-provider cases) **+ 308 client tests**, all green.
 ---
 
+## Phase 28, as delivered
+
+**Phase number 28** is the next free number, following the Phase 24–27 "direct feature request" convention — 20–23 stay reserved. The master plan's own "proposed Phase 28" (row-level security) is only a proposal and gets renumbered when it actually starts; this Phase 28 is unrelated to that proposal and claims the number first, by delivery order.
+
+**A direct feature request, not part of the strategic-plan sequence.** The user's request counts as sign-off on master-plan decision **D1** ([master-plan.md § 11](master-plan.md)) — but **for inventory only**: ProcureFlow, MakeFlow, PeopleCost and AssetBook stay dropped; nothing else in D1 is approved by this phase. Plan: `plans/phase-28-stockledger.md` (deleted on delivery).
+
+**StockLedger is a new, eighth app**, slug `stock`, not a LedgerCore module. `requires: []` — the app stands alone, posting nothing to the general ledger; it does track **value** (moving average cost, or specific identification for `SERIAL` items) from day one, so a later phase only has to add the GL posting hook. StockLedger owns its own item master (`stock_items`) rather than extending LedgerCore's; rule 16 forbids reading another app's tables directly, and master-plan D5 (platform master data) is not approved, so linking a StockLedger item to a LedgerCore item is future work.
+
+**Schema — three migrations, `065`–`067`, 12 tables.** Settings, UoMs, categories, attribute definitions, code schemes + their counters, locations (065); the item master with JSONB attributes (066); lots, serials, the append-only movement ledger, and the derived balance cache (067). See [schema.md § Phase 28](schema.md#phase-28--stockledger-platform-independent-app--applied).
+
+**Core capabilities:** 10 industry starting profiles (code, not data — `config/stockIndustryProfiles.ts`, applied by copying rows into the org's own tables, mirroring how `config/apps.ts` itself is a static list); per-org, per-category custom item/serial attributes as JSONB, validated in the service layer against a relational definitions table; a small configurable item-code grammar with per-scope-key counters; perpetual inventory (moving average for `QUANTITY`/`LOT`, specific identification for `SERIAL`) with an append-only movement ledger and an integrity-checked derived balance cache; a serial status FSM; QR label generation with a deliberately minimal scan payload. Full spec: [stock.md](stock.md).
+
+**API.** `/api/v1/stock` — 36 routes across setup, catalogue (UoMs/categories/attributes/code schemes/locations), items, movements, serials and lookup/labels. See [api.md § StockLedger](api.md#stockledger--apiv1stock--phase-28).
+
+**Dependency.** `qrcode` (server) — SVG QR generation for printable labels. See [development.md § Dependency policy](development.md#dependency-policy).
+
+**Deliberately not built.** No GL posting (the natural rule-16 bridge — an inventory-asset debit on receipt, a COGS debit on issue — is named future work); no FIFO costing (moving average and specific identification only; FIFO cost layers are the named next build-ladder step); no stock count/cycle-count workflow; no purchase order or goods-receipt document (no 3-way matching, matching AP-Flow's own stated gap); no reservation beyond a serial's manual `BOOKED` status; no thermal-printer driver integration; no multi-currency costing; no CSV/bulk item import; no webhook event and no background job. Full list: [stock.md § Deliberately not built](stock.md#deliberately-not-built).
+
+**Acceptance ✅ — verified.** 1969 server tests (1967 passed, 2 skipped — the same pre-existing gated live-provider cases every prior phase's total carries; 168 of the total are StockLedger's own) + 338 client tests (30 StockLedger's own), all green. `npm run verify:integrity` passes with 5 checks, including the new `stock_balances_match_movements` reconciliation. A formal guardrail review against all 16 hard rules found zero violations. A real end-to-end browser smoke test (register → app picker → setup wizard → real-estate item creation → serial receipt with custom attributes → book/issue FSM → QR label generation with real QR images → scan-URL lookup navigation) passed all 8 milestones against the real dev stack.
+
+**Study notes written for this phase** — 5 new, 4 extended (no debt): [inventory-valuation-and-perpetual-stock.md](../study/architecture/inventory-valuation-and-perpetual-stock.md), [jsonb-user-defined-attributes.md](../study/postgresql/jsonb-user-defined-attributes.md), [discriminated-unions-and-parsers.md](../study/typescript/discriminated-unions-and-parsers.md), [barcodes-and-qr-codes.md](../study/architecture/barcodes-and-qr-codes.md), [schema-driven-forms-and-print-layouts.md](../study/react/schema-driven-forms-and-print-layouts.md); extended [gapless-numbering-and-counters.md](../study/postgresql/gapless-numbering-and-counters.md), [partial-unique-indexes.md](../study/postgresql/partial-unique-indexes.md), [transactions-isolation-pooling.md](../study/postgresql/transactions-isolation-pooling.md), [const-assertions-and-satisfies.md](../study/typescript/const-assertions-and-satisfies.md).
+
+**Next step: Phase 29** — linking a StockLedger item to LedgerCore's item catalogue and posting a stock movement's value into the general ledger (inventory-asset on receipt, COGS on issue), the bridge this phase deliberately left unbuilt.
+
+---
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.
@@ -973,7 +1005,7 @@ Phase 7 also delivered **financial-event webhooks** — an outbound notification
 
 The prior roadmap (Phases 6–14, before this restructure) planned Inventory & WMS, Procurement/P2P, Manufacturing/MRP, HR & Payroll, QMS, CRM, and EAM as modules of one ERP. None of that scope survives the restructure — the seven apps above are the roadmap now. The engineering patterns those modules would have demonstrated are kept here only as a record, since some are genuinely interesting interview material even though nothing will be built against them:
 
-- **Inventory & WMS** — pessimistic locking (`SELECT ... FOR UPDATE`) on stock rows; append-only movement ledger; current quantity always derived, never a mutable counter.
+- **Inventory & WMS** — **superseded by [Phase 28](#phase-28-as-delivered), StockLedger.** Master-plan decision D1 was approved for inventory only (2026-09); the pattern originally sketched here — pessimistic locking (`SELECT ... FOR UPDATE`) on stock rows, an append-only movement ledger, current quantity always derived, never a mutable counter — is exactly what Phase 28 built, plus industry-specific catalogues, custom attributes, configurable item codes and QR labels the original sketch didn't anticipate. ProcureFlow, MakeFlow, PeopleCost and AssetBook (the rest of D1) remain dropped.
 - **Procurement / P2P** — FSM-enforced status progression; automated 3-way matching (the pattern AP-Flow now owns instead).
 - **Manufacturing / MRP & BOM** — `WITH RECURSIVE` CTEs to resolve nested component trees; mandatory cycle detection.
 - **HR & Payroll** — batch processing via cron-triggered jobs; `EXCLUDE USING GIST` constraints (requires `btree_gist`) to make overlapping leave ranges physically impossible.

@@ -3,7 +3,7 @@
 > A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim
+**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim. Extended Phase 28 — StockLedger's multi-row balance/serial locking: deterministic lock ordering, upsert-then-lock, and a `FULL JOIN` across a derived cache and its source ledger.
 **Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
 
 ---
@@ -169,6 +169,44 @@ The outer `UPDATE` marks the claimed rows (`published_at = now()`) in the same s
 
 Full mechanism and the rest of the drain's design: [../architecture/transactional-outbox.md](../architecture/transactional-outbox.md).
 
+### Locking several rows at once: deterministic ordering as the actual deadlock fix
+
+Every earlier example here locks *one* row (a counter, a stock item in the rejected inventory-checkout example, a batch of outbox events claimed as an atomic set). StockLedger's `transfer` movement is the first place this codebase genuinely needs to lock **several distinct balance rows in one transaction** — a transfer debits a `(item, from-location)` balance and credits a `(item, to-location)` balance, both real rows that must be locked before either is written, so a concurrent transfer can't read a stale quantity on either side.
+
+Locking two rows is exactly the shape that produces a classic deadlock: transaction A locks row 1 then wants row 2; transaction B — a transfer running in the *opposite* direction between the same two locations — locks row 2 then wants row 1. Each holds what the other needs; Postgres detects the cycle after `deadlock_timeout` (1s by default) and kills one with `40P01`. The fix the section above already names — "always acquire locks in a deterministic order" — is what `movementService.ts`'s `lockBalances` actually does: every call sorts its full set of `(itemId, locationId, lotId)` keys into one canonical order *before* issuing any `FOR UPDATE`, regardless of which balance the caller thinks of as "the from side" or "the to side." A transfer A→B and a transfer B→A both end up locking the same two rows in the same relative order — whichever sorts first, always first — so the cycle that produces a deadlock can never form. This isn't a mitigation that makes deadlocks *rare*; sorted locking makes the specific interleaving that causes them structurally unreachable, which is why `movementConcurrency.test.ts` runs two opposite-direction transfers concurrently, repeatedly, and asserts zero `40P01`s across the run rather than merely asserting the transfers eventually succeed.
+
+### Upsert-then-lock: `SELECT ... FOR UPDATE` needs a row to already exist
+
+`SELECT ... FOR UPDATE` can only lock a row that's already there — it is not a mechanism for creating one. A `receive` movement's very first unit for a given `(item, location, lot)` has no balance row yet, so there's nothing to `FOR UPDATE` against. `lockBalances` handles this the same way the invoice/item counters handle their own "first use" case (`gapless-numbering-and-counters.md`'s lazy-seed pattern): it first runs
+
+```sql
+INSERT INTO stock_balances (org_id, item_id, location_id, lot_id, quantity_milli, value_cents)
+VALUES ($1, $2, $3, $4, 0, 0)
+ON CONFLICT (org_id, item_id, location_id, lot_id) DO NOTHING
+```
+
+for every key in the sorted set — safe under concurrency because `ON CONFLICT DO NOTHING` never raises an error even if another transaction wins the insert race — and only then runs the sorted `SELECT ... FOR UPDATE` across all the keys, now guaranteed to find every row. "Upsert, then lock" rather than "lock, and insert if missing" specifically because Postgres has no `SELECT ... FOR UPDATE OR INSERT` primitive; you either prove the row exists first (this pattern) or you catch a locking failure and retry, and the upsert is strictly simpler once you already have `ON CONFLICT DO NOTHING` as a tool.
+
+### Why `SERIALIZABLE` and per-row optimistic versioning were both rejected here
+
+Two alternatives to pessimistic locking were considered and rejected for StockLedger's balance updates specifically:
+
+- **`SERIALIZABLE` + retry.** Works well when the read set is hard to enumerate ahead of time. Here it's the opposite — a movement's affected balance rows are known exactly (they're computed from the request body) before any query runs, which is precisely the condition under which `FOR UPDATE` on a deterministic key set is simpler and cheaper: no abort-and-retry loop, no risk of a retry storm under contention, and the lock scope is provably minimal (exactly the rows this movement touches, nothing more).
+- **Optimistic concurrency (a `version` column, `UPDATE ... WHERE version = $expected`).** Works well when contention is rare and a conflict should be surfaced to a human to resolve (an edit-conflict UI). A stock movement is the opposite case — two concurrent receipts against the same item/location are a completely normal, expected occurrence with no ambiguity about the correct outcome (both should succeed, and the balance should reflect both), not a conflict a person needs to adjudicate. Pessimistic locking lets both proceed correctly, serialized but never rejected; optimistic locking would make the second one fail and need an application-level retry loop to get the same result `FOR UPDATE` gives for free.
+
+### `FULL JOIN` across a derived cache and its append-only source, and why raw `NULL` breaks it
+
+`db/integrity.ts`'s `checkStockBalancesMatchMovements` needs to compare two independently-computed sets of rows — `stock_balances` (the cache) and a `GROUP BY` aggregate over `stock_movements` (Σ of the append-only source) — keyed by `(org_id, item_id, location_id, lot_id)`, and flag any key present in one set but not the other, or present in both with a different total. A `FULL JOIN` is the right shape (an `INNER JOIN` would silently hide a key that exists in only one side, exactly the bug this check exists to catch), but the natural key includes `lot_id`, which is nullable — and SQL's `a = b` is `NULL` (not `TRUE`) whenever either side is `NULL`, so a plain `ON a.lot_id = b.lot_id` fails to match two rows that both genuinely have "no lot," treating every lotless balance as if it existed on only one side. The fix folds the nullable column to a sentinel before comparing:
+
+```sql
+FULL JOIN movement_totals m
+  ON b.org_id = m.org_id AND b.item_id = m.item_id AND b.location_id = m.location_id
+ AND COALESCE(b.lot_id, '00000000-0000-0000-0000-000000000000')
+   = COALESCE(m.lot_id, '00000000-0000-0000-0000-000000000000')
+```
+
+`COALESCE` substitutes a fixed, never-otherwise-used sentinel UUID whenever `lot_id` is `NULL`, so two lotless rows now compare sentinel-to-sentinel with ordinary equality, which *is* `TRUE` for equal values — turning a join condition that could never match `NULL` against `NULL` into one that can. This is the general fix for joining on a nullable key: `NULL` never participates in `=` truthfully, so any join (or `GROUP BY`, or `DISTINCT`) that needs nullable columns to behave as ordinary comparable values has to substitute a stand-in value first.
+
 ## Why we chose it here
 
 | Decision | Reasoning |
@@ -177,7 +215,9 @@ Full mechanism and the rest of the drain's design: [../architecture/transactiona
 | `DELETE … RETURNING` to consume a refresh token | Read-then-write would let two concurrent refreshes both succeed. One statement makes the claim atomic — and turns "zero rows" into replay detection |
 | `ON CONFLICT DO NOTHING` for slug allocation | A caught `23505` would abort the enclosing transaction, so retrying needs either this or a `SAVEPOINT` per attempt |
 | READ COMMITTED (the default) for GL writes | The balance invariant is enforced in-application before insert, by CHECK constraints, and by a deferred constraint trigger at `COMMIT`; we're not doing read-then-write on contended rows |
-| `SELECT ... FOR UPDATE` | Not used anywhere. It was planned for inventory stock checkout, which is genuinely read-then-write on a hot row — but Inventory was dropped from scope, and no surviving app has that shape. See [roadmap.md](../../docs/roadmap.md#dropped-from-scope) |
+| `SELECT ... FOR UPDATE` on a deterministically-sorted key set | Phase 28 — StockLedger's `lockBalances`/`lockSerials`. Read-then-write on genuinely hot rows (a movement's balance), where the affected key set is known exactly before any query runs — the case this codebase originally imagined for the now-dropped Inventory module, ultimately built by StockLedger instead. See [roadmap.md](../../docs/roadmap.md#dropped-from-scope) |
+| `SERIALIZABLE` + retry for stock movements | Rejected — the read set is already known exactly (computed from the request), so it gets nothing over `FOR UPDATE` except an abort-and-retry loop and a risk of a retry storm under contention |
+| Optimistic (`version` column) concurrency for stock movements | Rejected — two concurrent receipts against the same balance are both supposed to succeed, not conflict; optimistic locking would fail the second one and need an app-level retry to reach the outcome `FOR UPDATE` gives directly |
 | Append-only ledgers over mutable counters | Sidesteps the lost-update class entirely — appending rows never contends the way `UPDATE counter` does. Current quantity is derived |
 
 That last one is the deepest architectural point: choosing an append-only data model makes a whole category of concurrency bug structurally impossible rather than defended against.
@@ -200,6 +240,12 @@ Phase 7:
 - `server/src/services/outboxService.ts` — `claimUnpublishedEvents`, the batch `SKIP LOCKED` claim above
 - `server/src/services/webhookDeliveryService.ts` — `claimStaleDeliveries`, the same primitive applied to the stale-delivery sweep
 
+Phase 28:
+
+- `server/src/services/stock/movementService.ts` — `lockBalances` (sort → upsert-seed via `ON CONFLICT DO NOTHING` → sorted `FOR UPDATE`), `lockSerials` (the same sorted-lock discipline applied to `stock_serials` rows by id)
+- `server/src/__tests__/stock/movementConcurrency.test.ts` — two opposite-direction transfers fired concurrently, repeatedly, asserting zero `40P01` deadlocks across the run
+- `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements`'s `COALESCE`-guarded `FULL JOIN`
+
 ## Gotchas
 
 - **`pool.query` inside a transaction block.** Silent partial commit. The single most damaging bug in this codebase's problem domain.
@@ -209,6 +255,9 @@ Phase 7:
 - **`SERIALIZABLE` without a retry loop.** You've converted a correctness bug into an intermittent user-facing 500.
 - **Money read as a string.** `row.debit_cents + 100` yields `"5000100"`. Parse at the service boundary.
 - **Connection pooling in serverless.** Each instance opens its own pool; Postgres has a hard `max_connections` (default 100). PgBouncer in transaction mode is the usual answer — but it breaks session-scoped features like prepared statements and `SET LOCAL`.
+- **Sorting only *some* of the locked keys.** Deterministic ordering only prevents deadlocks if *every* code path that locks more than one of these rows sorts the same way — a second function that locks the same two balance rows in request-arrival order instead of sorted order reintroduces the exact cycle the sort was meant to close. The discipline has to be centralized in one shared locking helper (`lockBalances`), not re-implemented ad hoc per movement type.
+- **`ON CONFLICT DO NOTHING` seeding a row with zero quantity is not itself the operation.** It only guarantees a lockable row exists; the actual quantity/value change still happens in the subsequent `UPDATE` under the lock. Skipping the seed step (assuming the row already exists because "it usually does") reintroduces the exact race `FOR UPDATE` exists to close, on exactly the first-ever movement for a given key.
+- **`COALESCE`'s sentinel must be a value that can never occur for real.** Using an empty string or `0` as the stand-in for a `NULL` UUID would be wrong if that value could ever legitimately appear in the column; a fixed all-zero UUID works here specifically because `lot_id` only ever holds real generated UUIDs or `NULL`, never the literal zero UUID.
 
 ## Interview Q&A
 
@@ -236,15 +285,28 @@ A: Because JavaScript numbers are IEEE 754 doubles, exactly representing integer
 **Q: Tell me about a time you had to reason about transaction boundaries.**
 A: The rule I enforce on AutoLedger came from a bug pattern in its predecessor: a service opened a transaction, wrote its rows, committed, and then ran a follow-up query via `pool.query` for a side effect, with the error swallowed as non-fatal. It worked, but it was a template waiting to be copied wrong — the next person to add a statement inside the transaction block would reach for `pool.query` too and get a silent partial write. So the guardrail is two-part: every query inside a transaction uses the checked-out client, and no post-`COMMIT` follow-up work in the same function at all. If something must happen after commit, it becomes a queued job with real retry semantics instead of a fire-and-forget with a swallowed error.
 
+**Q: A transfer moves stock between two locations, so you need to lock two different balance rows in one transaction. What stops that from deadlocking against a transfer running in the opposite direction?**
+A: Deterministic lock ordering. Both transfers know the full set of rows they need to lock before they lock anything, so instead of locking "from" then "to" in whatever order the request happened to name them, the code sorts the complete key set into one canonical order first and locks in that order every time. A transfer A→B and a transfer B→A then both lock the same two rows in the same relative order — whichever key sorts first is always locked first, by both transactions — so the circular wait that causes a deadlock (each holding what the other wants) can never form. It's not a fix that makes deadlocks less likely; it makes the specific interleaving that causes one unreachable, which is why the concurrency test asserts zero deadlocks across many repeated runs rather than just eventual success.
+
+**Q: `SELECT ... FOR UPDATE` needs the row to already exist. What do you do when a receipt is the very first movement for an item at a location, and there's no balance row to lock yet?**
+A: Seed it first with an idempotent insert — `INSERT ... VALUES (..., 0, 0) ON CONFLICT (...) DO NOTHING` — for every key you're about to need, before attempting any lock. `ON CONFLICT DO NOTHING` never raises even if a concurrent transaction wins the insert race, so after that statement every key is guaranteed to have a row, and the subsequent sorted `SELECT ... FOR UPDATE` is guaranteed to find something to lock. The actual quantity change still happens later, under the lock — the seed step's only job is making sure there's a row to lock in the first place.
+
+**Q: Why not use SERIALIZABLE isolation for stock movements instead of explicit row locks?**
+A: SERIALIZABLE earns its keep when the set of rows a transaction will touch is hard to know in advance — the database tracks read/write dependencies for you and aborts a transaction that would have caused an anomaly, so you don't have to enumerate what to lock. A stock movement doesn't have that problem: the exact balance rows it will touch are computable directly from the request before any query runs. Given a known key set, pessimistic locking is strictly simpler — no abort-and-retry loop, and the lock scope is provably minimal, exactly the rows this movement needs and nothing else.
+
 ## Follow-ups they'll dig into
 
 - "How do you retry a serialization failure safely?" (Only if the transaction is side-effect-free outside the DB; cap attempts; add jitter. And the retry must re-run the *reads*, not just the writes.)
 - "What's the difference between `FOR UPDATE` and `FOR NO KEY UPDATE`?" (The latter doesn't block FK checks that only need key stability — fewer false conflicts.)
 - "How would you implement a job queue in Postgres?" (`SELECT ... FOR UPDATE SKIP LOCKED LIMIT 1` — consumers grab different rows without blocking each other.)
 - "Why do long transactions cause table bloat?" (An open snapshot pins dead tuples; `VACUUM` can't reclaim rows still visible to any live snapshot.)
+- "What if the set of rows to lock isn't known until you've already locked some of them?" (Deterministic ordering stops working the moment the key set can grow mid-transaction — that scenario needs either `SERIALIZABLE`+retry or a coarser lock covering the whole possible range up front.)
+- "How would you prove your deadlock fix actually works, rather than just being lucky in testing?" (Fire the two opposite-order operations concurrently, repeatedly, under real load — a test that runs them once and passes proves almost nothing, since a deadlock is a race that may not trigger on a given run.)
 
 ## See also
 
 - [../architecture/multi-tenancy-row-level-scoping.md](../architecture/multi-tenancy-row-level-scoping.md)
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md)
+- [../architecture/inventory-valuation-and-perpetual-stock.md](../architecture/inventory-valuation-and-perpetual-stock.md) — the append-only ledger + derived-cache design these locks protect
+- [gapless-numbering-and-counters.md](gapless-numbering-and-counters.md) — the `ON CONFLICT DO NOTHING` lazy-seed idiom, first used for a counter row, reused here to seed a lockable balance row
 - `docs/guardrails.md` rules 5 and 7

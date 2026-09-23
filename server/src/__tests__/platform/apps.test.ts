@@ -25,7 +25,7 @@ describe('GET /api/v1/apps', () => {
     expect(res.status).toBe(401);
   });
 
-  it('returns exactly seven apps with unique kebab-case slugs', async () => {
+  it('returns exactly eight apps with unique kebab-case slugs', async () => {
     const user = await createUserWithOrg();
     const agent = await loginAgent(app, user);
 
@@ -33,11 +33,11 @@ describe('GET /api/v1/apps', () => {
 
     expect(res.status).toBe(200);
     expect(res.body.success).toBe(true);
-    expect(res.body.count).toBe(7);
-    expect(res.body.apps).toHaveLength(7);
+    expect(res.body.count).toBe(8);
+    expect(res.body.apps).toHaveLength(8);
 
     const slugs = res.body.apps.map((a: { slug: string }) => a.slug);
-    expect(new Set(slugs).size).toBe(7);
+    expect(new Set(slugs).size).toBe(8);
     for (const slug of slugs) {
       expect(slug).toMatch(/^[a-z]+(-[a-z]+)*$/);
     }

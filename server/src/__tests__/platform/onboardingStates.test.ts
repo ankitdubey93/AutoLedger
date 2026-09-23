@@ -43,7 +43,7 @@ it('GET /onboarding returns one item per app plus platform, all NOT_STARTED for 
   const res = await agent.get(BASE);
 
   expect(res.status).toBe(200);
-  expect(res.body.items).toHaveLength(8);
+  expect(res.body.items).toHaveLength(9);
   for (const item of res.body.items as { status: string; draft: Record<string, unknown> }[]) {
     expect(item.status).toBe('NOT_STARTED');
     expect(item.draft).toEqual({});

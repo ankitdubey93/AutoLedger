@@ -82,6 +82,22 @@ export const APPS = [
     status: 'building',
     requires: ['ledger-core'],
   },
+  {
+    slug: 'stock',
+    name: 'StockLedger',
+    domain: 'Inventory & Warehousing',
+    tagline: 'Industry-ready inventory with your own item codes and QR labels.',
+    skills: [
+      'Industry inventory templates',
+      'User-defined item attributes (JSONB)',
+      'Configurable item-code schemes',
+      'QR code labelling',
+      'Perpetual inventory with moving-average and specific-identification costing',
+      'Pessimistic locking on stock balances',
+    ],
+    status: 'building',
+    requires: [],
+  },
 ] as const satisfies readonly AppDefinition[];
 
 export type AppSlug = (typeof APPS)[number]['slug'];

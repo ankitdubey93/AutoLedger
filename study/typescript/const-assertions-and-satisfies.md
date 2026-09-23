@@ -3,7 +3,7 @@
 > Two independent tools that solve one recurring problem together: keep exactly one array as the source of truth for both a runtime list and the type that describes it, with the compiler checking the array's *shape* while still remembering its *exact values*.
 
 **Category:** TypeScript
-**Introduced by:** Phase 2 — `server/src/config/apps.ts`, the app registry
+**Introduced by:** Phase 2 — `server/src/config/apps.ts`, the app registry. Extended Phase 28 — `stockIndustryProfiles.ts`'s ten profiles (the same `as const satisfies` shape, one level more nested) and `STOCK_SERIAL_TRANSITIONS`, a `via`-tagged FSM table that deliberately does *not* use this pattern.
 **Verified against:** TypeScript 5.x / 7 (type-checking behaviour is unchanged across the JS→Go compiler rewrite; only speed changes)
 
 ---
@@ -79,6 +79,33 @@ export const APPS = [
 
 Read right to left: "this array, as const, must satisfy `readonly AppDefinition[]` — but keep inferring its own (narrower) type regardless." If an entry is missing a field, has a typo'd key, or sets `status` to something outside `'building' | 'planned'`, this line fails to compile. If it's valid, `APPS`'s inferred type is still the fully literal tuple from step 2 — `satisfies` contributes nothing to the final type, only a checkpoint during inference.
 
+### The pattern one level deeper: ten profiles, each with nested arrays of nested arrays
+
+`config/apps.ts`'s `APPS` is a flat array of flat objects. `stockIndustryProfiles.ts`'s `STOCK_INDUSTRY_PROFILES` applies the identical `as const satisfies readonly StockIndustryProfile[]` shape to something structurally deeper — each profile has a `categories` array, each category has an `attributes` array, each attribute is its own object with a `dataType` field that needs to be one of a fixed set of literals (`StockAttributeType`). `as const` freezes recursively through every level of this nesting, not just the top array — the same mechanism as `config/apps.ts`, just exercised on a shape with more levels, which is worth knowing cold: `as const`'s recursion is unconditional and doesn't stop at the first nested array or object it encounters.
+
+The payoff of `satisfies` here is proportionally larger than in the flat `APPS` case, precisely because there's more nested structure for a typo to hide in: a profile's category referencing a `defaultUomCode` that doesn't match any of that same profile's declared `uoms[].code` entries wouldn't be caught by `satisfies` either (cross-referencing sibling array entries is a runtime/test concern, not something the type system can express) — but a `dataType` value misspelled as `'Number'` instead of `'NUMBER'`, or a required field left off one attribute three levels deep in the ninth profile of ten, fails to compile immediately, at the exact line, rather than surfacing later as a silently-skipped custom field in a specific industry's setup wizard.
+
+### When the pattern is deliberately *not* used: a `via`-tagged transition table
+
+`STOCK_SERIAL_TRANSITIONS`, the FSM table for serial status changes (`AVAILABLE -> BOOKED` via `MANUAL`, `AVAILABLE -> ISSUED` only via `MOVEMENT`, and so on), is declared with a plain type annotation instead:
+
+```ts
+export const STOCK_SERIAL_TRANSITIONS: Readonly<
+  Record<StockSerialStatus, readonly { to: StockSerialStatus; via: 'MANUAL' | 'MOVEMENT' }[]>
+> = {
+  AVAILABLE: [
+    { to: 'ON_HOLD', via: 'MANUAL' },
+    { to: 'BOOKED', via: 'MANUAL' },
+    { to: 'ISSUED', via: 'MOVEMENT' },
+  ],
+  // ...
+};
+```
+
+No `as const`, no `satisfies` — a genuine, deliberate departure from the `APPS`/`STOCK_INDUSTRY_PROFILES` shape, and worth being able to explain *why* rather than treating it as an inconsistency. The annotation form is chosen here because nothing downstream ever needs the *literal* type of an individual `to`/`via` value — the only consumer, `canTransitionSerial`, calls `.some((t) => t.to === to && t.via === via)`, comparing against caller-supplied `StockSerialStatus`/`'MANUAL' | 'MOVEMENT'` values at the *union* level, never reading, say, `STOCK_SERIAL_TRANSITIONS.AVAILABLE[2].to` and expecting the literal `'ISSUED'` specifically. `Record<StockSerialStatus, ...>` as an annotation buys something `as const satisfies` doesn't automatically give for free here: **exhaustiveness over the record's keys** — TypeScript requires every member of `StockSerialStatus` to appear as a key in the object literal, and rejects both a missing status and a typo'd one, which is precisely the guarantee this table most needs (a serial status with no transition table entry at all would make `canTransitionSerial` throw on lookup, `STOCK_SERIAL_TRANSITIONS[from]` reading a `Record`'s missing key as `undefined`, whose `.some(...)` call fails at runtime). `satisfies Record<StockSerialStatus, ...>` would check the same completeness but — being a validation pass that's then discarded, as this note's step 4 explains — would still need `as const` layered underneath to keep literals if literals were wanted, and they aren't here.
+
+The general rule this contrast illustrates: reach for `as const satisfies` when you want the compiler to check a shape *and* you (or a downstream union-deriving type like `AppSlug`) need the literal values preserved; reach for a plain `Record<Key, Value>` annotation when what you actually need is exhaustiveness over a fixed set of keys and the values themselves are only ever compared at the union-type level, never read back as individual literals.
+
 ## Why we chose it here
 
 The alternative to `satisfies` is a plain annotation (`const APPS: AppDefinition[] = [...]`), which type-checks the same array but widens every field to its declared type. That's a real loss here: `AppSlug` is derived *from* `APPS`, so if `APPS` were annotated as `AppDefinition[]`, `slug` would already be `string` by the time `AppSlug` tries to extract from it, and the extraction would just produce `string` — a union with no members worth having.
@@ -97,6 +124,8 @@ The same pattern already existed in this codebase before Phase 2: `types/auth.ts
 
 - `server/src/config/apps.ts` — `APPS` (`as const satisfies readonly AppDefinition[]`), `AppSlug` (derived union), `isAppSlug` (the type predicate that narrows a runtime string back down to `AppSlug`)
 - `server/src/types/auth.ts` — `ROLES` / `Role`, the earlier instance of the `as const` → `typeof X[number]` half of the pattern (no `satisfies` there, because `ROLES` is a flat string array with nothing to validate a shape against)
+- `server/src/config/stockIndustryProfiles.ts` — `STOCK_INDUSTRY_PROFILES` (`as const satisfies readonly StockIndustryProfile[]`), the same pattern applied through several levels of nested arrays
+- `server/src/types/stock.ts` — `STOCK_SERIAL_TRANSITIONS` (a plain `Readonly<Record<StockSerialStatus, ...>>` annotation, deliberately *not* `as const satisfies` — see above), `canTransitionSerial`
 
 ## Gotchas
 
@@ -104,6 +133,7 @@ The same pattern already existed in this codebase before Phase 2: `types/auth.ts
 - **The union comes from the *type*, not the array.** `AppSlug` is computed once, at the type level, from `typeof APPS`. Pushing a new object into `APPS` at runtime does not add a member to `AppSlug` — the array is also `readonly`, so `APPS.push(...)` is a compile error, which is the intended guardrail: the registry is edited by adding a line to the literal, not by mutation.
 - **`isAppSlug` is still required, not optional.** The union type only helps *inside* the program, where the compiler can track values. The moment a slug comes from `req.params.appSlug`, it's an untyped `string` again — TypeScript erases at runtime, so there is no way to "check the type" of a string against a union without a hand-written predicate function that actually compares it to the known values.
 - **`(typeof X)[number]` needs `X` to be an array or tuple type.** Indexing a plain object type by `number` doesn't do this — it only works because `APPS` is an array literal.
+- **`Record<Key, Value>` gives exhaustiveness over keys "for free," but `as const satisfies Record<Key, Value>` does not automatically give you the same thing back** — `satisfies` still requires the object to conform to the target type, so a missing key is still caught, but reaching for `as const satisfies` when what you actually wanted was exhaustiveness-checking (not literal-value preservation) is more ceremony than the plain-annotation form for no extra benefit — pick based on whether anything downstream needs the literals, not by default habit.
 - **Mixing `as const` with a spread can re-widen.** `[...APPS]` (used in `appService.listApps()` to avoid handing out the frozen array by reference) has type `AppDefinition[]`, not the literal tuple — which is fine there, since the function's return type is deliberately the wider `AppSummary[]`, but it's worth noticing that widening happened.
 
 ## Interview Q&A
@@ -126,6 +156,12 @@ A: You can't cast your way there safely — `as AppSlug` compiles but proves not
 **Q: Tell me about a time a widened type caused a bug, or would have.**
 A: On AutoLedger, the app registry (`APPS`) needs a derived `AppSlug` union so that route params and the client's app-chooser routing can be checked against exactly the seven real slugs, not an arbitrary string. If `APPS` were given a plain `AppDefinition[]` annotation instead of `as const satisfies AppDefinition[]`, every field — including `slug` — would widen to its declared type, `string`. `AppSlug` derived from that would just be `string`, and `isAppSlug`, route matching, and the client-side `useActiveApp` hook would all lose the compile-time guarantee that a slug is one of the seven — a typo'd slug anywhere in the app would compile cleanly and fail only at runtime, as a silent no-match instead of a caught error.
 
+**Q: You've got one FSM transition table (`STOCK_SERIAL_TRANSITIONS`) declared with a plain `Record<Key, Value>` annotation, right next to a config array (`STOCK_INDUSTRY_PROFILES`) that uses `as const satisfies`. Is that an inconsistency?**
+A: No — they're solving different problems. `as const satisfies` is for when you want a value checked against a shape *and* you need its literal types preserved afterward, typically because something downstream derives a union from it. The transition table's only consumer compares `to`/`via` fields against caller-supplied union-typed values with `===` — nothing ever needs to read back the literal `'ISSUED'` specifically from a fixed array index. What the transition table does need is exhaustiveness: every member of `StockSerialStatus` must appear as a key, or a status with no defined transitions would make a lookup silently return `undefined` and crash later. A plain `Record<StockSerialStatus, ...>` annotation gives you exactly that check, directly, with no `as const` ceremony buying anything unused. Choosing between the two isn't about consistency for its own sake — it's about which specific guarantee the value actually needs.
+
+**Q: What would go wrong if `STOCK_SERIAL_TRANSITIONS` were missing a status as a key, and how does the type system catch it?**
+A: `STOCK_SERIAL_TRANSITIONS[from]` where `from` is a valid `StockSerialStatus` but the object literal never defined an entry for it would, at runtime, read `undefined` off the object — and the very next thing `canTransitionSerial` does is call `.some(...)` on that value, which throws a `TypeError: Cannot read properties of undefined`. The `Record<StockSerialStatus, ...>` annotation prevents this from ever compiling in the first place: TypeScript requires an object literal assigned to a `Record<K, V>` type to have an entry for every member of `K`, so leaving out a status is a compile error naming the missing key, not a runtime crash discovered by whichever status happens to hit that code path first in production.
+
 ## Follow-ups they'll dig into
 
 - "Does `as const` have any runtime cost?" (None — it's erased entirely, same as every other TypeScript type annotation. The `readonly` it implies is a compile-time-only restriction; nothing stops a `as any as MutableType` bypass, same as any TS immutability.)
@@ -136,4 +172,6 @@ A: On AutoLedger, the app registry (`APPS`) needs a derived `AppSlug` union so t
 
 - [typescript-foundations.md](typescript-foundations.md) — `satisfies` and `as const` at the foundations level, plus `typeof ROLES[number]`
 - [branded-types-for-money.md](branded-types-for-money.md) — a different technique (nominal-typing simulation) solving an adjacent problem (unit safety, not exhaustiveness)
+- [discriminated-unions-and-parsers.md](discriminated-unions-and-parsers.md) — a different corner of this same FSM's neighborhood: `CodeSegment`, a discriminated union rather than a transition table
+- [../architecture/document-lifecycle-fsm.md](../architecture/document-lifecycle-fsm.md) — the codebase's other FSM transition tables, and the `satisfies Partial<Record<...>>` shape `docs/guardrails.md` rule 10 documents for them
 - `docs/architecture.md#suite-structure` — why the registry is a static list rather than a database table in this phase

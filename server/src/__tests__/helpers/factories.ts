@@ -46,7 +46,10 @@ export async function resetTables(): Promise<void> {
               boarddeck_close_runs, boarddeck_close_checks, boarddeck_decks,
               taxguard_corpus_documents, taxguard_chunks, taxguard_questions,
               sandbox_datasets,
-              integration_drive_connections, integration_drive_folders, integration_drive_files
+              integration_drive_connections, integration_drive_folders, integration_drive_files,
+              stock_settings, stock_uoms, stock_categories, stock_attribute_definitions,
+              stock_code_schemes, stock_code_counters, stock_locations, stock_items,
+              stock_lots, stock_serials, stock_movements, stock_balances
      RESTART IDENTITY CASCADE`,
   );
 }

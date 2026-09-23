@@ -4851,3 +4851,693 @@ export function applyDebitNote(
 ): Promise<{ success: boolean; debitNote: DebitNote }> {
   return apiFetch(`/ledger-core/debit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
 }
+
+// --- StockLedger (Phase 28) ---
+
+export const STOCK_INDUSTRY_KEYS = [
+  'GENERAL',
+  'RETAIL',
+  'WHOLESALE_DISTRIBUTION',
+  'MANUFACTURING',
+  'FOOD_BEVERAGE',
+  'PHARMA_HEALTHCARE',
+  'APPAREL_FOOTWEAR',
+  'ELECTRONICS',
+  'AUTOMOTIVE',
+  'REAL_ESTATE',
+] as const;
+export type StockIndustryKey = (typeof STOCK_INDUSTRY_KEYS)[number];
+
+export const STOCK_ITEM_TYPES = [
+  'RAW_MATERIAL',
+  'COMPONENT',
+  'WORK_IN_PROGRESS',
+  'FINISHED_GOOD',
+  'TRADING_GOOD',
+  'CONSUMABLE',
+  'PACKAGING',
+  'SPARE_PART',
+  'PROPERTY_UNIT',
+] as const;
+export type StockItemType = (typeof STOCK_ITEM_TYPES)[number];
+
+export const STOCK_TRACKING_MODES = ['QUANTITY', 'LOT', 'SERIAL'] as const;
+export type StockTrackingMode = (typeof STOCK_TRACKING_MODES)[number];
+
+export const STOCK_ATTRIBUTE_TYPES = ['TEXT', 'NUMBER', 'DATE', 'BOOLEAN', 'SELECT'] as const;
+export type StockAttributeType = (typeof STOCK_ATTRIBUTE_TYPES)[number];
+
+export const STOCK_ATTRIBUTE_SCOPES = ['ITEM', 'SERIAL'] as const;
+export type StockAttributeScope = (typeof STOCK_ATTRIBUTE_SCOPES)[number];
+
+export const STOCK_LOCATION_KINDS = ['WAREHOUSE', 'STORE', 'SITE', 'ZONE', 'BIN'] as const;
+export type StockLocationKind = (typeof STOCK_LOCATION_KINDS)[number];
+export const STOCK_TOP_LEVEL_LOCATION_KINDS = ['WAREHOUSE', 'STORE', 'SITE'] as const;
+
+export const STOCK_MOVEMENT_TYPES = [
+  'RECEIPT',
+  'ISSUE',
+  'TRANSFER_OUT',
+  'TRANSFER_IN',
+  'ADJUSTMENT_IN',
+  'ADJUSTMENT_OUT',
+] as const;
+export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
+
+export const STOCK_SERIAL_STATUSES = ['AVAILABLE', 'ON_HOLD', 'BOOKED', 'ISSUED'] as const;
+export type StockSerialStatus = (typeof STOCK_SERIAL_STATUSES)[number];
+
+export const STOCK_LABEL_KINDS = ['ITEM', 'LOT', 'SERIAL', 'LOCATION'] as const;
+export type StockLabelKind = (typeof STOCK_LABEL_KINDS)[number];
+
+export type StockAttributeValue = string | boolean;
+export type StockAttributes = Record<string, StockAttributeValue>;
+
+export interface StockSettings {
+  configured: boolean;
+  industryProfile: StockIndustryKey | null;
+  suggestedProfile: StockIndustryKey;
+  updatedAt: string | null;
+}
+export interface StockUom {
+  id: string;
+  code: string;
+  name: string;
+  decimalPlaces: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockCategory {
+  id: string;
+  code: string;
+  name: string;
+  parentId: string | null;
+  path: string;
+  depth: number;
+  itemType: StockItemType;
+  defaultTracking: StockTrackingMode;
+  defaultUomId: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockAttributeDefinition {
+  id: string;
+  categoryId: string;
+  appliesTo: StockAttributeScope;
+  key: string;
+  label: string;
+  dataType: StockAttributeType;
+  options: string[] | null;
+  decimalPlaces: number | null;
+  isRequired: boolean;
+  sortOrder: number;
+  isActive: boolean;
+}
+export interface StockCodeScheme {
+  id: string;
+  name: string;
+  pattern: string;
+  isDefault: boolean;
+  isActive: boolean;
+  example: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockLocation {
+  id: string;
+  code: string;
+  name: string;
+  kind: StockLocationKind;
+  parentId: string | null;
+  path: string;
+  depth: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockItem {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  categoryId: string;
+  categoryName: string;
+  itemType: StockItemType;
+  tracking: StockTrackingMode;
+  uomId: string;
+  uomCode: string;
+  uomDecimalPlaces: number;
+  codeSchemeId: string | null;
+  barcode: string | null;
+  attributes: StockAttributes;
+  reorderPointMilli: number | null;
+  onHandQuantityMilli: number;
+  onHandValueCents: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockLot {
+  id: string;
+  itemId: string;
+  lotNumber: string;
+  manufacturedOn: string | null;
+  expiresOn: string | null;
+  onHandQuantityMilli: number;
+  createdAt: string;
+}
+export interface StockSerial {
+  id: string;
+  itemId: string;
+  serialNumber: string;
+  status: StockSerialStatus;
+  locationId: string | null;
+  locationCode: string | null;
+  costCents: number;
+  statusNote: string | null;
+  attributes: StockAttributes;
+  createdAt: string;
+  updatedAt: string;
+}
+export interface StockMovement {
+  id: string;
+  movementGroupId: string;
+  movementType: StockMovementType;
+  itemId: string;
+  itemCode: string;
+  locationId: string;
+  locationCode: string;
+  lotId: string | null;
+  lotNumber: string | null;
+  serialId: string | null;
+  serialNumber: string | null;
+  quantityMilli: number;
+  valueCents: number;
+  runningLocationQuantityMilli: number;
+  reference: string | null;
+  reason: string | null;
+  occurredOn: string;
+  createdAt: string;
+}
+export interface StockBalance {
+  itemId: string;
+  itemCode: string;
+  itemName: string;
+  uomCode: string;
+  locationId: string;
+  locationCode: string;
+  locationPath: string;
+  lotId: string | null;
+  lotNumber: string | null;
+  expiresOn: string | null;
+  quantityMilli: number;
+  valueCents: number;
+  averageUnitCostCents: number | null;
+}
+export interface StockSummary {
+  activeItemCount: number;
+  totalValueCents: number;
+  lowStockItemCount: number;
+  expiringLotCount: number;
+  locationCount: number;
+}
+export interface StockLabel {
+  kind: StockLabelKind;
+  id: string;
+  code: string;
+  title: string;
+  subtitle: string;
+  payload: string;
+  qrSvg: string;
+  copies: number;
+}
+export interface StockLookupMatch {
+  kind: StockLabelKind;
+  id: string;
+  itemId: string | null;
+  code: string;
+  title: string;
+}
+
+export interface StockIndustryProfileSummary {
+  key: StockIndustryKey;
+  name: string;
+  description: string;
+  locationName: string;
+  categories: {
+    code: string;
+    name: string;
+    itemType: StockItemType;
+    defaultTracking: StockTrackingMode;
+    attributes: { key: string; label: string; appliesTo: StockAttributeScope; dataType: StockAttributeType }[];
+  }[];
+  codeSchemes: { name: string; pattern: string; isDefault: boolean; example: string }[];
+}
+
+export interface StockCodeSchemePreset {
+  name: string;
+  pattern: string;
+  description: string;
+  example: string;
+}
+
+export interface StockMovementResult {
+  movementGroupId: string;
+  movements: StockMovement[];
+}
+
+/** GET /stock/settings */
+export function fetchStockSettings(signal?: AbortSignal): Promise<{ success: boolean; settings: StockSettings }> {
+  return apiFetch('/stock/settings', { signal: signal ?? null });
+}
+
+/** GET /stock/setup/profiles */
+export function fetchStockProfiles(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; profiles: StockIndustryProfileSummary[] }> {
+  return apiFetch('/stock/setup/profiles', { signal: signal ?? null });
+}
+
+/** POST /stock/setup */
+export function applyStockProfile(industryProfile: StockIndustryKey): Promise<{
+  success: boolean;
+  settings: StockSettings;
+  created: { uoms: number; categories: number; attributes: number; codeSchemes: number; locations: number };
+}> {
+  return apiFetch('/stock/setup', { method: 'POST', body: JSON.stringify({ industryProfile }) });
+}
+
+/** GET /stock/uoms */
+export function fetchStockUoms(
+  includeInactive?: boolean,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; uoms: StockUom[] }> {
+  const suffix = includeInactive === true ? '?includeInactive=true' : '';
+  return apiFetch(`/stock/uoms${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /stock/uoms */
+export function createStockUom(input: {
+  code: string;
+  name: string;
+  decimalPlaces: number;
+}): Promise<{ success: boolean; uom: StockUom }> {
+  return apiFetch('/stock/uoms', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/uoms/:id */
+export function updateStockUom(
+  id: string,
+  input: Partial<{ name: string; isActive: boolean }>,
+): Promise<{ success: boolean; uom: StockUom }> {
+  return apiFetch(`/stock/uoms/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** GET /stock/categories */
+export function fetchStockCategories(
+  includeInactive?: boolean,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; categories: StockCategory[] }> {
+  const suffix = includeInactive === true ? '?includeInactive=true' : '';
+  return apiFetch(`/stock/categories${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/categories/:id */
+export function fetchStockCategory(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; category: StockCategory; attributes: StockAttributeDefinition[] }> {
+  return apiFetch(`/stock/categories/${id}`, { signal: signal ?? null });
+}
+
+/** POST /stock/categories */
+export function createStockCategory(input: {
+  code: string;
+  name: string;
+  itemType: StockItemType;
+  defaultTracking: StockTrackingMode;
+  defaultUomId: string | null;
+  parentId: string | null;
+}): Promise<{ success: boolean; category: StockCategory }> {
+  return apiFetch('/stock/categories', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/categories/:id */
+export function updateStockCategory(
+  id: string,
+  input: Partial<{ name: string; defaultUomId: string | null; isActive: boolean }>,
+): Promise<{ success: boolean; category: StockCategory }> {
+  return apiFetch(`/stock/categories/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** POST /stock/categories/:id/attributes */
+export function createStockAttribute(
+  categoryId: string,
+  input: {
+    key: string;
+    label: string;
+    appliesTo: StockAttributeScope;
+    dataType: StockAttributeType;
+    options: string[] | null;
+    decimalPlaces: number | null;
+    isRequired: boolean;
+    sortOrder: number;
+  },
+): Promise<{ success: boolean; attribute: StockAttributeDefinition }> {
+  return apiFetch(`/stock/categories/${categoryId}/attributes`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/categories/:id/attributes/:attributeId */
+export function updateStockAttribute(
+  categoryId: string,
+  attributeId: string,
+  input: Partial<{ label: string; options: string[]; isRequired: boolean; sortOrder: number; isActive: boolean }>,
+): Promise<{ success: boolean; attribute: StockAttributeDefinition }> {
+  return apiFetch(`/stock/categories/${categoryId}/attributes/${attributeId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+}
+
+/** GET /stock/code-schemes */
+export function fetchStockCodeSchemes(
+  includeInactive?: boolean,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; codeSchemes: StockCodeScheme[] }> {
+  const suffix = includeInactive === true ? '?includeInactive=true' : '';
+  return apiFetch(`/stock/code-schemes${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/code-schemes/presets */
+export function fetchStockCodePresets(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; presets: StockCodeSchemePreset[] }> {
+  return apiFetch('/stock/code-schemes/presets', { signal: signal ?? null });
+}
+
+/** POST /stock/code-schemes/preview */
+export function previewStockCodePattern(input: {
+  pattern: string;
+  categoryId: string | null;
+  attributes: Record<string, string | boolean>;
+}): Promise<{ success: boolean; valid: boolean; example?: string; scopeKey?: string; error?: string }> {
+  return apiFetch('/stock/code-schemes/preview', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /stock/code-schemes */
+export function createStockCodeScheme(input: {
+  name: string;
+  pattern: string;
+  isDefault: boolean;
+}): Promise<{ success: boolean; codeScheme: StockCodeScheme }> {
+  return apiFetch('/stock/code-schemes', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/code-schemes/:id */
+export function updateStockCodeScheme(
+  id: string,
+  input: Partial<{ name: string; isDefault: true; isActive: boolean }>,
+): Promise<{ success: boolean; codeScheme: StockCodeScheme }> {
+  return apiFetch(`/stock/code-schemes/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** GET /stock/locations */
+export function fetchStockLocations(
+  includeInactive?: boolean,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; locations: StockLocation[] }> {
+  const suffix = includeInactive === true ? '?includeInactive=true' : '';
+  return apiFetch(`/stock/locations${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /stock/locations */
+export function createStockLocation(input: {
+  code: string;
+  name: string;
+  kind: StockLocationKind;
+  parentId: string | null;
+}): Promise<{ success: boolean; location: StockLocation }> {
+  return apiFetch('/stock/locations', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/locations/:id */
+export function updateStockLocation(
+  id: string,
+  input: Partial<{ name: string; isActive: boolean }>,
+): Promise<{ success: boolean; location: StockLocation }> {
+  return apiFetch(`/stock/locations/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** GET /stock/items */
+export function fetchStockItems(
+  params: {
+    q?: string | undefined;
+    categoryId?: string | undefined;
+    itemType?: StockItemType | undefined;
+    tracking?: StockTrackingMode | undefined;
+    includeInactive?: boolean | undefined;
+    lowStock?: boolean | undefined;
+    page?: number | undefined;
+    limit?: number | undefined;
+  } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  items: StockItem[];
+}> {
+  const query = new URLSearchParams();
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.categoryId !== undefined) query.set('categoryId', params.categoryId);
+  if (params.itemType !== undefined) query.set('itemType', params.itemType);
+  if (params.tracking !== undefined) query.set('tracking', params.tracking);
+  if (params.includeInactive === true) query.set('includeInactive', 'true');
+  if (params.lowStock === true) query.set('lowStock', 'true');
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/stock/items${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/items/:id */
+export function fetchStockItem(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  item: StockItem;
+  attributes: StockAttributeDefinition[];
+  serialAttributes: StockAttributeDefinition[];
+}> {
+  return apiFetch(`/stock/items/${id}`, { signal: signal ?? null });
+}
+
+/** POST /stock/items */
+export function createStockItem(input: {
+  name: string;
+  description: string | null;
+  categoryId: string;
+  uomId: string | null;
+  tracking: StockTrackingMode | null;
+  code: string | null;
+  codeSchemeId: string | null;
+  barcode: string | null;
+  attributes: Record<string, unknown>;
+  reorderPointMilli: number | null;
+}): Promise<{ success: boolean; item: StockItem }> {
+  return apiFetch('/stock/items', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/items/:id */
+export function updateStockItem(
+  id: string,
+  input: Partial<{
+    name: string;
+    description: string | null;
+    barcode: string | null;
+    attributes: Record<string, unknown>;
+    reorderPointMilli: number | null;
+    isActive: boolean;
+  }>,
+): Promise<{ success: boolean; item: StockItem }> {
+  return apiFetch(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+export interface StockReceiptLineInput {
+  itemId: string;
+  quantityMilli: number;
+  unitCostCents: number;
+  lot: { lotNumber: string; manufacturedOn: string | null; expiresOn: string | null } | null;
+  serials: { serialNumber: string; costCents: number | null; attributes: Record<string, unknown> }[] | null;
+}
+export interface StockOutboundLineInput {
+  itemId: string;
+  quantityMilli: number;
+  lotId: string | null;
+  serialIds: string[] | null;
+}
+export interface StockAdjustmentLineInput {
+  itemId: string;
+  direction: 'IN' | 'OUT';
+  quantityMilli: number;
+  lotId: string | null;
+  unitCostCents: number | null;
+}
+
+/** POST /stock/receipts */
+export function postStockReceipt(input: {
+  occurredOn: string;
+  reference: string | null;
+  locationId: string;
+  lines: StockReceiptLineInput[];
+}): Promise<{ success: boolean } & StockMovementResult> {
+  return apiFetch('/stock/receipts', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /stock/issues */
+export function postStockIssue(input: {
+  occurredOn: string;
+  reference: string | null;
+  locationId: string;
+  lines: StockOutboundLineInput[];
+}): Promise<{ success: boolean } & StockMovementResult> {
+  return apiFetch('/stock/issues', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /stock/transfers */
+export function postStockTransfer(input: {
+  occurredOn: string;
+  reference: string | null;
+  fromLocationId: string;
+  toLocationId: string;
+  lines: StockOutboundLineInput[];
+}): Promise<{ success: boolean } & StockMovementResult> {
+  return apiFetch('/stock/transfers', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /stock/adjustments */
+export function postStockAdjustment(input: {
+  occurredOn: string;
+  reason: string;
+  locationId: string;
+  lines: StockAdjustmentLineInput[];
+}): Promise<{ success: boolean } & StockMovementResult> {
+  return apiFetch('/stock/adjustments', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** GET /stock/balances */
+export function fetchStockBalances(
+  params: { itemId?: string | undefined; locationId?: string | undefined; includeZero?: boolean | undefined } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; balances: StockBalance[] }> {
+  const query = new URLSearchParams();
+  if (params.itemId !== undefined) query.set('itemId', params.itemId);
+  if (params.locationId !== undefined) query.set('locationId', params.locationId);
+  if (params.includeZero === true) query.set('includeZero', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/stock/balances${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/movements */
+export function fetchStockMovements(
+  params: {
+    itemId?: string | undefined;
+    locationId?: string | undefined;
+    type?: StockMovementType | undefined;
+    groupId?: string | undefined;
+    from?: string | undefined;
+    to?: string | undefined;
+    page?: number | undefined;
+    limit?: number | undefined;
+  } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  movements: StockMovement[];
+}> {
+  const query = new URLSearchParams();
+  if (params.itemId !== undefined) query.set('itemId', params.itemId);
+  if (params.locationId !== undefined) query.set('locationId', params.locationId);
+  if (params.type !== undefined) query.set('type', params.type);
+  if (params.groupId !== undefined) query.set('groupId', params.groupId);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/stock/movements${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/items/:id/lots */
+export function fetchStockItemLots(
+  itemId: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; lots: StockLot[] }> {
+  return apiFetch(`/stock/items/${itemId}/lots`, { signal: signal ?? null });
+}
+
+/** GET /stock/items/:id/serials */
+export function fetchStockItemSerials(
+  itemId: string,
+  status?: StockSerialStatus,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; serials: StockSerial[] }> {
+  const suffix = status !== undefined ? `?status=${status}` : '';
+  return apiFetch(`/stock/items/${itemId}/serials${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /stock/summary */
+export function fetchStockSummary(signal?: AbortSignal): Promise<{ success: boolean; summary: StockSummary }> {
+  return apiFetch('/stock/summary', { signal: signal ?? null });
+}
+
+/** POST /stock/serials/:id/status */
+export function changeStockSerialStatus(
+  id: string,
+  input: { status: 'AVAILABLE' | 'ON_HOLD' | 'BOOKED'; note: string | null },
+): Promise<{ success: boolean; serial: StockSerial }> {
+  return apiFetch(`/stock/serials/${id}/status`, { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /stock/serials/:id */
+export function updateStockSerialAttributes(
+  id: string,
+  attributes: Record<string, unknown>,
+): Promise<{ success: boolean; serial: StockSerial }> {
+  return apiFetch(`/stock/serials/${id}`, { method: 'PATCH', body: JSON.stringify({ attributes }) });
+}
+
+/** GET /stock/lookup?q= */
+export function lookupStock(
+  q: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; matches: StockLookupMatch[] }> {
+  const query = new URLSearchParams({ q });
+  return apiFetch(`/stock/lookup?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** GET /stock/lookup?kind=lot|serial&id= */
+export function lookupStockById(
+  kind: 'lot' | 'serial',
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; match: StockLookupMatch }> {
+  const query = new URLSearchParams({ kind, id });
+  return apiFetch(`/stock/lookup?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** POST /stock/labels */
+export function buildStockLabels(
+  targets: { kind: StockLabelKind; id: string; copies: number }[],
+): Promise<{ success: boolean; count: number; labels: StockLabel[] }> {
+  return apiFetch('/stock/labels', { method: 'POST', body: JSON.stringify({ targets }) });
+}

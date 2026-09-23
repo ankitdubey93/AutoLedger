@@ -3,7 +3,7 @@
 > A `SEQUENCE` is fast and safe under concurrency, and it is also, by design, allowed to leave gaps — which makes it the wrong tool the moment a human-facing document number matters.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.8 — `ledger_invoice_settings.next_number`, allocating `INV-000001`, `INV-000002`, … as invoices are issued
+**Introduced by:** Phase 3.8 — `ledger_invoice_settings.next_number`, allocating `INV-000001`, `INV-000002`, … as invoices are issued. Extended Phase 28 — StockLedger's item-code counters, one counter per *rendered scope key*, not one counter per organization.
 **Verified against:** PostgreSQL 16
 
 ---
@@ -47,6 +47,18 @@ INSERT INTO ledger_invoice_settings (org_id) VALUES ($1) ON CONFLICT (org_id) DO
 
 `ON CONFLICT (org_id) DO NOTHING` is idempotent and safe under the same concurrency this whole mechanism defends against: if two transactions both race to insert the first row for an organization, one succeeds and the other's insert becomes a no-op rather than an error, and both proceed to the `UPDATE` that follows — which then serializes on the row exactly as before. This is the same idiom `study/postgresql/transactions-isolation-pooling.md` documents as the concurrency-safe alternative to "check if it exists, then insert."
 
+### Per-scope-key counters: many counter rows instead of one
+
+The invoice counter is one row per organization — every invoice, whatever its customer or category, shares one series. StockLedger's item-code generation needs something the invoice pattern never had to: a *different* series per combination of category and year, because a code pattern like `{CAT}-{YY}-{SEQ:5}` renders to `RM-26-00001`, `RM-26-00002`, …, `FG-26-00001`, … — the sequence must restart at 1 for `FG` even though `RM` is already past a thousand, and must restart again for both when the year rolls over.
+
+The fix is structural, not a special case of the algorithm: `stock_code_counters` has a composite key `(org_id, scheme_id, scope_key)` rather than `(org_id)` alone, where `scope_key` is the *rendered* non-sequence portion of the pattern — `RM-26` and `FG-26` are two different rows, each independently locked and incremented by the same `UPDATE ... SET next_seq = next_seq + 1 ... RETURNING next_seq - 1` shape used for invoices. `renderScopeKey` (in `utils/stockCodePattern.ts`) computes this key by rendering every token in the pattern *except* the `{SEQ:n}` token itself, so two items with the same category and creation year always hash to the same scope key and therefore the same counter row, while a category change or a year boundary transparently produces a new row on first use (via the same lazy `ON CONFLICT (org_id, scheme_id, scope_key) DO NOTHING` seed the invoice counter uses for its own first row).
+
+This means "one counter, locked by one row" from the invoice case generalizes to "one counter *per distinct rendered scope*," with the lock still scoped to exactly the row a given generation attempt needs — a `RM-26` code generation and an `FG-26` code generation for the same org, at the same instant, still don't contend, exactly as two different organizations' invoice numbering don't contend today.
+
+### Skipping past a manual-code collision, not retrying blindly
+
+A second difference from the invoice case: an item's code isn't always auto-generated — a user can type one in by hand, and a hand-typed code can happen to land exactly on a value the counter would have generated later (e.g. someone manually creates `RM-26-00003` before the counter has reached 3). `createItem` handles this with a bounded retry, not an unconditional accept-first-attempt: it allocates the next sequence value, renders the full code, attempts the insert, and on a `23505` unique-violation specifically on the item-code constraint, loops back and allocates again — up to 20 attempts — rather than surfacing the collision to the caller as an opaque 500. This is the same "catch a `23505`, not a business-logic error path" discipline `transactions-isolation-pooling.md` documents for the organization-slug allocator, except the retry here spans multiple *counter increments* (each attempt burns a sequence value, deliberately — see the gotcha below) rather than multiple *candidate values from a fixed list*.
+
 ### What "gapless" actually means in practice
 
 Despite the name of this pattern, it is not perfectly gapless — a transaction that allocates a number and then the *client* disconnects before ever calling `/issue` again would still burn nothing, because the allocation is inside the transaction; but an organization that issues, then immediately voids, an invoice keeps that invoice's number permanently (voiding does not return the number to the pool — the invoice still exists, just marked `VOID`). What this pattern actually guarantees is stronger than "gapless" and more useful: every number that is ever handed out corresponds to a row that really was created inside a transaction that committed. Auditors call this **sequential and accounted for**, not strictly gapless, and it is what real accounting systems (including QuickBooks, Xero) actually provide — a true gapless guarantee across arbitrary failures needs a separate reservation/confirmation protocol that is not worth the complexity here.
@@ -66,6 +78,10 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 - `server/src/services/ledger-core/invoiceSettingsService.ts` — `allocateInvoiceNumber(client, orgId)`, taking a `Queryable` restricted to the caller's transaction client, never `pool`
 - `server/src/services/ledger-core/invoiceService.ts` — `issueInvoice` calls it inside its own `BEGIN…COMMIT`, before posting the journal entry
 - `server/src/__tests__/ledger-core/invoices.test.ts` — `'allocates the next number on a second invoice'` asserts `INV-000001` then `INV-000002` in sequence
+- `server/src/db/migrations/065_stock_setup.sql` — `stock_code_counters (org_id, scheme_id, scope_key, next_seq)`, composite-keyed instead of one row per org
+- `server/src/utils/stockCodePattern.ts` — `renderScopeKey`, the pure function that derives a counter's scope key from a pattern and its non-sequence token values
+- `server/src/services/stock/itemService.ts` — `createItem`'s 20-attempt bounded retry around the counter allocation + insert, catching `23505` on the item-code unique constraint specifically
+- `server/src/__tests__/stock/items.test.ts` — asserts two items in different categories (different scope keys) both start at `...00001`, and that a manual code collision is skipped past rather than surfaced as a 500
 
 ## Gotchas
 
@@ -73,6 +89,8 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 - The row lock only protects against concurrent *writers*. A read of `next_number` outside a lock (e.g. for display, "next invoice will be numbered...") can be stale by the time an actual issue happens — which is fine for a preview, but must never be trusted as the number that will actually be used.
 - Voiding an invoice does not reclaim its number. If the business ever wants number reuse after a void, that's a deliberate, separate decision — not a bug in this mechanism.
 - The `UPDATE` locks the *counter row*, not the invoices table — a long-running unrelated transaction holding a lock on the same organization's `ledger_invoice_settings` row (say, someone mid-edit on invoice defaults, in a transaction that hasn't committed) would block an issue attempt until it releases. In practice, `updateInvoiceSettings` runs and commits in a single statement, so this window is negligible.
+- A retry loop around a counter allocation genuinely burns a sequence value per attempt — retrying 3 times because of manual-code collisions means the counter has advanced by 3, not by 1, even though only the last attempt's value survives. This is the correct trade (the alternative is a value that was already taken by a different row), but it means the counter's current value is "how many allocation *attempts* have happened," not "how many items exist" — the two only coincide when nobody ever types a colliding manual code.
+- Per-scope-key counters multiply the number of counter rows by however many distinct scopes a pattern can render — a pattern keyed by category *and* year creates a new row every January for every category still in use. That's intended (it's what makes the sequence restart per year), but it means the counter table's row count is not bounded by organization count the way the invoice counter's is.
 
 ## Interview Q&A
 
@@ -94,6 +112,12 @@ A: PostgreSQL's transactional guarantees already cover a crash mid-transaction �
 **Q: Why do credit notes get their own number series instead of sharing the invoice counter?**
 A: Two reasons. Practically, sharing would punch holes in the invoice series every time a credit note was issued, and "every invoice number is accounted for" is the property the counter exists to provide. From a compliance angle, VAT/GST regimes generally expect each document type to carry its own consecutive series and a credit note to reference the invoice it amends (verify the exact rule for your jurisdiction — I'm not stating a specific statute here). In Phase 26 the credit-note and debit-note counters live on the same settings row as the invoice counter (`credit_note_next_number`, `debit_note_next_number`), allocated by the same `UPDATE … RETURNING` row-lock pattern inside the issuing transaction, with the column names chosen from a constant map rather than interpolated from input.
 
+**Q: StockLedger needs item codes like `RM-26-00001` and `FG-26-00001` — two independent sequences sharing one pattern. How does that differ from the invoice counter's design, and why not just reuse one counter row per org?**
+A: A single counter row per org would force every category and every year onto one shared sequence, which is wrong here — `FG` items need to start at 1 regardless of how far `RM`'s counter has advanced, and both need to restart at the year boundary. The fix is a composite key on the counter table, `(org_id, scheme_id, scope_key)`, where the scope key is the pattern's rendered non-sequence portion — so `RM-26` and `FG-26` are genuinely different rows, each locked and incremented independently by the exact same `UPDATE ... RETURNING` shape the invoice counter uses. The row-locking mechanism doesn't change at all; what changes is that there are now many rows instead of one, keyed by whatever the business rule says should share a sequence.
+
+**Q: What happens if a user manually types an item code that collides with one the counter would generate later?**
+A: The insert fails with a `23505` unique-violation on the item-code constraint, and the service catches specifically that constraint (by name, not by parsing the error message) and retries — allocating the next sequence value again and attempting the insert again, up to a bounded number of attempts, rather than surfacing a raw 500 to the user. Each retry does burn a sequence value permanently even though only the successful attempt's number is used, which is an accepted cost: the alternative is colliding with a code a human already chose, which is worse than a small, explainable gap in the sequence.
+
 ## Follow-ups they'll dig into
 
 - What if the organization's counter row doesn't exist yet when the first invoice is issued? (Handled by `INSERT ... ON CONFLICT (org_id) DO NOTHING` immediately before the `UPDATE`, itself safe under the same concurrency this pattern defends against.)
@@ -104,3 +128,4 @@ A: Two reasons. Practically, sharing would punch holes in the invoice series eve
 - [transactions-isolation-pooling.md](transactions-isolation-pooling.md) — row locks, `FOR UPDATE`, and why `pool.query` escapes a transaction
 - [deferred-constraint-triggers.md](deferred-constraint-triggers.md) — the other place this codebase relies on a failed `COMMIT` rolling back everything, including side effects computed earlier in the same transaction
 - [../architecture/document-lifecycle-fsm.md](../architecture/document-lifecycle-fsm.md) — the invoice number is allocated at exactly the `DRAFT -> ISSUED` transition, never before
+- [../typescript/discriminated-unions-and-parsers.md](../typescript/discriminated-unions-and-parsers.md) — the pure tokenizer/renderer that turns a code pattern string into the scope key this note's counter rows are keyed by

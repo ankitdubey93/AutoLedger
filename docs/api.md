@@ -194,7 +194,7 @@ The active organization comes **only** from the verified access token. `orgId` i
 }
 ```
 
-Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow, FP&A Engine, UnitEcon, BoardDeck and ForecasterPro each require `ledger-core`. This is the static registry — every organization sees the same seven apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
+Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow, FP&A Engine, UnitEcon, BoardDeck and ForecasterPro each require `ledger-core` — StockLedger (Phase 28) requires nothing, the one app with `requires: []`. This is the static registry — every organization sees the same eight apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
 
 ---
 
@@ -1068,6 +1068,83 @@ A corpus document moves `PENDING` → `PARSING` → `EMBEDDING` → `READY` or `
 Failure paths: `400 Corpus documents must be PDF` · `400 Invalid request body` (schema — includes a question under 3 characters) · `403` for a write below its role tier · `404 Corpus document not found` / `404 Question not found` (also another org's, or a malformed uuid) · `409 This document is already in the corpus` · `422 No relevant source material found` (retrieval returned zero chunks above the similarity floor for that jurisdiction) · `502 Embeddings provider returned an unexpected response` / `502 Answer model returned an unexpected response` · `503 Embeddings are not configured` / `503 Answering is not configured` (no key for the selected `TAXGUARD_EMBEDDING_PROVIDER` — `VOYAGE_API_KEY` or `GEMINI_API_KEY` — / no `ANTHROPIC_API_KEY`).
 
 The **only** route into the platform anywhere in this app is `documentService.getDocumentById`/`openDocumentStream` — `documents`/`document_links` are platform tables (migration 030), not another app's, so this is not a rule-16 violation. No route into any other app's own tables. `utils/taxActParse.ts` is a pure function with no database import, unit-tested without Postgres. No money column, no GL posting, no outbox event, no webhook from this phase.
+
+---
+
+### StockLedger — `/api/v1/stock` — Phase 28
+
+Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom item/serial attributes, configurable item-code schemes, movements with a moving-average/specific-identification balance cache, QR labels. Reading is open to every member including `VIEWER`. Catalogue configuration (UoMs, categories, attributes, code schemes, locations, applying an industry profile) needs `OWNER`/`ADMIN`. Items, movements and serial changes are bookkeeping, so they need `ACCOUNTANT` and above, matching LedgerCore's own item/document routes. Posts nothing to LedgerCore's GL — every route here reads or writes only StockLedger's own 12 tables.
+
+**Setup & settings:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/settings` | any member | Returns `{ configured: false }` if `stock_settings` has no row yet |
+| GET | `/setup/profiles` | any member | The 10 industry profiles, each with its keyword list for the suggestion banner |
+| POST | `/setup` | `OWNER`, `ADMIN` | `{ industryProfile }`. Copies that profile's UoMs/categories/attributes/code schemes/default location into the org's own tables. `409` once already configured |
+
+**Catalogue — UoMs, categories, attributes, code schemes, locations:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/uoms` | any member | `?includeInactive=true` to include retired ones |
+| POST | `/uoms` | `OWNER`, `ADMIN` | `{ code, name, decimalPlaces }` |
+| PATCH | `/uoms/:id` | `OWNER`, `ADMIN` | Name/`decimalPlaces`/`isActive` — `code` is frozen |
+| GET | `/categories` | any member | Full tree, each with computed `path`/`depth` |
+| GET | `/categories/:id` | any member | One category with its attribute definitions |
+| POST | `/categories` | `OWNER`, `ADMIN` | `{ code, name, itemType, defaultTracking, defaultUomId, parentId? }`. `422` past 3 levels deep |
+| PATCH | `/categories/:id` | `OWNER`, `ADMIN` | Name/`defaultUomId`/`isActive` only — `code`, `parentId`, `itemType`, `defaultTracking` are frozen |
+| POST | `/categories/:id/attributes` | `OWNER`, `ADMIN` | `{ appliesTo, key, label, dataType, options?, decimalPlaces?, isRequired? }` |
+| PATCH | `/categories/:id/attributes/:attributeId` | `OWNER`, `ADMIN` | Label/required/options/`isActive` — `key`, `dataType`, `appliesTo` are frozen |
+| GET | `/code-schemes` | any member | `?includeInactive=true` |
+| GET | `/code-schemes/presets` | any member | The 7 ready-made pattern presets |
+| POST | `/code-schemes/preview` | any member | `{ pattern, categoryId, attributes }`. Renders an example code with sequence 1 — never allocates a real counter value |
+| POST | `/code-schemes` | `OWNER`, `ADMIN` | `{ name, pattern, isDefault? }` |
+| PATCH | `/code-schemes/:id` | `OWNER`, `ADMIN` | Name/pattern/`isDefault`/`isActive` — setting `isDefault` un-sets any other default in the same transaction |
+| GET | `/locations` | any member | Full tree with computed `path` |
+| POST | `/locations` | `OWNER`, `ADMIN` | `{ code, name, kind, parentId? }`. `422` if `kind` and `parentId` disagree (top-level kinds have no parent; `ZONE`/`BIN` must have one) |
+| PATCH | `/locations/:id` | `OWNER`, `ADMIN` | Name/`isActive` only |
+
+**Items:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/items` | any member | `?categoryId=`/`?isActive=`/`?lowStock=true`/`?q=` filters, on-hand quantity/value joined in |
+| GET | `/items/:id` | any member | Includes current balances by location and (for `SERIAL`/`LOT` items) its lots/serials |
+| POST | `/items` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ name, categoryId, itemType, tracking, uomId, attributes, code? \| codeSchemeId?, barcode?, reorderPointMilli? }`. Generates a code via the scheme if `code` is omitted; validates `attributes` against the category's definitions |
+| PATCH | `/items/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/description/`attributes` (merged, not replaced)/barcode/reorder point/`isActive` — `code`, `categoryId`, `tracking`, `uomId` are frozen |
+
+**Movements, balances, lots, serials, summary:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/receipts` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ itemId, locationId, quantity/lotNumber/serialNumbers, unitCostCents, occurredOn, reference? }` |
+| POST | `/issues` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ itemId, locationId, quantity/lotId/serialIds, occurredOn, reference? }`. `409` on insufficient stock |
+| POST | `/transfers` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ itemId, fromLocationId, toLocationId, quantity/lotId/serialIds, occurredOn }`. Writes a `TRANSFER_OUT`+`TRANSFER_IN` pair sharing one `movementGroupId` |
+| POST | `/adjustments` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ itemId, locationId, quantityDelta/lotId/serialId, unitCostCents?, reason, occurredOn }` |
+| GET | `/balances` | any member | `?itemId=`/`?locationId=`, non-zero by default |
+| GET | `/movements` | any member | `?itemId=`/`?locationId=`/`?from=`/`?to=`, running quantity per row |
+| GET | `/items/:id/lots` | any member | FEFO order (soonest `expiresOn` first) |
+| GET | `/items/:id/serials` | any member | `?status=` filter |
+| GET | `/summary` | any member | Org-wide on-hand value, low-stock count, item count |
+
+**Serial status and attributes:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/serials/:id/status` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ to, note? }`. `422` on a transition not in `STOCK_SERIAL_TRANSITIONS` with `via: 'MANUAL'` |
+| PATCH | `/serials/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `attributes` (merged) |
+
+**Lookup and labels:**
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/lookup?code=` | any member | Exact-match across items/lots/serials. `?kind=` narrows to one |
+| POST | `/labels` | any member | `{ targets: [{ kind, id, copies }] }`, capped at 500 total copies. Returns each target's code/title/subtitle/scan payload/QR SVG |
+
+Failure paths: `400 Invalid request body` (schema) · `403` for a write below its role tier · `404` on any StockLedger entity id (also another org's, or a malformed uuid) · `409 StockLedger is already configured for this organization` · `409` on a duplicate UoM/category/scheme/location code or item barcode · `409` on insufficient stock for an issue/transfer-out · `409` on a serial status transition already satisfied · `422` on a category depth/location-kind/attribute-validation/code-pattern violation · `422 A label sheet is limited to 500 labels`.
+
+`services/stock/` and `controllers/stock/` contain no query against any other app's tables — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_|forecaster_|unitecon_|boarddeck_|taxguard_|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/` returns nothing. `utils/stockCodePattern.ts`, `utils/stockAttributes.ts`, `utils/stockValuation.ts` and `utils/gtin.ts` are all pure functions with no database import, unit-tested without Postgres. No GL posting, no outbox event, no webhook from this phase — see [stock.md](stock.md#deliberately-not-built).
 
 ---
 

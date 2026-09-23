@@ -234,9 +234,19 @@ describe('GET /reports/balance-sheet', () => {
   });
 
   it('confirms no summary table exists anywhere in the schema', async () => {
+    // Scoped to exclude `stock_%`: Phase 28's `stock_balances` is a different,
+    // deliberate pattern — a derived CACHE for StockLedger's perpetual
+    // inventory, reconciled against `stock_movements` by the integrity
+    // script (db/integrity.ts's `stock_balances_match_movements` check),
+    // not a stored summary LedgerCore's own reports could silently drift
+    // from. This test's own intent (its describe block, its header comment
+    // above) is that LedgerCore's balance sheet has no such table — it
+    // predates every other app in the schema, hence the originally
+    // unscoped search.
     const { rows } = await pool.query<{ n: number }>(
       `SELECT COUNT(*)::int AS n FROM information_schema.tables
         WHERE table_schema = 'public'
+          AND table_name NOT LIKE 'stock\\_%'
           AND (table_name LIKE '%balance%' OR table_name LIKE '%summary%' OR table_name LIKE '%rollup%')`,
     );
     expect(rows[0]!.n).toBe(0);

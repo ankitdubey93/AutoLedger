@@ -473,3 +473,26 @@ select {
     color: #000;
   }
 }
+
+/* -------------------------------------------- printing a StockLedger label sheet */
+
+@page {
+  margin: 8mm;
+}
+
+.label-sheet .label {
+  break-inside: avoid;
+}
+
+.label-sm {
+  width: 38mm;
+  height: 25mm;
+}
+.label-md {
+  width: 50mm;
+  height: 30mm;
+}
+.label-lg {
+  width: 100mm;
+  height: 50mm;
+}

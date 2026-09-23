@@ -2,14 +2,14 @@
 
 ## Suite structure
 
-AutoLedger is the suite name. Inside it are seven portfolio applications — LedgerCore, TaxGuard AI, AP-Flow, FP&A Engine, UnitEcon, BoardDeck Automator, ForecasterPro — see [roadmap.md](roadmap.md#app-map) for what each one does.
+AutoLedger is the suite name. Inside it are eight portfolio applications — LedgerCore, TaxGuard AI, AP-Flow, FP&A Engine, UnitEcon, BoardDeck Automator, ForecasterPro, StockLedger — see [roadmap.md](roadmap.md#app-map) for what each one does.
 
 Two layers, cutting across every part of the stack:
 
 - **Platform layer** — identity, tenancy, RBAC, the app registry, health. App-less: `/api/v1/auth`, `/api/v1/organizations`, `/api/v1/apps`, `/api/v1/health`. Built once, in Phases 1–2, and never duplicated per app.
 - **App layer** — everything else. Each app's routes mount at `/api/v1/<app-slug>/<module>` (see `config/apps.ts` for the slugs, e.g. `ledger-core`, `taxguard`). An app's own frontend pages live under `client/src/Pages/<app-slug>/`.
 
-All seven apps share one database, one `organizations` table as the tenant boundary, and one migration sequence — there is no per-app database and no per-app auth. LedgerCore's General Ledger is additionally shared *data*, not just shared *infrastructure*: every other app posts into it via `source_type` / `source_id` rather than keeping its own notion of money (see [schema.md](schema.md)).
+All eight apps share one database, one `organizations` table as the tenant boundary, and one migration sequence — there is no per-app database and no per-app auth. LedgerCore's General Ledger is additionally shared *data*, not just shared *infrastructure*: every other app posts into it via `source_type` / `source_id` rather than keeping its own notion of money (see [schema.md](schema.md)) — StockLedger (Phase 28) is the one exception so far, tracking its own quantity and value with `requires: []` and no GL posting yet.
 
 The app slug is a **routing namespace, not a tenancy boundary**. `org_id` remains the only thing that scopes data access — a request to `/api/v1/ap-flow/invoices` is still scoped by the caller's `org_id`, exactly like a platform route. An app never reads another app's tables directly.
 

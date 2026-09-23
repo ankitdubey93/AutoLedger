@@ -757,6 +757,8 @@ These change standing rules or recorded decisions. Nothing proceeds on them unti
 | **D7** | Multi-entity: entities inside one org (company codes) or separate orgs | Lean toward **inside one org**; decide at GroupClose's phase start with a design spike | Schema design for GroupClose |
 | **D8** | Outcome pricing vs seat pricing for the first pilots | **Outcome pricing from day one**, with a floor platform fee | Ops Console and `outcomes` table are P0 |
 
+Inventory portion of D1 approved and built as Phase 28 (2026-09); the rest of D1 (ProcureFlow, MakeFlow, PeopleCost, AssetBook) is still open.
+
 ---
 
 ## 12. What I need from you

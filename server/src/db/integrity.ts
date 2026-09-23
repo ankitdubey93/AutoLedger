@@ -26,7 +26,8 @@ export interface IntegrityCheck {
     | 'debits_equal_credits'
     | 'every_entry_balances'
     | 'no_orphaned_ledger_lines'
-    | 'bank_line_journal_entries_exist';
+    | 'bank_line_journal_entries_exist'
+    | 'stock_balances_match_movements';
   description: string;
   passed: boolean;
   /** Up to 20 offending rows, for the operator to go look at. Empty when passed. */
@@ -186,12 +187,64 @@ async function checkBankLineJournalEntriesExist(): Promise<IntegrityCheck> {
   };
 }
 
+/**
+ * Phase 28 — StockLedger's `stock_balances` is a derived cache
+ * (movementService.ts writes it in the same transaction as each movement);
+ * this re-derives it from scratch by summing `stock_movements` and compares.
+ *
+ * `FULL JOIN` needs a hashable/mergeable join condition, and Postgres
+ * refuses `IS NOT DISTINCT FROM` there — so a NULL `lot_id` (a QUANTITY or
+ * SERIAL item's balance) is folded to a sentinel nil UUID with `COALESCE`
+ * on both sides instead, which `=` can join on normally.
+ */
+async function checkStockBalancesMatchMovements(): Promise<IntegrityCheck> {
+  const { rows } = await pool.query<{
+    org_id: string;
+    item_id: string;
+    balance_qty: string;
+    movement_qty: string;
+    balance_val: string;
+    movement_val: string;
+  }>(
+    `WITH m AS (
+       SELECT org_id, item_id, location_id,
+              COALESCE(lot_id, '00000000-0000-0000-0000-000000000000'::uuid) AS lot_key,
+              SUM(quantity_milli) AS qty, SUM(value_cents) AS val
+         FROM stock_movements GROUP BY 1, 2, 3, 4
+     ), b AS (
+       SELECT org_id, item_id, location_id,
+              COALESCE(lot_id, '00000000-0000-0000-0000-000000000000'::uuid) AS lot_key,
+              quantity_milli AS qty, value_cents AS val
+         FROM stock_balances
+     )
+     SELECT COALESCE(b.org_id, m.org_id) AS org_id, COALESCE(b.item_id, m.item_id)::text AS item_id,
+            COALESCE(b.qty, 0)::text AS balance_qty, COALESCE(m.qty, 0)::text AS movement_qty,
+            COALESCE(b.val, 0)::text AS balance_val, COALESCE(m.val, 0)::text AS movement_val
+       FROM b FULL JOIN m
+         ON m.org_id = b.org_id AND m.item_id = b.item_id AND m.location_id = b.location_id AND m.lot_key = b.lot_key
+      WHERE COALESCE(b.qty, 0) <> COALESCE(m.qty, 0) OR COALESCE(b.val, 0) <> COALESCE(m.val, 0)
+      LIMIT 20`,
+  );
+
+  return {
+    name: 'stock_balances_match_movements',
+    description: 'Every stock balance equals the sum of its movements (quantity and value)',
+    passed: rows.length === 0,
+    offenders: rows.map((r) => ({
+      orgId: r.org_id,
+      subject: `item ${r.item_id}`,
+      detail: `balance ${r.balance_qty}/${r.balance_val} ≠ movements ${r.movement_qty}/${r.movement_val}`,
+    })),
+  };
+}
+
 export async function runIntegrityChecks(): Promise<IntegrityReport> {
   const checks = await Promise.all([
     checkDebitsEqualCredits(),
     checkEveryEntryBalances(),
     checkNoOrphanedLedgerLines(),
     checkBankLineJournalEntriesExist(),
+    checkStockBalancesMatchMovements(),
   ]);
 
   return {

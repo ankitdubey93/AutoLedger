@@ -18,6 +18,7 @@ import forecasterRoutes from './forecaster/index.js';
 import uniteconRoutes from './unitecon/index.js';
 import boarddeckRoutes from './boarddeck/index.js';
 import taxguardRoutes from './taxguard/index.js';
+import stockRoutes from './stock/index.js';
 
 /**
  * The versioned API router. Every module mounts here, never directly on the
@@ -100,5 +101,8 @@ apiRouter.use('/boarddeck', boarddeckRoutes);
 
 // Phase 16 — TaxGuard AI, tax act parsing and RAG over pgvector.
 apiRouter.use('/taxguard', taxguardRoutes);
+
+// Phase 28 — StockLedger, inventory & warehousing.
+apiRouter.use('/stock', stockRoutes);
 
 export default apiRouter;

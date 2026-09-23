@@ -59,21 +59,21 @@ it('GET without a session → 401', async () => {
   expect(res.status).toBe(401);
 });
 
-it('fresh org: GET → 200, selectionCompletedAt null, count 7, every enabled false and enabledAt null', async () => {
+it('fresh org: GET → 200, selectionCompletedAt null, count 8, every enabled false and enabledAt null', async () => {
   const agent = await loginAgent(app, userA);
   const res = await agent.get(BASE);
 
   expect(res.status).toBe(200);
   expect(res.body.success).toBe(true);
   expect(res.body.selectionCompletedAt).toBeNull();
-  expect(res.body.count).toBe(7);
+  expect(res.body.count).toBe(8);
   for (const a of res.body.apps as AppEntry[]) {
     expect(a.enabled).toBe(false);
     expect(a.enabledAt).toBeNull();
   }
 });
 
-it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other five not, selection complete", async () => {
+it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other six not, selection complete", async () => {
   const agent = await loginAgent(app, userA);
   const res = await agent.put(BASE).send({ appSlugs: ['ledger-core', 'ap-flow'] });
 
@@ -81,7 +81,7 @@ it("OWNER PUT ['ledger-core','ap-flow'] → 200; those two enabled, other five n
   const apps = res.body.apps as AppEntry[];
   expect(enabledSlugs(apps)).toEqual(['ap-flow', 'ledger-core']);
   expect(Number.isNaN(Date.parse(entry(apps, 'ledger-core').enabledAt ?? ''))).toBe(false);
-  expect(apps.filter((a) => !a.enabled)).toHaveLength(5);
+  expect(apps.filter((a) => !a.enabled)).toHaveLength(6);
   expect(Number.isNaN(Date.parse(res.body.selectionCompletedAt as string))).toBe(false);
 });
 
