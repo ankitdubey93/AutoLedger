@@ -161,7 +161,7 @@ A half-step between the GL core and live statements. Renumbers nothing; every bo
 - [x] The base-currency lock — `422` if any `ledger_lines` row exists and the submitted currency differs from the current one
 - [x] `dashboardService.dashboardSummary` — position, year-to-date/month-to-date performance, a 6-point gap-filled trend, recent entries, integrity — one `FILTER`-aggregate scan plus a `generate_series` scaffold, **no summary table**
 - [x] `GET/POST/PATCH /ledger-core/settings`, `GET /ledger-core/reports/dashboard`, `PATCH /organizations` (platform layer)
-- [x] Client: sidebar navigation, onboarding wizard (3 steps), dashboard with a hand-rolled `TrendChart`, settings page, reports index (trial balance live, P&L/balance sheet marked "Phase 4")
+- [x] Client: sidebar navigation (a thin wrapper over the shared, collapsible `AppSidebar` rail since Phase 31), onboarding wizard (3 steps), dashboard with a hand-rolled `TrendChart`, settings page, reports index (trial balance live, P&L/balance sheet marked "Phase 4")
 - [x] Cross-tenant isolation tests for both `settings.test.ts` and `dashboard.test.ts`
 
 **Acceptance ✅ — all verified.** A newly registered user picking LedgerCore is redirected to the wizard, never the chart of accounts; completing it once and reloading never shows the wizard again. `GET /ledger-core/settings` on a fresh organization returns `200` with `onboardedAt: null`, never `404`. Posting a journal entry after onboarding with a different base currency returns `422`; with the same currency, `200`. The dashboard's `trend` always has exactly 6 points, including months with no postings, at zero. Covered by `__tests__/ledger-core/{settings,dashboard}.test.ts`.

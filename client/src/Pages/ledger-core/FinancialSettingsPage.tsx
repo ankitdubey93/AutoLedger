@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Landmark } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import {
@@ -13,6 +14,8 @@ import {
 import { fiscalYearBounds } from './fiscalYear';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass, primaryButtonClass } from '../../components/ui/formClasses';
 
 /**
  * Phase 30 — the Financial tab: fiscal year, books start date and the default
@@ -43,11 +46,6 @@ const MONTHS = [
 ];
 
 const DAYS = Array.from({ length: 28 }, (_, index) => index + 1);
-
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
-const primaryButtonClass =
-  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed';
 
 /** `2027-03-31` → `31 March 2027`. Parsed from the string, never `new Date(iso)` (local-midnight shift). */
 function formatLongDate(iso: string): string {
@@ -207,9 +205,7 @@ export default function FinancialSettingsPage() {
 
   return (
     <section className="flex flex-col gap-6 max-w-xl">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Settings</h2>
-      </header>
+      <PageHeader as="h2" icon={Landmark} title="Settings" />
 
       <SettingsTabs />
 

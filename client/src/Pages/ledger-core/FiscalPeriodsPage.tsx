@@ -150,7 +150,7 @@ export default function FiscalPeriodsPage() {
             type="button"
             onClick={() => void handleGenerate()}
             disabled={busyId === 'generate'}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busyId === 'generate' ? 'Generating…' : 'Generate periods for this fiscal year'}
           </button>

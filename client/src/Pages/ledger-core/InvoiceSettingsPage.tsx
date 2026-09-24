@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Receipt } from 'lucide-react';
 import {
   getInvoiceSettings,
   listAccounts,
@@ -7,15 +8,14 @@ import {
 } from '../../services/fetchServices';
 import { formatRate, parseRateInput } from '../../utils/money';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass } from '../../components/ui/formClasses';
 
 /**
  * Invoice numbering, defaults, and branding — read with sensible defaults
  * before the organization has ever saved one (`configured: false`), written
  * as a single PATCH.
  */
-
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
 
 function accountOptions(accounts: Account[], type: Account['type']) {
   return accounts.filter((a) => a.isPostable && a.type === type);
@@ -121,9 +121,7 @@ export default function InvoiceSettingsPage() {
 
   return (
     <section className="flex flex-col gap-4 max-w-xl">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Invoice settings</h2>
-      </header>
+      <PageHeader as="h2" icon={Receipt} title="Invoice settings" />
 
       <SettingsTabs />
 
@@ -326,7 +324,7 @@ export default function InvoiceSettingsPage() {
           type="button"
           disabled={saving}
           onClick={() => void handleSave()}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {saving ? 'Saving…' : 'Save'}
         </button>

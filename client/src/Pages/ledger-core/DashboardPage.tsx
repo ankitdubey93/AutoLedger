@@ -2,11 +2,19 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Banknote,
+  BookPlus,
   CheckCircle2,
+  Clock,
   CreditCard,
+  FilePlus2,
+  LayoutDashboard,
+  LineChart,
   PiggyBank,
+  ReceiptText,
+  Scale,
   TrendingDown,
   TrendingUp,
+  Upload,
   Wallet,
   XCircle,
 } from 'lucide-react';
@@ -19,6 +27,7 @@ import MetricTile from './MetricTile';
 import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';
 import BarChart from './BarChart';
+import PageHeader from '../../components/ui/PageHeader';
 
 /**
  * LedgerCore's home page. Every figure is aggregated from raw `ledger_lines`
@@ -79,10 +88,40 @@ export default function DashboardPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <header>
-        <h2 className="text-lg font-semibold m-0">{organization?.name ?? 'Dashboard'}</h2>
-        <p className="text-sm text-[var(--muted)] m-0 mt-1">{fiscalYear.label}</p>
-      </header>
+      <PageHeader
+        as="h2"
+        icon={LayoutDashboard}
+        title={organization?.name ?? 'Dashboard'}
+        subtitle={fiscalYear.label}
+        actions={
+          <>
+            <Link
+              to={`${base}/invoices/new`}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <FilePlus2 size={13} aria-hidden="true" /> New invoice
+            </Link>
+            <Link
+              to={`${base}/expenses/new`}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <ReceiptText size={13} aria-hidden="true" /> New expense
+            </Link>
+            <Link
+              to={`${base}/journals/new`}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <BookPlus size={13} aria-hidden="true" /> New journal entry
+            </Link>
+            <Link
+              to={`${base}/bank/import`}
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <Upload size={13} aria-hidden="true" /> Import bank statement
+            </Link>
+          </>
+        }
+      />
 
       {!position.equationHolds && (
         <p className="status status--bad">
@@ -132,7 +171,7 @@ export default function DashboardPage() {
       </div>
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3">Accounting equation</p>
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Scale size={14} aria-hidden="true" className="text-[var(--muted)]" /> Accounting equation</p>
         <EquationBar
           assetsCents={position.assetsCents}
           liabilitiesCents={position.liabilitiesCents}
@@ -314,12 +353,12 @@ export default function DashboardPage() {
       </div>
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3">Last 6 months</p>
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><LineChart size={14} aria-hidden="true" className="text-[var(--muted)]" /> Last 6 months</p>
         <TrendChart points={trend} />
       </div>
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3">Recent entries</p>
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Clock size={14} aria-hidden="true" className="text-[var(--muted)]" /> Recent entries</p>
         {activity.recentEntries.length === 0 ? (
           <p className="text-sm text-[var(--muted)] m-0">No activity yet.</p>
         ) : (
@@ -355,12 +394,12 @@ export default function DashboardPage() {
       </div>
 
       <div
-        className={[
-          'flex items-center gap-2.5 rounded-lg px-4 py-3 text-sm ring-1 ring-inset',
+        className="flex items-center gap-2.5 rounded-lg px-4 py-3 text-sm ring-1 ring-inset"
+        style={
           integrity.isBalanced
-            ? 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/20'
-            : 'bg-rose-500/10 text-rose-400 ring-rose-500/20',
-        ].join(' ')}
+            ? { background: 'var(--good-soft)', color: 'var(--good)', boxShadow: 'inset 0 0 0 1px var(--good-soft)' }
+            : { background: 'var(--bad-soft)', color: 'var(--bad)', boxShadow: 'inset 0 0 0 1px var(--bad-soft)' }
+        }
         role="status"
       >
         {integrity.isBalanced ? (

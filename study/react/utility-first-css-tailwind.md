@@ -4,7 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 3 — LedgerCore's first real UI: a chart-of-accounts tree, a multi-line journal entry form, a trial balance grid
-**Extended by:** a 2026-09-03 client-only UX revision — the cascade-layer rule below bit a second time, on the new app top bar
+**Extended by:** a 2026-09-03 client-only UX revision — the cascade-layer rule below bit a second time, on the new app top bar; Phase 31 — a design-token rewrite and a three-way light/dark/system theme, covered in "Theming: custom properties, `data-theme`, and the no-flash inline script" below
 **Verified against:** Tailwind CSS 4.3.3, `@tailwindcss/vite` 4.3.3, Vite 8, React 19
 
 ---
@@ -76,6 +76,37 @@ This is unlayered CSS beating unlayered CSS on ordinary specificity (`.app-topba
 
 The same change also **deleted** a rule that existed only because component boundaries were expressed as a CSS selector instead of a routing fact: `.app-main:has(.app-shell) { max-width: 90rem; }` widened the content column specifically when an app's shell was mounted inside it, detected via `:has()` rather than any explicit signal. Once `AppFrame` stopped rendering inside `.app-main` at all — see the routing note's "Where chrome is mounted is a routing decision, not a CSS one" — the selector could no longer match anything, and removing it was the correct response, not leaving a dead rule for the next reader to puzzle over. `:has()` standing in for "is a particular component mounted here" is a sign the real answer belongs in the component tree, not the stylesheet; this is the same lesson as the cascade-layer fix, from the other direction.
 
+### Theming: custom properties, `data-theme`, and the no-flash inline script
+
+Phase 31 replaced the original seven-token dark palette with about twenty tokens (surfaces, borders, text, an accent scale, status colours, radii, shadows) and added a person-chosen theme on top of the OS preference this codebase already followed. The mechanism is three selectors carrying the **same variable names**, so every class and every `bg-[var(--panel)]` arbitrary value stays theme-agnostic — nothing in a component's JSX ever branches on which theme is active:
+
+```css
+:root { --bg: #0b0d12; /* … dark, the unconditional fallback */ }
+
+:root[data-theme="light"] { --bg: #f6f7fa; /* … forced light */ }
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) { --bg: #f6f7fa; /* … "system", only when the OS prefers light */ }
+}
+```
+
+`data-theme` is an HTML attribute the app sets, not a CSS feature by itself — it exists so a plain attribute selector can carry an explicit choice that the `@media` block, which only ever reflects the OS, structurally cannot express. Specificity between the two blocks never actually has to be adjudicated: **the second and third rules never both apply to the same element**, because the media-query block explicitly excludes `[data-theme="dark"]` from its own selector (`:root:not([data-theme="dark"])`), so a person who has chosen "light" matches the plain `[data-theme="light"]` rule regardless of what the OS reports, and a person who has chosen "dark" is excluded from the `@media` block entirely and falls through to `:root`'s own dark defaults. "System" is modelled as the *absence* of the attribute (and the absence of a localStorage key) rather than a third written value — `:root`'s bare declarations plus the `@media` block already cover it with zero JavaScript once no attribute is present.
+
+The remaining problem is timing: React doesn't run until after the browser has already parsed the `<head>` and started painting, so if `data-theme` were only set by a `useEffect`, a person who chose "light" in a previous visit would see one dark frame before React corrects it — a flash of wrong theme, structurally identical to a flash of unstyled content. The fix is the same class of trick as an SSR hydration guard: a **synchronous inline `<script>` in `index.html`, before any stylesheet or bundle loads**, that reads the same localStorage key and sets the same attribute:
+
+```html
+<script>
+  try {
+    var theme = localStorage.getItem('autoledger.theme');
+    if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-theme', theme);
+  } catch (e) { /* ignore — the @media fallback still applies */ }
+</script>
+```
+
+`ThemeContext`'s `ThemeProvider` is the only thing that writes `data-theme` and the localStorage key *after* mount; the inline copy above is not a duplicate to keep in sync so much as a one-time bridge across the gap where React hasn't run yet. Both reads are wrapped in `try/catch` for the same reason: `localStorage` can throw (private browsing in some engines, blocked storage, a full quota), and the correct behaviour on a throw is "fall through to the `@media` block", not a crashed page.
+
+One more mechanical point worth knowing: `color-mix(in srgb, #7c6cf6 16%, transparent)` is how the "soft" status backgrounds (`--good-soft`, `--bad-soft`, `--accent-soft`) are derived from the same hex a component also uses at full opacity, instead of hand-picking a second hex per token per theme. `color-mix()` runs at *paint* time against whatever `--accent` currently resolves to, so redefining `--accent` under `[data-theme="light"]` automatically redefines every `-soft` token derived from it — one override cascades into a whole family of derived colours, rather than needing its own three-selector duplication.
+
 ### The trade the utilities make
 
 Utility-first is not "inline styles with extra steps" — inline styles cannot do hover, focus, media queries, or dark mode, and do not dedupe. What it actually trades:
@@ -119,6 +150,9 @@ Utility-first is not "inline styles with extra steps" — inline styles cannot d
 - **Arbitrary values need no spaces**: `bg-[var(--panel)]`, not `bg-[var( --panel )]`.
 - **Class order does not matter** — output order is determined by Tailwind, not by the order in the attribute. `p-2 p-4` is not "last wins"; use a conditional.
 - **A Tailwind utility cannot beat an unlayered rule, ever, regardless of how specific the utility looks.** `mt-0` does not override an unlayered `.btn { margin-top: 1rem }`, no matter how the class list is ordered or how many utilities are stacked. The fix is a scoped unlayered override, not `!important` and not more utilities.
+- **`window.matchMedia` does not exist in jsdom.** Calling it unconditionally inside `ThemeProvider` passes every real browser and fails every test with `TypeError: window.matchMedia is not a function` — the fix is a capability check (`typeof window.matchMedia === 'function'`) before calling it, everywhere it's called, not just once. This is the same class of gap as `window.confirm` in [accessible-dialogs-and-focus.md](accessible-dialogs-and-focus.md) — jsdom implements the DOM, not the full browser platform, and both bugs only show up by actually running the test rather than reading the code.
+- **The inline theme script and `ThemeProvider` must agree on exactly one storage key and exactly one attribute contract**, or the page flashes the theme it was supposed to prevent flashing. They are two independent pieces of code (one is not generated from the other) — a rename of `autoledger.theme` in one place and not the other is a silent regression with no type error to catch it.
+- **`color-mix()` composes with custom properties, but not across an unrelated cascade boundary.** A `-soft` token only tracks its base colour automatically because both are defined together, under the same selectors, for the same theme. Defining `--accent` under `[data-theme="light"]` but leaving `--accent-soft`'s `color-mix()` call only under `:root` would make the "soft" variant silently keep resolving the dark accent.
 
 ---
 
@@ -140,6 +174,18 @@ A: The markup gets noisy — a styled table row can carry a dozen classes, and r
 A: Almost certainly a layered-versus-unlayered collision, not a specificity problem in the usual sense. Every Tailwind utility lives inside `@layer utilities`, and CSS cascade layers have a rule most people don't expect: unlayered CSS beats layered CSS unconditionally, regardless of selector specificity or source order. If there's a hand-written, unlayered rule somewhere setting that margin — which is exactly the situation in this codebase, where the pre-Tailwind stylesheet is deliberately unlayered so Preflight can't break it — no utility can win against it, no matter how many you stack or how you order them. The fix is another unlayered rule, scoped to the actual component (`.app-topbar .btn { margin-top: 0 }`), not `!important` and not fighting it with more utilities.
 
 ---
+
+**Q: How does the light/dark/system theme toggle actually work under the hood?**
+A: Three CSS selectors share the same custom-property names. `:root` holds the dark palette as the unconditional fallback. `:root[data-theme="light"]` holds an explicit override that wins whenever that attribute is present, regardless of the OS. And `@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) { ... } }` covers "system" — it only fires when the OS prefers light *and* the person hasn't explicitly forced dark. "System" itself is never a written value anywhere; it's modelled as the absence of the attribute and the absence of a stored preference, so the plain `:root` defaults plus that one `@media` block already produce the right result with no JavaScript branching. A `ThemeProvider` in React just decides which of those three states to be in and sets or clears the attribute — the actual repainting is CSS resolving custom properties, not React re-rendering styled components.
+
+**Q: The theme is read from localStorage, but React doesn't run until after the page starts loading. How do you avoid a flash of the wrong theme?**
+A: The same trick used for hydration flashes generally: a synchronous inline `<script>` in `index.html`, placed before any stylesheet or the React bundle loads, that reads the same localStorage key and sets the same `data-theme` attribute React will later manage. By the time the browser paints anything, the attribute is already correct, so there's nothing to flash. `ThemeProvider`'s job after that is just to keep the attribute in sync as the person changes their choice — it's not the thing preventing the initial flash, the inline script is.
+
+**Q: Why wrap the inline script's localStorage read in try/catch?**
+A: Because `localStorage` isn't guaranteed to be available or writable — some browsers throw on access in private/incognito mode, and it can also throw on quota. A crash in an inline `<head>` script would break the entire page before React even has a chance to run. The correct behaviour on a throw is to do nothing and let the CSS `@media` fallback apply, which is exactly what an empty catch block does here — silence is the fallback, not a bug being swallowed.
+
+**Q: `useTheme()` in this codebase returns a working default instead of throwing when there's no `<ThemeProvider>` above it — most of this project's other contexts throw. Why the different choice here?**
+A: Because of who calls it. `useOrg()` and `useAuth()` are read by page-level components that only ever render inside the full provider tree, so a throw is a real bug signal. `useTheme()` is read by shared shell components — the top bar's theme-toggle menu — that a lot of existing tests mount directly, without wrapping every one of them in a `<ThemeProvider>`. Throwing there would mean touching dozens of unrelated test files just to satisfy a context that has an obviously safe default (`system`, with a no-op setter) — the same value the CSS already renders with zero JavaScript. The rule isn't "contexts should never throw," it's "throw when a missing provider is actually a bug you want surfaced, and default when the value is genuinely optional and the alternative is spurious test churn."
 
 ## Follow-ups they'll dig into
 

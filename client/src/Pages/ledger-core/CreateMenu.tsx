@@ -1,37 +1,22 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import Menu from '../../components/ui/Menu';
 
 /**
  * The single entry point for "start something new" across LedgerCore — an
  * invoice, a journal entry, a customer, an account — rather than a scattered
  * button per page.
+ *
+ * Rendered inside the suite sidebar (LedgerCoreSidebar / AppSidebar), which
+ * lives under AppFrame — the same shell every app's sidebar mounts inside —
+ * so its targets are pinned to LedgerCore's own base path rather than
+ * whatever app happens to be open.
+ *
+ * Phase 31: built on the shared `Menu` primitive (arrow keys, focus return,
+ * outside-click) instead of its own hand-rolled outside-click effect.
  */
 export default function CreateMenu() {
   const base = useAppBasePath();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-
-    function handlePointerDown(event: PointerEvent) {
-      if (containerRef.current !== null && !containerRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false);
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown);
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown);
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [open]);
 
   const items = [
     { label: 'Invoice', to: `${base}/invoices/new` },
@@ -44,35 +29,20 @@ export default function CreateMenu() {
   ];
 
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
-      >
-        <Plus size={15} aria-hidden="true" /> New
-      </button>
-
-      {open && (
-        <div
-          role="menu"
-          className="absolute left-0 right-0 mt-1 rounded-md border border-[var(--border)] bg-[var(--panel)] shadow-lg overflow-hidden z-20"
+    <Menu
+      panelLabel="Create new"
+      align="left"
+      panelClassName="right-0 w-auto"
+      items={items}
+      trigger={({ buttonProps }) => (
+        <button
+          {...buttonProps}
+          type="button"
+          className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
-          {items.map((item) => (
-            <Link
-              key={item.label}
-              role="menuitem"
-              to={item.to}
-              onClick={() => setOpen(false)}
-              className="block px-3 py-2 text-sm no-underline text-[var(--text)] hover:bg-[var(--bg)]"
-            >
-              {item.label}
-            </Link>
-          ))}
-        </div>
+          <Plus size={15} aria-hidden="true" /> New
+        </button>
       )}
-    </div>
+    />
   );
 }

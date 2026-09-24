@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useOrg } from '../../context/OrgContext';
 import { useAuthActions } from '../../context/AuthContext';
 import { updateLedgerSettings, updateOrganization } from '../../services/fetchServices';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass, primaryButtonClass } from '../../components/ui/formClasses';
 
 /**
  * A flat form over the organization-identity fields the onboarding wizard
@@ -37,11 +40,6 @@ const CURRENCIES = [
   'NZD',
   'ZAR',
 ] as const;
-
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
-const primaryButtonClass =
-  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed';
 
 export default function SettingsPage() {
   const { organization } = useOrg();
@@ -113,9 +111,7 @@ export default function SettingsPage() {
 
   return (
     <section className="flex flex-col gap-4 max-w-xl">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Settings</h2>
-      </header>
+      <PageHeader as="h2" icon={SettingsIcon} title="Settings" />
 
       <SettingsTabs />
 

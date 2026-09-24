@@ -650,7 +650,7 @@ export default function NewInvoicePage() {
           <button
             type="submit"
             disabled={!canSave}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? 'Saving…' : 'Save draft'}
           </button>

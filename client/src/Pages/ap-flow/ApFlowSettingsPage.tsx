@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { FolderSync, Sparkles } from 'lucide-react';
 import { getApFlowSettings, updateApFlowSettings } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
+import PageHeader from '../../components/ui/PageHeader';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 
 /**
@@ -82,17 +84,17 @@ export default function ApFlowSettingsPage() {
   return (
     <section className="flex flex-col gap-4 max-w-xl">
       <BackLink to={base} label="AP-Flow" />
-      <header>
-        <h2 className="text-lg font-semibold m-0">AP-Flow settings</h2>
-      </header>
+      <PageHeader as="h2" icon={Sparkles} title="AP-Flow settings" />
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
       {!loaded && error === null && <p className="muted">Loading…</p>}
 
       {loaded && (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3">
-          <h3 className="text-sm font-semibold m-0">Auto-posting</h3>
+        <div className="card flex flex-col gap-3">
+          <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">
+            <Sparkles size={14} aria-hidden="true" className="text-[var(--muted)]" /> Auto-posting
+          </h3>
           <p className="text-sm text-[var(--muted)] m-0">
             Documents that fail any check stay in the review queue with the reason shown.
           </p>
@@ -134,7 +136,7 @@ export default function ApFlowSettingsPage() {
             <button type="button" disabled={saving} onClick={() => void handleSave()} className="btn">
               Save
             </button>
-            {saved && <span className="text-emerald-400 text-sm">Saved</span>}
+            {saved && <span className="text-[var(--good)] text-sm">Saved</span>}
             {updatedAt !== null && (
               <span className="text-[var(--muted)] text-sm">Last saved {new Date(updatedAt).toLocaleString()}</span>
             )}
@@ -142,8 +144,10 @@ export default function ApFlowSettingsPage() {
         </div>
       )}
 
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-2">
-        <h3 className="text-sm font-semibold m-0">Google Drive intake</h3>
+      <div className="card flex flex-col gap-2">
+        <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">
+          <FolderSync size={14} aria-hidden="true" className="text-[var(--muted)]" /> Google Drive intake
+        </h3>
         <p className="text-sm text-[var(--muted)] m-0">
           Watched folders now live on the platform Integrations page — a folder can feed either AP-Flow or LedgerCore.
         </p>

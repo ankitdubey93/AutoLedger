@@ -1,41 +1,37 @@
-import { NavLink } from 'react-router-dom';
+import {
+  Building2,
+  FileStack,
+  FileText,
+  GitCompareArrows,
+  Landmark,
+  ListTree,
+  Receipt,
+} from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import TabBar from '../../components/ui/TabBar';
 
-/** The tab strip shared by SettingsPage, InvoiceSettingsPage and PaymentTermsSettingsPage. */
+/** The tab strip shared by SettingsPage, InvoiceSettingsPage and PaymentTermsSettingsPage — a thin wrapper over the shared TabBar (Phase 31). */
 export default function SettingsTabs() {
   const base = useAppBasePath();
 
-  const linkClass = ({ isActive }: { isActive: boolean }) =>
-    [
-      'px-3 py-1.5 text-sm no-underline rounded-md',
-      isActive
-        ? 'bg-[var(--panel)] text-[var(--text)] font-medium'
-        : 'text-[var(--muted)] hover:text-[var(--text)]',
-    ].join(' ');
-
   return (
-    <nav aria-label="Settings" className="flex gap-1 border-b border-[var(--border)] pb-2">
-      <NavLink to={`${base}/settings`} end className={linkClass}>
-        Organization
-      </NavLink>
-      <NavLink to={`${base}/settings/financial`} className={linkClass}>
-        Financial
-      </NavLink>
-      <NavLink to={`${base}/settings/chart`} className={linkClass}>
-        Chart of accounts
-      </NavLink>
-      <NavLink to={`${base}/settings/conversion-balances`} className={linkClass}>
-        Conversion balances
-      </NavLink>
-      <NavLink to={`${base}/settings/invoicing`} className={linkClass}>
-        Invoicing
-      </NavLink>
-      <NavLink to={`${base}/settings/invoice-template`} className={linkClass}>
-        Invoice template
-      </NavLink>
-      <NavLink to={`${base}/settings/payment-terms`} className={linkClass}>
-        Payment terms
-      </NavLink>
-    </nav>
+    <TabBar
+      ariaLabel="Settings"
+      variant="links"
+      items={[
+        { id: 'organization', label: 'Organization', icon: Building2, to: `${base}/settings`, end: true },
+        { id: 'financial', label: 'Financial', icon: Landmark, to: `${base}/settings/financial` },
+        { id: 'chart', label: 'Chart of accounts', icon: ListTree, to: `${base}/settings/chart` },
+        {
+          id: 'conversion-balances',
+          label: 'Conversion balances',
+          icon: GitCompareArrows,
+          to: `${base}/settings/conversion-balances`,
+        },
+        { id: 'invoicing', label: 'Invoicing', icon: Receipt, to: `${base}/settings/invoicing` },
+        { id: 'invoice-template', label: 'Invoice template', icon: FileText, to: `${base}/settings/invoice-template` },
+        { id: 'payment-terms', label: 'Payment terms', icon: FileStack, to: `${base}/settings/payment-terms` },
+      ]}
+    />
   );
 }

@@ -4,6 +4,29 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AutoLedger ERP</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      // Phase 31: read the persisted theme before first paint so the page
+      // never flashes the wrong palette. ThemeContext (src/context/ThemeContext.tsx)
+      // is the only other writer of this key and keeps `data-theme` in sync
+      // after mount; this inline copy exists only because React has not run
+      // yet. Wrapped in try/catch because localStorage can throw (private
+      // browsing, blocked storage) — falling through leaves no attribute, so
+      // the CSS `@media (prefers-color-scheme)` fallback in index.css applies.
+      try {
+        var theme = localStorage.getItem('autoledger.theme');
+        if (theme === 'light' || theme === 'dark') {
+          document.documentElement.setAttribute('data-theme', theme);
+        }
+      } catch (e) {
+        /* ignore — system preference via CSS media query still applies */
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

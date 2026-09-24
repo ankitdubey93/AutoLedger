@@ -180,7 +180,7 @@ export default function PaymentDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -190,7 +190,7 @@ export default function PaymentDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="payment-dialog-title"
-        className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-lg"
+        className="animate-pop-in w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]"
       >
         <h3 id="payment-dialog-title" className="text-base font-semibold m-0">
           {direction === 'RECEIVE' ? 'Record a receipt' : 'Record a payment'}
@@ -283,7 +283,7 @@ export default function PaymentDialog({
           <button
             type="submit"
             disabled={!canSave}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? 'Recording…' : 'Record'}
           </button>

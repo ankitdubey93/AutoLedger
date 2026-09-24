@@ -293,7 +293,7 @@ export default function StockNewItemPage() {
       <button
         type="submit"
         disabled={submitting}
-        className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+        className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
       >
         Create item
       </button>

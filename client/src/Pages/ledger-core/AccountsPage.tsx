@@ -94,7 +94,11 @@ function AccountRow({
             aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${node.code} ${node.name}`}
             className="p-0.5 -ml-1 rounded bg-transparent border-0 cursor-pointer text-[var(--muted)] hover:text-[var(--text)]"
           >
-            <ChevronDown size={14} aria-hidden="true" className={isCollapsed ? '-rotate-90' : ''} />
+            <ChevronDown
+              size={14}
+              aria-hidden="true"
+              className={`transition-transform duration-150 ${isCollapsed ? '-rotate-90' : ''}`}
+            />
           </button>
         ) : (
           <span className="w-[18px] shrink-0" aria-hidden="true" />
@@ -234,7 +238,7 @@ export default function AccountsPage() {
           <button
             type="button"
             onClick={() => setShowForm((open) => !open)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             <Plus size={15} aria-hidden="true" /> New account
           </button>
@@ -262,7 +266,7 @@ export default function AccountsPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             Create the first account
           </button>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Gauge, Inbox, ListChecks, SlidersHorizontal } from 'lucide-react';
 import {
   createApFlowDocument,
   listApFlowDocuments,
@@ -10,6 +11,8 @@ import {
 } from '../../services/fetchServices';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import ApFlowUploadPanel from './ApFlowUploadPanel';
+import PageHeader from '../../components/ui/PageHeader';
+import EmptyState from '../../components/ui/EmptyState';
 
 /**
  * AP-Flow's capture register (Phase 10; direct upload and auto-post status
@@ -22,40 +25,57 @@ const SCANNABLE_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpe
 const IN_FLIGHT_STATUSES = new Set<ApFlowDocumentStatus>(['PENDING', 'PROCESSING']);
 const POLL_INTERVAL_MS = 5000;
 
+const PILL_CLASS = 'text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ring-1 ring-inset';
+
 function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
   if (status === 'PENDING') {
     return <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Pending</span>;
   }
   if (status === 'PROCESSING') {
     return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 ring-1 ring-inset ring-sky-500/20">
+      <span
+        className={PILL_CLASS}
+        style={{ background: 'var(--accent-soft)', color: 'var(--accent)', boxShadow: 'inset 0 0 0 1px var(--accent-soft)' }}
+      >
         Processing
       </span>
     );
   }
   if (status === 'EXTRACTED') {
     return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
+      <span
+        className={PILL_CLASS}
+        style={{ background: 'var(--good-soft)', color: 'var(--good)', boxShadow: 'inset 0 0 0 1px var(--good-soft)' }}
+      >
         Extracted
       </span>
     );
   }
   if (status === 'POSTED') {
     return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-400 ring-1 ring-inset ring-violet-500/20">
+      <span
+        className={PILL_CLASS}
+        style={{ background: 'var(--panel-2)', color: 'var(--text)', boxShadow: 'inset 0 0 0 1px var(--border)' }}
+      >
         Posted
       </span>
     );
   }
   if (status === 'DUPLICATE') {
     return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">
+      <span
+        className={PILL_CLASS}
+        style={{ background: 'var(--warn-soft)', color: 'var(--warn)', boxShadow: 'inset 0 0 0 1px var(--warn-soft)' }}
+      >
         Possible duplicate
       </span>
     );
   }
   return (
-    <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-red-500/10 text-red-400 ring-1 ring-inset ring-red-500/20">
+    <span
+      className={PILL_CLASS}
+      style={{ background: 'var(--bad-soft)', color: 'var(--bad)', boxShadow: 'inset 0 0 0 1px var(--bad-soft)' }}
+    >
       Failed
     </span>
   );
@@ -138,25 +158,25 @@ export default function ApFlowDocumentsPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold m-0">AP-Flow</h2>
-          <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            Capture a vendor bill or receipt and extract it into a structured draft.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Link to={`${base}/usage`} className="btn btn--ghost">
-            AI usage
-          </Link>
-          <Link to={`${base}/settings`} className="btn btn--ghost">
-            Settings
-          </Link>
-          <Link to={`${base}/review`} className="btn btn--ghost">
-            Review queue
-          </Link>
-        </div>
-      </header>
+      <PageHeader
+        as="h2"
+        icon={Inbox}
+        title="AP-Flow"
+        subtitle="Capture a vendor bill or receipt and extract it into a structured draft."
+        actions={
+          <>
+            <Link to={`${base}/usage`} className="btn btn--ghost flex items-center gap-1.5">
+              <Gauge size={14} aria-hidden="true" /> AI usage
+            </Link>
+            <Link to={`${base}/settings`} className="btn btn--ghost flex items-center gap-1.5">
+              <SlidersHorizontal size={14} aria-hidden="true" /> Settings
+            </Link>
+            <Link to={`${base}/review`} className="btn btn--ghost flex items-center gap-1.5">
+              <ListChecks size={14} aria-hidden="true" /> Review queue
+            </Link>
+          </>
+        }
+      />
 
       <ApFlowUploadPanel onUploaded={() => setReloadToken((t) => t + 1)} />
 
@@ -213,9 +233,7 @@ export default function ApFlowDocumentsPage() {
       {documents === null && error === null && <p className="muted">Loading…</p>}
 
       {documents !== null && documents.length === 0 && (
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center">
-          <p className="text-sm text-[var(--muted)] m-0">No documents yet — drop one above.</p>
-        </div>
+        <EmptyState icon={Inbox} title="No documents yet — drop one above." />
       )}
 
       {documents !== null && documents.length > 0 && (

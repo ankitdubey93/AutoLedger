@@ -187,7 +187,7 @@ export default function InvoiceDetailPage() {
               type="button"
               onClick={() => setConfirmAction('issue')}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Issue
             </button>
@@ -197,7 +197,7 @@ export default function InvoiceDetailPage() {
               type="button"
               onClick={() => setShowPaymentDialog(true)}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Record payment
             </button>

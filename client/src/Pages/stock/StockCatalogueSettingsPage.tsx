@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import TabBar from '../../components/ui/TabBar';
+import PageHeader from '../../components/ui/PageHeader';
 import {
   STOCK_ATTRIBUTE_TYPES,
   STOCK_ITEM_TYPES,
@@ -192,7 +195,7 @@ export default function StockCatalogueSettingsPage() {
 
   return (
     <div className="max-w-3xl space-y-8">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Catalogue</h1>
+      <PageHeader as="h1" icon={SettingsIcon} title="Catalogue" />
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">
@@ -209,7 +212,7 @@ export default function StockCatalogueSettingsPage() {
                 {uom.code} — {uom.name} ({uom.decimalPlaces} dp)
               </span>
               {canWrite ? (
-                <button type="button" onClick={() => void handleToggleUom(uom)} className="text-xs text-[var(--muted)]">
+                <button type="button" onClick={() => void handleToggleUom(uom)} className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-2)] transition-colors">
                   {uom.isActive ? 'Deactivate' : 'Activate'}
                 </button>
               ) : null}
@@ -247,7 +250,7 @@ export default function StockCatalogueSettingsPage() {
             <button
               type="button"
               onClick={() => void handleCreateUom()}
-              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
             >
               Add unit
             </button>
@@ -276,7 +279,7 @@ export default function StockCatalogueSettingsPage() {
                 <button
                   type="button"
                   onClick={() => void handleToggleCategory(category)}
-                  className="ml-2 text-xs text-[var(--muted)]"
+                  className="ml-2 rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-2)] transition-colors"
                 >
                   {category.isActive ? 'Deactivate' : 'Activate'}
                 </button>
@@ -353,7 +356,7 @@ export default function StockCatalogueSettingsPage() {
             <button
               type="button"
               onClick={() => void handleCreateCategory()}
-              className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
             >
               Add category
             </button>
@@ -369,23 +372,16 @@ export default function StockCatalogueSettingsPage() {
           <p className="text-sm text-[var(--muted)]">Choose a category above to see or edit its custom fields.</p>
         ) : (
           <>
-            <div role="tablist" className="flex gap-2">
-              {(['ITEM', 'SERIAL'] as const).map((scope) => (
-                <button
-                  key={scope}
-                  type="button"
-                  role="tab"
-                  aria-selected={attributeScope === scope}
-                  onClick={() => setAttributeScope(scope)}
-                  className={[
-                    'px-3 py-1.5 text-sm rounded-md',
-                    attributeScope === scope ? 'bg-[var(--panel)] text-[var(--text)] font-medium' : 'text-[var(--muted)]',
-                  ].join(' ')}
-                >
-                  {scope === 'ITEM' ? 'Item fields' : 'Serial fields'}
-                </button>
-              ))}
-            </div>
+            <TabBar
+              ariaLabel="Custom field scope"
+              variant="buttons"
+              active={attributeScope}
+              onChange={(id) => setAttributeScope(id as StockAttributeScope)}
+              items={[
+                { id: 'ITEM', label: 'Item fields' },
+                { id: 'SERIAL', label: 'Serial fields' },
+              ]}
+            />
             <ul className="space-y-1">
               {visibleAttributes.map((attribute) => (
                 <li key={attribute.id} className="flex items-center justify-between text-sm">
@@ -397,7 +393,7 @@ export default function StockCatalogueSettingsPage() {
                     <button
                       type="button"
                       onClick={() => void handleToggleAttribute(attribute)}
-                      className="text-xs text-[var(--muted)]"
+                      className="rounded-md border border-[var(--border)] px-2 py-1 text-xs text-[var(--muted)] hover:text-[var(--text)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-2)] transition-colors"
                     >
                       {attribute.isActive ? 'Deactivate' : 'Activate'}
                     </button>
@@ -463,7 +459,7 @@ export default function StockCatalogueSettingsPage() {
                 <button
                   type="button"
                   onClick={() => void handleCreateAttribute()}
-                  className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+                  className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
                 >
                   Add field
                 </button>

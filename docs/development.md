@@ -308,6 +308,8 @@ Added in Phase 28:
 
 No client-side dependency this phase — every StockLedger page (`StockSetupPage`, `StockItemsPage`, `StockMovementPage`, `StockLabelsPage`, `AttributeFields`, and the rest) is hand-rolled, matching every other app's pages; the generated QR SVG reaches the client as a string and is rendered as an `<img src="data:image/svg+xml;base64,...">`, never `dangerouslySetInnerHTML`.
 
+**Phase 31 (workspace UI/UX redesign) added no npm dependency either — server or client.** The new theme system, shell (sidebar/top bar/footer/command palette), and shared `components/ui/` library are all hand-rolled: `Menu`'s accessible-menu-button behaviour, `ThemeContext`'s light/dark/system state, and `CommandPalette`'s substring matching are plain React and DOM APIs, not a headless-UI or dialog library. The one new asset is **Inter**, loaded from Google Fonts via a `<link>` in `client/index.html` — a network resource, not an npm package, so it needs no `package.json` entry and no build-time bundling; the existing system-font stack (`ui-sans-serif, system-ui, …`) stays as the fallback if the font fails to load.
+
 ---
 
 ## Troubleshooting

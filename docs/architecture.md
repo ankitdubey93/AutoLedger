@@ -13,7 +13,7 @@ All three apps share one database, one `organizations` table as the tenant bound
 
 The app slug is a **routing namespace, not a tenancy boundary**. `org_id` remains the only thing that scopes data access — a request to `/api/v1/ap-flow/invoices` is still scoped by the caller's `org_id`, exactly like a platform route. An app never reads another app's tables directly.
 
-**Which apps an organization uses (Phase 27).** The registry (`config/apps.ts`) is the same for everyone; each organization additionally keeps its own enabled set in `organization_apps`, chosen on the post-sign-up picker (`/welcome`) and changed in Account → Apps (`GET`/`PUT /api/v1/organizations/apps`). Each registry entry declares `requires` — the apps it reads from or posts to — and a selection missing one is refused. This is **visibility only**: the chooser and `useActiveApp` hide a disabled app and redirect away from its URL, but no app router checks it, so it is not an authorization boundary. Server-side enforcement (a per-router guard, a `READ_ONLY` state) is the entitlement design in [master-plan.md § 5.6](master-plan.md), not built.
+**Which apps an organization uses (Phase 27).** The registry (`config/apps.ts`) is the same for everyone; each organization additionally keeps its own enabled set in `organization_apps`, chosen on the post-sign-up picker (`/welcome`) and changed in Account → Apps (`GET`/`PUT /api/v1/organizations/apps`). Each registry entry declares `requires` — the apps it reads from or posts to — and a selection missing one is refused. This is **visibility only**: the chooser, the suite sidebar, the app-switcher menu and `useEnabledApps`/`resolveActiveApp` (Phase 31; replaced `useActiveApp`) hide a disabled app and redirect away from its URL, but no app router checks it, so it is not an authorization boundary. Server-side enforcement (a per-router guard, a `READ_ONLY` state) is the entitlement design in [master-plan.md § 5.6](master-plan.md), not built.
 
 ## Multi-tenancy (foundational)
 
@@ -245,30 +245,43 @@ server/
 
 client/
 ├── src/
-│   ├── main.tsx
+│   ├── main.tsx                    ← wraps <App/> in <ThemeProvider/>
 │   ├── App.tsx                     ← router + AuthProvider + OrgProvider
 │   ├── context/
 │   │   ├── AuthContext.tsx
-│   │   └── OrgContext.tsx          ← active organization + switcher
+│   │   ├── OrgContext.tsx          ← active organization + switcher
+│   │   └── ThemeContext.tsx        ← light/dark/system, data-theme + localStorage (Phase 31)
 │   ├── apps/
-│   │   ├── registry.ts             ← slug → element, for route wiring
-│   │   ├── useActiveApp.ts         ← resolves :appSlug against GET /apps
+│   │   ├── registry.ts             ← slug → element/nav-data/brand icon, for route wiring
+│   │   ├── useEnabledApps.ts       ← GET /organizations/apps keyed on org, + resolveActiveApp (Phase 31; replaced useActiveApp.ts)
 │   │   └── useAppBasePath.ts       ← /app/<slug> prefix for in-app links
 │   ├── Pages/                      ← capital P
 │   │   ├── AppChooserPage.tsx      ← "/", one card per app
 │   │   ├── AccountPage.tsx         ← "/account", suite-level identity/org/session
 │   │   ├── ledger-core/            ← app pages nest under Pages/<app-slug>/
-│   │   └── ap-flow/
+│   │   │   ├── ledgerCoreNav.ts    ← sidebar nav groups as data (Phase 31)
+│   │   │   └── LedgerCoreSidebar.tsx  ← thin wrapper over components/layout/AppSidebar.tsx
+│   │   ├── ap-flow/
+│   │   │   ├── apFlowNav.ts        ← Phase 31 — AP-Flow's first sidebar
+│   │   │   └── ApFlowSidebar.tsx
+│   │   └── stock/
+│   │       ├── stockNav.ts
+│   │       └── StockSidebar.tsx
 │   ├── components/
 │   │   ├── ProtectedRoute.tsx
+│   │   ├── ui/                     ← shared primitives (Phase 31): Menu, TabBar, PageHeader, StatTile, EmptyState, Skeleton, formClasses
 │   │   └── layout/
-│   │       ├── PlatformLayout.tsx  ← suite chrome for "/" and "/account" only
+│   │       ├── PlatformLayout.tsx  ← suite chrome for "/", "/welcome", "/account", "/documents", "/integrations"
 │   │       ├── AppFrame.tsx        ← per-app shell, mounted at /app/:appSlug
-│   │       ├── AppTopBar.tsx       ← small AutoLedger mark + app name + org/user controls
+│   │       ├── AppTopBar.tsx       ← shared by both layouts: app switcher, search, theme toggle, org/user menus
+│   │       ├── AppSidebar.tsx      ← Phase 31 — the shared collapsible/mobile-drawer rail every app's Sidebar wraps
+│   │       ├── AppFooter.tsx       ← Phase 31
+│   │       ├── CommandPalette.tsx  ← Phase 31 — ⌘K, navigation only
+│   │       ├── ShellContext.tsx    ← Phase 31 — sidebar-collapse/drawer/palette state
 │   │       └── OrgSwitcher.tsx
 │   ├── services/fetchServices.ts
 │   └── utils/fetchWithAutoRefresh.ts
-├── index.html
+├── index.html                      ← inline no-flash theme script (Phase 31)
 ├── vite.config.ts
 └── package.json
 ```

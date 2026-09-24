@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
+import { ArrowRight, Grid2x2 } from 'lucide-react';
 import { getOrganizationApps, type AppSummary, type OrganizationAppsResponse } from '../services/fetchServices';
 import { useOrg } from '../context/OrgContext';
+import { APP_BRAND } from '../apps/registry';
 import SetupChecklist from './SetupChecklist';
 
 /**
@@ -71,12 +73,23 @@ export default function AppChooserPage() {
 }
 
 function AppCard({ app }: { app: AppSummary }) {
+  const brand = APP_BRAND[app.slug];
+  const Icon = brand?.icon ?? Grid2x2;
+  const color = brand?.color ?? 'var(--accent)';
+
   const body = (
     <>
       <div className="app-card__head">
-        <h2 className="app-card__name">{app.name}</h2>
+        <span
+          aria-hidden="true"
+          className="flex size-9 items-center justify-center rounded-lg text-white shrink-0"
+          style={{ background: `linear-gradient(135deg, ${color}, color-mix(in srgb, ${color} 70%, black))` }}
+        >
+          <Icon size={18} />
+        </span>
         {app.status === 'planned' && <span className="chip chip--muted">Coming soon</span>}
       </div>
+      <h2 className="app-card__name">{app.name}</h2>
       <p className="app-card__domain">{app.domain}</p>
       <p className="muted">{app.tagline}</p>
       <ul className="app-card__skills">
@@ -96,8 +109,12 @@ function AppCard({ app }: { app: AppSummary }) {
   }
 
   return (
-    <Link to={`/app/${app.slug}`} className="card app-card">
+    <Link to={`/app/${app.slug}`} className="card card--interactive app-card group">
       {body}
+      <span className="mt-auto flex items-center gap-1 text-xs font-medium text-[var(--accent)]">
+        Open
+        <ArrowRight size={13} aria-hidden="true" className="transition-transform group-hover:translate-x-1" />
+      </span>
     </Link>
   );
 }

@@ -179,7 +179,7 @@ export default function BankTransactionsPage() {
         </div>
         <Link
           to={`${base}/bank/import`}
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] no-underline"
+          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
         >
           Import statement
         </Link>
@@ -196,7 +196,7 @@ export default function BankTransactionsPage() {
               onClick={() => setFilter('status', tab.value)}
               className={[
                 'px-3 py-1.5 rounded-md text-sm border-0 cursor-pointer',
-                status === tab.value ? 'bg-[var(--text)] text-[var(--bg)]' : 'bg-transparent text-[var(--muted)]',
+                status === tab.value ? 'bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors' : 'bg-transparent text-[var(--muted)]',
               ].join(' ')}
             >
               {tab.label}
@@ -346,7 +346,7 @@ export default function BankTransactionsPage() {
                             type="button"
                             disabled={busy}
                             onClick={() => void submitPostJournal(txn)}
-                            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+                            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                           >
                             Post
                           </button>
@@ -387,7 +387,7 @@ export default function BankTransactionsPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => handleAccept(txn.id, suggestion.id, suggestion.score)}
-                              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+                              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                             >
                               {suggestion.score >= AUTO_MATCH_THRESHOLD ? 'Accept' : 'Match'}
                             </button>

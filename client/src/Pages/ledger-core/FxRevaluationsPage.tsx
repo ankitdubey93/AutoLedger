@@ -36,7 +36,7 @@ export default function FxRevaluationsPage() {
         </div>
         <Link
           to={`${base}/fx-exposure`}
-          className="px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--text)] text-[var(--bg)]"
+          className="px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           Post a revaluation
         </Link>

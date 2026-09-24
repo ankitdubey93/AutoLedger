@@ -94,7 +94,7 @@ export default function StockSetupPage() {
         </ul>
         <Link
           to={`${base}/dashboard`}
-          className="inline-block rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white no-underline"
+          className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
           onClick={() => navigate(`${base}/dashboard`)}
         >
           Continue to dashboard
@@ -210,7 +210,7 @@ export default function StockSetupPage() {
             type="button"
             disabled={applying || selectedKey === null}
             onClick={() => void handleApply()}
-            className="rounded-md bg-[var(--accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
           >
             Set up StockLedger
           </button>

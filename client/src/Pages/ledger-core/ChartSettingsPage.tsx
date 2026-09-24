@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, Landmark } from 'lucide-react';
+import { Folder, Landmark, ListTree } from 'lucide-react';
 import {
   listAccountTree,
   updateAccount,
@@ -10,6 +10,7 @@ import {
 import { TYPE_STYLES } from './AccountsPage';
 import NewAccountForm, { ACCOUNT_TYPES } from './NewAccountForm';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
 
 /**
  * Phase 30 — the Chart of accounts tab: an in-settings account builder.
@@ -233,9 +234,7 @@ export default function ChartSettingsPage() {
 
   return (
     <section className="flex flex-col gap-6">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Settings</h2>
-      </header>
+      <PageHeader as="h2" icon={ListTree} title="Settings" />
 
       <SettingsTabs />
 
@@ -266,7 +265,7 @@ export default function ChartSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setAddFormType(addFormType === type ? null : type)}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
                 >
                   Add account
                 </button>

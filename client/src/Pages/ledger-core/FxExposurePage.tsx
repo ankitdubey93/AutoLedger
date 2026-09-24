@@ -95,7 +95,7 @@ export default function FxExposurePage() {
               <button
                 type="button"
                 onClick={() => setConfirming(true)}
-                className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+                className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
               >
                 Post revaluation
               </button>

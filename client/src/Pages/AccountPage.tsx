@@ -16,6 +16,7 @@ import { useOrg } from '../context/OrgContext';
 import AppPicker from '../components/AppPicker';
 import AccountTabs, { type AccountTab } from './AccountTabs';
 import OrganizationProfilePanel from './OrganizationProfilePanel';
+import { initials } from '../utils/initials';
 
 /**
  * The account page: identity, organization, membership, and session details
@@ -434,9 +435,23 @@ export default function AccountPage() {
 
   return (
     <div className="dashboard">
-      <header>
-        <h1>Account</h1>
-        <p className="subtitle">Your identity, organization, and session — across every app in the suite.</p>
+      <header className="flex items-center gap-3.5">
+        <span className="flex size-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-sm font-semibold">
+          {initials(auth.user.name, auth.user.email)}
+        </span>
+        <div>
+          <h1>Account</h1>
+          <p className="subtitle m-0 mt-0.5">
+            {auth.user.email}
+            {organization !== null && (
+              <>
+                {' · '}
+                {organization.name}
+                {role !== null && <span className="chip ml-2">{role}</span>}
+              </>
+            )}
+          </p>
+        </div>
       </header>
 
       <div className="grid">
@@ -488,9 +503,11 @@ export default function AccountPage() {
             </dl>
           )}
         </section>
+      </div>
 
-        <AccountTabs active={tab} onChange={setTab} />
+      <AccountTabs active={tab} onChange={setTab} />
 
+      <div className="grid">
         {tab === 'organization' && (
           <>
             <OrganizationProfilePanel />

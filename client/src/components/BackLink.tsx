@@ -13,9 +13,9 @@ export default function BackLink({ to, label }: { to: string; label: string }) {
   return (
     <Link
       to={to}
-      className="inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] no-underline w-fit"
+      className="group inline-flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] no-underline w-fit transition-colors"
     >
-      <ArrowLeft size={15} aria-hidden="true" />
+      <ArrowLeft size={15} aria-hidden="true" className="transition-transform duration-150 group-hover:-translate-x-0.5" />
       {label}
     </Link>
   );

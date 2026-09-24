@@ -218,7 +218,7 @@ export default function StockCodeSchemesPage() {
                   className={`${inputClass} w-16 ml-1`}
                 />
               </label>
-              <button type="button" onClick={handleInsertAttribute} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white">
+              <button type="button" onClick={handleInsertAttribute} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
                 Insert
               </button>
             </div>
@@ -238,7 +238,7 @@ export default function StockCodeSchemesPage() {
                   className={`${inputClass} w-16 ml-1`}
                 />
               </label>
-              <button type="button" onClick={handleInsertSequence} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white">
+              <button type="button" onClick={handleInsertSequence} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
                 Insert
               </button>
             </div>
@@ -291,7 +291,7 @@ export default function StockCodeSchemesPage() {
               <input type="checkbox" checked={schemeIsDefault} onChange={(e) => setSchemeIsDefault(e.target.checked)} />
               Make default
             </label>
-            <button type="button" onClick={() => void handleSave()} className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white">
+            <button type="button" onClick={() => void handleSave()} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
               Save
             </button>
           </div>

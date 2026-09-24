@@ -160,7 +160,7 @@ export default function StockLocationsPage() {
           <button
             type="button"
             onClick={() => void handleCreate()}
-            className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white"
+            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
           >
             Add location
           </button>

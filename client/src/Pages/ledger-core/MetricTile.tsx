@@ -1,6 +1,6 @@
-import { Link } from 'react-router-dom';
 import type { LucideIcon } from 'lucide-react';
 import { formatCents } from '../../utils/money';
+import StatTile from '../../components/ui/StatTile';
 
 /**
  * A dashboard position tile. Renders as a link when `to` is given — the
@@ -10,6 +10,9 @@ import { formatCents } from '../../utils/money';
  *
  * Value and currency stay in separate text nodes: `formatCents` never gets a
  * currency symbol appended, matching the rule money.ts documents.
+ *
+ * Phase 31: a thin wrapper over the shared `StatTile` (its money formatting
+ * and Link-vs-div behaviour are the only things specific to LedgerCore).
  */
 
 export interface MetricTileProps {
@@ -26,41 +29,24 @@ export interface MetricTileProps {
   hint: string | null;
 }
 
-const TONE_ICON: Record<MetricTileProps['tone'], string> = {
-  neutral: 'text-[var(--muted)]',
-  good: 'text-[var(--good)]',
-  bad: 'text-[var(--bad)]',
-};
-
-export default function MetricTile({ label, valueCents, currency, icon: Icon, tone, to, hint }: MetricTileProps) {
-  const content = (
-    <>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">{label}</p>
-        <Icon size={16} aria-hidden="true" className={TONE_ICON[tone]} />
-      </div>
-      {valueCents === null ? (
-        <p className="text-2xl font-semibold m-0 mt-2">—</p>
-      ) : (
-        <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">
-          <span>{formatCents(valueCents)}</span>{' '}
-          <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
-        </p>
-      )}
-      {hint !== null && <p className="text-xs text-[var(--muted)] m-0 mt-1.5">{hint}</p>}
-    </>
-  );
-
-  if (to !== null) {
-    return (
-      <Link
-        to={to}
-        className="card no-underline text-inherit block transition-colors hover:border-[var(--good)] focus-visible:border-[var(--good)]"
-      >
-        {content}
-      </Link>
+export default function MetricTile({ label, valueCents, currency, icon, tone, to, hint }: MetricTileProps) {
+  const value =
+    valueCents === null ? (
+      '—'
+    ) : (
+      <>
+        <span>{formatCents(valueCents)}</span> <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+      </>
     );
-  }
 
-  return <div className="card">{content}</div>;
+  return (
+    <StatTile
+      label={label}
+      icon={icon}
+      tone={tone}
+      value={value}
+      {...(hint !== null ? { hint } : {})}
+      {...(to !== null ? { to } : {})}
+    />
+  );
 }

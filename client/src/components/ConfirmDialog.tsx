@@ -48,7 +48,7 @@ export default function ConfirmDialog({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
       onClick={(event) => {
         if (event.target === event.currentTarget) onCancel();
       }}
@@ -57,7 +57,7 @@ export default function ConfirmDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="confirm-dialog-title"
-        className="w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-4 shadow-lg"
+        className="animate-pop-in w-full max-w-sm rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-4 shadow-[var(--shadow-lg)]"
       >
         <h3 id="confirm-dialog-title" className="text-base font-semibold m-0">
           {title}
@@ -79,7 +79,7 @@ export default function ConfirmDialog({
             disabled={busy}
             className={[
               'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed',
-              tone === 'danger' ? 'bg-[var(--bad)] text-white' : 'bg-[var(--text)] text-[var(--bg)]',
+              tone === 'danger' ? 'bg-[var(--bad)] text-white' : 'bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors',
             ].join(' ')}
           >
             {busy ? '…' : confirmLabel}

@@ -179,7 +179,7 @@ export default function StockItemDetailPage() {
             type="button"
             disabled={saving}
             onClick={() => void handleSaveAttributes()}
-            className="rounded-md bg-[var(--accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
           >
             Save
           </button>

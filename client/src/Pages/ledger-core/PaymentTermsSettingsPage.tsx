@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FileStack } from 'lucide-react';
 import {
   createPaymentTerm,
   listPaymentTerms,
@@ -6,6 +7,8 @@ import {
   type PaymentTerm,
 } from '../../services/fetchServices';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass } from '../../components/ui/formClasses';
 
 /**
  * The payment terms catalogue — Phase 24's selectable due-date terms, managed
@@ -13,9 +16,6 @@ import SettingsTabs from './SettingsTabs';
  * (seeded at registration); a standard term can be deactivated but not
  * renamed or re-dated, so a custom one is added here instead.
  */
-
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
 function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
   const [code, setCode] = useState('');
@@ -91,7 +91,7 @@ function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCan
         <button
           type="submit"
           disabled={busy || code.trim() === '' || name.trim() === '' || netDays.trim() === ''}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy ? 'Creating…' : 'Create payment term'}
         </button>
@@ -138,9 +138,7 @@ export default function PaymentTermsSettingsPage() {
 
   return (
     <section className="flex flex-col gap-4 max-w-2xl">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Settings</h2>
-      </header>
+      <PageHeader as="h2" icon={FileStack} title="Settings" />
 
       <SettingsTabs />
 
@@ -151,7 +149,7 @@ export default function PaymentTermsSettingsPage() {
         <button
           type="button"
           onClick={() => setShowForm((open) => !open)}
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)]"
+          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           New payment term
         </button>

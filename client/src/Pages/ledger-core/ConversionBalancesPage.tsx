@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, GitCompareArrows } from 'lucide-react';
 import {
   ApiRequestError,
   createMigrationImport,
@@ -15,6 +15,8 @@ import { useAppBasePath } from '../../apps/useAppBasePath';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import { IMPORT_TEMPLATES, csvField } from './importTemplates';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass, primaryButtonClass } from '../../components/ui/formClasses';
 
 /**
  * Phase 30 — the Conversion balances tab: a Xero-style opening-balance grid.
@@ -55,10 +57,6 @@ interface DraftRow {
   credit: string;
 }
 
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
-const primaryButtonClass =
-  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed';
 const ghostButtonClass =
   'flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer p-0 disabled:opacity-40 disabled:cursor-not-allowed';
 
@@ -264,9 +262,7 @@ export default function ConversionBalancesPage() {
 
   return (
     <section className="flex flex-col gap-6 max-w-4xl">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Settings</h2>
-      </header>
+      <PageHeader as="h2" icon={GitCompareArrows} title="Settings" />
 
       <SettingsTabs />
 

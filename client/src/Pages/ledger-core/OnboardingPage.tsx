@@ -60,7 +60,7 @@ type WizardStep = { step: 1 } | { step: 2 } | { step: 3 };
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 const primaryButtonClass =
-  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed';
+  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 const ghostButtonClass =
   'px-4 py-2 rounded-md text-sm font-medium border border-[var(--border)] bg-transparent text-[var(--text)] cursor-pointer';
 

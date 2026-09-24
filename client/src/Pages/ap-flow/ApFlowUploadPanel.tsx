@@ -51,7 +51,9 @@ export default function ApFlowUploadPanel({ onUploaded }: { onUploaded: () => vo
   return (
     <div
       className={`rounded-lg border border-dashed p-4 flex flex-col gap-3 transition-colors ${
-        dragging ? 'border-[var(--accent,#6366f1)] bg-[var(--panel)]' : 'border-[var(--border)] bg-[var(--panel)]'
+        dragging
+          ? 'border-[var(--accent)] bg-[var(--accent-soft)]'
+          : 'border-[var(--border)] bg-[var(--panel)] hover:border-[var(--border-strong)]'
       }`}
       onDragOver={(e) => {
         e.preventDefault();

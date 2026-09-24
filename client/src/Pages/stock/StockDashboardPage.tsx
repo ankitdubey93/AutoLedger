@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Boxes, AlertTriangle, CalendarClock, MapPin, Wallet } from 'lucide-react';
+import { Boxes, AlertTriangle, CalendarClock, ClipboardList, History, MapPin, Wallet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { formatQuantityMilli } from '../../utils/quantity';
 import MetricTile from '../ledger-core/MetricTile';
+import PageHeader from '../../components/ui/PageHeader';
+import EmptyState from '../../components/ui/EmptyState';
+import { SkeletonCards } from '../../components/ui/Skeleton';
 import {
   fetchStockItems,
   fetchStockMovements,
@@ -18,7 +21,8 @@ import {
  * `ledger-core/MetricTile` (which is built around `valueCents` + a
  * currency); the other four tiles are plain counts, which running through
  * a cents formatter would misrepresent (42 items is not $0.42), so they
- * render as small local cards in the same visual language instead.
+ * render on the shared `StatTile` primitive instead (via MetricTile's
+ * sibling usage below), in the same visual language.
  */
 export default function StockDashboardPage() {
   const auth = useAuth();
@@ -52,21 +56,21 @@ export default function StockDashboardPage() {
   }
 
   if (summary === null) {
-    return <p>Loading…</p>;
+    return (
+      <div className="space-y-6" aria-busy="true">
+        <div className="skeleton skeleton--title" />
+        <SkeletonCards count={5} />
+        <span className="visually-hidden">Loading dashboard…</span>
+      </div>
+    );
   }
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Dashboard</h1>
+      <PageHeader as="h1" icon={Boxes} title="Dashboard" />
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="card">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Active items</p>
-            <Boxes size={16} aria-hidden="true" className="text-[var(--muted)]" />
-          </div>
-          <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{summary.activeItemCount}</p>
-        </div>
+        <StatTileCount label="Active items" value={summary.activeItemCount} icon={Boxes} />
 
         <MetricTile
           label="Stock value"
@@ -78,84 +82,120 @@ export default function StockDashboardPage() {
           hint={null}
         />
 
-        <div className="card">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Low stock</p>
-            <AlertTriangle size={16} aria-hidden="true" className={summary.lowStockItemCount > 0 ? 'text-[var(--bad)]' : 'text-[var(--muted)]'} />
-          </div>
-          <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{summary.lowStockItemCount}</p>
-        </div>
+        <StatTileCount
+          label="Low stock"
+          value={summary.lowStockItemCount}
+          icon={AlertTriangle}
+          bad={summary.lowStockItemCount > 0}
+        />
 
-        <div className="card">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Lots expiring in 30 days</p>
-            <CalendarClock size={16} aria-hidden="true" className={summary.expiringLotCount > 0 ? 'text-[var(--bad)]' : 'text-[var(--muted)]'} />
-          </div>
-          <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{summary.expiringLotCount}</p>
-        </div>
+        <StatTileCount
+          label="Lots expiring in 30 days"
+          value={summary.expiringLotCount}
+          icon={CalendarClock}
+          bad={summary.expiringLotCount > 0}
+        />
 
-        <div className="card">
-          <div className="flex items-center justify-between gap-2">
-            <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Locations</p>
-            <MapPin size={16} aria-hidden="true" className="text-[var(--muted)]" />
-          </div>
-          <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{summary.locationCount}</p>
-        </div>
+        <StatTileCount label="Locations" value={summary.locationCount} icon={MapPin} />
       </div>
 
       <section aria-label="Low stock items" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Low stock</h2>
+        <h2 className="text-sm font-medium text-[var(--text)] flex items-center gap-1.5">
+          <ClipboardList size={14} aria-hidden="true" className="text-[var(--muted)]" /> Low stock
+        </h2>
         {lowStockItems.length === 0 ? (
-          <p className="text-sm text-[var(--muted)]">Nothing is below its reorder point.</p>
+          <EmptyState icon={ClipboardList} title="Nothing is below its reorder point." />
         ) : (
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="pr-3 py-1">Code</th>
-                <th className="pr-3 py-1">Name</th>
-                <th className="pr-3 py-1">On hand</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lowStockItems.map((item) => (
-                <tr key={item.id} className="border-t border-[var(--border)]">
-                  <td className="pr-3 py-1 text-[var(--text)]">{item.code}</td>
-                  <td className="pr-3 py-1 text-[var(--text)]">{item.name}</td>
-                  <td className="pr-3 py-1 text-[var(--text)]">
-                    {formatQuantityMilli(item.onHandQuantityMilli)} {item.uomCode}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="card p-0 overflow-hidden">
+            <div className="table-scroll">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="text-left text-[var(--muted)]">
+                    <th className="px-3 py-2">Code</th>
+                    <th className="px-3 py-2">Name</th>
+                    <th className="px-3 py-2">On hand</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lowStockItems.map((item) => (
+                    <tr key={item.id}>
+                      <td className="px-3 py-2 text-[var(--text)]">{item.code}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">{item.name}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">
+                        {formatQuantityMilli(item.onHandQuantityMilli)} {item.uomCode}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
       </section>
 
       <section aria-label="Recent movements" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Recent movements</h2>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pr-3 py-1">Date</th>
-              <th className="pr-3 py-1">Type</th>
-              <th className="pr-3 py-1">Item</th>
-              <th className="pr-3 py-1">Location</th>
-              <th className="pr-3 py-1">Quantity</th>
-            </tr>
-          </thead>
-          <tbody>
-            {recentMovements.map((m) => (
-              <tr key={m.id} className="border-t border-[var(--border)]">
-                <td className="pr-3 py-1 text-[var(--muted)]">{m.occurredOn}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{m.movementType}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{m.itemCode}</td>
-                <td className="pr-3 py-1 text-[var(--muted)]">{m.locationCode}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2 className="text-sm font-medium text-[var(--text)] flex items-center gap-1.5">
+          <History size={14} aria-hidden="true" className="text-[var(--muted)]" /> Recent movements
+        </h2>
+        {recentMovements.length === 0 ? (
+          <EmptyState icon={History} title="No movements recorded yet." />
+        ) : (
+          <div className="card p-0 overflow-hidden">
+            <div className="table-scroll">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="text-left text-[var(--muted)]">
+                    <th className="px-3 py-2">Date</th>
+                    <th className="px-3 py-2">Type</th>
+                    <th className="px-3 py-2">Item</th>
+                    <th className="px-3 py-2">Location</th>
+                    <th className="px-3 py-2">Quantity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentMovements.map((m) => (
+                    <tr key={m.id}>
+                      <td className="px-3 py-2 text-[var(--muted)]">{m.occurredOn}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">{m.movementType}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">{m.itemCode}</td>
+                      <td className="px-3 py-2 text-[var(--muted)]">{m.locationCode}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </section>
+    </div>
+  );
+}
+
+/** A plain-count tile (not money) in the same visual language as MetricTile/StatTile. */
+function StatTileCount({
+  label,
+  value,
+  icon: Icon,
+  bad = false,
+}: {
+  label: string;
+  value: number;
+  icon: typeof Boxes;
+  bad?: boolean;
+}) {
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">{label}</p>
+        <span
+          aria-hidden="true"
+          className={`flex size-7 items-center justify-center rounded-md ${bad ? 'bg-[var(--bad-soft)] text-[var(--bad)]' : 'bg-[var(--panel-2)] text-[var(--muted)]'}`}
+        >
+          <Icon size={15} />
+        </span>
+      </div>
+      <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{value}</p>
     </div>
   );
 }

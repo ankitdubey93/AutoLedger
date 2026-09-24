@@ -88,8 +88,8 @@ function ApplyDialog({
   }
 
   return (
-    <div role="dialog" aria-modal="true" aria-labelledby="apply-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
-      <div className="w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3">
+    <div role="dialog" aria-modal="true" aria-labelledby="apply-title" className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="animate-pop-in w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
         <h3 id="apply-title" className="text-base font-semibold m-0">
           Apply credit — {formatCents(note.unappliedCents)} available
         </h3>
@@ -131,7 +131,7 @@ function ApplyDialog({
             type="button"
             onClick={() => void handleApply()}
             disabled={busy || targets === null || targets.length === 0}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
           >
             Apply
           </button>
@@ -206,7 +206,7 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
   const buttonClass =
     'px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40';
   const primaryClass =
-    'px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40';
+    'px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
 
   return (
     <section className="flex flex-col gap-6">

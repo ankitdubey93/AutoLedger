@@ -55,7 +55,7 @@ export default function MigrationImportsPage() {
         </div>
         <Link
           to={`${base}/migration-imports/new`}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] no-underline"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
         >
           <Plus size={15} aria-hidden="true" /> New import
         </Link>
@@ -69,7 +69,7 @@ export default function MigrationImportsPage() {
           <p className="text-sm text-[var(--muted)] m-0">No imports yet.</p>
           <Link
             to={`${base}/migration-imports/new`}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] no-underline"
+            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
           >
             Start the first import
           </Link>

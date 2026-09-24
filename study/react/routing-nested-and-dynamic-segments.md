@@ -4,7 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 2 — the two-level chrome, `PlatformLayout` → `AppShell` → an app's own pages, plus the `/app/:appSlug` dynamic segment
-**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below; Phase 3.6 added a second dynamic segment one level deeper — see "The list / create / detail split" below; Phase 3.7 (2026-09-03) added a query parameter used as a one-shot seed rather than a live filter — see "A query parameter as a one-shot seed, not a source of truth" below
+**Extended by:** a 2026-09-03 client-only UX revision that restructured this exact tree — see "Where chrome is mounted is a routing decision, not a CSS one" and "`useSearchParams`" below; Phase 3.6 added a second dynamic segment one level deeper — see "The list / create / detail split" below; Phase 3.7 (2026-09-03) added a query parameter used as a one-shot seed rather than a live filter — see "A query parameter as a one-shot seed, not a source of truth" below; Phase 31 replaced the per-slug `useActiveApp` with a fetch keyed on the organization instead of the route param, eliminating a loading flash every time `:appSlug` changed — see "A fetch keyed by tenant, not by route param" below
 **Verified against:** react-router-dom 7.18.3, React 19.2.8
 
 > **A note on the examples below:** the "Mechanism" walkthrough that follows describes the route tree **as Phase 2 built it** — `AppShell` nested as a *child* of `PlatformLayout`, so the suite header wrapped every app. That nesting relationship no longer holds: the 2026-09-03 revision made the per-app shell (renamed `AppFrame`) a **sibling** of `PlatformLayout`, not a child, precisely so the suite header stops rendering at all inside an app. The splat-resolution mechanics, the `<Navigate>` vs `navigate()` material, and the remount-by-`key` trick are all still accurate and still exercised in this codebase — only the parent/child relationship between the two named components changed. The new section below explains why that specific change had to be a routing change and not a CSS one.
@@ -46,13 +46,13 @@ This is why the suite has *two* layout components instead of one: `PlatformLayou
 
 ### Dynamic segments and `useParams`
 
-`:appSlug` in `path="/app/:appSlug"` is a **dynamic segment** — it matches any non-empty path segment and captures its value under that name. `useParams<{ appSlug: string }>()` inside `AppShell` (via `useActiveApp`) reads it back:
+`:appSlug` in `path="/app/:appSlug"` is a **dynamic segment** — it matches any non-empty path segment and captures its value under that name. `useParams<{ appSlug: string }>()` inside `AppFrame` reads it back:
 
 ```ts
 const { appSlug } = useParams<{ appSlug: string }>();
 ```
 
-The type parameter is a lie the compiler trusts, not a runtime guarantee — `useParams` returns `Readonly<Partial<{ appSlug: string }>>` under the hood in recent versions specifically because a route *can* render without every dynamic segment resolving (an optional segment, or the component reused under a different route), so the honest type has every param possibly `undefined`. This project's `useActiveApp` hook narrows it further by validating `appSlug` against the real app registry (`GET /apps`) rather than trusting the string — the union type from `AppSlug` (see the `const-assertions-and-satisfies` note) can't be produced from `useParams` alone, since a route param is always just `string`.
+The type parameter is a lie the compiler trusts, not a runtime guarantee — `useParams` returns `Readonly<Partial<{ appSlug: string }>>` under the hood in recent versions specifically because a route *can* render without every dynamic segment resolving (an optional segment, or the component reused under a different route), so the honest type has every param possibly `undefined`. This project's `resolveActiveApp` function (Phase 31; previously `useActiveApp`) narrows it further by validating `appSlug` against the real app registry (`GET /organizations/apps`) rather than trusting the string — the union type from `AppSlug` (see the `const-assertions-and-satisfies` note) can't be produced from `useParams` alone, since a route param is always just `string`.
 
 The alternative to a dynamic segment is a **splat** (`*`), which matches the rest of the path greedily rather than one segment — `path="/app/:appSlug/*"` would let an app own arbitrarily deep sub-routes under its own `<Routes>` nested inside its own page tree. AutoLedger doesn't need this yet, since no app has sub-pages, but the plan for it is recorded as a comment in `App.tsx` next to the app-routes block, so the shape is decided before it's needed.
 
@@ -151,6 +151,48 @@ Not routing per se, but load-bearing on the route tree: `PlatformLayout`'s `<mai
 ```
 
 React's reconciliation compares elements by type *and* key at each position in the tree. Changing a `key` doesn't update the existing component instance — it tells React this is a **different** element, so the old subtree unmounts (cleanup effects run, all component state is discarded) and a brand-new subtree mounts from scratch. Every page under `<Outlet/>` — the chooser, the account page, any app's pages — refetches cleanly on an org switch, with no code in any of those pages aware that a switch happened. This is deliberate cache invalidation by identity rather than a fetch layer having to know to clear itself; the routing tree's own reconciliation rules do the work.
+
+### A fetch keyed by tenant, not by route param
+
+`AppFrame` is mounted at one route, `<Route path="/app/:appSlug" element={<AppFrame />}>`, for every app in the suite — moving from LedgerCore to StockLedger via the app-switcher menu is a `:appSlug` param change at the *same* tree position, not a different route matching. Per the mechanism above, React reconciles that in place: same element type, same key, so `AppFrame`'s component instance is **not** unmounted or remounted — only `useParams()` returns a new value on the next render.
+
+The original `useActiveApp` hook didn't take advantage of that. Its data-fetching effect depended on `appSlug`:
+
+```tsx
+useEffect(() => {
+  setState({ status: 'loading' });      // ← resets on every appSlug change
+  getOrganizationApps().then(/* ... */);
+}, [appSlug]);
+```
+
+Every crossing from one app to another — despite `AppFrame` staying mounted — re-ran this effect, which synchronously reset to `loading` and repainted a skeleton before the (nearly instant, already-cached-by-the-browser) fetch resolved. The bug wasn't a slow request; it was **re-deriving data that hadn't actually gone stale.** The set of apps this organization has enabled doesn't change because the URL's `:appSlug` segment changed — it only changes when the organization itself changes, or when someone edits the app selection.
+
+The fix, `useEnabledApps`, keys the same fetch on the thing that actually invalidates it:
+
+```tsx
+export function useEnabledApps(): EnabledAppsState {
+  const { organization, orgVersion } = useOrg();
+  const [state, setState] = useState<EnabledAppsState>({ status: 'loading' });
+
+  useEffect(() => {
+    setState({ status: 'loading' });
+    getOrganizationApps().then(/* ... */);
+  }, [organization?.id, orgVersion]);        // ← not appSlug
+
+  return state;
+}
+
+// Resolving :appSlug against already-fetched data is now a pure, separate step:
+export function resolveActiveApp(state: EnabledAppsState, appSlug: string | undefined): ActiveAppState {
+  if (state.status !== 'ready') return /* loading / not-found */;
+  const app = state.apps.find((a) => a.slug === appSlug);
+  return app === undefined ? { status: 'not-found' } : { status: 'found', app };
+}
+```
+
+Splitting the hook into a stateful fetch (`useEnabledApps`, keyed on tenancy) and a pure resolution function (`resolveActiveApp`, keyed on the URL) matters beyond the flash fix: `resolveActiveApp` is synchronous and side-effect-free, so it's unit-testable with plain fixtures and no React rendering at all — five `it()` blocks and zero `render()` calls in `useEnabledApps.test.ts` cover every branch (loading, error, found, not-found-disabled, not-found-undefined-slug), where testing the old combined hook meant mounting a component and waiting on a fetch mock for every case.
+
+The `ignore`-flag cleanup — `let ignore = false; ... return () => { ignore = true }` — is unchanged from `useActiveApp`, because an out-of-order response is still possible with the new dependency array: switching organizations quickly enough could still let an old organization's `getOrganizationApps()` response resolve after a newer one's request was fired, and the flag suppresses `setState` from a response that's no longer for the currently-mounted org.
 
 ### Where chrome is mounted is a routing decision, not a CSS one
 
@@ -260,6 +302,9 @@ An entry that is itself a reversal (`reversesEntryId !== null`) shouldn't be rev
 | Nested routes, one layout route per chrome level | Each layout owns exactly its own scope; shared chrome never remounts on a child navigation | **Chosen** |
 | A separate router instance per app (e.g. `createBrowserRouter` per app, mounted conditionally) | Real isolation, closer to micro-frontends | Wildly over-engineered for seven apps sharing one auth session and one deploy; would also break browser back/forward across app switches |
 | Redirect guards as `useEffect` + `navigate()` everywhere | Familiar to anyone from an imperative router background | Rejected — a render-time `if / <Navigate>` is simpler to test (no timing, no missing dependency array) and can't accidentally fire twice |
+| Phase 31: one sidebar shared across all three apps, hoisted into `AppFrame` above `<Outlet/>` | One nav component instead of three; a cross-app command palette's data model falls out for free | Rejected — collapsing three apps' navigation into one always-mounted rail blurs the URL-namespace boundary each app's own sidebar currently makes visible (rule 16's client-side counterpart: `/app/<slug>` *feels* like a real boundary partly because each app owns everything rendered under it, sidebar included), and it would have meant redesigning `AppFrame` itself rather than the presentational layer underneath it |
+| Phase 31: each app keeps its own `<Sidebar/>`, all three now thin wrappers over one shared `AppSidebar` presentational component | Three instantiations, but each is one prop object away from the old bespoke markup; app ownership of "what renders under `/app/<slug>`" stays intact | **Chosen** — the redesign (collapse, groups, mobile drawer) lands once in `AppSidebar`, without touching which app decides what its own nav contains |
+| A context provider exposing the enabled-apps list to any descendant that wants it | Avoids passing the list explicitly | Rejected as unnecessary — `useEnabledApps()` already has exactly two callers (`AppFrame`, for resolving `:appSlug`; `AppTopBar`, for the app-switcher menu), both of which can call the hook directly. A context earns its cost when a value has many indirect consumers several layers apart; two direct, adjacent callers is a case where prop-drilling-of-a-hook-call is simpler than introducing a provider to avoid it |
 
 ## Where it lives in this codebase
 
@@ -267,7 +312,7 @@ An entry that is itself a reversal (`reversesEntryId !== null`) shouldn't be rev
 - `client/src/components/layout/PlatformLayout.tsx` — the suite layout route, now scoped to `/` and `/account` only
 - `client/src/components/layout/AppFrame.tsx` — the per-app layout route (renamed from `AppShell.tsx`); resolves `:appSlug`, redirects on `not-found`/`planned` via `<Navigate replace>`, and owns the org-switch remount `key` on its `<main>`
 - `client/src/components/layout/AppTopBar.tsx` — the small `AutoLedger` mark-and-link plus the org/user controls that replaced the suite header inside an app
-- `client/src/apps/useActiveApp.ts` — `useParams` usage and the validation against the real registry
+- `client/src/apps/useEnabledApps.ts` — `useParams`/`useEnabledApps`/`resolveActiveApp`: the tenant-keyed fetch and the pure, unit-tested param-validation split (Phase 31; replaced `useActiveApp.ts`)
 - `client/src/apps/useAppBasePath.ts` — the absolute `/app/<slug>` prefix every in-app link and redirect is built from, and why: a relative `to` resolves against the deepest path-contributing match's full `pathname`, which is the whole current URL once that match is a splat
 - `client/src/components/ProtectedRoute.tsx` — the earliest layout route in the tree, from Phase 1
 - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
@@ -306,6 +351,7 @@ The rule this generalizes to: ask **why** the gate exists before choosing hard o
 - **A query parameter that seeds state needs a latch, or it becomes a binding by accident.** Without the `seeded` guard, `NewJournalEntryPage`'s effect would re-run on every render that still has `copyFrom` in its dependency array satisfied (it always is, since `copyFrom` doesn't change) and overwrite whatever the user just typed the instant a re-render happened to fire — e.g. from React batching an unrelated state update. The bug wouldn't reproduce every keystroke, which is exactly what makes it nasty: it depends on *when* a re-render happens to interleave with the effect, not on anything the user did wrong.
 - **Two components deriving the "same" boolean independently is a drift bug waiting to happen, not a style nitpick.** `JournalsPage`'s Reverse button and `JournalDetailPage`'s Reverse button must agree on `canReverse`, and the way to guarantee that isn't a shared abstraction (there's no `useCanReverse()` hook here) — it's discipline: when one copy changes, the other has to change with it, and a reviewer has to know to check both files whenever either one's reversal logic is touched.
 - **A page mounted at a dynamic segment (`journals/:entryId`) is just as depth-fragile for relative links as one mounted at a static segment.** The splat that makes relative links dangerous here is two levels up (`App.tsx`'s catch-all), not the `:entryId` segment itself — the dynamic segment is a red herring; what matters for `resolveTo` is only whether a splat sits anywhere above the resolving component in the matched chain.
+- **A route param changing does not remount the component at that route position — don't assume a fresh mount just because `useParams()` returns something new.** `useActiveApp`'s bug was exactly this assumption baked into a dependency array: `[appSlug]` looks like "refetch when the app changes," and it does refetch, but the component itself (`AppFrame`) was never unmounted to begin with, so every field of local state that *wasn't* deliberately reset (nothing was, here) would have silently carried over from the previous app too. Key a fetch on what actually invalidates the data (the tenant), and let params be read fresh on every render for whatever's actually derived from the URL — don't conflate "the URL changed" with "start over."
 
 ## Interview Q&A
 
@@ -372,6 +418,12 @@ A: It's the difference between the copy-seed feature preserving the exact amount
 **Q: You added a "skip this wizard" feature. Why didn't you just remove the onboarding gate for that organization once it's skipped?**
 A: Because "skipped" and "no gate" mean different things — removing the gate entirely would mean the app has no way to remind the organization setup is still incomplete, and no way to route them back to finish it. What actually changes is *what the gate does* when its condition holds: instead of a blocking `<Navigate>`, it renders the real content with an advisory banner. The routing structure — a `<Route path="*">` whose `element` is computed from state — is identical to the hard gate's; only the computed element changed, from "redirect" to "render plus banner." Removing the gate would lose the ability to ever surface that reminder again.
 
+**Q: A component sits at a route with a dynamic segment, `/app/:appSlug`. Navigating from one value of that segment to another — does the component remount?**
+A: No, and that's the detail that actually matters here, not a technicality. React Router doesn't create a new route match location for a param change; it's the same `<Route>` in the same position in the tree, so React's reconciler sees the same element type at the same position and updates it in place rather than unmounting and remounting. `useParams()` simply returns a new value on the next render — every other piece of state in that component, and every effect that isn't explicitly keyed on the changed param, survives across the navigation untouched. That's *usually* what you want (it's exactly why a persistent shell doesn't flicker), but it's a trap if you assume a "new" param means a fresh start — anything that's supposed to reset needs to say so explicitly, either via a dependency array or a `key`.
+
+**Q: You found a bug where switching between two options briefly showed a loading skeleton even though the underlying data hadn't actually changed. What was the fix, in general terms — not the specific `useEnabledApps` code?**
+A: The general fix is keying the fetch on what actually invalidates the data, not on whatever value happens to be nearby and changing. The original hook's dependency array read `[appSlug]`, which looks reasonable — "refetch when the route changes" — but the data being fetched (the org's enabled apps) doesn't depend on the route at all; it depends on which organization is active. Once the effect's dependencies were changed to `[organization?.id, orgVersion]`, crossing between two apps stopped re-triggering the fetch, because from that effect's point of view nothing it actually cares about changed. The general lesson: a `useEffect` dependency array is a *causality* claim ("this data depends on these values"), not just a list of "things that happen to be in scope" — get the causality wrong and you either over-fetch (this bug) or under-fetch (a stale-data bug, the opposite failure mode).
+
 ## Follow-ups they'll dig into
 
 - "What's the difference between a dynamic segment and a splat?" (A segment `:x` matches exactly one path component and captures it by name; a splat `*` matches everything remaining, captured under the key `"*"`, useful for a sub-router owned by a lower-level route.)
@@ -381,5 +433,5 @@ A: Because "skipped" and "no gate" mean different things — removing the gate e
 ## See also
 
 - [context-effects-and-data-fetching.md](context-effects-and-data-fetching.md) — the `checking` state machine `ProtectedRoute` renders against, and the `ignore`-flag fetch pattern used inside routed pages
-- [const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md) — how `AppSlug` is derived, which is what `useActiveApp` validates a route param against
+- [const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md) — how `AppSlug` is derived, which is what `resolveActiveApp` validates a route param against
 - `docs/architecture.md#suite-structure` — the platform-vs-app layer split this route tree implements

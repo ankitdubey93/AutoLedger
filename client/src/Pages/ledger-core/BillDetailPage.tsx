@@ -188,7 +188,7 @@ export default function BillDetailPage() {
               type="button"
               onClick={() => setConfirmAction('approve')}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Approve
             </button>
@@ -198,7 +198,7 @@ export default function BillDetailPage() {
               type="button"
               onClick={() => setShowPaymentDialog(true)}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Record payment
             </button>

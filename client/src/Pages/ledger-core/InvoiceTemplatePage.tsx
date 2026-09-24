@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { FileText } from 'lucide-react';
 import {
   getInvoiceSettings,
   getOrganizationProfile,
@@ -17,6 +18,8 @@ import { useDocumentObjectUrl } from '../../utils/useDocumentObjectUrl';
 import InvoiceDocument from './InvoiceDocument';
 import { SAMPLE_INVOICE } from './sampleInvoice';
 import SettingsTabs from './SettingsTabs';
+import PageHeader from '../../components/ui/PageHeader';
+import { inputClass } from '../../components/ui/formClasses';
 
 /**
  * Invoice template editor: controls on the left, a live preview on the right.
@@ -26,9 +29,6 @@ import SettingsTabs from './SettingsTabs';
  * rate and posting accounts stay on InvoiceSettingsPage; this page PATCHes
  * only the fields it owns.
  */
-
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
 
 // Keyed by the literal unions, so adding an id to the whitelist without a label here
 // is a compile error rather than a blank card.
@@ -223,9 +223,7 @@ export default function InvoiceTemplatePage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <header>
-        <h2 className="text-lg font-semibold m-0">Invoice template</h2>
-      </header>
+      <PageHeader as="h2" icon={FileText} title="Invoice template" />
 
       <SettingsTabs />
 
@@ -371,7 +369,7 @@ export default function InvoiceTemplatePage() {
               type="button"
               disabled={saving || !dirty || titleBlank}
               onClick={() => void handleSave()}
-              className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--text)] text-[var(--bg)] disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               {saving ? 'Saving…' : 'Save'}
             </button>

@@ -1,158 +1,25 @@
-import { NavLink } from 'react-router-dom';
-import {
-  Banknote,
-  FileMinus,
-  BookOpen,
-  Building2,
-  CalendarCheck,
-  Coins,
-  FileBarChart,
-  FileText,
-  GitCompareArrows,
-  History,
-  Landmark,
-  LayoutDashboard,
-  ListTree,
-  Package,
-  ReceiptText,
-  RefreshCw,
-  Scale,
-  Send,
-  Settings as SettingsIcon,
-  Upload,
-  Users,
-  Webhook,
-} from 'lucide-react';
 import { useAppBasePath } from '../../apps/useAppBasePath';
+import AppSidebar, { type SidebarNavGroup } from '../../components/layout/AppSidebar';
 import CreateMenu from './CreateMenu';
+import { LEDGER_CORE_NAV_GROUPS } from './ledgerCoreNav';
 
 /**
- * LedgerCore's own navigation — a grouped, sticky, full-height rail.
- * Extends the same `{to, label, icon, end}` + `NavLink` idiom the original
- * flat tab strip used; only the layout and grouping are new.
+ * LedgerCore's sidebar — a thin wrapper over the shared AppSidebar (Phase
+ * 31), resolving `ledgerCoreNav.ts`'s app-relative suffixes against
+ * `useAppBasePath()` into absolute hrefs. `''` means the app root.
  *
- * Each item's `to` is a suffix, not a target: every link is built as an
- * absolute `${base}/${to}` from `useAppBasePath()`. Relative targets do not
- * work here — this sidebar renders inside a descendant `<Routes>` under the
- * platform's `/app/:appSlug` splat, and react-router resolves a relative
- * `to` against that splat match's full pathname, so `'journals'` clicked
- * from `/app/ledger-core/accounts` resolves to
- * `/app/ledger-core/accounts/journals`.
- *
- * `md:top-14` and `calc(100vh-3.5rem)` both encode AppTopBar's `h-14`
- * (3.5rem). If that height ever changes, both must change with it.
+ * Absolute targets matter here specifically: this sidebar renders inside a
+ * descendant `<Routes>` under the platform's `/app/:appSlug` splat, and
+ * react-router resolves a relative `to` against that splat match's full
+ * pathname, so `'journals'` clicked from `/app/ledger-core/accounts` would
+ * resolve to `/app/ledger-core/accounts/journals` if it were relative.
  */
-const NAV_GROUPS = [
-  {
-    heading: 'Overview',
-    items: [{ to: '', label: 'Dashboard', icon: LayoutDashboard, end: true }],
-  },
-  {
-    heading: 'Bookkeeping',
-    items: [
-      { to: 'accounts', label: 'Chart of Accounts', icon: ListTree, end: false },
-      { to: 'journals', label: 'Journal Entries', icon: BookOpen, end: false },
-    ],
-  },
-  {
-    heading: 'Sales',
-    items: [
-      { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
-      { to: 'credit-notes', label: 'Credit notes', icon: FileMinus, end: false },
-      { to: 'customers', label: 'Customers', icon: Users, end: false },
-      { to: 'items', label: 'Items & Services', icon: Package, end: false },
-      { to: 'payments', label: 'Payments', icon: Banknote, end: false },
-    ],
-  },
-  {
-    heading: 'Purchases',
-    items: [
-      { to: 'expenses', label: 'Expenses', icon: ReceiptText, end: false },
-      { to: 'debit-notes', label: 'Debit notes', icon: FileMinus, end: false },
-      { to: 'vendors', label: 'Vendors', icon: Building2, end: false },
-    ],
-  },
-  {
-    heading: 'Banking',
-    items: [
-      { to: 'bank', label: 'Bank Lines', icon: Landmark, end: true },
-      { to: 'bank/import', label: 'Import Statement', icon: Upload, end: false },
-      { to: 'bank/reconciliation', label: 'Reconciliation', icon: GitCompareArrows, end: false },
-    ],
-  },
-  {
-    heading: 'Reporting',
-    items: [
-      { to: 'trial-balance', label: 'Trial Balance', icon: Scale, end: false },
-      { to: 'reports', label: 'Reports', icon: FileBarChart, end: false },
-    ],
-  },
-  {
-    heading: 'Currency',
-    items: [
-      { to: 'fx-rates', label: 'Rates', icon: Coins, end: false },
-      { to: 'fx-exposure', label: 'Exposure', icon: GitCompareArrows, end: false },
-      { to: 'fx-revaluations', label: 'Revaluations', icon: RefreshCw, end: false },
-    ],
-  },
-  {
-    heading: 'Configure',
-    items: [
-      { to: 'fiscal-periods', label: 'Fiscal Periods', icon: CalendarCheck, end: false },
-      { to: 'settings', label: 'Settings', icon: SettingsIcon, end: false },
-      { to: 'audit', label: 'Audit Trail', icon: History, end: false },
-    ],
-  },
-  {
-    heading: 'Automation',
-    items: [
-      { to: 'webhooks', label: 'Webhooks', icon: Webhook, end: true },
-      { to: 'webhooks/deliveries', label: 'Deliveries', icon: Send, end: false },
-    ],
-  },
-  {
-    heading: 'Data migration',
-    items: [{ to: 'migration-imports', label: 'Imports', icon: Upload, end: false }],
-  },
-] as const;
-
 export default function LedgerCoreSidebar() {
   const base = useAppBasePath();
-  return (
-    <nav
-      aria-label="LedgerCore"
-      className="no-print md:w-60 md:shrink-0 md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] md:overflow-y-auto border-b md:border-b-0 md:border-r border-[var(--border)] md:pr-3 md:py-5"
-    >
-      <div className="hidden md:block mb-4 px-1">
-        <CreateMenu />
-      </div>
-      <div className="flex md:flex-col gap-1 md:gap-6 overflow-x-auto md:overflow-visible pb-2 md:pb-0">
-        {NAV_GROUPS.map((group) => (
-          <div key={group.heading} className="flex md:flex-col gap-1">
-            <p className="hidden md:block px-3 mb-1 mt-0 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--muted)]">
-              {group.heading}
-            </p>
-            {group.items.map(({ to, label, icon: Icon, end }) => (
-              <NavLink
-                key={label}
-                to={to === '' ? base : `${base}/${to}`}
-                end={end}
-                className={({ isActive }) =>
-                  [
-                    'flex items-center gap-2.5 px-3 py-2 text-sm no-underline rounded-md whitespace-nowrap transition-colors',
-                    isActive
-                      ? 'bg-[var(--panel)] text-[var(--text)] font-medium shadow-[inset_2px_0_0_var(--good)]'
-                      : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel)]',
-                  ].join(' ')
-                }
-              >
-                <Icon size={16} aria-hidden="true" />
-                {label}
-              </NavLink>
-            ))}
-          </div>
-        ))}
-      </div>
-    </nav>
-  );
+  const groups: SidebarNavGroup[] = LEDGER_CORE_NAV_GROUPS.map((group) => ({
+    heading: group.heading,
+    items: group.items.map((item) => ({ ...item, to: item.to === '' ? base : `${base}/${item.to}` })),
+  }));
+
+  return <AppSidebar ariaLabel="LedgerCore" storageKey="ledger-core" groups={groups} header={<CreateMenu />} />;
 }
