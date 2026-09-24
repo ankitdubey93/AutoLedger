@@ -137,7 +137,7 @@ export default function PaymentTermsSettingsPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-2xl">
+    <section className="flex flex-col gap-4">
       <PageHeader as="h2" icon={FileStack} title="Settings" />
 
       <SettingsTabs />

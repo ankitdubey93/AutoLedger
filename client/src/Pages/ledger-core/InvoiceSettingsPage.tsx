@@ -120,7 +120,7 @@ export default function InvoiceSettingsPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-xl">
+    <section className="flex flex-col gap-4">
       <PageHeader as="h2" icon={Receipt} title="Invoice settings" />
 
       <SettingsTabs />

@@ -143,7 +143,7 @@ export default function StockItemDetailPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <BackLink to={`${base}/items`} label="Items" />
 
       {error !== null ? (

@@ -56,7 +56,7 @@ export default function StockLookupPage() {
   }
 
   return (
-    <div className="max-w-xl space-y-4">
+    <div className="space-y-4">
       <h1 className="text-lg font-semibold text-[var(--text)]">Lookup</h1>
 
       {error !== null ? (

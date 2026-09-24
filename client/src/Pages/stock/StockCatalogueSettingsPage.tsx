@@ -194,7 +194,7 @@ export default function StockCatalogueSettingsPage() {
   const selectedCategory = categories.find((c) => c.id === selectedCategoryId) ?? null;
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="space-y-8">
       <PageHeader as="h1" icon={SettingsIcon} title="Catalogue" />
 
       {error !== null ? (

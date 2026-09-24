@@ -83,7 +83,7 @@ export default function StockSetupPage() {
 
   if (created !== null) {
     return (
-      <div className="max-w-xl space-y-4">
+      <div className="space-y-4">
         <h1 className="text-lg font-semibold text-[var(--text)]">StockLedger is set up</h1>
         <ul className="text-sm text-[var(--muted)] space-y-1">
           <li>{created.uoms} units of measure</li>
@@ -106,7 +106,7 @@ export default function StockSetupPage() {
   if (settings.configured && !addingAnother) {
     const current = profiles.find((p) => p.key === settings.industryProfile);
     return (
-      <div className="max-w-xl space-y-4">
+      <div className="space-y-4">
         <h1 className="text-lg font-semibold text-[var(--text)]">StockLedger setup</h1>
         <p className="text-sm text-[var(--text)]">
           Currently configured for <strong>{current?.name ?? settings.industryProfile}</strong>.
@@ -125,7 +125,7 @@ export default function StockSetupPage() {
   const selectedProfile = profiles.find((p) => p.key === selectedKey) ?? null;
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div className="space-y-6">
       <h1 className="text-lg font-semibold text-[var(--text)]">StockLedger setup</h1>
 
       <section aria-label="Choose your industry">

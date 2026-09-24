@@ -157,7 +157,7 @@ export default function IntegrationsPage() {
   const notConfigured = loaded && !modes.serviceAccount && !modes.oauth;
 
   return (
-    <section className="flex flex-col gap-4 max-w-2xl">
+    <section className="flex flex-col gap-4">
       <header>
         <h2 className="text-lg font-semibold m-0">Integrations</h2>
         <p className="text-sm text-[var(--muted)] m-0">

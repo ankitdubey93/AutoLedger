@@ -166,7 +166,7 @@ export default function FinancialSettingsPage() {
 
   if (ledgerSettings.status !== 'ready') {
     return (
-      <section className="flex flex-col gap-4 max-w-xl">
+      <section className="flex flex-col gap-4">
         <SettingsTabs />
         <div aria-busy="true" className="flex flex-col gap-3">
           <div className="skeleton skeleton--card" />
@@ -204,7 +204,7 @@ export default function FinancialSettingsPage() {
   }
 
   return (
-    <section className="flex flex-col gap-6 max-w-xl">
+    <section className="flex flex-col gap-6">
       <PageHeader as="h2" icon={Landmark} title="Settings" />
 
       <SettingsTabs />

@@ -132,7 +132,7 @@ export default function BankImportPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-2xl">
+    <section className="flex flex-col gap-4">
       <BackLink to={`${base}/bank`} label="Back to bank lines" />
 
       <header>

@@ -81,7 +81,7 @@ export default function NewMigrationImportPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-2xl">
+    <section className="flex flex-col gap-4">
       <BackLink to={`${base}/migration-imports`} label="Back to imports" />
 
       <header>

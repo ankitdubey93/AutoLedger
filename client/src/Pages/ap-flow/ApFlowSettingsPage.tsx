@@ -82,7 +82,7 @@ export default function ApFlowSettingsPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-xl">
+    <section className="flex flex-col gap-4">
       <BackLink to={base} label="AP-Flow" />
       <PageHeader as="h2" icon={Sparkles} title="AP-Flow settings" />
 

@@ -140,7 +140,7 @@ export default function StockCodeSchemesPage() {
   }
 
   return (
-    <div className="max-w-3xl space-y-8">
+    <div className="space-y-8">
       <h1 className="text-lg font-semibold text-[var(--text)]">Item codes</h1>
 
       {error !== null ? (

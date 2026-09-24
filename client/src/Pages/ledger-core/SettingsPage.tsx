@@ -110,7 +110,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <section className="flex flex-col gap-4 max-w-xl">
+    <section className="flex flex-col gap-4">
       <PageHeader as="h2" icon={SettingsIcon} title="Settings" />
 
       <SettingsTabs />

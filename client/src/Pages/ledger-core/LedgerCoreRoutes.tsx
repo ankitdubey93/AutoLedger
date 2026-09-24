@@ -87,7 +87,7 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
   return (
     <div className="flex flex-col md:flex-row md:gap-6 px-4 md:px-6">
       <LedgerCoreSidebar />
-      <div className="min-w-0 flex-1 py-6 max-w-[76rem]">
+      <div className="min-w-0 flex-1 py-6">
         {showBanner && <OnboardingBanner />}
         <Routes>
           <Route index element={<DashboardPage />} />
