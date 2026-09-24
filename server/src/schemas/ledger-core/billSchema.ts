@@ -25,6 +25,8 @@ const billLineSchema = z.object({
   expenseAccountId: z.uuid(),
   taxRateBp: z.int().min(0).max(10_000).default(0),
   itemId: z.uuid().nullable().default(null),
+  // Phase 32: where an INVENTORY line moves stock. Null = StockLedger's default location.
+  stockLocationId: z.uuid().nullable().default(null),
 });
 
 export const createBillSchema = z

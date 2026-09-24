@@ -46,7 +46,7 @@ export const LEDGER_CORE_NAV_GROUPS = [
       { to: 'invoices', label: 'Invoices', icon: FileText, end: false },
       { to: 'credit-notes', label: 'Credit notes', icon: FileMinus, end: false },
       { to: 'customers', label: 'Customers', icon: Users, end: false },
-      { to: 'items', label: 'Items & Services', icon: Package, end: false },
+      { to: 'items', label: 'Products & Services', icon: Package, end: false },
       { to: 'payments', label: 'Payments', icon: Banknote, end: false },
     ],
   },

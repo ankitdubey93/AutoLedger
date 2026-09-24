@@ -58,7 +58,7 @@ describe('verify:integrity', () => {
     const report = await runIntegrityChecks();
 
     expect(report.passed).toBe(true);
-    expect(report.checks).toHaveLength(5);
+    expect(report.checks).toHaveLength(6);
     for (const check of report.checks) {
       expect(check.passed).toBe(true);
       expect(check.offenders).toEqual([]);

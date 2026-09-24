@@ -856,6 +856,10 @@ export function updatePaymentTerm(
 /** Mirrors server/src/types/ledger-core.ts's ItemKind. */
 export type ItemKind = 'SERVICE' | 'GOODS';
 
+/** Phase 32. Mirrors server/src/types/ledger-core.ts's ItemType. */
+export const ITEM_TYPES = ['SERVICE', 'NON_INVENTORY', 'INVENTORY', 'FIXED_ASSET'] as const;
+export type ItemType = (typeof ITEM_TYPES)[number];
+
 /** Mirrors server/src/types/ledger-core.ts's Item. */
 export interface Item {
   id: string;
@@ -863,10 +867,15 @@ export interface Item {
   name: string;
   description: string | null;
   kind: ItemKind;
+  itemType: ItemType;
+  /** true for INVENTORY / FIXED_ASSET — name and status are managed in StockLedger. */
+  stockManaged: boolean;
   salePriceCents: number | null;
   purchasePriceCents: number | null;
   revenueAccountId: string | null;
   expenseAccountId: string | null;
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
   saleTaxRateBp: number;
   purchaseTaxRateBp: number;
   isActive: boolean;
@@ -876,12 +885,13 @@ export interface Item {
 
 /** GET /ledger-core/items */
 export function listItems(
-  params: { q?: string; kind?: ItemKind; includeInactive?: boolean } = {},
+  params: { q?: string; kind?: ItemKind; itemType?: ItemType; includeInactive?: boolean } = {},
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; items: Item[] }> {
   const query = new URLSearchParams();
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   if (params.kind !== undefined) query.set('kind', params.kind);
+  if (params.itemType !== undefined) query.set('itemType', params.itemType);
   if (params.includeInactive === true) query.set('includeInactive', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
   return apiFetch(`/ledger-core/items${suffix}`, { signal: signal ?? null });
@@ -892,7 +902,8 @@ export function createItem(body: {
   code: string;
   name: string;
   description: string | null;
-  kind: ItemKind;
+  /** Phase 32: SERVICE or NON_INVENTORY — inventory/asset items are created in StockLedger. */
+  itemType: 'SERVICE' | 'NON_INVENTORY';
   salePriceCents: number | null;
   purchasePriceCents: number | null;
   revenueAccountId: string | null;
@@ -936,6 +947,8 @@ export interface InvoiceLine {
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
+  stockLocationId?: string | null;
 }
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
@@ -1038,6 +1051,8 @@ export interface InvoiceLineInput {
   taxRateBp: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
+  stockLocationId?: string | null;
 }
 
 export interface InvoiceInput {
@@ -1404,6 +1419,8 @@ export interface BillLine {
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
+  stockLocationId?: string | null;
 }
 
 export type BillStatus = 'DRAFT' | 'AWAITING_APPROVAL' | 'POSTED' | 'VOID';
@@ -1501,6 +1518,8 @@ export interface BillLineInput {
   taxRateBp: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
+  stockLocationId?: string | null;
 }
 
 export interface BillInput {
@@ -3723,6 +3742,8 @@ export const STOCK_MOVEMENT_TYPES = [
   'TRANSFER_IN',
   'ADJUSTMENT_IN',
   'ADJUSTMENT_OUT',
+  'RECEIPT_REVERSAL',
+  'ISSUE_REVERSAL',
 ] as const;
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 
@@ -3737,6 +3758,8 @@ export type StockAttributes = Record<string, StockAttributeValue>;
 
 export interface StockSettings {
   configured: boolean;
+  /** Phase 32 — where a document line lands when it names no location. */
+  defaultLocationId: string | null;
   industryProfile: StockIndustryKey | null;
   suggestedProfile: StockIndustryKey;
   updatedAt: string | null;
@@ -3817,6 +3840,8 @@ export interface StockItem {
   reorderPointMilli: number | null;
   onHandQuantityMilli: number;
   onHandValueCents: number;
+  /** Phase 32 — the LedgerCore product this item is linked to; null = unlinked (posts no GL). */
+  ledgerItemId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -3861,6 +3886,11 @@ export interface StockMovement {
   reference: string | null;
   reason: string | null;
   occurredOn: string;
+  /** Phase 32 — ('bill'|'invoice', documentId) or ('stock', movementGroupId); null = no GL effect. */
+  sourceType: string | null;
+  sourceId: string | null;
+  glAccountId: string | null;
+  reversesMovementId: string | null;
   createdAt: string;
 }
 export interface StockBalance {
@@ -4159,6 +4189,48 @@ export function fetchStockItem(
   return apiFetch(`/stock/items/${id}`, { signal: signal ?? null });
 }
 
+/** Phase 32 — the accounting side of the LedgerCore product a stock item is linked to. */
+export interface StockItemProductInput {
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+}
+
+/** GET /stock/product-balances — on-hand per LedgerCore product id. */
+export interface StockProductBalance {
+  ledgerItemId: string;
+  stockItemId: string;
+  tracking: StockTrackingMode;
+  uomCode: string;
+  uomDecimalPlaces: number;
+  onHandQuantityMilli: number;
+  isActive: boolean;
+}
+export function fetchStockProductBalances(
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; balances: StockProductBalance[] }> {
+  return apiFetch('/stock/product-balances', { signal: signal ?? null });
+}
+
+/** POST /stock/items/:id/link-product */
+export function linkStockItemProduct(
+  id: string,
+  product: StockItemProductInput,
+): Promise<{ success: boolean; item: StockItem }> {
+  return apiFetch(`/stock/items/${id}/link-product`, { method: 'POST', body: JSON.stringify(product) });
+}
+
+/** PATCH /stock/settings */
+export function updateStockSettings(input: {
+  defaultLocationId: string | null;
+}): Promise<{ success: boolean; settings: StockSettings }> {
+  return apiFetch('/stock/settings', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
 /** POST /stock/items */
 export function createStockItem(input: {
   name: string;
@@ -4171,6 +4243,8 @@ export function createStockItem(input: {
   barcode: string | null;
   attributes: Record<string, unknown>;
   reorderPointMilli: number | null;
+  /** Phase 32 — prices/accounts of the linked product; omitted = defaults. */
+  product?: StockItemProductInput;
 }): Promise<{ success: boolean; item: StockItem }> {
   return apiFetch('/stock/items', { method: 'POST', body: JSON.stringify(input) });
 }

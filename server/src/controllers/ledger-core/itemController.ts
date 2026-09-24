@@ -5,7 +5,8 @@ import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
 import { optionalText } from '../../utils/queryParam.js';
-import type { ItemKind } from '../../types/ledger-core.js';
+import { ITEM_TYPES } from '../../types/ledger-core.js';
+import type { ItemKind, ItemType } from '../../types/ledger-core.js';
 
 /**
  * Thin adapters over itemService. Zero SQL (guardrails rule 2).
@@ -18,12 +19,17 @@ function optionalKind(raw: unknown): ItemKind | null {
   return raw === 'SERVICE' || raw === 'GOODS' ? raw : null;
 }
 
+function optionalItemType(raw: unknown): ItemType | null {
+  return ITEM_TYPES.find((t) => t === raw) ?? null;
+}
+
 /** GET /ledger-core/items */
 export const list: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const items = await itemService.listItems(user.orgId, {
     q: optionalText(req, 'q', 200),
     kind: optionalKind(req.query.kind),
+    itemType: optionalItemType(req.query.itemType),
     includeInactive: req.query.includeInactive === 'true',
   });
   res.json({ success: true, count: items.length, items });

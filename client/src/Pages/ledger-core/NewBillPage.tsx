@@ -28,6 +28,9 @@ import {
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
+import { isInventoryItem, LineLocationSelect, ProductPicker } from './ProductPicker';
+import QuickAddProductDialog from './QuickAddProductDialog';
+import { useStockLineData } from './useStockLineData';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
@@ -56,10 +59,11 @@ interface DraftLine {
   expenseAccountId: string;
   taxRate: string;
   itemId: string;
+  stockLocationId: string;
 }
 
 function emptyLine(): DraftLine {
-  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '', itemId: '' };
+  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '', itemId: '', stockLocationId: '' };
 }
 
 function today(): string {
@@ -102,6 +106,8 @@ export default function NewBillPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<Item[]>([]);
+  const stockData = useStockLineData();
+  const [quickAddLine, setQuickAddLine] = useState<number | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
 
   const [vendorId, setVendorId] = useState('');
@@ -183,6 +189,7 @@ export default function NewBillPage() {
             expenseAccountId: line.expenseAccountId,
             taxRate: line.taxRateBp === 0 ? '' : formatRate(line.taxRateBp),
             itemId: line.itemId ?? '',
+            stockLocationId: line.stockLocationId ?? '',
           })),
         );
         setSeeded(true);
@@ -277,7 +284,7 @@ export default function NewBillPage() {
    */
   function applyItem(index: number, itemId: string) {
     if (itemId === '') {
-      updateLine(index, { itemId: '' });
+      updateLine(index, { itemId: '', stockLocationId: '' });
       return;
     }
     const item = items.find((i) => i.id === itemId);
@@ -285,12 +292,18 @@ export default function NewBillPage() {
       updateLine(index, { itemId });
       return;
     }
+    applyItemRecord(index, item);
+  }
+
+  function applyItemRecord(index: number, item: Item) {
     updateLine(index, {
-      itemId,
+      itemId: item.id,
       description: item.name,
       unitPrice: formatCents(item.purchasePriceCents ?? 0),
-      expenseAccountId: item.expenseAccountId ?? '',
+      // An INVENTORY item posts to its inventory (asset) account, not an expense one.
+      expenseAccountId: (item.itemType === 'INVENTORY' ? item.assetAccountId : item.expenseAccountId) ?? '',
       taxRate: item.purchaseTaxRateBp === 0 ? '' : formatRate(item.purchaseTaxRateBp),
+      stockLocationId: '',
     });
   }
 
@@ -334,6 +347,11 @@ export default function NewBillPage() {
           expenseAccountId: line.expenseAccountId,
           taxRateBp: line.taxRate.trim() === '' ? 0 : (parseRateInput(line.taxRate) ?? 0),
           itemId: line.itemId === '' ? null : line.itemId,
+          // Only an INVENTORY line receives stock; a location on any other line is a 422.
+          stockLocationId:
+            line.itemId !== '' && items.find((i) => i.id === line.itemId)?.itemType === 'INVENTORY' && line.stockLocationId !== ''
+              ? line.stockLocationId
+              : null,
         })),
       };
 
@@ -497,19 +515,27 @@ export default function NewBillPage() {
                 return (
                   <tr key={index} className="border-t border-[var(--border)]">
                     <td className="p-2">
-                      <select
+                      <ProductPicker
                         value={line.itemId}
-                        onChange={(e) => applyItem(index, e.target.value)}
-                        aria-label={`Item for line ${String(index + 1)}`}
+                        items={items}
+                        balances={stockData.balances}
+                        onChange={(itemId) => applyItem(index, itemId)}
+                        onQuickAdd={() => setQuickAddLine(index)}
+                        ariaLabel={`Item for line ${String(index + 1)}`}
                         className={inputClass}
-                      >
-                        <option value="">Free text</option>
-                        {items.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.code} · {item.name}
-                          </option>
-                        ))}
-                      </select>
+                      />
+                      {isInventoryItem(items.find((i) => i.id === line.itemId)) && (
+                        <div className="mt-1">
+                          <LineLocationSelect
+                            value={line.stockLocationId}
+                            locations={stockData.locations}
+                            defaultLocationId={stockData.defaultLocationId}
+                            onChange={(stockLocationId) => updateLine(index, { stockLocationId })}
+                            ariaLabel={`Stock location for line ${String(index + 1)}`}
+                            className={inputClass}
+                          />
+                        </div>
+                      )}
                     </td>
                     <td className="p-2">
                       <input
@@ -544,6 +570,12 @@ export default function NewBillPage() {
                         value={line.expenseAccountId}
                         onChange={(e) => updateLine(index, { expenseAccountId: e.target.value })}
                         aria-label={`Account for line ${String(index + 1)}`}
+                        disabled={isInventoryItem(items.find((i) => i.id === line.itemId))}
+                        title={
+                          isInventoryItem(items.find((i) => i.id === line.itemId))
+                            ? 'Inventory items post to their inventory account'
+                            : undefined
+                        }
                         className={inputClass}
                       >
                         <option value="">Select…</option>
@@ -633,6 +665,20 @@ export default function NewBillPage() {
             {busy ? 'Saving…' : 'Save draft'}
           </button>
         </div>
+      
+      {quickAddLine !== null && (
+        <QuickAddProductDialog
+          mode="purchase"
+          accounts={expenseAccounts}
+          defaultAccountId={lines[quickAddLine]?.expenseAccountId ?? ''}
+          onCancel={() => setQuickAddLine(null)}
+          onCreated={(item) => {
+            setItems((current) => [...current, item].sort((a, b) => a.code.localeCompare(b.code)));
+            applyItemRecord(quickAddLine, item);
+            setQuickAddLine(null);
+          }}
+        />
+      )}
       </form>
     </section>
   );

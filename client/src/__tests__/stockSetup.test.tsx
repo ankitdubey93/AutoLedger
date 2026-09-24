@@ -29,6 +29,7 @@ function sessionFor(role: 'OWNER' | 'VIEWER') {
 
 const unconfiguredSettings: StockSettings = {
   configured: false,
+  defaultLocationId: null,
   industryProfile: null,
   suggestedProfile: 'REAL_ESTATE',
   updatedAt: null,

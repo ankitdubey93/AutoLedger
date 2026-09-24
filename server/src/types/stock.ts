@@ -59,6 +59,8 @@ export function isStockLocationKind(value: string): value is StockLocationKind {
 
 export const STOCK_MOVEMENT_TYPES = [
   'RECEIPT', 'ISSUE', 'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT',
+  // Phase 32: a void of a document-sourced movement is a NEW row that points at the one it undoes.
+  'RECEIPT_REVERSAL', 'ISSUE_REVERSAL',
 ] as const;
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 export const STOCK_INBOUND_MOVEMENT_TYPES = ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN'] as const;
@@ -114,6 +116,8 @@ export type StockAttributes = Record<string, StockAttributeValue>;
 
 export interface StockSettings {
   configured: boolean;
+  /** Phase 32: where a document line lands when it names no location. */
+  defaultLocationId: string | null;
   industryProfile: StockIndustryKey | null;
   suggestedProfile: StockIndustryKey;
   updatedAt: string | null;
@@ -194,6 +198,8 @@ export interface StockItem {
   reorderPointMilli: number | null;
   onHandQuantityMilli: number;
   onHandValueCents: number;
+  /** Phase 32: the LedgerCore product (items.id) this stock item is linked to; null = unlinked, posts no GL. */
+  ledgerItemId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -238,6 +244,12 @@ export interface StockMovement {
   reference: string | null;
   reason: string | null;
   occurredOn: string;
+  /** Phase 32 provenance: ('bill'|'invoice', documentId) or ('stock', movementGroupId); null = no GL effect. */
+  sourceType: string | null;
+  sourceId: string | null;
+  /** The inventory account this movement's value posted to; null = never touched the GL. */
+  glAccountId: string | null;
+  reversesMovementId: string | null;
   createdAt: string;
 }
 export interface StockBalance {

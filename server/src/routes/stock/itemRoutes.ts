@@ -18,5 +18,6 @@ router.get('/:id', authenticate, itemController.getOne);
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.create);
 router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.update);
+router.post('/:id/link-product', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.linkProduct);
 
 export default router;

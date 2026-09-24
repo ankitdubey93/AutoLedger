@@ -378,6 +378,9 @@ export const DEFAULT_CHART: readonly SeedAccount[] = [
 
   // Cost of sales 5000–5999 — Expense, separated by range and parent, not type
   { code: '5000', name: 'Cost of Goods Sold', type: 'Expense', parent: null, postable: false },
+  // Phase 32: postable children for perpetual-inventory posting (5000 is a header).
+  { code: '5050', name: 'Cost of Sales — Inventory', type: 'Expense', parent: '5000', postable: true },
+  { code: '5400', name: 'Inventory Adjustments & Shrinkage', type: 'Expense', parent: '5000', postable: true },
   { code: '5100', name: 'Direct Materials', type: 'Expense', parent: '5000', postable: true },
   { code: '5200', name: 'Direct Labor', type: 'Expense', parent: '5000', postable: true },
   { code: '5300', name: 'Freight & Duty', type: 'Expense', parent: '5000', postable: true },

@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as setupService from '../../services/stock/setupService.js';
-import { applyProfileSchema } from '../../schemas/stock/setupSchema.js';
+import { applyProfileSchema, updateStockSettingsSchema } from '../../schemas/stock/setupSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 
@@ -25,4 +25,12 @@ export const apply: RequestHandler = async (req, res) => {
   const input = parseBody(applyProfileSchema, req.body);
   const result = await setupService.applyIndustryProfile(user.orgId, user.id, input.industryProfile);
   res.json({ success: true, settings: result.settings, created: result.created });
+};
+
+/** PATCH /stock/settings */
+export const updateSettings: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(updateStockSettingsSchema, req.body);
+  const settings = await setupService.updateStockSettings(user.orgId, input);
+  res.json({ success: true, settings });
 };

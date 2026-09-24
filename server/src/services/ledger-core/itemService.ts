@@ -2,13 +2,21 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import type { Item, ItemKind } from '../../types/ledger-core.js';
+import { resolveInventoryPostingAccountsOnClient } from './settingsService.js';
+import { ITEM_TYPES } from '../../types/ledger-core.js';
+import type { Item, ItemKind, ItemType } from '../../types/ledger-core.js';
 
 /**
- * LedgerCore items — a catalogue of products/services an invoice or bill line
- * can be picked from (Phase 24). This is a CATALOGUE, not inventory: there is
- * no on-hand quantity, no stock movement, no COGS posting and no inventory
- * valuation.
+ * LedgerCore items — "Products & Services": the one master an invoice or bill
+ * line is picked from (Phase 24, extended in Phase 32).
+ *
+ * PHASE 32 ITEM TYPES. SERVICE and NON_INVENTORY are created here. INVENTORY
+ * (and, in step 2, FIXED_ASSET) are created in StockLedger, which calls
+ * `createLinkedItemOnClient` inside its own transaction — this file never
+ * holds quantities, movements or valuation, only the accounting identity of a
+ * stock item (its inventory and COGS accounts). A stock-managed item's name
+ * and active flag are owned by StockLedger and pushed here by
+ * `syncLinkedItemOnClient`; `updateItem` refuses to change them directly.
  *
  * Picking an item on a line COPIES its defaults into that line; the line
  * never reads through to the item afterward (see invoice_lines.item_id /
@@ -27,9 +35,9 @@ function pgErrorCode(err: unknown): string | undefined {
   return typeof err.code === 'string' ? err.code : undefined;
 }
 
-const ITEM_COLUMNS = `id, code, name, description, kind, sale_price_cents, purchase_price_cents,
-                       revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp,
-                       is_active, created_at, updated_at`;
+const ITEM_COLUMNS = `id, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
+                       revenue_account_id, expense_account_id, asset_account_id, cogs_account_id,
+                       sale_tax_rate_bp, purchase_tax_rate_bp, is_active, created_at, updated_at`;
 
 interface ItemRow {
   id: string;
@@ -37,10 +45,13 @@ interface ItemRow {
   name: string;
   description: string | null;
   kind: string;
+  item_type: string;
   sale_price_cents: string | null;
   purchase_price_cents: string | null;
   revenue_account_id: string | null;
   expense_account_id: string | null;
+  asset_account_id: string | null;
+  cogs_account_id: string | null;
   sale_tax_rate_bp: number;
   purchase_tax_rate_bp: number;
   is_active: boolean;
@@ -52,18 +63,31 @@ function isItemKind(value: string): value is ItemKind {
   return value === 'SERVICE' || value === 'GOODS';
 }
 
+function isItemType(value: string): value is ItemType {
+  return (ITEM_TYPES as readonly string[]).includes(value);
+}
+
+function isStockManaged(itemType: ItemType): boolean {
+  return itemType === 'INVENTORY' || itemType === 'FIXED_ASSET';
+}
+
 function toItem(row: ItemRow): Item {
   if (!isItemKind(row.kind)) throw new Error(`Unknown item kind "${row.kind}" on item ${row.id}`);
+  if (!isItemType(row.item_type)) throw new Error(`Unknown item type "${row.item_type}" on item ${row.id}`);
   return {
     id: row.id,
     code: row.code,
     name: row.name,
     description: row.description,
     kind: row.kind,
+    itemType: row.item_type,
+    stockManaged: isStockManaged(row.item_type),
     salePriceCents: row.sale_price_cents === null ? null : Number(row.sale_price_cents),
     purchasePriceCents: row.purchase_price_cents === null ? null : Number(row.purchase_price_cents),
     revenueAccountId: row.revenue_account_id,
     expenseAccountId: row.expense_account_id,
+    assetAccountId: row.asset_account_id,
+    cogsAccountId: row.cogs_account_id,
     saleTaxRateBp: row.sale_tax_rate_bp,
     purchaseTaxRateBp: row.purchase_tax_rate_bp,
     isActive: row.is_active,
@@ -72,11 +96,16 @@ function toItem(row: ItemRow): Item {
   };
 }
 
+/** `kind` is derived from `itemType` — the two are never chosen independently. */
+function kindFor(itemType: ItemType): ItemKind {
+  return itemType === 'SERVICE' ? 'SERVICE' : 'GOODS';
+}
+
 export interface CreateItemInput {
   code: string;
   name: string;
   description: string | null;
-  kind: ItemKind;
+  itemType: ItemType;
   salePriceCents: number | null;
   purchasePriceCents: number | null;
   revenueAccountId: string | null;
@@ -92,6 +121,8 @@ export interface UpdateItemInput {
   purchasePriceCents?: number | null | undefined;
   revenueAccountId?: string | null | undefined;
   expenseAccountId?: string | null | undefined;
+  assetAccountId?: string | null | undefined;
+  cogsAccountId?: string | null | undefined;
   saleTaxRateBp?: number | undefined;
   purchaseTaxRateBp?: number | undefined;
   isActive?: boolean | undefined;
@@ -99,7 +130,7 @@ export interface UpdateItemInput {
 
 export async function listItems(
   orgId: string,
-  options: { q: string | null; kind: ItemKind | null; includeInactive: boolean },
+  options: { q: string | null; kind: ItemKind | null; itemType: ItemType | null; includeInactive: boolean },
 ): Promise<Item[]> {
   const clauses = ['org_id = $1'];
   const values: unknown[] = [orgId];
@@ -108,6 +139,10 @@ export async function listItems(
   if (options.kind !== null) {
     values.push(options.kind);
     clauses.push(`kind = $${String(values.length)}`);
+  }
+  if (options.itemType !== null) {
+    values.push(options.itemType);
+    clauses.push(`item_type = $${String(values.length)}`);
   }
   if (options.q !== null) {
     values.push(options.q);
@@ -142,7 +177,7 @@ async function assertAccount(
   client: PoolClient,
   orgId: string,
   accountId: string,
-  wantType: 'Revenue' | 'Expense',
+  wantType: 'Revenue' | 'Expense' | 'Asset',
 ): Promise<void> {
   const { rows } = await client.query<{ type: string; is_postable: boolean }>(
     'SELECT type, is_postable FROM accounts WHERE id = $1 AND org_id = $2',
@@ -161,6 +196,11 @@ async function assertAccount(
 }
 
 export async function createItem(orgId: string, createdBy: string, input: CreateItemInput): Promise<Item> {
+  // Stock-managed types are created in StockLedger, which creates the linked
+  // product here in the same transaction (createLinkedItemOnClient).
+  if (isStockManaged(input.itemType)) {
+    throw new ApiError(422, 'Create inventory and asset items in StockLedger — they appear here automatically');
+  }
   try {
     const { rows } = await withTransaction(async (client) => {
       if (input.revenueAccountId !== null) await assertAccount(client, orgId, input.revenueAccountId, 'Revenue');
@@ -168,9 +208,9 @@ export async function createItem(orgId: string, createdBy: string, input: Create
 
       return client.query<ItemRow>(
         `INSERT INTO items
-           (org_id, created_by, code, name, description, kind, sale_price_cents, purchase_price_cents,
+           (org_id, created_by, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
             revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
          RETURNING ${ITEM_COLUMNS}`,
         [
           orgId,
@@ -178,7 +218,8 @@ export async function createItem(orgId: string, createdBy: string, input: Create
           input.code,
           input.name,
           input.description,
-          input.kind,
+          kindFor(input.itemType),
+          input.itemType,
           input.salePriceCents,
           input.purchasePriceCents,
           input.revenueAccountId,
@@ -199,8 +240,8 @@ export async function createItem(orgId: string, createdBy: string, input: Create
 
 export async function updateItem(orgId: string, id: string, input: UpdateItemInput): Promise<Item> {
   // Column names come from this frozen map, never from the request — rule 4
-  // forbids interpolating an identifier a caller could influence. `code` and
-  // `kind` are deliberately absent — neither is updatable.
+  // forbids interpolating an identifier a caller could influence. `code`,
+  // `kind` and `item_type` are deliberately absent — none is updatable.
   const COLUMNS = {
     name: 'name',
     description: 'description',
@@ -208,6 +249,8 @@ export async function updateItem(orgId: string, id: string, input: UpdateItemInp
     purchasePriceCents: 'purchase_price_cents',
     revenueAccountId: 'revenue_account_id',
     expenseAccountId: 'expense_account_id',
+    assetAccountId: 'asset_account_id',
+    cogsAccountId: 'cogs_account_id',
     saleTaxRateBp: 'sale_tax_rate_bp',
     purchaseTaxRateBp: 'purchase_tax_rate_bp',
     isActive: 'is_active',
@@ -215,6 +258,25 @@ export async function updateItem(orgId: string, id: string, input: UpdateItemInp
 
   try {
     const { rows } = await withTransaction(async (client) => {
+      const { rows: current } = await client.query<{ item_type: string }>(
+        'SELECT item_type FROM items WHERE id = $1 AND org_id = $2 FOR UPDATE',
+        [id, orgId],
+      );
+      const currentType = current[0]?.item_type;
+      if (currentType === undefined) throw new ApiError(404, 'Item not found');
+      const managed = isItemType(currentType) && isStockManaged(currentType);
+      if (managed && (input.name !== undefined || input.isActive !== undefined)) {
+        throw new ApiError(422, 'Edit the name and status of inventory and asset items in StockLedger');
+      }
+      if (!managed && (input.assetAccountId !== undefined || input.cogsAccountId !== undefined)) {
+        throw new ApiError(422, 'Inventory and COGS accounts apply only to inventory and asset items');
+      }
+      if (input.assetAccountId !== undefined && input.assetAccountId !== null) {
+        await assertAccount(client, orgId, input.assetAccountId, 'Asset');
+      }
+      if (input.cogsAccountId !== undefined && input.cogsAccountId !== null) {
+        await assertAccount(client, orgId, input.cogsAccountId, 'Expense');
+      }
       if (input.revenueAccountId !== undefined && input.revenueAccountId !== null) {
         await assertAccount(client, orgId, input.revenueAccountId, 'Revenue');
       }
@@ -249,4 +311,142 @@ export async function updateItem(orgId: string, id: string, input: UpdateItemInp
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) throw new ApiError(409, 'Item code already exists');
     throw err;
   }
+}
+
+// ------------------------------------------------ StockLedger bridge (Phase 32)
+
+export interface CreateLinkedItemInput {
+  code: string;
+  name: string;
+  itemType: 'INVENTORY';
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+}
+
+/**
+ * Creates the LedgerCore product behind a StockLedger item, on the CALLER's
+ * transaction client (rule 5): a code collision rolls back the stock item and
+ * its code-counter bump with it. The description stays NULL — the sales
+ * description is edited in LedgerCore (its cap is 500 characters, StockLedger's
+ * is 1000).
+ */
+export async function createLinkedItemOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  input: CreateLinkedItemInput,
+): Promise<Item> {
+  if (input.revenueAccountId !== null) await assertAccount(client, orgId, input.revenueAccountId, 'Revenue');
+  if (input.assetAccountId !== null) await assertAccount(client, orgId, input.assetAccountId, 'Asset');
+  if (input.cogsAccountId !== null) await assertAccount(client, orgId, input.cogsAccountId, 'Expense');
+
+  try {
+    const { rows } = await client.query<ItemRow>(
+      `INSERT INTO items
+         (org_id, created_by, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
+          revenue_account_id, asset_account_id, cogs_account_id, sale_tax_rate_bp, purchase_tax_rate_bp)
+       VALUES ($1, $2, $3, $4, NULL, 'GOODS', $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING ${ITEM_COLUMNS}`,
+      [
+        orgId,
+        userId,
+        input.code,
+        input.name,
+        input.itemType,
+        input.salePriceCents,
+        input.purchasePriceCents,
+        input.revenueAccountId,
+        input.assetAccountId,
+        input.cogsAccountId,
+        input.saleTaxRateBp,
+        input.purchaseTaxRateBp,
+      ],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
+    return toItem(row);
+  } catch (err) {
+    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
+      throw new ApiError(409, `A product with code ${input.code} already exists in Products & Services`);
+    }
+    throw err;
+  }
+}
+
+/** Pushes a StockLedger rename / (de)activation onto the linked product. No-op when nothing changes. */
+export async function syncLinkedItemOnClient(
+  client: PoolClient,
+  orgId: string,
+  ledgerItemId: string,
+  input: { name?: string | undefined; isActive?: boolean | undefined },
+): Promise<void> {
+  const sets: string[] = [];
+  const values: unknown[] = [ledgerItemId, orgId];
+  if (input.name !== undefined) {
+    values.push(input.name);
+    sets.push(`name = $${String(values.length)}`);
+  }
+  if (input.isActive !== undefined) {
+    values.push(input.isActive);
+    sets.push(`is_active = $${String(values.length)}`);
+  }
+  if (sets.length === 0) return;
+  await client.query(`UPDATE items SET ${sets.join(', ')} WHERE id = $1 AND org_id = $2`, values);
+}
+
+export interface StockItemAccounts {
+  itemType: ItemType;
+  assetAccountId: string;
+  cogsAccountId: string;
+}
+
+/**
+ * For each given product id, the inventory and COGS accounts its stock posts
+ * to: the item's own account first, then `ledger_settings`, then the default
+ * chart code — every candidate checked for type and postability by
+ * `resolveInventoryPostingAccountsOnClient`. Ids that are not stock-managed
+ * products are absent from the result. Fails with a readable 422 rather than
+ * guess a wrong account.
+ */
+export async function resolveStockAccountsOnClient(
+  client: PoolClient,
+  orgId: string,
+  ledgerItemIds: string[],
+): Promise<Map<string, StockItemAccounts>> {
+  const result = new Map<string, StockItemAccounts>();
+  const unique = [...new Set(ledgerItemIds)];
+  if (unique.length === 0) return result;
+
+  const { rows } = await client.query<{
+    id: string;
+    code: string;
+    item_type: string;
+    asset_account_id: string | null;
+    cogs_account_id: string | null;
+  }>(
+    `SELECT id, code, item_type, asset_account_id, cogs_account_id FROM items
+      WHERE org_id = $1 AND id = ANY($2::uuid[]) AND item_type IN ('INVENTORY', 'FIXED_ASSET')`,
+    [orgId, unique],
+  );
+  if (rows.length === 0) return result;
+
+  const defaults = await resolveInventoryPostingAccountsOnClient(client, orgId);
+  for (const row of rows) {
+    if (!isItemType(row.item_type)) continue;
+    const assetAccountId = row.asset_account_id ?? defaults.inventoryAccountId;
+    const cogsAccountId = row.cogs_account_id ?? defaults.cogsAccountId;
+    if (assetAccountId === null) {
+      throw new ApiError(422, `No inventory account is configured for item ${row.code}. Set one in settings.`);
+    }
+    if (cogsAccountId === null) {
+      throw new ApiError(422, `No cost-of-sales account is configured for item ${row.code}. Set one in settings.`);
+    }
+    result.set(row.id, { itemType: row.item_type, assetAccountId, cogsAccountId });
+  }
+  return result;
 }

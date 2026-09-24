@@ -27,7 +27,8 @@ export interface IntegrityCheck {
     | 'every_entry_balances'
     | 'no_orphaned_ledger_lines'
     | 'bank_line_journal_entries_exist'
-    | 'stock_balances_match_movements';
+    | 'stock_balances_match_movements'
+    | 'stock_movements_reconcile_with_gl';
   description: string;
   passed: boolean;
   /** Up to 20 offending rows, for the operator to go look at. Empty when passed. */
@@ -238,6 +239,69 @@ async function checkStockBalancesMatchMovements(): Promise<IntegrityCheck> {
   };
 }
 
+/**
+ * Phase 32 — the stock ledger and the general ledger agree, document by
+ * document. For every (source, inventory account) a set of GL-linked stock
+ * movements posted to, the sum of the movements' value must equal the net
+ * debit on that account across the journal entries of the same source —
+ * INCLUDING the reversing entries of those entries. A reversal copies the
+ * original's `source_type` but not its `source_id`, so it is joined back
+ * through `reverses_entry_id`.
+ *
+ * Scope, stated openly: this reconciles each DOCUMENT with its movements, not
+ * the whole inventory account with total stock value. A manual journal
+ * straight to the inventory account, or stock that pre-dates its product link,
+ * can still make the account differ from StockLedger's valuation — treating
+ * inventory as a control account is the next step.
+ */
+async function checkStockMovementsReconcileWithGl(): Promise<IntegrityCheck> {
+  const { rows } = await pool.query<{
+    org_id: string;
+    source_type: string;
+    source_id: string;
+    gl_account_id: string;
+    movement_val: string;
+    gl_val: string;
+  }>(
+    `WITH m AS (
+       SELECT org_id, source_type, source_id, gl_account_id, SUM(value_cents) AS movement_val
+         FROM stock_movements
+        WHERE gl_account_id IS NOT NULL AND source_id IS NOT NULL
+        GROUP BY org_id, source_type, source_id, gl_account_id
+     ), e AS (
+       SELECT id, org_id, source_type, source_id FROM journal_entries WHERE source_id IS NOT NULL
+       UNION ALL
+       SELECT r.id, r.org_id, o.source_type, o.source_id
+         FROM journal_entries r
+         JOIN journal_entries o ON o.id = r.reverses_entry_id AND o.org_id = r.org_id
+        WHERE o.source_id IS NOT NULL
+     ), g AS (
+       SELECT e.org_id, e.source_type, e.source_id, l.account_id,
+              SUM(l.base_debit_cents - l.base_credit_cents) AS gl_val
+         FROM e JOIN ledger_lines l ON l.journal_entry_id = e.id AND l.org_id = e.org_id
+        GROUP BY e.org_id, e.source_type, e.source_id, l.account_id
+     )
+     SELECT m.org_id, m.source_type, m.source_id, m.gl_account_id,
+            m.movement_val::text, COALESCE(g.gl_val, 0)::text AS gl_val
+       FROM m
+       LEFT JOIN g ON g.org_id = m.org_id AND g.source_type = m.source_type
+                  AND g.source_id = m.source_id AND g.account_id = m.gl_account_id
+      WHERE m.movement_val <> COALESCE(g.gl_val, 0)
+      LIMIT 20`,
+  );
+
+  return {
+    name: 'stock_movements_reconcile_with_gl',
+    description: 'Every GL-linked stock movement set equals its journal entries on the inventory account, reversals included',
+    passed: rows.length === 0,
+    offenders: rows.map((r) => ({
+      orgId: r.org_id,
+      subject: `${r.source_type} ${r.source_id}`,
+      detail: `stock movements ${r.movement_val} ≠ GL ${r.gl_val} on account ${r.gl_account_id}`,
+    })),
+  };
+}
+
 export async function runIntegrityChecks(): Promise<IntegrityReport> {
   const checks = await Promise.all([
     checkDebitsEqualCredits(),
@@ -245,6 +309,7 @@ export async function runIntegrityChecks(): Promise<IntegrityReport> {
     checkNoOrphanedLedgerLines(),
     checkBankLineJournalEntriesExist(),
     checkStockBalancesMatchMovements(),
+    checkStockMovementsReconcileWithGl(),
   ]);
 
   return {

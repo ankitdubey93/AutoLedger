@@ -1,21 +1,29 @@
 import { useEffect, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
   createItem,
+  fetchStockProductBalances,
   listAccounts,
   listItems,
   updateItem,
   type Account,
   type Item,
-  type ItemKind,
+  type ItemType,
+  type StockProductBalance,
 } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from '../../utils/money';
+import TabBar from '../../components/ui/TabBar';
 
 /**
- * The item catalogue — products and services an invoice or bill line can be
- * picked from (Phase 24). This is a catalogue, not inventory: there is no
- * on-hand quantity, no stock movement and no COGS posting.
+ * Products & Services — the one master an invoice or bill line is picked from
+ * (Phase 24, extended in Phase 32).
+ *
+ * Four item types. SERVICE and NON_INVENTORY (office supplies, anything bought
+ * or sold that is not quantity-tracked) are created here. INVENTORY and
+ * FIXED_ASSET items are created in StockLedger, which creates the linked
+ * product automatically; here they show their on-hand quantity and an "Open in
+ * StockLedger" link, and their name/status are read-only.
  *
  * `?new=1` opens the create form on mount, the same idiom CreateMenu and
  * CustomersPage use to jump straight into "add one" from anywhere in the app.
@@ -23,6 +31,26 @@ import { formatCents, parseCentsInput } from '../../utils/money';
 
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
+
+const TYPE_LABEL: Record<ItemType, string> = {
+  SERVICE: 'Service',
+  NON_INVENTORY: 'Non-inventory',
+  INVENTORY: 'Inventory',
+  FIXED_ASSET: 'Fixed asset',
+};
+
+type TabId = 'ALL' | ItemType;
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'ALL', label: 'All' },
+  { id: 'SERVICE', label: 'Services' },
+  { id: 'NON_INVENTORY', label: 'Non-inventory' },
+  { id: 'INVENTORY', label: 'Inventory' },
+  { id: 'FIXED_ASSET', label: 'Fixed assets' },
+];
+
+function formatQuantity(milli: number, decimalPlaces: number): string {
+  return (milli / 1000).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimalPlaces });
+}
 
 function ItemForm({
   revenueAccounts,
@@ -37,7 +65,7 @@ function ItemForm({
 }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const [kind, setKind] = useState<ItemKind>('SERVICE');
+  const [itemType, setItemType] = useState<'SERVICE' | 'NON_INVENTORY'>('SERVICE');
   const [description, setDescription] = useState('');
   const [salePrice, setSalePrice] = useState('');
   const [purchasePrice, setPurchasePrice] = useState('');
@@ -55,7 +83,7 @@ function ItemForm({
         code: code.trim(),
         name: name.trim(),
         description: description.trim() === '' ? null : description.trim(),
-        kind,
+        itemType,
         salePriceCents: salePrice.trim() === '' ? null : (parseCentsInput(salePrice) ?? null),
         purchasePriceCents: purchasePrice.trim() === '' ? null : (parseCentsInput(purchasePrice) ?? null),
         revenueAccountId: revenueAccountId === '' ? null : revenueAccountId,
@@ -75,7 +103,14 @@ function ItemForm({
       onSubmit={(e) => void handleSubmit(e)}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
     >
-      <h3 className="text-sm font-semibold m-0">New item</h3>
+      <h3 className="text-sm font-semibold m-0">New product or service</h3>
+      <p className="text-xs text-[var(--muted)] m-0">
+        For anything you bill for or buy without tracking stock. To track quantity, use{' '}
+        <Link to="/app/stock/items/new" className="underline">
+          New stock item
+        </Link>{' '}
+        in StockLedger — it appears here automatically.
+      </p>
 
       <div className="flex flex-wrap gap-3">
         <label className="flex flex-col gap-1 text-sm w-32">
@@ -100,11 +135,15 @@ function ItemForm({
             className={inputClass}
           />
         </label>
-        <label className="flex flex-col gap-1 text-sm w-36">
-          <span className="text-[var(--muted)]">Kind</span>
-          <select value={kind} onChange={(e) => setKind(e.target.value as ItemKind)} className={inputClass}>
+        <label className="flex flex-col gap-1 text-sm w-48">
+          <span className="text-[var(--muted)]">Type</span>
+          <select
+            value={itemType}
+            onChange={(e) => setItemType(e.target.value as 'SERVICE' | 'NON_INVENTORY')}
+            className={inputClass}
+          >
             <option value="SERVICE">Service</option>
-            <option value="GOODS">Goods</option>
+            <option value="NON_INVENTORY">Non-inventory (not stocked)</option>
           </select>
         </label>
       </div>
@@ -196,6 +235,8 @@ export default function ItemsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
+  const [balances, setBalances] = useState<Map<string, StockProductBalance>>(new Map());
+  const [tab, setTab] = useState<TabId>('ALL');
   const q = params.get('q') ?? '';
 
   useEffect(() => {
@@ -215,6 +256,14 @@ export default function ItemsPage() {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load items');
       });
 
+    // On-hand quantities for stock-managed products. Best effort: the page is
+    // fully usable without them (a failed call just leaves the column blank).
+    fetchStockProductBalances()
+      .then((res) => {
+        if (!ignore) setBalances(new Map(res.balances.map((b) => [b.ledgerItemId, b])));
+      })
+      .catch(() => undefined);
+
     return () => {
       ignore = true;
     };
@@ -229,6 +278,8 @@ export default function ItemsPage() {
     }
   }
 
+  const visible = items === null ? null : items.filter((item) => tab === 'ALL' || item.itemType === tab);
+
   function setSearch(value: string) {
     const next = new URLSearchParams(params);
     if (value === '') next.delete('q');
@@ -241,9 +292,9 @@ export default function ItemsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Items &amp; Services</h2>
+          <h2 className="text-lg font-semibold m-0">Products &amp; Services</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            The catalogue an invoice or bill line can be picked from.
+            Everything an invoice or bill line can be picked from — services, non-inventory items, stock and assets.
           </p>
         </div>
         <button
@@ -251,9 +302,11 @@ export default function ItemsPage() {
           onClick={() => setShowForm((open) => !open)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
-          <Plus size={15} aria-hidden="true" /> New item
+          <Plus size={15} aria-hidden="true" /> New product or service
         </button>
       </header>
+
+      <TabBar ariaLabel="Item type" variant="buttons" items={TABS} active={tab} onChange={(id) => setTab(id as TabId)} />
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">
         <span className="text-[var(--muted)]">Search</span>
@@ -289,14 +342,19 @@ export default function ItemsPage() {
         </div>
       )}
 
-      {items !== null && items.length > 0 && (
+      {visible !== null && visible.length === 0 && items !== null && items.length > 0 && (
+        <p className="text-sm text-[var(--muted)]">No {tab === 'ALL' ? 'items' : TYPE_LABEL[tab].toLowerCase()} yet.</p>
+      )}
+
+      {visible !== null && visible.length > 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
           <table className="w-full border-collapse text-sm min-w-[42rem]">
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
                 <th className="p-3 font-medium">Code</th>
                 <th className="p-3 font-medium">Name</th>
-                <th className="p-3 font-medium">Kind</th>
+                <th className="p-3 font-medium">Type</th>
+                <th className="p-3 font-medium text-right">On hand</th>
                 <th className="p-3 font-medium text-right">Sale price</th>
                 <th className="p-3 font-medium text-right">Purchase price</th>
                 <th className="p-3 font-medium">Status</th>
@@ -304,11 +362,16 @@ export default function ItemsPage() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {visible.map((item) => (
                 <tr key={item.id} className="border-t border-[var(--border)]">
                   <td className="p-3">{item.code}</td>
                   <td className="p-3">{item.name}</td>
-                  <td className="p-3">{item.kind === 'SERVICE' ? 'Service' : 'Goods'}</td>
+                  <td className="p-3">{TYPE_LABEL[item.itemType]}</td>
+                  <td className="p-3 text-right tabular-nums">
+                    {balances.get(item.id) === undefined
+                      ? '—'
+                      : `${formatQuantity(balances.get(item.id)?.onHandQuantityMilli ?? 0, balances.get(item.id)?.uomDecimalPlaces ?? 0)} ${balances.get(item.id)?.uomCode ?? ''}`}
+                  </td>
                   <td className="p-3 text-right tabular-nums">
                     {item.salePriceCents === null ? '—' : formatCents(item.salePriceCents)}
                   </td>
@@ -325,9 +388,18 @@ export default function ItemsPage() {
                     )}
                   </td>
                   <td className="p-3 text-right">
-                    <button type="button" onClick={() => void toggleActive(item)} className="btn btn--ghost">
-                      {item.isActive ? 'Deactivate' : 'Reactivate'}
-                    </button>
+                    {item.stockManaged ? (
+                      <Link
+                        to={`/app/stock/items/${balances.get(item.id)?.stockItemId ?? ''}`}
+                        className="btn btn--ghost"
+                      >
+                        Open in StockLedger
+                      </Link>
+                    ) : (
+                      <button type="button" onClick={() => void toggleActive(item)} className="btn btn--ghost">
+                        {item.isActive ? 'Deactivate' : 'Reactivate'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

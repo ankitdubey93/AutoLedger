@@ -11,7 +11,7 @@ Migrations live in `server/src/db/migrations/` **only**, applied in sorted filen
 All three surviving apps share one database and one migration sequence. Table names disambiguate which app owns them:
 
 - **LedgerCore is unprefixed** (`accounts`, `journal_entries`, `ledger_lines`) — it is the shared system of record every other app posts into, the same reason `organizations` and `users` are unprefixed platform tables.
-- **Every other app prefixes its own tables** with its slug: `ap_flow_documents`, `stock_items`. An app's tables are never read by another app directly — cross-app effects go through LedgerCore's GL via `source_type` / `source_id`. StockLedger (Phase 28) does **not** post to the GL at all — every `stock_*` table stands alone with no `source_type`/`source_id` hook, the one app not yet bridged. Five further apps once followed the same convention (`fpa_scenarios`, `taxguard_documents`, `unitecon_product_lines`, `boarddeck_decks`, `forecaster_budgets`) — all retired in Phase 29 (below).
+- **Every other app prefixes its own tables** with its slug: `ap_flow_documents`, `stock_items`. An app's tables are never read by another app directly — cross-app effects go through LedgerCore's GL via `source_type` / `source_id`. StockLedger (Phase 28) posted nothing to the GL until Phase 32, which connects it: a stock item is linked to a LedgerCore product and its movements post journals — see [Phase 32](#phase-32--one-product-master-and-inventory-posting-ledgercore--stockledger--applied). Five further apps once followed the same convention (`fpa_scenarios`, `taxguard_documents`, `unitecon_product_lines`, `boarddeck_decks`, `forecaster_budgets`) — all retired in Phase 29 (below).
 
 Migration filenames tag the app they belong to: `NNN_<app-slug>_<subject>.sql`, e.g. `002_ledger-core_accounts.sql`. Platform migrations (like `001`) carry no app tag.
 
@@ -679,6 +679,21 @@ The absence of a row means "never filled in," not `404` — `organizationProfile
 See [api.md](api.md#organizations--apiv1organizations) and [api.md](api.md#invoice-settings--apiv1ledger-coresettingsinvoicing--phase-38) for the routes and [ledger-core.md](ledger-core.md) for the full feature description and gaps.
 
 ---
+
+## Phase 32 — one product master and inventory posting (LedgerCore + StockLedger) — applied
+
+A direct feature request. Migrations `071` (LedgerCore) and `072` (StockLedger). See [roadmap.md § Phase 32, as delivered](roadmap.md#phase-32-as-delivered). Every statement is idempotent; every `ADD CONSTRAINT` sits in a `pg_constraint`-guarded `DO` block.
+
+**`071_ledger-core_item_types_and_inventory_accounts.sql`**
+- `items`: `item_type` TEXT NOT NULL (backfilled `SERVICE`→`SERVICE`, `GOODS`→`NON_INVENTORY`, then its default dropped, so a raw insert must name it) · `asset_account_id`, `cogs_account_id` UUID NULL with composite FKs `fk_items_asset_account` / `fk_items_cogs_account` → `accounts (org_id, id)` `ON DELETE RESTRICT`. CHECKs: `ck_items_item_type` (`SERVICE`, `NON_INVENTORY`, `INVENTORY`, `FIXED_ASSET`) · `ck_items_kind_matches_type` (`(kind = 'SERVICE') = (item_type = 'SERVICE')`) · `ck_items_stock_accounts` (the two accounts are NULL unless the type is `INVENTORY`/`FIXED_ASSET`). Indexes on both account columns and `(org_id, item_type, is_active, code)`.
+- `invoice_lines.stock_location_id`, `bill_lines.stock_location_id` UUID NULL — **no `REFERENCES`**: `stock_locations` belongs to StockLedger and rule 16 overrides rule 8 for a cross-app pointer (the same ruling `032`/`049` made in the other direction); the service validates it.
+- `ledger_settings`: `inventory_account_id`, `cogs_account_id`, `inventory_adjustment_account_id`, `stock_opening_account_id` UUID NULL, each with a composite FK to `accounts (org_id, id)` `RESTRICT` and an index.
+- Seeds `5050 Cost of Sales — Inventory` and `5400 Inventory Adjustments & Shrinkage` (Expense, postable, children of 5000) for organizations that already have a chart (the `028` pattern; `ON CONFLICT DO NOTHING`). `DEFAULT_CHART` gains the same two rows: **47 accounts, 37 postable**.
+
+**`072_stock_ledger_link.sql`**
+- `stock_items.ledger_item_id` UUID NULL — partial unique index `ux_stock_items_org_ledger_item (org_id, ledger_item_id) WHERE ledger_item_id IS NOT NULL`; trigger `trg_stock_items_ledger_link_frozen` raises `0A000` if a set value changes or clears. **No `REFERENCES`** to `items` (rule 16); items are never deleted, only deactivated.
+- `stock_settings.default_location_id` UUID NULL, composite FK `fk_stock_settings_default_location` → `stock_locations (org_id, id)` `RESTRICT`, indexed.
+- `stock_movements`: `ux_stock_movements_org_id_id UNIQUE (org_id, id)` (the self-FK target) · `source_type` TEXT, `source_id` UUID (`ck_stock_movements_source_pair`: both NULL or both set, type 1–40 chars) · `gl_account_id` UUID (no FK — rule 16; NULL = never touched the GL) · `reverses_movement_id` UUID with composite self-FK `fk_stock_movements_reverses` `RESTRICT`. The movement-type CHECK is widened with `RECEIPT_REVERSAL` and `ISSUE_REVERSAL`; `ck_stock_movements_sign` now treats `ISSUE_REVERSAL` as inbound and `RECEIPT_REVERSAL` as outbound; `ck_stock_movements_reversal_link` requires `reverses_movement_id` exactly for the two reversal types. `ux_stock_movements_reverses` (partial unique) stops a movement being reversed twice; `idx_stock_movements_org_source (org_id, source_type, source_id) WHERE source_id IS NOT NULL`. `ADD COLUMN` does not fire `067`'s append-only trigger — movements stay append-only.
 
 ## Phase 17 — target tables
 

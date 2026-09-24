@@ -50,6 +50,7 @@ function makeItem(overrides: Partial<StockItem>): StockItem {
     reorderPointMilli: null,
     onHandQuantityMilli: 0,
     onHandValueCents: 0,
+    ledgerItemId: null,
     isActive: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

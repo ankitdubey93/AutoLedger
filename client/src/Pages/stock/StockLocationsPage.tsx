@@ -6,7 +6,9 @@ import {
   STOCK_TOP_LEVEL_LOCATION_KINDS,
   createStockLocation,
   fetchStockLocations,
+  fetchStockSettings,
   updateStockLocation,
+  updateStockSettings,
   type StockLocation,
   type StockLocationKind,
 } from '../../services/fetchServices';
@@ -29,6 +31,23 @@ export default function StockLocationsPage() {
 
   const [locations, setLocations] = useState<StockLocation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [defaultLocationId, setDefaultLocationId] = useState<string>('');
+
+  useEffect(() => {
+    fetchStockSettings()
+      .then((res) => setDefaultLocationId(res.settings.defaultLocationId ?? ''))
+      .catch(() => undefined);
+  }, []);
+
+  async function handleDefaultLocation(next: string) {
+    setError(null);
+    try {
+      await updateStockSettings({ defaultLocationId: next === '' ? null : next });
+      setDefaultLocationId(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save the default location');
+    }
+  }
 
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
@@ -91,6 +110,28 @@ export default function StockLocationsPage() {
           {error}
         </p>
       ) : null}
+
+      <div>
+        <label htmlFor="default-location" className="block text-sm text-[var(--text)] mb-1">
+          Default location for invoices and bills
+        </label>
+        <select
+          id="default-location"
+          value={defaultLocationId}
+          disabled={!canWrite}
+          onChange={(e) => void handleDefaultLocation(e.target.value)}
+          className={inputClass}
+        >
+          <option value="">None — choose on every line</option>
+          {locations
+            .filter((l) => l.isActive)
+            .map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.path}
+              </option>
+            ))}
+        </select>
+      </div>
 
       <ul className="space-y-1">
         {locations.map((location) => (

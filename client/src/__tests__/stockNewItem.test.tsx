@@ -88,6 +88,17 @@ function mockRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor('OWNER')));
+    if (url.includes('/ledger-core/accounts')) {
+      const at = new Date().toISOString();
+      const make = (id: string, code: string, name: string, type: string) => ({ id, code, name, type, parentId: null, isPostable: true, isActive: true, description: null, createdAt: at, updatedAt: at });
+      return Promise.resolve(
+        jsonResponse(200, {
+          success: true,
+          count: 3,
+          accounts: [make('acc-4100', '4100', 'Product Revenue', 'Revenue'), make('acc-1140', '1140', 'Inventory', 'Asset'), make('acc-5050', '5050', 'Cost of Sales — Inventory', 'Expense')],
+        }),
+      );
+    }
     if (url.includes('/stock/categories/cat-res')) {
       return Promise.resolve(jsonResponse(200, { success: true, category: categories[0], attributes: resAttributes }));
     }
@@ -161,6 +172,45 @@ describe('StockNewItemPage', () => {
 
     await waitFor(() => expect(postItemBody).not.toBeNull());
     expect((postItemBody?.attributes as Record<string, unknown>).area).toBe('1180.50');
+  });
+
+  it('sends the accounting side of the linked product (prices in integer cents, chosen accounts)', async () => {
+    mockRoutes();
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.selectOptions(await screen.findByLabelText('Category *'), 'cat-res');
+    await user.type(await screen.findByLabelText('Name *'), 'Skyline Unit 1204');
+    await user.type(screen.getByLabelText('Project *'), 'Skyline');
+    await user.selectOptions(screen.getByLabelText('Configuration *'), '2 BHK');
+
+    await user.type(screen.getByLabelText('Sale price'), '2500.00');
+    await user.type(screen.getByLabelText('Purchase price'), '1000.50');
+    await waitFor(() => expect(screen.getByRole('option', { name: '1140 · Inventory' })).toBeInTheDocument());
+    await user.selectOptions(screen.getByLabelText('Inventory account'), 'acc-1140');
+
+    await user.click(screen.getByRole('button', { name: 'Create item' }));
+
+    await waitFor(() => expect(postItemBody).not.toBeNull());
+    expect(postItemBody?.product).toMatchObject({
+      salePriceCents: 250000,
+      purchasePriceCents: 100050,
+      assetAccountId: 'acc-1140',
+      revenueAccountId: null,
+      cogsAccountId: null,
+    });
+  });
+
+  it('only offers accounts of the right type in each account select', async () => {
+    mockRoutes();
+    renderPage();
+
+    await screen.findByLabelText('Inventory account');
+    await waitFor(() => expect(screen.getByRole('option', { name: '1140 · Inventory' })).toBeInTheDocument());
+    const inventory = screen.getByLabelText('Inventory account');
+    expect(Array.from(inventory.querySelectorAll('option')).map((o) => o.textContent)).toEqual(['Default', '1140 · Inventory']);
+    const cogs = screen.getByLabelText('Cost of sales account');
+    expect(Array.from(cogs.querySelectorAll('option')).map((o) => o.textContent)).toEqual(['Default', '5050 · Cost of Sales — Inventory']);
   });
 
   it('shows the live generated-code preview', async () => {

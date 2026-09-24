@@ -61,6 +61,7 @@ describe('GET /stock/settings', () => {
     expect(res.status).toBe(200);
     expect(res.body.settings).toEqual({
       configured: false,
+      defaultLocationId: null,
       industryProfile: null,
       suggestedProfile: 'GENERAL',
       updatedAt: null,

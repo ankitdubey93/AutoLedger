@@ -13,6 +13,7 @@ const router = Router();
 
 router.get('/settings', authenticate, setupController.getSettings);
 router.get('/setup/profiles', authenticate, setupController.listProfiles);
+router.patch('/settings', authenticate, requireRole('OWNER', 'ADMIN'), setupController.updateSettings);
 router.post('/setup', authenticate, requireRole('OWNER', 'ADMIN'), setupController.apply);
 
 export default router;

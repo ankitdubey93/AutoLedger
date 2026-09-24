@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as itemService from '../../services/stock/itemService.js';
-import { createStockItemSchema, updateStockItemSchema } from '../../schemas/stock/itemSchema.js';
+import { createStockItemSchema, linkProductSchema, updateStockItemSchema } from '../../schemas/stock/itemSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -62,5 +62,13 @@ export const update: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateStockItemSchema, req.body);
   const item = await itemService.updateItem(user.orgId, requireParam(req, 'id'), input);
+  res.json({ success: true, item });
+};
+
+/** POST /stock/items/:id/link-product — link a pre-Phase-32 item to a new LedgerCore product. */
+export const linkProduct: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(linkProductSchema, req.body ?? {});
+  const item = await itemService.linkProduct(user.orgId, user.id, requireParam(req, 'id'), input);
   res.json({ success: true, item });
 };

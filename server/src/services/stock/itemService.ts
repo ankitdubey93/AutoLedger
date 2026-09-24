@@ -5,6 +5,8 @@ import { validateAttributes } from '../../utils/stockAttributes.js';
 import { isValidGtin } from '../../utils/gtin.js';
 import { getActiveDefinitions } from './catalogueService.js';
 import { nextCodeOnClient } from './codeSchemeService.js';
+import * as ledgerItemService from '../ledger-core/itemService.js';
+import { postLinkOpeningOnClient } from './stockGlService.js';
 import type {
   StockAttributeDefinition,
   StockAttributes,
@@ -57,6 +59,7 @@ interface ItemRow {
   reorder_point_milli: string | null;
   on_hand_quantity_milli: string;
   on_hand_value_cents: string;
+  ledger_item_id: string | null;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -66,7 +69,7 @@ const ITEM_SELECT = `
   SELECT i.id, i.code, i.name, i.description, i.category_id, c.name AS category_name, i.item_type, i.tracking,
          i.uom_id, u.code AS uom_code, u.decimal_places AS uom_decimal_places, i.code_scheme_id, i.barcode,
          i.attributes, i.reorder_point_milli, COALESCE(b.q, 0) AS on_hand_quantity_milli, COALESCE(b.v, 0) AS on_hand_value_cents,
-         i.is_active, i.created_at, i.updated_at
+         i.ledger_item_id, i.is_active, i.created_at, i.updated_at
     FROM stock_items i
     JOIN stock_categories c ON c.id = i.category_id AND c.org_id = i.org_id
     JOIN stock_uoms u ON u.id = i.uom_id AND u.org_id = i.org_id
@@ -94,6 +97,7 @@ function toItem(row: ItemRow): StockItem {
     reorderPointMilli: row.reorder_point_milli === null ? null : Number(row.reorder_point_milli),
     onHandQuantityMilli: Number(row.on_hand_quantity_milli),
     onHandValueCents: Number(row.on_hand_value_cents),
+    ledgerItemId: row.ledger_item_id,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -187,7 +191,30 @@ export interface CreateStockItemInput {
   barcode: string | null;
   attributes: Record<string, unknown>;
   reorderPointMilli: number | null;
+  /** Phase 32: the accounting side of the linked LedgerCore product. Omitted = no prices, default accounts. */
+  product?: StockItemProductInput | undefined;
 }
+
+/** The accounting identity a stock item carries into Products & Services. */
+export interface StockItemProductInput {
+  salePriceCents: number | null;
+  purchasePriceCents: number | null;
+  revenueAccountId: string | null;
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
+  saleTaxRateBp: number;
+  purchaseTaxRateBp: number;
+}
+
+const EMPTY_PRODUCT: StockItemProductInput = {
+  salePriceCents: null,
+  purchasePriceCents: null,
+  revenueAccountId: null,
+  assetAccountId: null,
+  cogsAccountId: null,
+  saleTaxRateBp: 0,
+  purchaseTaxRateBp: 0,
+};
 
 export async function createItem(orgId: string, userId: string, input: CreateStockItemInput): Promise<StockItem> {
   try {
@@ -255,7 +282,7 @@ export async function createItem(orgId: string, userId: string, input: CreateSto
         codeSchemeId = schemeId;
       }
 
-      return client.query<{ id: string }>(
+      const inserted = await client.query<{ id: string }>(
         `INSERT INTO stock_items
            (org_id, code, name, description, category_id, item_type, tracking, uom_id, code_scheme_id,
             barcode, attributes, reorder_point_milli, created_by)
@@ -277,6 +304,25 @@ export async function createItem(orgId: string, userId: string, input: CreateSto
           userId,
         ],
       );
+
+      // Phase 32: every stock item is born linked to a LedgerCore product, in the
+      // SAME transaction — a code collision in Products & Services rolls back this
+      // insert and the code-counter bump above with it (rule 5).
+      const product = input.product ?? EMPTY_PRODUCT;
+      const created = inserted.rows[0];
+      if (created === undefined) throw new Error('INSERT ... RETURNING produced no row');
+      const ledgerItem = await ledgerItemService.createLinkedItemOnClient(client, orgId, userId, {
+        code,
+        name: input.name,
+        itemType: 'INVENTORY',
+        ...product,
+      });
+      await client.query('UPDATE stock_items SET ledger_item_id = $3 WHERE id = $1 AND org_id = $2', [
+        created.id,
+        orgId,
+        ledgerItem.id,
+      ]);
+      return inserted;
     });
 
     const row = rows[0];
@@ -304,8 +350,8 @@ export interface UpdateStockItemInput {
 export async function updateItem(orgId: string, id: string, input: UpdateStockItemInput): Promise<StockItem> {
   try {
     await withTransaction(async (client) => {
-      const { rows: existingRows } = await client.query<{ category_id: string }>(
-        'SELECT category_id FROM stock_items WHERE id = $1 AND org_id = $2',
+      const { rows: existingRows } = await client.query<{ category_id: string; ledger_item_id: string | null }>(
+        'SELECT category_id, ledger_item_id FROM stock_items WHERE id = $1 AND org_id = $2',
         [id, orgId],
       );
       const existing = existingRows[0];
@@ -357,6 +403,14 @@ export async function updateItem(orgId: string, id: string, input: UpdateStockIt
         values,
       );
       if (rows[0] === undefined) throw new ApiError(404, 'Item not found');
+
+      // Name and status are owned here; push them onto the linked product.
+      if (existing.ledger_item_id !== null) {
+        await ledgerItemService.syncLinkedItemOnClient(client, orgId, existing.ledger_item_id, {
+          name: input.name,
+          isActive: input.isActive,
+        });
+      }
     });
   } catch (err) {
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
@@ -365,6 +419,67 @@ export async function updateItem(orgId: string, id: string, input: UpdateStockIt
     }
     throw err;
   }
+
+  const { item } = await getItem(orgId, id);
+  return item;
+}
+
+/**
+ * Links an item created before Phase 32 (or never linked) to a new LedgerCore
+ * product. If it already holds stock, posts the opening entry — Dr Inventory /
+ * Cr Opening-stock equity — so the GL inventory account starts equal to
+ * StockLedger's valuation. Not done in a migration: a code can collide with an
+ * existing product (a person decides), and the opening entry needs a user, an
+ * open period and the audit context.
+ */
+export async function linkProduct(
+  orgId: string,
+  userId: string,
+  id: string,
+  product: StockItemProductInput,
+): Promise<StockItem> {
+  await withTransaction(async (client) => {
+    const { rows } = await client.query<{ code: string; name: string; ledger_item_id: string | null }>(
+      'SELECT code, name, ledger_item_id FROM stock_items WHERE id = $1 AND org_id = $2 FOR UPDATE',
+      [id, orgId],
+    );
+    const item = rows[0];
+    if (item === undefined) throw new ApiError(404, 'Item not found');
+    if (item.ledger_item_id !== null) throw new ApiError(409, 'Item is already linked to a product');
+
+    const ledgerItem = await ledgerItemService.createLinkedItemOnClient(client, orgId, userId, {
+      code: item.code,
+      name: item.name,
+      itemType: 'INVENTORY',
+      ...product,
+    });
+    await client.query('UPDATE stock_items SET ledger_item_id = $3 WHERE id = $1 AND org_id = $2', [
+      id,
+      orgId,
+      ledgerItem.id,
+    ]);
+
+    const { rows: valueRows } = await client.query<{ v: string }>(
+      'SELECT COALESCE(SUM(value_cents), 0) AS v FROM stock_balances WHERE org_id = $1 AND item_id = $2',
+      [orgId, id],
+    );
+    const onHandValueCents = Number(valueRows[0]?.v ?? '0');
+    if (onHandValueCents > 0) {
+      const accounts = await ledgerItemService.resolveStockAccountsOnClient(client, orgId, [ledgerItem.id]);
+      const inventoryAccountId = accounts.get(ledgerItem.id)?.assetAccountId;
+      if (inventoryAccountId === undefined) throw new Error('linked product did not resolve inventory accounts');
+      await postLinkOpeningOnClient(
+        client,
+        orgId,
+        userId,
+        id,
+        inventoryAccountId,
+        onHandValueCents,
+        new Date().toISOString().slice(0, 10),
+        item.code,
+      );
+    }
+  });
 
   const { item } = await getItem(orgId, id);
   return item;

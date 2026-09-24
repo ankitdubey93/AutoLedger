@@ -14,6 +14,24 @@ import { ITEM_CODE_REGEX } from '../../utils/stockCodePattern.js';
 
 const BARCODE_REGEX = /^[0-9]{8}$|^[0-9]{12,14}$/;
 const quantityMilli = z.int().min(0).max(1_000_000_000);
+const priceCents = z.int().min(0).max(1_000_000_000_000).nullable().default(null);
+
+/**
+ * Phase 32: the accounting side of the LedgerCore product a stock item is
+ * linked to. Every field is optional — omitted accounts fall back to the
+ * org's inventory settings, then the default chart (1140 / 5050).
+ */
+export const productSchema = z.object({
+  salePriceCents: priceCents,
+  purchasePriceCents: priceCents,
+  revenueAccountId: z.uuid().nullable().default(null),
+  assetAccountId: z.uuid().nullable().default(null),
+  cogsAccountId: z.uuid().nullable().default(null),
+  saleTaxRateBp: z.int().min(0).max(10_000).default(0),
+  purchaseTaxRateBp: z.int().min(0).max(10_000).default(0),
+});
+
+export const linkProductSchema = productSchema;
 
 export const createStockItemSchema = z
   .object({
@@ -33,6 +51,7 @@ export const createStockItemSchema = z
     barcode: z.string().trim().regex(BARCODE_REGEX, 'Barcode must be 8, 12, 13 or 14 digits').nullable().default(null),
     attributes: z.record(z.string(), z.unknown()).default({}),
     reorderPointMilli: quantityMilli.nullable().default(null),
+    product: productSchema.optional(),
   })
   .refine((v) => !(v.code !== null && v.codeSchemeId !== null), {
     message: 'Provide either code or codeSchemeId, not both',

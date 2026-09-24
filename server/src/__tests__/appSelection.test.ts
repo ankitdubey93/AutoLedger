@@ -39,6 +39,13 @@ describe('validateAppSelection', () => {
   });
 
   it('accepts an app with no requirements on its own', () => {
-    expect(validateAppSelection(['stock'])).toEqual(['stock']);
+    expect(validateAppSelection(['ledger-core'])).toEqual(['ledger-core']);
+  });
+
+  it('StockLedger requires LedgerCore (Phase 32 — its items are LedgerCore products and its movements post to the GL)', () => {
+    const err = rejection(['stock']);
+    expect(err.status).toBe(422);
+    expect(err.message).toBe('StockLedger requires LedgerCore');
+    expect(validateAppSelection(['ledger-core', 'stock'])).toEqual(['ledger-core', 'stock']);
   });
 });

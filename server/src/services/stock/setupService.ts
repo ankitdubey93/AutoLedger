@@ -1,5 +1,6 @@
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
+import { ApiError } from '../../utils/apiError.js';
 import * as ledgerSettingsService from '../ledger-core/settingsService.js';
 import { markCompletedOnClient } from '../onboardingService.js';
 import {
@@ -32,13 +33,14 @@ import type {
 
 interface StockSettingsRow {
   industry_profile: string;
+  default_location_id: string | null;
   updated_at: Date;
 }
 
 /** Calling ledgerSettingsService.getSettings is the rule-16-sanctioned cross-app read — never a direct `ledger_settings` query. */
 export async function getStockSettings(orgId: string): Promise<StockSettings> {
   const { rows } = await pool.query<StockSettingsRow>(
-    'SELECT industry_profile, updated_at FROM stock_settings WHERE org_id = $1',
+    'SELECT industry_profile, default_location_id, updated_at FROM stock_settings WHERE org_id = $1',
     [orgId],
   );
 
@@ -46,16 +48,45 @@ export async function getStockSettings(orgId: string): Promise<StockSettings> {
 
   const row = rows[0];
   if (row === undefined) {
-    return { configured: false, industryProfile: null, suggestedProfile, updatedAt: null };
+    return { configured: false, defaultLocationId: null, industryProfile: null, suggestedProfile, updatedAt: null };
   }
 
   const industryProfile = isStockIndustryKey(row.industry_profile) ? row.industry_profile : null;
   return {
     configured: true,
+    defaultLocationId: row.default_location_id,
     industryProfile,
     suggestedProfile,
     updatedAt: row.updated_at.toISOString(),
   };
+}
+
+/**
+ * Phase 32: the location a document line lands in when it names none. Must be
+ * an active location of this org — a composite FK enforces the tenant, the
+ * service enforces "active" and a readable 422.
+ */
+export async function updateStockSettings(
+  orgId: string,
+  input: { defaultLocationId: string | null },
+): Promise<StockSettings> {
+  await withTransaction(async (client) => {
+    if (input.defaultLocationId !== null) {
+      const { rows } = await client.query<{ is_active: boolean }>(
+        'SELECT is_active FROM stock_locations WHERE id = $1 AND org_id = $2',
+        [input.defaultLocationId, orgId],
+      );
+      const location = rows[0];
+      if (location === undefined) throw new ApiError(422, 'Location does not exist in this organization');
+      if (!location.is_active) throw new ApiError(422, 'Location is inactive');
+    }
+    const { rowCount } = await client.query(
+      'UPDATE stock_settings SET default_location_id = $2 WHERE org_id = $1',
+      [orgId, input.defaultLocationId],
+    );
+    if (rowCount === 0) throw new ApiError(409, 'Set up StockLedger before choosing a default location');
+  });
+  return getStockSettings(orgId);
 }
 
 export interface ProfileSummary {
@@ -195,6 +226,16 @@ export async function applyIndustryProfile(
       [orgId, profile.defaultLocation.code, profile.defaultLocation.name, profile.defaultLocation.kind, userId],
     );
     created.locations += locationResult.rowCount ?? 0;
+
+    // Phase 32: the profile's main location becomes the org's default document location
+    // (where a bill/invoice line lands when it names none) — only if none is chosen yet,
+    // so re-applying a profile never overrides an explicit choice.
+    await client.query(
+      `UPDATE stock_settings
+          SET default_location_id = (SELECT id FROM stock_locations WHERE org_id = $1 AND code = $2)
+        WHERE org_id = $1 AND default_location_id IS NULL`,
+      [orgId, profile.defaultLocation.code],
+    );
 
     await markCompletedOnClient(client, orgId, 'stock');
   });

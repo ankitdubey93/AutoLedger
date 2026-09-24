@@ -11,6 +11,7 @@ import type {
   StockSerial,
   StockSerialStatus,
   StockSummary,
+  StockTrackingMode,
 } from '../../types/stock.js';
 
 /**
@@ -117,6 +118,10 @@ interface MovementRow {
   reference: string | null;
   reason: string | null;
   occurred_on: string;
+  source_type: string | null;
+  source_id: string | null;
+  gl_account_id: string | null;
+  reverses_movement_id: string | null;
   created_at: Date;
 }
 
@@ -139,6 +144,10 @@ function toMovement(row: MovementRow): StockMovement {
     reference: row.reference,
     reason: row.reason,
     occurredOn: row.occurred_on,
+    sourceType: row.source_type,
+    sourceId: row.source_id,
+    glAccountId: row.gl_account_id,
+    reversesMovementId: row.reverses_movement_id,
     createdAt: row.created_at.toISOString(),
   };
 }
@@ -348,4 +357,53 @@ export async function getSummary(orgId: string): Promise<StockSummary> {
     expiringLotCount: Number(row.expiring_lot_count),
     locationCount: Number(row.location_count),
   };
+}
+
+// ------------------------------------------------------------- product balances (Phase 32)
+
+export interface StockProductBalance {
+  ledgerItemId: string;
+  stockItemId: string;
+  tracking: StockTrackingMode;
+  uomCode: string;
+  uomDecimalPlaces: number;
+  onHandQuantityMilli: number;
+  isActive: boolean;
+}
+
+/**
+ * On-hand quantity per LINKED item, keyed by its LedgerCore product id — what
+ * LedgerCore's Products & Services list and the invoice/bill line picker show
+ * beside each inventory item. Served from StockLedger's own routes (the client
+ * calls this API; LedgerCore's server never reads stock tables).
+ */
+export async function listProductBalances(orgId: string): Promise<StockProductBalance[]> {
+  const { rows } = await pool.query<{
+    ledger_item_id: string;
+    id: string;
+    tracking: string;
+    uom_code: string;
+    decimal_places: number;
+    on_hand: string;
+    is_active: boolean;
+  }>(
+    `SELECT i.ledger_item_id, i.id, i.tracking, u.code AS uom_code, u.decimal_places,
+            COALESCE(SUM(b.quantity_milli), 0) AS on_hand, i.is_active
+       FROM stock_items i
+       JOIN stock_uoms u ON u.id = i.uom_id AND u.org_id = i.org_id
+       LEFT JOIN stock_balances b ON b.item_id = i.id AND b.org_id = i.org_id
+      WHERE i.org_id = $1 AND i.ledger_item_id IS NOT NULL
+      GROUP BY i.ledger_item_id, i.id, i.tracking, u.code, u.decimal_places, i.is_active
+      ORDER BY i.code ASC`,
+    [orgId],
+  );
+  return rows.map((r) => ({
+    ledgerItemId: r.ledger_item_id,
+    stockItemId: r.id,
+    tracking: r.tracking as StockTrackingMode,
+    uomCode: r.uom_code,
+    uomDecimalPlaces: r.decimal_places,
+    onHandQuantityMilli: Number(r.on_hand),
+    isActive: r.is_active,
+  }));
 }

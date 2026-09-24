@@ -3,8 +3,8 @@
 > A perpetual inventory system updates quantity and value on every movement, not at period end — which means "what is this worth right now" is always a query away, and the price paid is which costing method the movement math actually uses.
 
 **Category:** Architecture
-**Introduced by:** Phase 28 — StockLedger's movement engine: receive, issue, transfer, adjust, each pricing what it moves
-**Verified against:** PostgreSQL 16
+**Introduced by:** Phase 28 — StockLedger's movement engine: receive, issue, transfer, adjust, each pricing what it moves. Extended in Phase 32 — perpetual inventory *posting to the general ledger*: receipt on a bill, COGS on an invoice, voids, and a stock-to-GL reconciliation check
+**Verified against:** PostgreSQL 16.15, Node 22 (the Phase 32 section was verified by integration tests against a real database)
 
 ---
 
@@ -50,12 +50,34 @@ The service checks `balance.quantityMilli < requested` before ever computing a v
 | Proportional split on every outflow, including the last unit | One formula, no special case | Can strand a cent via compounding rounding; the emptying-movement special case guarantees the value sums exactly |
 | Replay/re-cost on a back-dated movement | Fully correct at all times | Expensive (cascading recompute); accepted as a named, documented gap instead |
 
+## Phase 32 — making the perpetual system post to the general ledger
+
+Phase 28 valued stock but posted nothing. A *perpetual* inventory system has two ledgers that must agree: the stock ledger (quantity and value per item) and the GL's inventory asset account. Phase 32 makes every stock movement of a linked item also a journal line, in the **same transaction**, so they cannot drift.
+
+**The three accounting events.**
+
+| Event | Stock ledger | GL |
+|---|---|---|
+| Purchase (bill approved) | `RECEIPT` at the line's base-currency net value | Dr Inventory (1140) instead of an expense account |
+| Sale (invoice issued) | `ISSUE` at the current moving average | same entry as the sale: Dr COGS (5050) / Cr Inventory — revenue is recognised and cost of sales matched in one entry |
+| Adjustment / shrinkage | `ADJUSTMENT_OUT` | Dr Inventory Adjustments (5400) / Cr Inventory |
+
+COGS is unknowable until the stock ledger says what the units cost, so the **order matters**: the invoice's stock is issued first, the value it returns is added to the journal, and only then is the invoice number allocated — a 409 for short stock rolls back with nothing consumed.
+
+**Base currency, always.** Inventory is carried in the organization's base currency. A foreign-currency bill converts each inventory account's net total once (exactly as the journal will convert that debit line), then splits it across lines with largest-remainder (`allocateCents`) so the receipts sum to the GL debit to the cent. Converting line by line and summing would drift by cents — that is the failure `allocateCents` exists to prevent.
+
+**Voids are new rows, never edits.** Movements are append-only, so a void appends `ISSUE_REVERSAL` / `RECEIPT_REVERSAL` rows that point at what they undo (`reverses_movement_id`, with a partial unique index so one movement is undone once). Voiding an *invoice* returns stock at the exact value it left at, so no balance constraint can break. Voiding a *bill* is harder because the average may have moved since: if less than the received quantity is on hand it is refused (409); otherwise the original value is removed, clamped to what the balance still holds (`quantity > 0 OR value = 0` and `value >= 0` are CHECKs), and the clamped difference is posted as a variance entry so the two ledgers stay equal. **Rejected: removing at the current moving average** — with 10 @ $5 on hand and a later receipt of 10 @ $10, voiding the second must leave $50, and the average leaves $75, which is simply wrong in the simplest case.
+
+**Reconciliation is a database check, not a hope.** `stock_movements_reconcile_with_gl` groups GL-linked movements by (source document, inventory account), sums their value, and compares it with the net debit on that account across the document's journal entries — including reversing entries, which copy `source_type` but not `source_id` and so are joined back through `reverses_entry_id`. It reconciles *documents*, not the whole account (a manual journal straight to 1140 can still differ); making inventory a control account is the named next step.
+
 ## Where it lives in this codebase
 
 - `server/src/utils/stockValuation.ts` — `receiptValueCents`, `outflowValueCents`, `averageUnitCostCents`
 - `server/src/services/stock/movementService.ts` — the four movement-type handlers, each deciding which valuation applies
 - `server/src/db/migrations/067_stock_movements.sql` — the append-only trigger, the `quantity_milli >= 0` CHECK, `stock_balances`
-- `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements`
+- `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements` and (Phase 32) `checkStockMovementsReconcileWithGl`
+- `server/src/services/stock/documentStockService.ts` — receive/issue/reverse for invoice and bill lines; `stockGlService.ts` — journals for manual movements; `movementService.reverseMovementsOnClient` — the void value rules
+- `server/src/db/migrations/072_stock_ledger_link.sql` — provenance columns, reversal types, single-reversal index
 
 ## Gotchas
 
@@ -87,6 +109,15 @@ A: Twice — the service checks the locked balance quantity against the requeste
 **Q: What's an append-only ledger buying you here versus just updating a balance column directly?**
 A: An append-only movement ledger is the source of truth; the balance is a cache computed from it. If you only ever updated a balance column, a bug or a bad manual fix could silently drift the number with no way to detect or explain it. With the movement ledger, an integrity check can independently recompute Σ movements and compare it against the cached balance at any time — the same "recompute from source and diff" discipline the general ledger's own integrity checks use for debits-equal-credits.
 
+**Q: A bill for stock is approved, then voided after some of it was sold. What should happen?**
+A: Refuse if less than the received quantity is still on hand — you cannot un-buy units that left. If enough is left, remove the *original* value of that receipt, not the current average, clamped to what the balance still holds so the CHECK constraints stay true, and post any clamped difference as a variance entry so the stock ledger and the GL still agree. Removing at the current average is wrong even in the simplest case: hold 10 @ $5, receive 10 @ $10, void the second — the correct result is $50, the average leaves $75.
+
+**Q: Why is COGS posted in the same journal entry as the sale, and why is the invoice number allocated after the stock issue?**
+A: COGS depends on the cost the stock ledger assigns at the moment of issue, so the stock must be issued before the journal can be built; putting cost of sales in the sale's own entry means revenue and its matching cost are recognised together or not at all, and a void reverses both with one reversing entry. The invoice number comes from a counter row that is locked while a transaction holds it — allocating it *after* the stock issue means a 409 for insufficient stock burns no number, and keeps a single lock order (document → stock balances → number → journal) across every path, which is what prevents deadlocks.
+
+**Q: How do you know the stock ledger and the general ledger agree?**
+A: An integrity check compares them per source document: the sum of a document's GL-linked movement values equals the net debit on the inventory account across that document's journal entries and their reversals. It is a query, run by `npm run verify:integrity` and after every scenario in the tests — and it is honest about its scope (per document, not the whole account).
+
 ## Follow-ups they'll dig into
 
 - "How would you add FIFO on top of this?" — a `stock_cost_layers` table (one row per receipt, tracking remaining quantity/value) and a `stock_layer_consumptions` join recording which layers an issue drew from; the balance table stays the summary, layers become the detail.
@@ -95,6 +126,7 @@ A: An append-only movement ledger is the source of truth; the balance is a cache
 
 ## See also
 
+- [cross-app-transactional-bridge.md](cross-app-transactional-bridge.md)
 - [double-entry-as-an-invariant.md](double-entry-as-an-invariant.md)
 - [derived-vs-stored-state.md](derived-vs-stored-state.md)
 - [../postgresql/transactions-isolation-pooling.md](../postgresql/transactions-isolation-pooling.md)

@@ -377,3 +377,68 @@ export async function resolveApPostingAccountsOnClient(
 
   return { payableAccountId, taxAccountId };
 }
+
+// ------------------------------------------------- inventory posting accounts
+
+/**
+ * Phase 32. Every field is `null` when neither the settings column nor the
+ * default chart's fallback code resolves to an account of the right type that
+ * is postable — a caller that NEEDS a field throws its own readable 422 (only
+ * the caller knows which of the four a given posting uses). A settings value
+ * or fallback that exists but has the wrong type, or is a non-postable header,
+ * is treated as unresolved rather than posted to: an imported chart may reuse
+ * 5050 or 5400 for something else.
+ */
+export interface InventoryPostingAccounts {
+  inventoryAccountId: string | null;
+  cogsAccountId: string | null;
+  adjustmentAccountId: string | null;
+  openingAccountId: string | null;
+}
+
+export async function resolveInventoryPostingAccountsOnClient(
+  client: PoolClient,
+  orgId: string,
+): Promise<InventoryPostingAccounts> {
+  const { rows } = await client.query<{
+    inventory_account_id: string | null;
+    cogs_account_id: string | null;
+    inventory_adjustment_account_id: string | null;
+    stock_opening_account_id: string | null;
+  }>(
+    `SELECT inventory_account_id, cogs_account_id, inventory_adjustment_account_id, stock_opening_account_id
+       FROM ledger_settings WHERE org_id = $1`,
+    [orgId],
+  );
+  const settings = rows[0];
+
+  const wanted: { setting: string | null | undefined; code: string; type: 'Asset' | 'Expense' | 'Equity' }[] = [
+    { setting: settings?.inventory_account_id, code: '1140', type: 'Asset' },
+    { setting: settings?.cogs_account_id, code: '5050', type: 'Expense' },
+    { setting: settings?.inventory_adjustment_account_id, code: '5400', type: 'Expense' },
+    { setting: settings?.stock_opening_account_id, code: '3400', type: 'Equity' },
+  ];
+
+  const ids = wanted.map((w) => w.setting).filter((v): v is string => typeof v === 'string');
+  const codes = wanted.map((w) => w.code);
+  const { rows: accounts } = await client.query<{ id: string; code: string; type: string; is_postable: boolean }>(
+    `SELECT id, code, type, is_postable FROM accounts
+      WHERE org_id = $1 AND (id = ANY($2::uuid[]) OR code = ANY($3::text[]))`,
+    [orgId, ids, codes],
+  );
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  const byCode = new Map(accounts.map((a) => [a.code, a]));
+
+  const resolve = (w: (typeof wanted)[number]): string | null => {
+    const chosen = typeof w.setting === 'string' ? byId.get(w.setting) : byCode.get(w.code);
+    return chosen !== undefined && chosen.type === w.type && chosen.is_postable ? chosen.id : null;
+  };
+
+  const [inventory, cogs, adjustment, opening] = wanted.map(resolve);
+  return {
+    inventoryAccountId: inventory ?? null,
+    cogsAccountId: cogs ?? null,
+    adjustmentAccountId: adjustment ?? null,
+    openingAccountId: opening ?? null,
+  };
+}

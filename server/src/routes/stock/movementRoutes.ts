@@ -27,5 +27,6 @@ router.get('/movements', authenticate, movementController.movements);
 router.get('/items/:id/lots', authenticate, movementController.itemLots);
 router.get('/items/:id/serials', authenticate, movementController.itemSerials);
 router.get('/summary', authenticate, movementController.summary);
+router.get('/product-balances', authenticate, movementController.productBalances);
 
 export default router;

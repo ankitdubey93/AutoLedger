@@ -27,9 +27,11 @@ const BASE = '/api/v1/ledger-core/accounts';
  * The seed's totals, asserted rather than assumed. See docs/schema.md.
  * Phase 9b adds 3400 Opening Balance Equity, a postable leaf: 44 -> 45
  * total, 34 -> 35 postable.
+ * Phase 32 adds 5050 Cost of Sales — Inventory and 5400 Inventory Adjustments &
+ * Shrinkage, both postable leaves: 45 -> 47 total, 35 -> 37 postable.
  */
-const SEEDED_TOTAL = 45;
-const SEEDED_POSTABLE = 35;
+const SEEDED_TOTAL = 47;
+const SEEDED_POSTABLE = 37;
 
 let userA: SeededUser;
 let userB: SeededUser;
@@ -64,7 +66,7 @@ beforeEach(async () => {
 afterAll(closePool);
 
 describe('the default chart is seeded at registration', () => {
-  it('seeds 44 accounts for a newly registered organization', async () => {
+  it('seeds 47 accounts for a newly registered organization', async () => {
     const agent = await loginAgent(app, userA);
     const res = await agent.get(BASE);
 
@@ -74,7 +76,7 @@ describe('the default chart is seeded at registration', () => {
     expect(res.body.accounts).toHaveLength(SEEDED_TOTAL);
   });
 
-  it('marks exactly 34 of them postable, the rest header rollups', async () => {
+  it('marks exactly 37 of them postable, the rest header rollups', async () => {
     const agent = await loginAgent(app, userA);
     const { body } = await agent.get(BASE);
 

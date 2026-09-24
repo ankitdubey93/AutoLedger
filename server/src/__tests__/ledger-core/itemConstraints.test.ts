@@ -49,7 +49,7 @@ describe('items CHECK, UNIQUE and composite-FK constraints', () => {
   it('kind outside SERVICE/GOODS is rejected', async () => {
     const code = await errorCode(() =>
       pool.query(
-        `INSERT INTO items (org_id, created_by, code, name, kind) VALUES ($1, $2, 'X', 'X item', 'BAD_KIND')`,
+        `INSERT INTO items (org_id, created_by, code, name, kind, item_type) VALUES ($1, $2, 'X', 'X item', 'BAD_KIND', 'SERVICE')`,
         [userA.orgId, userA.id],
       ),
     );
@@ -59,8 +59,8 @@ describe('items CHECK, UNIQUE and composite-FK constraints', () => {
   it('a negative sale_price_cents is rejected', async () => {
     const code = await errorCode(() =>
       pool.query(
-        `INSERT INTO items (org_id, created_by, code, name, kind, sale_price_cents)
-         VALUES ($1, $2, 'X', 'X item', 'SERVICE', -100)`,
+        `INSERT INTO items (org_id, created_by, code, name, kind, item_type, sale_price_cents)
+         VALUES ($1, $2, 'X', 'X item', 'SERVICE', 'SERVICE', -100)`,
         [userA.orgId, userA.id],
       ),
     );
@@ -70,8 +70,8 @@ describe('items CHECK, UNIQUE and composite-FK constraints', () => {
   it('sale_tax_rate_bp above 10000 is rejected', async () => {
     const code = await errorCode(() =>
       pool.query(
-        `INSERT INTO items (org_id, created_by, code, name, kind, sale_tax_rate_bp)
-         VALUES ($1, $2, 'X', 'X item', 'SERVICE', 10001)`,
+        `INSERT INTO items (org_id, created_by, code, name, kind, item_type, sale_tax_rate_bp)
+         VALUES ($1, $2, 'X', 'X item', 'SERVICE', 'SERVICE', 10001)`,
         [userA.orgId, userA.id],
       ),
     );
@@ -80,11 +80,11 @@ describe('items CHECK, UNIQUE and composite-FK constraints', () => {
 
   it('a duplicate (org_id, code) is rejected', async () => {
     await pool.query(
-      `INSERT INTO items (org_id, created_by, code, name, kind) VALUES ($1, $2, 'DUP', 'First', 'SERVICE')`,
+      `INSERT INTO items (org_id, created_by, code, name, kind, item_type) VALUES ($1, $2, 'DUP', 'First', 'SERVICE', 'SERVICE')`,
       [userA.orgId, userA.id],
     );
     const constraint = await constraintName(() =>
-      pool.query(`INSERT INTO items (org_id, created_by, code, name, kind) VALUES ($1, $2, 'DUP', 'Second', 'SERVICE')`, [
+      pool.query(`INSERT INTO items (org_id, created_by, code, name, kind, item_type) VALUES ($1, $2, 'DUP', 'Second', 'SERVICE', 'SERVICE')`, [
         userA.orgId,
         userA.id,
       ]),
@@ -102,8 +102,8 @@ describe('items CHECK, UNIQUE and composite-FK constraints', () => {
 
     const code = await errorCode(() =>
       pool.query(
-        `INSERT INTO items (org_id, created_by, code, name, kind, revenue_account_id)
-         VALUES ($1, $2, 'X', 'X item', 'SERVICE', $3)`,
+        `INSERT INTO items (org_id, created_by, code, name, kind, item_type, revenue_account_id)
+         VALUES ($1, $2, 'X', 'X item', 'SERVICE', 'SERVICE', $3)`,
         [userA.orgId, userA.id, otherOrgAccountId],
       ),
     );

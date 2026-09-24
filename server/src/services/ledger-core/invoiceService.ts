@@ -6,6 +6,9 @@ import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
+import type { JournalLineInput } from './journalService.js';
+import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
+import * as documentStockService from '../stock/documentStockService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
@@ -70,6 +73,8 @@ export interface InvoiceLineInput {
    * used to fill any other field here — the client already copied the
    * item's defaults into description/unitPriceCents/account/taxRateBp. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line issues stock from; null = the default location. */
+  stockLocationId?: string | null | undefined;
 }
 
 export interface CreateInvoiceInput {
@@ -149,6 +154,7 @@ interface InvoiceLineRow {
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
+  stock_location_id: string | null;
 }
 
 const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, c.name AS customer_name,
@@ -180,6 +186,7 @@ function toLine(row: InvoiceLineRow): InvoiceLine {
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
+    stockLocationId: row.stock_location_id,
   };
 }
 
@@ -252,7 +259,7 @@ async function loadLines(
   const { rows } = await pool.query<InvoiceLineRow>(
     `SELECT l.id, l.invoice_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
        FROM invoice_lines l
        JOIN accounts a ON a.id = l.revenue_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -473,17 +480,29 @@ async function insertInvoiceLines(
   invoiceId: string,
   totals: LineTotal[],
 ): Promise<void> {
+  // Phase 32: early feedback for lot/serial items, fixed assets and a location on a
+  // non-stock line (posting re-checks). The revenue account stays whatever the line carries.
+  await prepareStockLinesOnClient(
+    client,
+    orgId,
+    totals.map((t, i) => ({
+      lineNumber: i + 1,
+      itemId: t.input.itemId,
+      stockLocationId: t.input.stockLocationId ?? null,
+      quantityMilli: t.input.quantityMilli,
+    })),
+  );
   await client.query(
     `INSERT INTO invoice_lines
        (org_id, invoice_id, line_number, description, quantity_milli, unit_price_cents,
-        revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id)
+        revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
+            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id)`,
+                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)`,
     [
       orgId,
       invoiceId,
@@ -496,6 +515,7 @@ async function insertInvoiceLines(
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
+      totals.map((t) => t.input.stockLocationId ?? null),
     ],
   );
 }
@@ -814,10 +834,15 @@ export async function issueInvoice(
     }
 
     const { rows: lineRows } = await client.query<{
+      line_number: number;
+      quantity_milli: string;
       revenue_account_id: string;
       net_cents: string;
+      item_id: string | null;
+      stock_location_id: string | null;
     }>(
-      'SELECT revenue_account_id, net_cents FROM invoice_lines WHERE invoice_id = $1 AND org_id = $2',
+      `SELECT line_number, quantity_milli, revenue_account_id, net_cents, item_id, stock_location_id
+         FROM invoice_lines WHERE invoice_id = $1 AND org_id = $2 ORDER BY line_number`,
       [id, orgId],
     );
     if (lineRows.length === 0) {
@@ -851,6 +876,37 @@ export async function issueInvoice(
       taxTotalCents > 0,
     );
 
+    // Phase 32 — INVENTORY lines issue stock at the current moving average, in
+    // BASE currency. Done before the invoice number is allocated so a 409 for
+    // short stock leaves the invoice a DRAFT with no number consumed (lock
+    // order: invoice row -> stock balances -> number counter -> journal).
+    const stockLines = await classifyStockLinesOnClient(
+      client,
+      orgId,
+      lineRows.map((l) => ({
+        lineNumber: l.line_number,
+        itemId: l.item_id,
+        stockLocationId: l.stock_location_id,
+        quantityMilli: Number(l.quantity_milli),
+      })),
+    );
+    const stockIssue =
+      stockLines.size === 0
+        ? null
+        : await documentStockService.issueForDocumentOnClient(client, orgId, userId, {
+            sourceType: 'invoice',
+            sourceId: id,
+            occurredOn: postingDate,
+            reference: null,
+            lines: [...stockLines.values()].map((l) => ({
+              lineNumber: l.lineNumber,
+              ledgerItemId: l.itemId,
+              locationId: l.stockLocationId,
+              quantityMilli: l.quantityMilli,
+              glAccountId: l.accounts.assetAccountId,
+            })),
+          });
+
     // One credit line per distinct revenue account — two invoice lines on the
     // same account merge into a single ledger line.
     const revenueByAccount = new Map<string, number>();
@@ -862,7 +918,7 @@ export async function issueInvoice(
       );
     }
 
-    const glLines = [
+    const glLines: JournalLineInput[] = [
       { accountId: receivableAccountId, debitCents: totalCents, creditCents: 0, currencyCode: documentCurrency, fxRate },
       ...[...revenueByAccount.entries()].map(([accountId, netCents]) => ({
         accountId,
@@ -888,6 +944,25 @@ export async function issueInvoice(
       // A bug, not user input — the invariant that totalCents = subtotal + tax
       // and that line net/tax sum to those totals should make this impossible.
       throw new Error('Invoice posting is unbalanced');
+    }
+
+    // Cost of sales: Dr COGS / Cr Inventory at the value StockLedger just removed,
+    // in the SAME entry as the sale. BASE currency (no currencyCode) — inventory
+    // value is always base — appended after the native-currency balance check
+    // above because a foreign-currency invoice legitimately mixes currencies
+    // (createEntryOnClient balances base amounts; the pair balances on its own).
+    if (stockIssue !== null) {
+      const cogsByAccount = new Map<string, number>();
+      const inventoryByAccount = new Map<string, number>();
+      for (const issued of stockIssue.lines) {
+        const line = stockLines.get(issued.lineNumber);
+        if (line === undefined || issued.valueCents === 0) continue;
+        const cogsAccountId = line.accounts.cogsAccountId;
+        cogsByAccount.set(cogsAccountId, (cogsByAccount.get(cogsAccountId) ?? 0) + issued.valueCents);
+        inventoryByAccount.set(issued.glAccountId, (inventoryByAccount.get(issued.glAccountId) ?? 0) + issued.valueCents);
+      }
+      for (const [accountId, value] of cogsByAccount) glLines.push({ accountId, debitCents: value, creditCents: 0 });
+      for (const [accountId, value] of inventoryByAccount) glLines.push({ accountId, debitCents: 0, creditCents: value });
     }
 
     const invoiceNumber = await invoiceSettingsService.allocateInvoiceNumber(client, orgId);
@@ -994,6 +1069,13 @@ export async function voidInvoice(
       if (row.journal_entry_id === null) {
         throw new Error(`Issued invoice ${id} has no journal_entry_id`);
       }
+      // Phase 32: stock comes back at the EXACT value it left at (the reversing
+      // entry below already mirrors the COGS lines), so no variance is possible.
+      await documentStockService.reverseDocumentOnClient(client, orgId, userId, {
+        sourceType: 'invoice',
+        sourceId: id,
+        occurredOn: entryDate,
+      });
       const reversalId = await journalService.reverseEntryOnClient(
         client,
         orgId,

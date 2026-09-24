@@ -2,14 +2,16 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
+import { allocateCents, cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
 import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
-import { resolveApPostingAccountsOnClient } from './settingsService.js';
+import { resolveApPostingAccountsOnClient, resolveInventoryPostingAccountsOnClient } from './settingsService.js';
+import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
+import * as documentStockService from '../stock/documentStockService.js';
 import {
   canTransitionBill,
   isBillStatus,
@@ -76,6 +78,9 @@ export interface BillLineInput {
    * used to fill any other field here — the client already copied the
    * item's defaults into description/unitPriceCents/account/taxRateBp. */
   itemId: string | null;
+  /** Phase 32 — where an INVENTORY line receives stock; null = the default location. Optional so
+   * AP-Flow's captured-bill path (no items) never has to name it. */
+  stockLocationId?: string | null | undefined;
 }
 
 export interface CreateBillInput {
@@ -159,6 +164,7 @@ interface BillLineRow {
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
+  stock_location_id: string | null;
 }
 
 const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.name AS vendor_name,
@@ -193,6 +199,7 @@ function toLine(row: BillLineRow): BillLine {
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
+    stockLocationId: row.stock_location_id,
   };
 }
 
@@ -265,7 +272,7 @@ async function loadLines(orgId: string, billIds: string[]): Promise<Map<string, 
   const { rows } = await pool.query<BillLineRow>(
     `SELECT l.id, l.bill_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
        FROM bill_lines l
        JOIN accounts a ON a.id = l.expense_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -486,17 +493,30 @@ async function insertBillLines(
   billId: string,
   totals: LineTotal[],
 ): Promise<void> {
+  // Phase 32: an INVENTORY line always posts to its item's inventory account, whatever
+  // account the client sent — stamped here so the stored line shows where it lands.
+  // Also refuses (422) lot/serial items, fixed assets and a location on a non-stock line.
+  const stockLines = await prepareStockLinesOnClient(
+    client,
+    orgId,
+    totals.map((t, i) => ({
+      lineNumber: i + 1,
+      itemId: t.input.itemId,
+      stockLocationId: t.input.stockLocationId ?? null,
+      quantityMilli: t.input.quantityMilli,
+    })),
+  );
   await client.query(
     `INSERT INTO bill_lines
        (org_id, bill_id, line_number, description, quantity_milli, unit_price_cents,
-        expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id)
+        expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
+            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id)`,
+                    expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)`,
     [
       orgId,
       billId,
@@ -504,11 +524,12 @@ async function insertBillLines(
       totals.map((t) => t.input.description),
       totals.map((t) => t.input.quantityMilli),
       totals.map((t) => t.input.unitPriceCents),
-      totals.map((t) => t.input.expenseAccountId),
+      totals.map((t, i) => stockLines.get(i + 1)?.accounts.assetAccountId ?? t.input.expenseAccountId),
       totals.map((t) => t.input.taxRateBp),
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
+      totals.map((t) => t.input.stockLocationId ?? null),
     ],
   );
 }
@@ -951,10 +972,15 @@ export async function approveBillOnClient(
   }
 
   const { rows: lineRows } = await client.query<{
+    line_number: number;
+    quantity_milli: string;
     expense_account_id: string;
     net_cents: string;
+    item_id: string | null;
+    stock_location_id: string | null;
   }>(
-    'SELECT expense_account_id, net_cents FROM bill_lines WHERE bill_id = $1 AND org_id = $2',
+    `SELECT line_number, quantity_milli, expense_account_id, net_cents, item_id, stock_location_id
+       FROM bill_lines WHERE bill_id = $1 AND org_id = $2 ORDER BY line_number`,
     [id, orgId],
   );
   if (lineRows.length === 0) {
@@ -988,15 +1014,76 @@ export async function approveBillOnClient(
     taxTotalCents > 0,
   );
 
-  // One debit line per distinct expense account — two bill lines on the
-  // same account merge into a single ledger line.
+  // Phase 32 — INVENTORY lines receive stock instead of expensing. Classified
+  // here (again — the draft-save check can be stale) and posted to the item's
+  // inventory account. The stock is received BEFORE the journal is built: lock
+  // order is bill row -> stock balances -> journal (documentStockService header).
+  const stockLines = await classifyStockLinesOnClient(
+    client,
+    orgId,
+    lineRows.map((l) => ({
+      lineNumber: l.line_number,
+      itemId: l.item_id,
+      stockLocationId: l.stock_location_id,
+      quantityMilli: Number(l.quantity_milli),
+    })),
+  );
+  const stockAccountIds = new Set([...stockLines.values()].map((l) => l.accounts.assetAccountId));
+  for (const line of lineRows) {
+    if (!stockLines.has(line.line_number) && stockAccountIds.has(line.expense_account_id)) {
+      // Otherwise the GL inventory account would gain value the stock ledger never saw.
+      throw new ApiError(422, `Line ${String(line.line_number)} posts to an inventory account that only inventory items may use on a bill`);
+    }
+  }
+
+  if (stockLines.size > 0) {
+    // Inventory value is BASE currency. Convert each inventory account's net
+    // total once — exactly what the journal will do for that debit line — then
+    // split it across the lines with largest-remainder so the receipts add up
+    // to the GL debit to the cent.
+    const byAccount = new Map<string, { lineNumber: number; netCents: number }[]>();
+    for (const line of lineRows) {
+      const stock = stockLines.get(line.line_number);
+      if (stock === undefined) continue;
+      const group = byAccount.get(stock.accounts.assetAccountId) ?? [];
+      group.push({ lineNumber: line.line_number, netCents: parseCents(line.net_cents) });
+      byAccount.set(stock.accounts.assetAccountId, group);
+    }
+    const valueByLine = new Map<number, number>();
+    for (const group of byAccount.values()) {
+      const net = group.reduce((sum, l) => sum + l.netCents, 0);
+      const baseNet = convertToBase(cents(net), fxRate);
+      const shares =
+        net === 0
+          ? group.map(() => 0)
+          : allocateCents(cents(baseNet), group.map((l) => cents(l.netCents))).map((c) => Number(c));
+      group.forEach((l, i) => valueByLine.set(l.lineNumber, shares[i] ?? 0));
+    }
+
+    await documentStockService.receiveForDocumentOnClient(client, orgId, userId, {
+      sourceType: 'bill',
+      sourceId: id,
+      occurredOn: postingDate,
+      reference: billRow.vendor_reference,
+      lines: [...stockLines.values()].map((l) => ({
+        lineNumber: l.lineNumber,
+        ledgerItemId: l.itemId,
+        locationId: l.stockLocationId,
+        quantityMilli: l.quantityMilli,
+        glAccountId: l.accounts.assetAccountId,
+        valueCents: valueByLine.get(l.lineNumber) ?? 0,
+      })),
+    });
+  }
+
+  // One debit line per distinct account — two bill lines on the same account
+  // merge into a single ledger line. An INVENTORY line's account is its item's
+  // inventory account, not whatever the draft line carried.
   const expenseByAccount = new Map<string, number>();
   for (const line of lineRows) {
     const net = parseCents(line.net_cents);
-    expenseByAccount.set(
-      line.expense_account_id,
-      (expenseByAccount.get(line.expense_account_id) ?? 0) + net,
-    );
+    const accountId = stockLines.get(line.line_number)?.accounts.assetAccountId ?? line.expense_account_id;
+    expenseByAccount.set(accountId, (expenseByAccount.get(accountId) ?? 0) + net);
   }
 
   const glLines = [
@@ -1086,6 +1173,53 @@ export async function approveBill(
   }
 }
 
+/**
+ * A receipt reversal removes the ORIGINAL value unless the balance no longer
+ * holds that much (a later issue at a lower average, say) — then it is clamped.
+ * The bill's reversing journal entry reverses the full original debit, so the
+ * clamped difference is re-posted here: Dr Inventory / Cr Inventory adjustments.
+ * Stock ledger and GL stay equal.
+ */
+async function postReceiptVarianceOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  billId: string,
+  originalEntryId: string,
+  entryDate: string | null,
+  byAccount: { glAccountId: string; originalValueCents: number; reversedValueCents: number }[],
+): Promise<void> {
+  const variances = byAccount
+    .map((a) => ({ accountId: a.glAccountId, cents: a.originalValueCents + a.reversedValueCents }))
+    .filter((v) => v.cents > 0);
+  if (variances.length === 0) return;
+
+  const { adjustmentAccountId } = await resolveInventoryPostingAccountsOnClient(client, orgId);
+  if (adjustmentAccountId === null) {
+    throw new ApiError(422, 'No inventory-adjustment account is configured. Set one in settings.');
+  }
+  let date = entryDate;
+  if (date === null) {
+    const { rows } = await client.query<{ entry_date: string }>(
+      'SELECT entry_date FROM journal_entries WHERE id = $1 AND org_id = $2',
+      [originalEntryId, orgId],
+    );
+    date = rows[0]?.entry_date ?? null;
+    if (date === null) throw new Error('bill journal entry not found');
+  }
+  const total = variances.reduce((sum, v) => sum + v.cents, 0);
+  await journalService.createEntryOnClient(client, orgId, userId, {
+    entryDate: date,
+    description: 'Void bill — received stock already partly consumed',
+    sourceType: 'bill',
+    sourceId: billId,
+    lines: [
+      ...variances.map((v) => ({ accountId: v.accountId, debitCents: v.cents, creditCents: 0 })),
+      { accountId: adjustmentAccountId, debitCents: 0, creditCents: total },
+    ],
+  });
+}
+
 export async function voidBill(
   orgId: string,
   userId: string,
@@ -1139,6 +1273,14 @@ export async function voidBill(
       if (row.journal_entry_id === null) {
         throw new Error(`Posted bill ${id} has no journal_entry_id`);
       }
+      // Phase 32: undo the bill's stock FIRST (lock order: bill row -> stock
+      // balances -> journal). Refuses with 409 if the received stock has since
+      // been issued.
+      const stockReversal = await documentStockService.reverseDocumentOnClient(client, orgId, userId, {
+        sourceType: 'bill',
+        sourceId: id,
+        occurredOn: entryDate,
+      });
       const reversalId = await journalService.reverseEntryOnClient(
         client,
         orgId,
@@ -1146,6 +1288,7 @@ export async function voidBill(
         row.journal_entry_id,
         entryDate,
       );
+      await postReceiptVarianceOnClient(client, orgId, userId, id, row.journal_entry_id, entryDate, stockReversal.byAccount);
       await client.query(
         `UPDATE bills SET status = 'VOID', voided_at = now(), void_journal_entry_id = $1
           WHERE id = $2 AND org_id = $3`,

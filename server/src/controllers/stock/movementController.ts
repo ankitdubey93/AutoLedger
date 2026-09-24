@@ -110,3 +110,10 @@ export const summary: RequestHandler = async (req, res) => {
   const result = await stockQueryService.getSummary(user.orgId);
   res.json({ success: true, summary: result });
 };
+
+/** GET /stock/product-balances — on-hand per LedgerCore product id, for the Products & Services list and line pickers. */
+export const productBalances: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const balances = await stockQueryService.listProductBalances(user.orgId);
+  res.json({ success: true, count: balances.length, balances });
+};

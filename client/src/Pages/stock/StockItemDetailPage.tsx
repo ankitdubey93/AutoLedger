@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import AttributeFields from './AttributeFields';
@@ -13,6 +13,7 @@ import {
   fetchStockItemLots,
   fetchStockItemSerials,
   fetchStockMovements,
+  linkStockItemProduct,
   updateStockItem,
   type StockAttributeDefinition,
   type StockBalance,
@@ -101,6 +102,31 @@ export default function StockItemDetailPage() {
     }
   }
 
+  async function handleLinkProduct() {
+    if (id === undefined) return;
+    if (!window.confirm('Link this item to Products & Services? Any stock it already holds is posted to your inventory account as opening stock.')) {
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await linkStockItemProduct(id, {
+        salePriceCents: null,
+        purchasePriceCents: null,
+        revenueAccountId: null,
+        assetAccountId: null,
+        cogsAccountId: null,
+        saleTaxRateBp: 0,
+        purchaseTaxRateBp: 0,
+      });
+      setItem(res.item);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not link the item');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleSerialAction(serial: StockSerial, status: Exclude<StockSerialStatus, 'ISSUED'>) {
     setError(null);
     const note = status === 'BOOKED' ? window.prompt('Note for this booking (optional):') : null;
@@ -171,6 +197,37 @@ export default function StockItemDetailPage() {
         </button>
       </div>
 
+      <section aria-label="Products and services" className="space-y-2">
+        <h2 className="text-sm font-medium text-[var(--text)]">Products &amp; Services</h2>
+        {item.ledgerItemId !== null ? (
+          <p className="text-sm text-[var(--muted)]">
+            Linked to LedgerCore. Stock movements of this item post to your inventory account, and it can be bought on
+            a bill and sold on an invoice. Prices and accounts are edited in{' '}
+            <Link to="/app/ledger-core/items" className="underline">
+              Products &amp; Services
+            </Link>
+            .
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-sm text-[var(--muted)]">
+              This item is not linked to Products &amp; Services, so it cannot appear on invoices or bills and its
+              movements post nothing to the ledger.
+            </p>
+            {canWrite ? (
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => void handleLinkProduct()}
+                className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--panel-2)] disabled:opacity-60"
+              >
+                Link to Products &amp; Services
+              </button>
+            ) : null}
+          </div>
+        )}
+      </section>
+
       <section aria-label="Custom fields" className="space-y-2">
         <h2 className="text-sm font-medium text-[var(--text)]">Custom fields</h2>
         <AttributeFields definitions={attributeDefs} value={attributes} onChange={setAttributes} idPrefix="item-detail-attr" />
@@ -195,6 +252,7 @@ export default function StockItemDetailPage() {
               <th className="pr-3 py-1">Lot</th>
               <th className="pr-3 py-1">Quantity</th>
               <th className="pr-3 py-1">Value</th>
+              <th className="pr-3 py-1">Source</th>
             </tr>
           </thead>
           <tbody>
@@ -326,6 +384,21 @@ export default function StockItemDetailPage() {
                 <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
                 <td className="pr-3 py-1 text-[var(--muted)]">{formatQuantityMilli(m.runningLocationQuantityMilli)}</td>
                 <td className="pr-3 py-1 text-[var(--text)]">{formatCents(m.valueCents)}</td>
+                <td className="pr-3 py-1 text-[var(--muted)]">
+                  {m.sourceType === 'bill' && m.sourceId !== null ? (
+                    <Link to={`/app/ledger-core/bills/${m.sourceId}`} className="underline">
+                      Bill
+                    </Link>
+                  ) : m.sourceType === 'invoice' && m.sourceId !== null ? (
+                    <Link to={`/app/ledger-core/invoices/${m.sourceId}`} className="underline">
+                      Invoice
+                    </Link>
+                  ) : m.glAccountId !== null ? (
+                    'Posted to ledger'
+                  ) : (
+                    '—'
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

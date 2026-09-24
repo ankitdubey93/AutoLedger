@@ -311,6 +311,8 @@ export interface InvoiceLine {
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — the StockLedger location an INVENTORY line moves stock at; null = the default location. */
+  stockLocationId: string | null;
 }
 
 export interface Invoice {
@@ -388,16 +390,26 @@ export interface InvoiceSettings {
 
 export type ItemKind = 'SERVICE' | 'GOODS';
 
+/** Phase 32. SERVICE/NON_INVENTORY are created in LedgerCore; INVENTORY/FIXED_ASSET are created in StockLedger. */
+export type ItemType = 'SERVICE' | 'NON_INVENTORY' | 'INVENTORY' | 'FIXED_ASSET';
+export const ITEM_TYPES: readonly ItemType[] = ['SERVICE', 'NON_INVENTORY', 'INVENTORY', 'FIXED_ASSET'];
+
 export interface Item {
   id: string;
   code: string;
   name: string;
   description: string | null;
   kind: ItemKind;
+  itemType: ItemType;
+  /** true for INVENTORY / FIXED_ASSET — name and status are managed in StockLedger. */
+  stockManaged: boolean;
   salePriceCents: number | null;
   purchasePriceCents: number | null;
   revenueAccountId: string | null;
   expenseAccountId: string | null;
+  /** INVENTORY: the inventory-asset account; FIXED_ASSET: the fixed-asset account. */
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
   saleTaxRateBp: number;
   purchaseTaxRateBp: number;
   isActive: boolean;
@@ -463,6 +475,8 @@ export interface BillLine {
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
+  /** Phase 32 — the StockLedger location an INVENTORY line moves stock at; null = the default location. */
+  stockLocationId: string | null;
 }
 
 export interface Bill {

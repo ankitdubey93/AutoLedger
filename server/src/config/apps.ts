@@ -51,7 +51,7 @@ export const APPS = [
       'Pessimistic locking on stock balances',
     ],
     status: 'building',
-    requires: [],
+    requires: ['ledger-core'],
   },
 ] as const satisfies readonly AppDefinition[];
 

@@ -292,6 +292,11 @@ export default function StockMovementPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-lg font-semibold text-[var(--text)]">Movements</h1>
+      <p className="text-sm text-[var(--muted)]">
+        Movements of items linked to Products &amp; Services also post a journal entry to your ledger: a receipt is
+        treated as opening stock, an issue or adjustment goes to inventory adjustments, and a transfer posts nothing.
+        To record a purchase, approve a bill instead; to record a sale, issue an invoice.
+      </p>
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">

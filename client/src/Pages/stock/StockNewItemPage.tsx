@@ -3,8 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import AttributeFields from './AttributeFields';
 import { parseQuantityToMilli } from '../../utils/quantity';
+import { parseCentsInput } from '../../utils/money';
 import {
   createStockItem,
+  listAccounts,
+  type Account,
   fetchStockCategories,
   fetchStockCategory,
   fetchStockCodeSchemes,
@@ -56,6 +59,15 @@ export default function StockNewItemPage() {
   const [barcode, setBarcode] = useState('');
   const [reorderPointText, setReorderPointText] = useState('');
 
+  // Phase 32 — the accounting side of the LedgerCore product this item creates.
+  // Blank accounts fall back to the org's inventory settings, then the default chart.
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [salePriceText, setSalePriceText] = useState('');
+  const [purchasePriceText, setPurchasePriceText] = useState('');
+  const [revenueAccountId, setRevenueAccountId] = useState('');
+  const [assetAccountId, setAssetAccountId] = useState('');
+  const [cogsAccountId, setCogsAccountId] = useState('');
+
   useEffect(() => {
     Promise.all([fetchStockCategories(), fetchStockUoms(), fetchStockCodeSchemes()])
       .then(([categoriesRes, uomsRes, schemesRes]) => {
@@ -66,6 +78,13 @@ export default function StockNewItemPage() {
         if (defaultScheme !== undefined) setCodeSchemeId(defaultScheme.id);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load setup data'));
+  }, []);
+
+  useEffect(() => {
+    // Best effort: without accounts the form still works, every account just uses its default.
+    listAccounts()
+      .then((res) => setAccounts(res.accounts.filter((a) => a.isPostable)))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -112,6 +131,17 @@ export default function StockNewItemPage() {
       return;
     }
 
+    const salePriceCents = salePriceText.trim() === '' ? null : parseCentsInput(salePriceText);
+    const purchasePriceCents = purchasePriceText.trim() === '' ? null : parseCentsInput(purchasePriceText);
+    if (salePriceText.trim() !== '' && salePriceCents === null) {
+      setError('Sale price must be an amount like 12.50');
+      return;
+    }
+    if (purchasePriceText.trim() !== '' && purchasePriceCents === null) {
+      setError('Purchase price must be an amount like 12.50');
+      return;
+    }
+
     setSubmitting(true);
     try {
       const res = await createStockItem({
@@ -125,6 +155,15 @@ export default function StockNewItemPage() {
         barcode: barcode.trim() === '' ? null : barcode.trim(),
         attributes,
         reorderPointMilli,
+        product: {
+          salePriceCents,
+          purchasePriceCents,
+          revenueAccountId: revenueAccountId === '' ? null : revenueAccountId,
+          assetAccountId: assetAccountId === '' ? null : assetAccountId,
+          cogsAccountId: cogsAccountId === '' ? null : cogsAccountId,
+          saleTaxRateBp: 0,
+          purchaseTaxRateBp: 0,
+        },
       });
       navigate(`${base}/items/${res.item.id}`);
     } catch (err) {
@@ -289,6 +328,65 @@ export default function StockNewItemPage() {
           className={inputClass}
         />
       </div>
+
+      <fieldset className="space-y-3 rounded-md border border-[var(--border)] p-3">
+        <legend className="px-1 text-sm text-[var(--text)]">Accounting (Products &amp; Services)</legend>
+        <p className="text-xs text-[var(--muted)] m-0">
+          This item also appears in LedgerCore&apos;s Products &amp; Services, so it can be bought on a bill and sold on an
+          invoice. Leave the accounts blank to use your defaults (Inventory 1140, Cost of Sales 5050).
+        </p>
+        <div className="flex flex-wrap gap-4">
+          <div>
+            <label htmlFor="new-item-sale-price" className="block text-sm text-[var(--text)] mb-1">
+              Sale price
+            </label>
+            <input
+              id="new-item-sale-price"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={salePriceText}
+              onChange={(e) => setSalePriceText(e.target.value)}
+              className={`${inputClass} text-right tabular-nums`}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-item-purchase-price" className="block text-sm text-[var(--text)] mb-1">
+              Purchase price
+            </label>
+            <input
+              id="new-item-purchase-price"
+              inputMode="decimal"
+              placeholder="0.00"
+              value={purchasePriceText}
+              onChange={(e) => setPurchasePriceText(e.target.value)}
+              className={`${inputClass} text-right tabular-nums`}
+            />
+          </div>
+        </div>
+        {(
+          [
+            ['new-item-revenue-account', 'Revenue account', 'Revenue', revenueAccountId, setRevenueAccountId],
+            ['new-item-asset-account', 'Inventory account', 'Asset', assetAccountId, setAssetAccountId],
+            ['new-item-cogs-account', 'Cost of sales account', 'Expense', cogsAccountId, setCogsAccountId],
+          ] as const
+        ).map(([id, label, type, value, setValue]) => (
+          <div key={id}>
+            <label htmlFor={id} className="block text-sm text-[var(--text)] mb-1">
+              {label}
+            </label>
+            <select id={id} value={value} onChange={(e) => setValue(e.target.value)} className={inputClass}>
+              <option value="">Default</option>
+              {accounts
+                .filter((a) => a.type === type)
+                .map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} · {a.name}
+                  </option>
+                ))}
+            </select>
+          </div>
+        ))}
+      </fieldset>
 
       <button
         type="submit"

@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ItemsPage from '../Pages/ledger-core/ItemsPage';
 import NewInvoicePage from '../Pages/ledger-core/NewInvoicePage';
 import { LedgerSettingsProvider } from '../Pages/ledger-core/LedgerSettingsContext';
-import type { Account, Customer, Item, InvoiceSettings, PaymentTerm } from '../services/fetchServices';
+import type { Account, Customer, Item, InvoiceSettings, PaymentTerm, StockProductBalance } from '../services/fetchServices';
 
 /**
  * The item catalogue page (list, create) and the invoice draft form's
@@ -35,10 +35,14 @@ const consultingItem: Item = {
   name: 'Consulting hour',
   description: null,
   kind: 'SERVICE',
+  itemType: 'SERVICE',
+  stockManaged: false,
   salePriceCents: 15000,
   purchasePriceCents: null,
   revenueAccountId: account4100.id,
   expenseAccountId: null,
+  assetAccountId: null,
+  cogsAccountId: null,
   saleTaxRateBp: 0,
   purchaseTaxRateBp: 0,
   isActive: true,
@@ -57,7 +61,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockItemsPageRoutes(items: Item[]) {
+function mockItemsPageRoutes(items: Item[], balances: StockProductBalance[] = []) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (init?.method === 'POST' && url.includes('/ledger-core/items')) {
@@ -74,6 +78,9 @@ function mockItemsPageRoutes(items: Item[]) {
     }
     if (url.includes('/ledger-core/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
+    }
+    if (url.includes('/stock/product-balances')) {
+      return Promise.resolve(jsonResponse(200, { success: true, count: balances.length, balances }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
   });
@@ -104,7 +111,7 @@ describe('ItemsPage', () => {
     renderItemsPage();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-    await user.click(screen.getByRole('button', { name: 'New item' }));
+    await user.click(screen.getByRole('button', { name: 'New product or service' }));
     await user.type(screen.getByLabelText('Code'), 'CONSULT');
     await user.type(screen.getByLabelText('Name'), 'Consulting hour');
     await user.type(screen.getByLabelText('Sale price'), '150.00');
@@ -126,8 +133,59 @@ describe('ItemsPage', () => {
     });
     const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
       salePriceCents: number;
+      itemType: string;
     };
     expect(body.salePriceCents).toBe(15000);
+    expect(body.itemType).toBe('SERVICE');
+  });
+
+  const widget: Item = {
+    ...consultingItem,
+    id: 'item-widget',
+    code: 'GEN-00001',
+    name: 'Widget',
+    kind: 'GOODS',
+    itemType: 'INVENTORY',
+    stockManaged: true,
+  };
+  const widgetBalance: StockProductBalance = {
+    ledgerItemId: 'item-widget',
+    stockItemId: 'stock-widget',
+    tracking: 'QUANTITY',
+    uomCode: 'EA',
+    uomDecimalPlaces: 0,
+    onHandQuantityMilli: 12_000,
+    isActive: true,
+  };
+
+  it('an inventory product shows its on-hand quantity and opens in StockLedger instead of offering to deactivate', async () => {
+    mockItemsPageRoutes([consultingItem, widget], [widgetBalance]);
+    renderItemsPage();
+
+    await screen.findByText('GEN-00001');
+    await screen.findByText('12 EA');
+    const link = screen.getByRole('link', { name: 'Open in StockLedger' });
+    expect(link).toHaveAttribute('href', '/app/stock/items/stock-widget');
+    // The service is still deactivatable here; the stock-managed row is not.
+    expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1);
+  });
+
+  it('the type tabs filter the list, and the create form offers only services and non-inventory items', async () => {
+    mockItemsPageRoutes([consultingItem, widget], [widgetBalance]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await screen.findByText('GEN-00001');
+    await user.click(screen.getByRole('tab', { name: 'Services' }));
+    expect(screen.getByText('CONSULT')).toBeInTheDocument();
+    expect(screen.queryByText('GEN-00001')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'New product or service' }));
+    const options = screen.getAllByRole('option').map((o) => o.textContent);
+    expect(options).toContain('Service');
+    expect(options).toContain('Non-inventory (not stocked)');
+    expect(options).not.toContain('Inventory');
+    expect(screen.getByRole('link', { name: 'New stock item' })).toHaveAttribute('href', '/app/stock/items/new');
   });
 });
 

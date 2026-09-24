@@ -100,14 +100,14 @@ it('PUT replaces the set, and an app that stays keeps its original enabledAt', a
 
 it("PUT ['ap-flow'] → 422 'AP-Flow requires LedgerCore', previous set unchanged", async () => {
   const agent = await loginAgent(app, userA);
-  await agent.put(BASE).send({ appSlugs: ['stock'] });
+  await agent.put(BASE).send({ appSlugs: ['ledger-core', 'stock'] });
 
   const res = await agent.put(BASE).send({ appSlugs: ['ap-flow'] });
   expect(res.status).toBe(422);
   expect(res.body.error).toBe('AP-Flow requires LedgerCore');
 
   const after = await agent.get(BASE);
-  expect(enabledSlugs(after.body.apps as AppEntry[])).toEqual(['stock']);
+  expect(enabledSlugs(after.body.apps as AppEntry[])).toEqual(['ledger-core', 'stock']);
 });
 
 it("PUT { appSlugs: [] } → 400; PUT ['nope'] → 422 'Unknown app \"nope\"'", async () => {
@@ -143,9 +143,9 @@ it('ACCOUNTANT PUT → 403; VIEWER GET → 200', async () => {
   expect(get.status).toBe(200);
 });
 
-it("cross-tenant: org A enables ['stock']; org B sees nothing of it", async () => {
+it("cross-tenant: org A enables ['ledger-core','stock']; org B sees nothing of it", async () => {
   const agentA = await loginAgent(app, userA);
-  await agentA.put(BASE).send({ appSlugs: ['stock'] });
+  await agentA.put(BASE).send({ appSlugs: ['ledger-core', 'stock'] });
 
   const agentB = await loginAgent(app, userB);
   const res = await agentB.get(BASE);
@@ -157,14 +157,14 @@ it("cross-tenant: org A enables ['stock']; org B sees nothing of it", async () =
 
 it("cross-tenant: org B PUT with header X-Org-Id: <A> leaves org A's set untouched", async () => {
   const agentA = await loginAgent(app, userA);
-  await agentA.put(BASE).send({ appSlugs: ['stock'] });
+  await agentA.put(BASE).send({ appSlugs: ['ledger-core', 'stock'] });
 
   const agentB = await loginAgent(app, userB);
   const put = await agentB.put(BASE).set('X-Org-Id', orgA).send({ appSlugs: ['ledger-core'] });
   expect(put.status).toBe(200);
 
   const a = await agentA.get(BASE);
-  expect(enabledSlugs(a.body.apps as AppEntry[])).toEqual(['stock']);
+  expect(enabledSlugs(a.body.apps as AppEntry[])).toEqual(['ledger-core', 'stock']);
 
   const b = await agentB.get(BASE);
   expect(enabledSlugs(b.body.apps as AppEntry[])).toEqual(['ledger-core']);
