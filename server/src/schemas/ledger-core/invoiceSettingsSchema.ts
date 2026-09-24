@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import {
+  INVOICE_TEMPLATE_IDS,
+  INVOICE_FONT_FAMILIES,
+  INVOICE_DENSITIES,
+} from '../../config/constants.js';
 
 /** Request schema for LedgerCore invoice settings — numbering, defaults, branding. */
 export const updateInvoiceSettingsSchema = z
@@ -19,5 +24,14 @@ export const updateInvoiceSettingsSchema = z
     paymentTerms: z.string().trim().max(500).nullable().optional(),
     footerNotes: z.string().trim().max(500).nullable().optional(),
     accentColor: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'accentColor must be a #rrggbb hex colour').optional(),
+    templateId: z.enum(INVOICE_TEMPLATE_IDS).optional(),
+    documentTitle: z.string().trim().min(1).max(24).optional(),
+    fontFamily: z.enum(INVOICE_FONT_FAMILIES).optional(),
+    density: z.enum(INVOICE_DENSITIES).optional(),
+    showLogo: z.boolean().optional(),
+    showOrgAddress: z.boolean().optional(),
+    showPaymentTerms: z.boolean().optional(),
+    showDueDate: z.boolean().optional(),
+    bankDetails: z.string().trim().max(500).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });

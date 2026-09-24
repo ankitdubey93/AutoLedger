@@ -10,6 +10,18 @@
  * `utils/money.ts`.
  */
 
+import type {
+  INVOICE_TEMPLATE_IDS,
+  INVOICE_FONT_FAMILIES,
+  INVOICE_DENSITIES,
+} from '../config/constants.js';
+
+/* ------------------------------------------- Phase 30 — invoice templates */
+
+export type InvoiceTemplateId = (typeof INVOICE_TEMPLATE_IDS)[number];
+export type InvoiceFontFamily = (typeof INVOICE_FONT_FAMILIES)[number];
+export type InvoiceDensity = (typeof INVOICE_DENSITIES)[number];
+
 /**
  * Exactly five, forever — guardrails rule 12. Cost of Goods Sold is not a sixth
  * type; COGS accounts are `Expense`, separated from operating expenses by the
@@ -359,6 +371,15 @@ export interface InvoiceSettings {
   paymentTerms: string | null;
   footerNotes: string | null;
   accentColor: string;
+  templateId: InvoiceTemplateId;
+  documentTitle: string;
+  fontFamily: InvoiceFontFamily;
+  density: InvoiceDensity;
+  showLogo: boolean;
+  showOrgAddress: boolean;
+  showPaymentTerms: boolean;
+  showDueDate: boolean;
+  bankDetails: string | null;
   /** `false` until the organization has saved invoice settings at least once. */
   configured: boolean;
 }

@@ -6,7 +6,9 @@ import { fiscalYearBounds } from '../../utils/fiscalYear.js';
 import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import * as onboardingService from '../onboardingService.js';
+import * as organizationProfileService from '../organizationProfileService.js';
 import type { LedgerSettings } from '../../types/ledger-core.js';
+import type { UpdateOrganizationProfileInput } from '../../types/organization.js';
 
 /**
  * LedgerCore onboarding and settings.
@@ -20,6 +22,12 @@ import type { LedgerSettings } from '../../types/ledger-core.js';
  * The absence of a `ledger_settings` row means "onboarding not yet completed"
  * — there is no seed row and no backfill migration, unlike the default chart
  * of accounts. See migration 005's header comment.
+ *
+ * `legalName` and `industry` live on `organization_profiles` since Phase 30
+ * (migration 069) and are read via a join and written through
+ * `organizationProfileService`. `ledger_settings.legal_name` and
+ * `ledger_settings.industry` are superseded, retained unedited on disk per
+ * rule 13, and must not be read or written from here again.
  */
 
 const PG_FOREIGN_KEY_VIOLATION = '23503';
@@ -118,13 +126,14 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
 
 const SETTINGS_SELECT = `
   SELECT o.name AS organization_name, o.base_currency, o.created_at AS org_created_at,
-         s.legal_name, s.fiscal_year_start_month, s.fiscal_year_start_day,
-         s.books_start_date, s.industry, s.timezone, s.cash_account_id, s.onboarded_at,
+         p.legal_name, s.fiscal_year_start_month, s.fiscal_year_start_day,
+         s.books_start_date, p.industry, s.timezone, s.cash_account_id, s.onboarded_at,
          s.unmatched_alert_threshold_cents,
          s.realized_fx_gain_account_id, s.realized_fx_loss_account_id, s.unrealized_fx_account_id,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
+    LEFT JOIN organization_profiles p ON p.org_id = o.id
    WHERE o.id = $1`;
 
 /** GET /ledger-core/settings. A missing `ledger_settings` row is not a 404 — it means "not yet onboarded". */
@@ -175,26 +184,30 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
       client,
     );
 
+    // Same `client` (rule 5): the profile write commits or rolls back with the
+    // rest of onboarding. `''` becomes `null` — migration 069's CHECK rejects a
+    // blank `legal_name`, and the wizard schema still accepts `''`.
+    await organizationProfileService.upsertProfileOnClient(client, orgId, {
+      legalName: input.legalName === '' ? null : input.legalName,
+      industry: input.industry,
+    });
+
     await client.query(
       `INSERT INTO ledger_settings
-         (org_id, legal_name, fiscal_year_start_month, fiscal_year_start_day,
-          books_start_date, industry, timezone, cash_account_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (org_id, fiscal_year_start_month, fiscal_year_start_day,
+          books_start_date, timezone, cash_account_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (org_id) DO UPDATE SET
-         legal_name = EXCLUDED.legal_name,
          fiscal_year_start_month = EXCLUDED.fiscal_year_start_month,
          fiscal_year_start_day = EXCLUDED.fiscal_year_start_day,
          books_start_date = EXCLUDED.books_start_date,
-         industry = EXCLUDED.industry,
          timezone = EXCLUDED.timezone,
          cash_account_id = EXCLUDED.cash_account_id`,
       [
         orgId,
-        input.legalName,
         input.fiscalYearStartMonth,
         input.fiscalYearStartDay,
         input.booksStartDate,
-        input.industry,
         input.timezone,
         input.cashAccountId,
       ],
@@ -226,11 +239,9 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence.
   const COLUMNS = {
-    legalName: 'legal_name',
     fiscalYearStartMonth: 'fiscal_year_start_month',
     fiscalYearStartDay: 'fiscal_year_start_day',
     booksStartDate: 'books_start_date',
-    industry: 'industry',
     timezone: 'timezone',
     cashAccountId: 'cash_account_id',
     unmatchedAlertThresholdCents: 'unmatched_alert_threshold_cents',
@@ -249,23 +260,56 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
     assignments.push(`${COLUMNS[key]} = $${String(values.length)}`);
   }
 
-  if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
+  // `legalName` / `industry` belong to `organization_profiles`. Only keys the
+  // caller actually sent are forwarded; `''` becomes `null` because migration
+  // 069's CHECK rejects a blank `legal_name`.
+  const profileInput: UpdateOrganizationProfileInput = {};
+  if (input.legalName !== undefined) {
+    profileInput.legalName = input.legalName === '' ? null : input.legalName;
+  }
+  if (input.industry !== undefined) profileInput.industry = input.industry;
+  const hasProfileFields = Object.keys(profileInput).length > 0;
+
+  if (assignments.length === 0 && !hasProfileFields) throw new ApiError(400, 'No fields to update');
 
   try {
-    const { rows } = await withTransaction((client) =>
-      client.query<{ org_id: string }>(
+    await withTransaction(async (client) => {
+      // Same `client` for both writes (rule 5): they commit or roll back together.
+      //
+      // The 409 applies to every input, profile-only included — the profile
+      // stays editable before onboarding through PATCH /organizations/profile.
+      // A profile-only patch has no `ledger_settings` UPDATE whose zero-row
+      // check could raise it, so check for the row first, before any profile write.
+      if (assignments.length === 0) {
+        const { rows: existing } = await client.query<{ exists: number }>(
+          'SELECT 1 AS exists FROM ledger_settings WHERE org_id = $1',
+          [orgId],
+        );
+        if (existing[0] === undefined) {
+          throw new ApiError(409, 'Complete LedgerCore onboarding before changing settings');
+        }
+      }
+
+      if (hasProfileFields) {
+        await organizationProfileService.upsertProfileOnClient(client, orgId, profileInput);
+      }
+
+      // Nothing to set on `ledger_settings` for a profile-only change.
+      if (assignments.length === 0) return;
+
+      const { rows } = await client.query<{ org_id: string }>(
         `UPDATE ledger_settings SET ${assignments.join(', ')} WHERE org_id = $1 RETURNING org_id`,
         values,
-      ),
-    );
+      );
 
-    // Zero rows means there was no settings row to update — the wizard was
-    // never completed. `rowCount` can be `null` on the `pg` types, which is
-    // why this checks the returned row instead (matching accountService's
-    // updateAccount).
-    if (rows[0] === undefined) {
-      throw new ApiError(409, 'Complete LedgerCore onboarding before changing settings');
-    }
+      // Zero rows means there was no settings row to update — the wizard was
+      // never completed. `rowCount` can be `null` on the `pg` types, which is
+      // why this checks the returned row instead (matching accountService's
+      // updateAccount). Throwing rolls back the profile upsert above too.
+      if (rows[0] === undefined) {
+        throw new ApiError(409, 'Complete LedgerCore onboarding before changing settings');
+      }
+    });
   } catch (err) {
     if (err instanceof ApiError) throw err;
     if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION && pgConstraint(err) === 'fk_ledger_settings_cash_account') {

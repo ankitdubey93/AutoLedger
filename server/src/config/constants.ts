@@ -289,3 +289,13 @@ export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 export const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 export const GOOGLE_HTTP_TIMEOUT_MS = 30_000;
 
+// -------------------------------------------------- invoice templates (30)
+
+/** Template choices for LedgerCore invoices — code-defined layouts, not user markup. */
+export const INVOICE_TEMPLATE_IDS = ['classic', 'modern', 'compact'] as const;
+
+/** Font families for invoice rendering. */
+export const INVOICE_FONT_FAMILIES = ['sans', 'serif'] as const;
+
+/** Line density options for invoice layout. */
+export const INVOICE_DENSITIES = ['comfortable', 'compact'] as const;

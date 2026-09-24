@@ -62,6 +62,8 @@ beforeEach(() => {
   fetchMock = vi.fn();
   putBodies = [];
   vi.stubGlobal('fetch', fetchMock);
+  // Mock scrollIntoView for deep link test
+  Element.prototype.scrollIntoView = vi.fn();
 });
 
 afterEach(() => {
@@ -101,9 +103,9 @@ function appsPanel(): HTMLElement {
   return panel;
 }
 
-function renderAccount() {
+function renderAccount(initialEntries: string[] = ['/account']) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
         <OrgProvider>
           <AccountPage />
@@ -131,6 +133,7 @@ describe('AccountPage', () => {
     const user = userEvent.setup();
     renderAccount();
 
+    await user.click(await screen.findByRole('tab', { name: 'Apps' }));
     await user.click(await screen.findByRole('checkbox', { name: 'StockLedger' }));
     await user.click(within(appsPanel()).getByRole('button', { name: 'Save' }));
 
@@ -141,13 +144,73 @@ describe('AccountPage', () => {
 
   it('a VIEWER sees a read-only list and no Save button', async () => {
     mockRoutes('VIEWER');
+    const user = userEvent.setup();
     renderAccount();
 
+    await user.click(await screen.findByRole('tab', { name: 'Apps' }));
     expect(await screen.findByText('Only an owner or admin can change which apps are enabled.')).toBeInTheDocument();
     const panel = within(appsPanel());
     expect(panel.getByText('LedgerCore')).toBeInTheDocument();
     expect(panel.getByText('StockLedger')).toBeInTheDocument();
     expect(panel.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     expect(screen.queryAllByRole('checkbox')).toHaveLength(0);
+  });
+
+  it('deep link to /account#apps shows Apps panel without manual tab click', async () => {
+    mockRoutes('OWNER');
+    renderAccount(['/account#apps']);
+
+    expect(await screen.findByRole('tab', { name: 'Apps' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('checkbox', { name: 'StockLedger' })).toBeInTheDocument();
+  });
+
+  it('renders all five tabs with Organisation selected by default; Members and Apps show their own panels', async () => {
+    mockRoutes('OWNER');
+    // Layer a members route and an empty profile over the harness: the Members
+    // tab lists real rows, and the Organisation tab's profile panel loads.
+    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/organizations/members')) {
+        return Promise.resolve(
+          jsonResponse(200, {
+            success: true,
+            count: 1,
+            members: [{ userId: 'u1', name: 'Ada', email: 'ada@example.com', role: 'OWNER', joinedAt: JOINED }],
+          }),
+        );
+      }
+      if (url.includes('/organizations/profile')) {
+        return Promise.resolve(jsonResponse(404, { success: false, error: 'not needed here' }));
+      }
+      return base(input, init);
+    });
+    const user = userEvent.setup();
+    renderAccount();
+
+    const tabs = await screen.findAllByRole('tab');
+    expect(tabs.map((t) => t.textContent)).toEqual(['Organisation', 'Apps', 'Members', 'Session', 'System']);
+    expect(screen.getByRole('tab', { name: 'Organisation' })).toHaveAttribute('aria-selected', 'true');
+    for (const name of ['Apps', 'Members', 'Session', 'System']) {
+      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false');
+    }
+    // Default tab: the Organisation panels, not the others.
+    expect(await screen.findByRole('heading', { name: 'Organization profile' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Members' })).not.toBeInTheDocument();
+    expect(document.getElementById('apps')).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: 'Members' }));
+    expect(screen.getByRole('tab', { name: 'Members' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('heading', { name: 'Members' })).toBeInTheDocument();
+    expect(await screen.findByRole('columnheader', { name: 'Email' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'ada@example.com' })).toBeInTheDocument();
+    expect(document.getElementById('apps')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Organization profile' })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('tab', { name: 'Apps' }));
+    expect(screen.getByRole('tab', { name: 'Apps' })).toHaveAttribute('aria-selected', 'true');
+    expect(await screen.findByRole('checkbox', { name: 'LedgerCore' })).toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: 'StockLedger' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Members' })).not.toBeInTheDocument();
   });
 });

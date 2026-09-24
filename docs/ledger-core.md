@@ -350,6 +350,26 @@ When you **don't** need one: the whole invoice was wrong and nothing was paid �
 
 Full detail: [roadmap.md § Phase 26, as delivered](roadmap.md#phase-26-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-26--credit--debit-notes-ledgercore--applied).
 
+### Phase 30 — invoice templates, organization profile & settings tabs ✅ shipped
+
+A direct feature request, outside the strategic-plan sequence, numbered like Phase 24. See [roadmap.md § Phase 30, as delivered](roadmap.md#phase-30-as-delivered).
+
+- [x] `organization_profiles` (platform, migration `069`) — postal address, mailing address, phone, contact email, website, logo, and `legalName`/`industry` moved here from `ledger_settings` (which keeps the two columns, unedited, per rule 13); `GET`/`PATCH /organizations/profile`
+- [x] **One renderer, two callers.** `InvoiceDocument.tsx` is a presentational-only component (no hooks, no fetch) extracted from `InvoiceDetailPage`'s inline markup and used unchanged by both the real invoice page and a new template editor's live preview — the structural decision the whole slice rests on. A characterisation test (`ledgerCoreInvoiceDocument.test.tsx`) pinned the untouched page's rendered output *before* the extraction, so the port is provably faithful
+- [x] Three templates — `classic`, `modern`, `compact` — are a **closed set of code-defined layouts** selected by `templateId`, not a user-authored template language; `ledger_invoice_settings` gains `templateId`, `documentTitle`, `fontFamily`, `density`, `showLogo`, `showOrgAddress`, `showPaymentTerms`, `showDueDate`, `bankDetails` (migration `070`, 5 CHECK constraints)
+- [x] `InvoiceTemplatePage` (`settings/invoice-template`) — editor left, sticky live preview right, fed entirely from local state against a fixed `SAMPLE_INVOICE`; no request fires on a keystroke or toggle
+- [x] The logo reaches the browser as an object URL (`useDocumentObjectUrl`, wrapping the existing authenticated `downloadDocument`), never a bare `<img src="/api/…">` — the access cookie is short-lived and the API origin differs from the client's
+- [x] `/account` becomes five tabs (Organisation/Apps/Members/Session/System); `OrganizationProfilePanel` holds the address form and a two-step logo upload (`POST /documents` then `PATCH /organizations/profile { logoDocumentId }`) — an upload that succeeds but whose link-back fails leaves an orphaned, unreferenced document in the vault, the same accepted failure mode `documentService` already has on rollback
+- [x] Three more LedgerCore settings tabs, **zero new server endpoints**: **Financial** (fiscal year start + a derived year-end line, books start date, default posting accounts, a read-only fiscal-periods count); **Chart of accounts** (an in-settings tree over the existing `listAccountTree`/`createAccount`/`updateAccount` — rename and retire only, never `code`/`type`, matching the existing "retype restates history" rule); **Conversion balances** (a Xero-style debit/credit grid, integer cents throughout, that serialises to the existing staged `OPENING_BALANCES` importer's CSV format rather than reimplementing validate/preview/commit)
+- [x] The conversion-balances grid never offers Retained Earnings (code `3200`) or the AR/AP control accounts (the org's configured receivable account, or code `1120`; code `2100` for payable) as options — excluded from the `<select>`s outright, not select-then-refused, matching `openingBalanceImportService.loadRefusedAccounts`'s own exclusions
+- [x] Cross-tenant isolation tests for both new server-side modules: `organizationProfile.test.ts`, `invoiceTemplate.test.ts`
+
+**Acceptance ✅ — verified.** 1576 server tests (2 skipped, the same pre-existing gated live-provider cases) + 369 client tests (0 skipped), up from 1550/283 at Phase 29. A `guardrail-review` over the complete diff found zero violations.
+
+**What this phase does *not* claim.** No user-authored template language (three code-defined layouts only) · no PDF export (still `window.print()`) · no logo on an AP-Flow or StockLedger document · no per-customer template override · no country picker (a typed 2-letter code) · no industry picker (free text) · no bulk chart import from the new Chart of accounts tab (that stays the staged importer's own page) · no conversion-balance commit UI of its own (`ConversionBalancesPage` hands off to the existing migration-import detail page for preview/commit). **Pre-existing, found in this phase, not fixed:** `ledger_invoice_settings.payment_terms` has no reader anywhere in the codebase — the editor deliberately has no field for it, since it would show in the preview and then print on no real invoice; a future cleanup should either wire it as a new-invoice default or drop the column.
+
+Full detail: [roadmap.md § Phase 30, as delivered](roadmap.md#phase-30-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-30--organization-profile--invoice-templates-platform--ledgercore--applied).
+
 ### Phase 17 — QuickBooks sync
 
 - [ ] OAuth 2.0 authorization-code flow, encrypted token storage, refresh handling

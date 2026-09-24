@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useOrg } from '../../context/OrgContext';
 import { useAuthActions } from '../../context/AuthContext';
 import { updateLedgerSettings, updateOrganization } from '../../services/fetchServices';
 import { useLedgerSettings } from './LedgerSettingsContext';
-import { fiscalYearBounds } from './fiscalYear';
 import SettingsTabs from './SettingsTabs';
 
 /**
- * A flat form over the same fields the onboarding wizard collects.
+ * A flat form over the organization-identity fields the onboarding wizard
+ * collects. The fiscal-year controls moved to the Financial tab in Phase 30.
  *
  * Two calls on save, not one: organization name and base currency are
  * platform fields (`PATCH /organizations`), while the rest are LedgerCore's
@@ -37,21 +38,6 @@ const CURRENCIES = [
   'ZAR',
 ] as const;
 
-const MONTHS = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full disabled:opacity-50';
 const primaryButtonClass =
@@ -65,8 +51,6 @@ export default function SettingsPage() {
   const [name, setName] = useState(organization?.name ?? '');
   const [baseCurrency, setBaseCurrency] = useState('USD');
   const [legalName, setLegalName] = useState('');
-  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
-  const [fiscalYearStartDay, setFiscalYearStartDay] = useState(1);
   const [industry, setIndustry] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
   const [businessNumber, setBusinessNumber] = useState('');
@@ -84,8 +68,6 @@ export default function SettingsPage() {
       const { settings } = ledgerSettings;
       setBaseCurrency(settings.baseCurrency);
       setLegalName(settings.legalName ?? '');
-      setFiscalYearStartMonth(settings.fiscalYearStartMonth);
-      setFiscalYearStartDay(settings.fiscalYearStartDay);
       setIndustry(settings.industry ?? '');
       setTaxNumber(organization?.taxNumber ?? '');
       setBusinessNumber(organization?.businessNumber ?? '');
@@ -102,7 +84,6 @@ export default function SettingsPage() {
   }
 
   const { settings, applySettings } = ledgerSettings;
-  const derivedFiscalYear = fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, new Date().toISOString().slice(0, 10));
 
   async function handleSave() {
     setSaving(true);
@@ -119,8 +100,6 @@ export default function SettingsPage() {
 
       const nextSettings = await updateLedgerSettings({
         legalName: legalName.trim() === '' ? null : legalName.trim(),
-        fiscalYearStartMonth,
-        fiscalYearStartDay,
         industry: industry === '' ? null : industry,
       });
       applySettings(nextSettings);
@@ -219,37 +198,8 @@ export default function SettingsPage() {
         <span className="text-xs text-[var(--muted)]">Also editable from your account settings.</span>
       </label>
 
-      <div className="flex gap-3">
-        <label className="flex flex-col gap-1 text-sm flex-1">
-          <span className="text-[var(--muted)]">Fiscal year starts in</span>
-          <select
-            value={fiscalYearStartMonth}
-            onChange={(e) => setFiscalYearStartMonth(Number(e.target.value))}
-            className={inputClass}
-          >
-            {MONTHS.map((monthName, index) => (
-              <option key={monthName} value={index + 1}>
-                {monthName}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1 text-sm w-24">
-          <span className="text-[var(--muted)]">Day</span>
-          <input
-            type="number"
-            min={1}
-            max={28}
-            value={fiscalYearStartDay}
-            onChange={(e) => setFiscalYearStartDay(Number(e.target.value))}
-            className={inputClass}
-          />
-        </label>
-      </div>
-
       <p className="text-sm text-[var(--muted)] m-0">
-        This fiscal year runs <strong>{derivedFiscalYear.startDate}</strong> to{' '}
-        <strong>{derivedFiscalYear.endDate}</strong> ({derivedFiscalYear.label}).
+        <Link to="/account">Address, contact details and logo are on your account's Organisation page.</Link>
       </p>
 
       {error !== null && <p className="status status--bad">{error}</p>}

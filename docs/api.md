@@ -143,6 +143,8 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
 | GET | `/apps` | any member | Every app, flagged enabled or not for the active organization — Phase 27 |
 | PUT | `/apps` | `OWNER`, `ADMIN` | Replace the organization's enabled-app set — Phase 27 |
+| GET | `/profile` | any member | The organization's postal identity — address, contact details, logo — Phase 30 |
+| PATCH | `/profile` | `OWNER`, `ADMIN` | Edit the organization's postal identity; creates the row on first write — Phase 30 |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 
@@ -167,6 +169,12 @@ The active organization comes **only** from the verified access token. `orgId` i
 ```
 
 `PUT /apps` takes `{ "appSlugs": string[] }` (1–20 entries, each 1–40 chars; else `400`) and **replaces** the whole set, returning the same shape with `200`. Duplicates are collapsed. `422` for `Unknown app "<slug>"`, `<App> is not available yet` (a `planned` app), or `<App> requires <App>` (a `requires` entry missing from the same set — e.g. `AP-Flow requires LedgerCore`). An app that stays enabled keeps its original `enabledAt`. Removing an app deletes nothing but its selection row. Every save also marks the `'platform'` onboarding row `COMPLETED`, in the same transaction. **This is visibility, not access control:** a disabled app's own routes still answer — the client hides the app and redirects away from its URL.
+
+**Organization profile (Phase 30).** `GET /profile` is open to any member — the invoice document renders it, and a `VIEWER` can open an invoice. A missing `organization_profiles` row is **not** a `404`: it returns `200` with every field `null` (`postalSameAsStreet: true`) and `configured: false`. `PATCH /profile`, `OWNER`/`ADMIN` only, upserts the row and returns `configured: true`. Body (all optional, at least one required — `400 No fields to update`): `legalName`, `industry` (free text, no fixed list), `streetAddress1`/`streetAddress2`, `city`, `region`, `postalCode`, `countryCode` (2-letter, case-insensitive on write, stored upper-case), `postalSameAsStreet` (boolean — when `true`, the six `postal*` fields are ignored by the renderer, not cleared), `postalAddress1`/`postalAddress2`/`postalCity`/`postalRegion`/`postalPostalCode`/`postalCountryCode`, `phone`, `contactEmail` (lowercased on write, rule 9), `website`, `logoDocumentId` (a `documents.id` — must belong to the caller's organization).
+
+Failure paths: `400` from the schema (e.g. a `countryCode` that isn't 2 letters) · `400 No fields to update` · `401` no session · `403` non-`OWNER`/`ADMIN` on `PATCH` · `422 Logo document does not exist in this organization` (`logoDocumentId` missing or belongs to another tenant — the composite FK `fk_organization_profiles_logo_document` rejects it) · `422` any other CHECK violation (e.g. a blank `legalName`).
+
+`legalName` and `industry` are **also** readable/writable through `GET`/`PATCH /ledger-core/settings` (they round-trip as part of `LedgerSettings`, unchanged in shape) — `settingsService` delegates those two fields to `organizationProfileService` under the hood as of Phase 30; see [schema.md § Phase 30](schema.md#phase-30--organization-profile--invoice-templates-platform--ledgercore--applied). A `PATCH /ledger-core/settings` body containing only `legalName`/`industry` (no `ledger_settings` column) still returns the same `409 Complete LedgerCore onboarding before changing settings` as every other settings write until onboarding has completed once — the profile itself stays editable before onboarding through `PATCH /organizations/profile` directly.
 
 ---
 
@@ -535,11 +543,13 @@ Failure paths: `400 status must be one of OPEN, CLOSED, LOCKED` · `404 Fiscal p
 | GET | `/` | any member | Invoice numbering, defaults, and branding for the active organization |
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit invoice settings; creates the row on first write |
 
-A missing `ledger_invoice_settings` row is **not** a 404 — `GET /` returns `200` with sensible defaults (`numberPrefix: 'INV-'`, `numberPadding: 6`, `nextNumber: 1`, `defaultDueDays: 30`, `defaultTaxRateBp: 0`, `taxLabel: 'Tax'`, `showTaxNumber: true`, `showBusinessNumber: false`, `showLegalName: true`, `accentColor: '#2563eb'`, every account id and text field `null`) and `configured: false`. `PATCH /` upserts the row and returns `configured: true`.
+A missing `ledger_invoice_settings` row is **not** a 404 — `GET /` returns `200` with sensible defaults (`numberPrefix: 'INV-'`, `numberPadding: 6`, `nextNumber: 1`, `defaultDueDays: 30`, `defaultTaxRateBp: 0`, `taxLabel: 'Tax'`, `showTaxNumber: true`, `showBusinessNumber: false`, `showLegalName: true`, `accentColor: '#2563eb'`, `templateId: 'classic'`, `documentTitle: 'INVOICE'`, `fontFamily: 'sans'`, `density: 'comfortable'`, `showLogo: true`, `showOrgAddress: true`, `showPaymentTerms: true`, `showDueDate: true`, `bankDetails: null`, every account id and other text field `null`) and `configured: false`. `PATCH /` upserts the row and returns `configured: true`.
 
 `receivableAccountId`, `defaultRevenueAccountId`, and `taxPayableAccountId` are optional overrides — when unset, issuing an invoice falls back to the default chart's `1120`/`4100`-per-line/`2140`. Each is validated against the org's own chart (composite FK): `422 Account does not exist in this organization` if it points at a foreign or missing account.
 
-Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb`, invalid basis points, invalid padding) · `400 No fields to update` · `422 Account does not exist in this organization`.
+**Invoice template fields — Phase 30.** Nine more optional fields on the same `PATCH /`: `templateId` — one of `'classic'`/`'modern'`/`'compact'`, a **closed set of code-defined layouts**, not user-authored markup (`400` for any other value; zod rejects it before it reaches SQL, and the DB CHECK `ck_invoice_settings_template_id` rejects it a second time if the schema is ever bypassed) · `documentTitle` — non-blank, `<= 24` chars, the label printed above the invoice number (default `'INVOICE'`) · `fontFamily` — `'sans'`/`'serif'` · `density` — `'comfortable'`/`'compact'` · `showLogo`/`showOrgAddress`/`showPaymentTerms`/`showDueDate` — booleans, each gating one disclosure block on the rendered document · `bankDetails` — free text, `<= 500` chars, nullable, rendered as its own footer block when set. These render through one shared component, `InvoiceDocument.tsx`, used identically by the real invoice page and the template editor's live preview — see [ledger-core.md § Phase 30](ledger-core.md#phase-30--invoice-templates-organization-profile--settings-tabs--shipped).
+
+Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb`, invalid basis points, invalid padding, invalid `templateId`/`fontFamily`/`density`, blank `documentTitle`) · `400 No fields to update` · `422 Account does not exist in this organization`.
 
 #### Customers — `/api/v1/ledger-core/customers` — Phase 3.8
 

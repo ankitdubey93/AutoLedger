@@ -11,25 +11,32 @@ import { createAccount, type Account, type AccountType } from '../../services/fe
  * Changing the type clears the selected parent: a parent of a different type
  * is rejected by the server with a documented 422, so keeping a stale
  * selection around would just relocate the error from here to the submit.
+ *
+ * `initialType` (Phase 30) lets a caller — `ChartSettingsPage`'s per-type
+ * "Add account" row — seed the type select without forking this component.
+ * It defaults to `'Asset'`, so `AccountsPage`'s existing usage (which never
+ * passes it) is unchanged.
  */
 
-const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
+export const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
 
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
 export default function NewAccountForm({
   accounts,
+  initialType = 'Asset',
   onCreated,
   onCancel,
 }: {
   accounts: Account[];
+  initialType?: AccountType;
   onCreated: () => void;
   onCancel: () => void;
 }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const [type, setType] = useState<AccountType>('Asset');
+  const [type, setType] = useState<AccountType>(initialType);
   const [parentId, setParentId] = useState('');
   const [isPostable, setIsPostable] = useState(true);
   const [description, setDescription] = useState('');

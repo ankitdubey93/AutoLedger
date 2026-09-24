@@ -5,12 +5,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import LedgerCoreRoutes from '../Pages/ledger-core/LedgerCoreRoutes';
+import ProtectedRoute from '../components/ProtectedRoute';
 
 /**
  * The onboarding gate and wizard. Renders the real `LedgerCoreRoutes` tree —
  * not `OnboardingPage` in isolation — because what's under test is the
  * redirect behaviour: a fresh organization sees the wizard, not the chart of
  * accounts, and never the other way around.
+ *
+ * Wrapped in the real `ProtectedRoute`, mirroring `App.tsx`: without it,
+ * `LedgerCoreRoutes` (and therefore `OnboardingPage`) mounts before the mocked
+ * `/auth/check` resolves, so `organization` is briefly `null`.
+ * `OnboardingPage` seeds `organizationName` from `organization?.name` in a
+ * `useState` initializer with no effect to re-sync it once auth resolves — an
+ * intentional one-shot seed (see its own comments), correct as long as
+ * `ProtectedRoute` guarantees `organization` is already populated by the time
+ * the page first mounts, exactly as it does in the real app.  Without this
+ * wrapper the test can occasionally observe that impossible-in-production
+ * state and get stuck on a permanently-disabled "Next" — a pre-existing test
+ * -harness gap, unrelated to Phase 30, found while verifying it.
  */
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -160,7 +173,9 @@ function renderLedgerCore() {
       <AuthProvider>
         <OrgProvider>
           <Routes>
-            <Route path="/app/:appSlug/*" element={<LedgerCoreRoutes />} />
+            <Route element={<ProtectedRoute />}>
+              <Route path="/app/:appSlug/*" element={<LedgerCoreRoutes />} />
+            </Route>
           </Routes>
         </OrgProvider>
       </AuthProvider>

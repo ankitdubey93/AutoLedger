@@ -14,6 +14,8 @@ import {
 import { useAuth, useAuthActions } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
 import AppPicker from '../components/AppPicker';
+import AccountTabs, { type AccountTab } from './AccountTabs';
+import OrganizationProfilePanel from './OrganizationProfilePanel';
 
 /**
  * The account page: identity, organization, membership, and session details
@@ -409,6 +411,7 @@ export default function AccountPage() {
   const auth = useAuth();
   const { organization, role } = useOrg();
   const { hash } = useLocation();
+  const [tab, setTab] = useState<AccountTab>(() => (hash === '#apps' ? 'apps' : 'organization'));
   const [appsReady, setAppsReady] = useState(false);
   const markAppsReady = useCallback(() => setAppsReady(true), []);
 
@@ -417,6 +420,11 @@ export default function AccountPage() {
   useEffect(() => {
     if (hash === '#apps' && appsReady) document.getElementById('apps')?.scrollIntoView();
   }, [hash, appsReady]);
+
+  // Keep tab in sync with hash for deep links like /account#apps
+  useEffect(() => {
+    if (hash === '#apps') setTab('apps');
+  }, [hash]);
 
   // PlatformLayout renders behind ProtectedRoute, so this is defensive only.
   if (auth.status !== 'authenticated') return null;
@@ -481,12 +489,18 @@ export default function AccountPage() {
           )}
         </section>
 
-        <AppsPanel onReady={markAppsReady} />
+        <AccountTabs active={tab} onChange={setTab} />
 
-        <MembersPanel />
-        <BusinessIdentificationPanel />
-        <SessionPanel expiresAt={auth.accessTokenExpiresAt} />
-        <HealthPanel />
+        {tab === 'organization' && (
+          <>
+            <OrganizationProfilePanel />
+            <BusinessIdentificationPanel />
+          </>
+        )}
+        {tab === 'apps' && <AppsPanel onReady={markAppsReady} />}
+        {tab === 'members' && <MembersPanel />}
+        {tab === 'session' && <SessionPanel expiresAt={auth.accessTokenExpiresAt} />}
+        {tab === 'system' && <HealthPanel />}
       </div>
     </div>
   );

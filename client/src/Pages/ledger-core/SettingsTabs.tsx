@@ -18,8 +18,20 @@ export default function SettingsTabs() {
       <NavLink to={`${base}/settings`} end className={linkClass}>
         Organization
       </NavLink>
+      <NavLink to={`${base}/settings/financial`} className={linkClass}>
+        Financial
+      </NavLink>
+      <NavLink to={`${base}/settings/chart`} className={linkClass}>
+        Chart of accounts
+      </NavLink>
+      <NavLink to={`${base}/settings/conversion-balances`} className={linkClass}>
+        Conversion balances
+      </NavLink>
       <NavLink to={`${base}/settings/invoicing`} className={linkClass}>
         Invoicing
+      </NavLink>
+      <NavLink to={`${base}/settings/invoice-template`} className={linkClass}>
+        Invoice template
       </NavLink>
       <NavLink to={`${base}/settings/payment-terms`} className={linkClass}>
         Payment terms

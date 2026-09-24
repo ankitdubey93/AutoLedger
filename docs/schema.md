@@ -658,6 +658,28 @@ See [api.md](api.md#stockledger--apiv1stock--phase-28) for the routes and [stock
 
 ---
 
+## Phase 30 — organization profile & invoice templates (platform + LedgerCore) — applied
+
+A direct feature request. Migrations `069` (platform) and `070` (LedgerCore). See [roadmap.md § Phase 30, as delivered](roadmap.md#phase-30-as-delivered).
+
+**`069_platform_organization_profile.sql` — `organization_profiles`** — one row per organization, keyed by `org_id` itself (same shape as `ledger_settings`). 22 columns: `org_id` UUID **PRIMARY KEY** FK → `organizations` ON DELETE CASCADE · `legal_name` TEXT NULL, CHECK non-blank when present, `<= 200` chars · `industry` TEXT NULL, `<= 120` chars, free text (no fixed picker) · `street_address_1`/`street_address_2` TEXT NULL, `<= 200` · `city`/`region` TEXT NULL, `<= 120` · `postal_code` TEXT NULL, `<= 32` · `country_code` CHAR(2) NULL, CHECK `~ '^[A-Z]{2}$'` · `postal_same_as_street` BOOLEAN NOT NULL DEFAULT `true` · `postal_address_1`/`postal_address_2`/`postal_city`/`postal_region`/`postal_postal_code`/`postal_country_code` — the mailing-address mirror of the six street-address columns above, same constraints · `phone` TEXT NULL, `<= 40` · `contact_email` TEXT NULL, `<= 254`, CHECK `contact_email = lower(contact_email)` (rule 9) · `website` TEXT NULL, `<= 200` · `logo_document_id` UUID NULL · `created_at`/`updated_at`.
+
+The absence of a row means "never filled in," not `404` — `organizationProfileService.getProfile` returns `PROFILE_DEFAULTS` (every field `null` except `postalSameAsStreet: true`) with `configured: false`, the same convention `getInvoiceSettings` and `getSettings` already use.
+
+**The logo FK is composite:** `fk_organization_profiles_logo_document` — `FOREIGN KEY (org_id, logo_document_id) REFERENCES documents (org_id, id) ON DELETE RESTRICT`, targeting `ux_documents_org_id_id` from migration `030`, so one tenant's profile can never point at another tenant's uploaded document (rule 1, rule 8). `ON DELETE RESTRICT` rather than `SET NULL`: a composite `SET NULL` on this FK would null `org_id`, which is this table's own primary key — restricting the delete is the only sound choice. Indexed on `logo_document_id` (`idx_organization_profiles_logo_document`).
+
+**One-time, idempotent backfill:** `legal_name` and `industry` move here from `ledger_settings` (`INSERT ... SELECT ... ON CONFLICT (org_id) DO NOTHING`) for every organization that had either set. **`ledger_settings.legal_name` and `ledger_settings.industry` stay on disk, unedited, per rule 13** — superseded, no longer read or written by any service from this phase onward. `settingsService.ts`'s `SETTINGS_SELECT` now `LEFT JOIN`s `organization_profiles` and reads `legal_name`/`industry` from there instead, keeping `LedgerSettings`' public JSON shape unchanged.
+
+**`070_ledger-core_invoice_template.sql` — nine columns on `ledger_invoice_settings`** (migration `007`): `template_id` TEXT NOT NULL DEFAULT `'classic'` · `document_title` TEXT NOT NULL DEFAULT `'INVOICE'` · `font_family` TEXT NOT NULL DEFAULT `'sans'` · `density` TEXT NOT NULL DEFAULT `'comfortable'` · `show_logo` / `show_org_address` / `show_payment_terms` / `show_due_date` BOOLEAN NOT NULL DEFAULT `true` · `bank_details` TEXT NULL. Five CHECK constraints, each in its own `pg_constraint`-guarded `DO` block (Postgres has no `ADD CONSTRAINT IF NOT EXISTS`): `ck_invoice_settings_template_id` — `template_id IN ('classic', 'modern', 'compact')` · `ck_invoice_settings_font_family` — `font_family IN ('sans', 'serif')` · `ck_invoice_settings_density` — `density IN ('comfortable', 'compact')` · `ck_invoice_settings_document_title` — non-blank, `<= 24` chars · `ck_invoice_settings_bank_details` — `<= 500` chars when present.
+
+**Templates are a closed set of code-defined layouts (`classic`/`modern`/`compact`), never user-authored markup** — the CHECK is what makes rendering by id safe, since no request value ever reaches the DOM as markup (a template language would be a stored-XSS surface). The `IN` lists here and `INVOICE_TEMPLATE_IDS`/`INVOICE_FONT_FAMILIES`/`INVOICE_DENSITIES` in `server/src/config/constants.ts` must be changed together.
+
+**No new endpoints for the Financial, Chart of accounts or Conversion balances settings tabs** — all three are client-only pages over routes that already existed before this phase (`PATCH /ledger-core/settings`, `listAccountTree`/`createAccount`/`updateAccount`, and the staged migration importer's `POST /ledger-core/migration-imports` with `kind: 'OPENING_BALANCES'`).
+
+See [api.md](api.md#organizations--apiv1organizations) and [api.md](api.md#invoice-settings--apiv1ledger-coresettingsinvoicing--phase-38) for the routes and [ledger-core.md](ledger-core.md) for the full feature description and gaps.
+
+---
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

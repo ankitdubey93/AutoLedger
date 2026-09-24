@@ -2,7 +2,12 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import type { InvoiceSettings } from '../../types/ledger-core.js';
+import type {
+  InvoiceSettings,
+  InvoiceTemplateId,
+  InvoiceFontFamily,
+  InvoiceDensity,
+} from '../../types/ledger-core.js';
 
 /**
  * LedgerCore invoice settings — numbering, defaults, and branding.
@@ -36,7 +41,7 @@ function pgErrorMessage(err: unknown): string {
   return 'Database rejected the invoice settings';
 }
 
-/** Mirrors migration 007's column DEFAULTs — the one place both sides read from. */
+/** Mirrors migration 007 and 070's column DEFAULTs — the one place both sides read from. */
 const INVOICE_SETTINGS_DEFAULTS: Omit<InvoiceSettings, 'configured'> = {
   numberPrefix: 'INV-',
   numberPadding: 6,
@@ -54,6 +59,15 @@ const INVOICE_SETTINGS_DEFAULTS: Omit<InvoiceSettings, 'configured'> = {
   paymentTerms: null,
   footerNotes: null,
   accentColor: '#2563eb',
+  templateId: 'classic',
+  documentTitle: 'INVOICE',
+  fontFamily: 'sans',
+  density: 'comfortable',
+  showLogo: true,
+  showOrgAddress: true,
+  showPaymentTerms: true,
+  showDueDate: true,
+  bankDetails: null,
 };
 
 export interface UpdateInvoiceSettingsInput {
@@ -73,6 +87,15 @@ export interface UpdateInvoiceSettingsInput {
   paymentTerms?: string | null | undefined;
   footerNotes?: string | null | undefined;
   accentColor?: string | undefined;
+  templateId?: InvoiceTemplateId | undefined;
+  documentTitle?: string | undefined;
+  fontFamily?: InvoiceFontFamily | undefined;
+  density?: InvoiceDensity | undefined;
+  showLogo?: boolean | undefined;
+  showOrgAddress?: boolean | undefined;
+  showPaymentTerms?: boolean | undefined;
+  showDueDate?: boolean | undefined;
+  bankDetails?: string | null | undefined;
 }
 
 interface SettingsRow {
@@ -92,6 +115,15 @@ interface SettingsRow {
   payment_terms: string | null;
   footer_notes: string | null;
   accent_color: string;
+  template_id: InvoiceTemplateId;
+  document_title: string;
+  font_family: InvoiceFontFamily;
+  density: InvoiceDensity;
+  show_logo: boolean;
+  show_org_address: boolean;
+  show_payment_terms: boolean;
+  show_due_date: boolean;
+  bank_details: string | null;
 }
 
 function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
@@ -112,6 +144,15 @@ function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
     paymentTerms: row.payment_terms,
     footerNotes: row.footer_notes,
     accentColor: row.accent_color,
+    templateId: row.template_id,
+    documentTitle: row.document_title,
+    fontFamily: row.font_family,
+    density: row.density,
+    showLogo: row.show_logo,
+    showOrgAddress: row.show_org_address,
+    showPaymentTerms: row.show_payment_terms,
+    showDueDate: row.show_due_date,
+    bankDetails: row.bank_details,
     configured: true,
   };
 }
@@ -122,7 +163,9 @@ export async function getInvoiceSettings(orgId: string): Promise<InvoiceSettings
     `SELECT number_prefix, number_padding, next_number, default_due_days, default_tax_rate_bp,
             tax_label, receivable_account_id, default_revenue_account_id, tax_payable_account_id,
             show_tax_number, show_business_number, show_legal_name,
-            billing_address, payment_terms, footer_notes, accent_color
+            billing_address, payment_terms, footer_notes, accent_color,
+            template_id, document_title, font_family, density, show_logo, show_org_address,
+            show_payment_terms, show_due_date, bank_details
        FROM ledger_invoice_settings
       WHERE org_id = $1`,
     [orgId],
@@ -157,6 +200,15 @@ export async function updateInvoiceSettings(
     paymentTerms: 'payment_terms',
     footerNotes: 'footer_notes',
     accentColor: 'accent_color',
+    templateId: 'template_id',
+    documentTitle: 'document_title',
+    fontFamily: 'font_family',
+    density: 'density',
+    showLogo: 'show_logo',
+    showOrgAddress: 'show_org_address',
+    showPaymentTerms: 'show_payment_terms',
+    showDueDate: 'show_due_date',
+    bankDetails: 'bank_details',
   } as const;
 
   const columns: string[] = [];

@@ -5,6 +5,7 @@ import {
   ApiRequestError,
   getInvoice,
   getInvoiceSettings,
+  getOrganizationProfile,
   issueInvoice,
   listCreditNotes,
   listPayments,
@@ -12,15 +13,18 @@ import {
   type CreditNote,
   type Invoice,
   type InvoiceSettings,
+  type OrganizationProfile,
   type Payment,
 } from '../../services/fetchServices';
-import { formatCents, formatQuantity, formatRate } from '../../utils/money';
+import { formatCents } from '../../utils/money';
+import { useDocumentObjectUrl } from '../../utils/useDocumentObjectUrl';
 import { useAppBasePath } from '../../apps/useAppBasePath';
 import { useOrg } from '../../context/OrgContext';
 import { useLedgerSettings } from './LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
+import InvoiceDocument from './InvoiceDocument';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 
 /**
@@ -48,6 +52,7 @@ export default function InvoiceDetailPage() {
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings | null>(null);
+  const [profile, setProfile] = useState<OrganizationProfile | null>(null);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
   const [notFound, setNotFound] = useState(false);
@@ -56,6 +61,7 @@ export default function InvoiceDetailPage() {
   const [confirmAction, setConfirmAction] = useState<'issue' | 'void' | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  const logoSrc = useDocumentObjectUrl(profile?.logoDocumentId ?? null);
 
   useEffect(() => {
     if (invoiceId === undefined) return;
@@ -73,11 +79,14 @@ export default function InvoiceDetailPage() {
         if (!ignore) setCreditNotes([]);
       });
 
-    Promise.all([getInvoice(invoiceId), getInvoiceSettings()])
-      .then(([invoiceRes, settingsRes]) => {
+    // The profile is optional decoration (logo, address block): a failed fetch
+    // becomes `null`, never a page error — an invoice must open and print without it.
+    Promise.all([getInvoice(invoiceId), getInvoiceSettings(), getOrganizationProfile().catch(() => null)])
+      .then(([invoiceRes, settingsRes, profileRes]) => {
         if (ignore) return;
         setInvoice(invoiceRes.invoice);
         setInvoiceSettings(settingsRes);
+        setProfile(profileRes);
         return listPayments({ customerId: invoiceRes.invoice.customerId, direction: 'RECEIVE' });
       })
       .then((paymentsRes) => {
@@ -149,6 +158,11 @@ export default function InvoiceDetailPage() {
   const settings = invoiceSettings;
   const legalName =
     ledgerSettings.status === 'ready' ? ledgerSettings.settings.legalName : null;
+  // Until LedgerCore settings resolve there is no base currency to compare against, so
+  // the "≈ base" row stays hidden — as it always has. Using the invoice's own currency
+  // makes InvoiceDocument's `currencyCode !== baseCurrency` test false.
+  const baseCurrency =
+    ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : invoice.currencyCode;
 
   return (
     <section className="flex flex-col gap-6">
@@ -218,133 +232,18 @@ export default function InvoiceDetailPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      <div
-        className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-6 flex flex-col gap-6"
-        style={settings !== null ? { borderTopColor: settings.accentColor, borderTopWidth: '4px' } : undefined}
-      >
-        <div className="flex justify-between gap-6 flex-wrap">
-          <div>
-            {settings?.showLegalName === true && legalName !== null && (
-              <p className="font-semibold m-0">{legalName}</p>
-            )}
-            {organization !== null && (
-              <p className="text-sm text-[var(--muted)] m-0">{organization.name}</p>
-            )}
-            {settings?.showTaxNumber === true && organization?.taxNumber != null && (
-              <p className="text-xs text-[var(--muted)] m-0">Tax no. {organization.taxNumber}</p>
-            )}
-            {settings?.showBusinessNumber === true && organization?.businessNumber != null && (
-              <p className="text-xs text-[var(--muted)] m-0">Business no. {organization.businessNumber}</p>
-            )}
-            {settings?.billingAddress != null && (
-              <p className="text-xs text-[var(--muted)] m-0 whitespace-pre-line">{settings.billingAddress}</p>
-            )}
-          </div>
-          <div className="text-right">
-            <p className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'DRAFT'}</p>
-            <p className="text-sm text-[var(--muted)] m-0">Issued {invoice.issueDate}</p>
-            <p className="text-sm text-[var(--muted)] m-0">Due {invoice.dueDate}</p>
-          </div>
-        </div>
-
-        <div>
-          <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Bill to</p>
-          <p className="font-medium m-0 mt-1">{invoice.customerNameSnapshot}</p>
-          {invoice.customerAddressSnapshot !== null && (
-            <p className="text-sm text-[var(--muted)] m-0 whitespace-pre-line">
-              {invoice.customerAddressSnapshot}
-            </p>
-          )}
-          {invoice.customerTaxNumberSnapshot !== null && (
-            <p className="text-xs text-[var(--muted)] m-0">Tax no. {invoice.customerTaxNumberSnapshot}</p>
-          )}
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-sm min-w-[36rem]">
-            <thead>
-              <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                <th className="p-2 font-medium">Description</th>
-                <th className="p-2 font-medium text-right">Qty</th>
-                <th className="p-2 font-medium text-right">Unit price</th>
-                <th className="p-2 font-medium">Account</th>
-                <th className="p-2 font-medium text-right">Tax</th>
-                <th className="p-2 font-medium text-right">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.lines.map((line) => (
-                <tr key={line.id} className="border-t border-[var(--border)]">
-                  <td className="p-2">{line.description}</td>
-                  <td className="p-2 text-right tabular-nums">{formatQuantity(line.quantityMilli)}</td>
-                  <td className="p-2 text-right tabular-nums">{formatCents(line.unitPriceCents)}</td>
-                  <td className="p-2">
-                    <Link
-                      to={`${base}/accounts/${line.revenueAccountId}`}
-                      className="text-[var(--text)] no-underline hover:underline"
-                    >
-                      {line.revenueAccountCode}
-                    </Link>
-                  </td>
-                  <td className="p-2 text-right tabular-nums">
-                    {line.taxRateBp > 0 ? `${formatRate(line.taxRateBp)}%` : '—'}
-                  </td>
-                  <td className="p-2 text-right tabular-nums">{formatCents(line.netCents + line.taxCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="flex flex-col items-end gap-1.5 w-full max-w-sm self-end text-sm">
-          <div className="flex justify-between gap-6 w-full">
-            <span className="text-[var(--muted)] min-w-0">Subtotal</span>
-            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.subtotalCents)}</span>
-          </div>
-          <div className="flex justify-between gap-6 w-full">
-            <span className="text-[var(--muted)] min-w-0">{settings?.taxLabel ?? 'Tax'}</span>
-            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.taxCents)}</span>
-          </div>
-          <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">
-            <span className="min-w-0">Total</span>
-            <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.totalCents)} {invoice.currencyCode}</span>
-          </div>
-          {ledgerSettings.status === 'ready' && invoice.currencyCode !== ledgerSettings.settings.baseCurrency && (
-            <div className="flex justify-between gap-6 w-full text-[var(--muted)]">
-              <span className="min-w-0">≈ {ledgerSettings.settings.baseCurrency} (at {invoice.fxRate})</span>
-              <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.baseTotalCents)}</span>
-            </div>
-          )}
-          {invoice.status === 'ISSUED' && (
-            <>
-              <div className="flex justify-between gap-6 w-full">
-                <span className="text-[var(--muted)] min-w-0">Paid</span>
-                <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.allocatedCents)}</span>
-              </div>
-              {invoice.creditedCents > 0 && (
-                <div className="flex justify-between gap-6 w-full">
-                  <span className="text-[var(--muted)] min-w-0">Credits applied</span>
-                  <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.creditedCents)}</span>
-                </div>
-              )}
-              <div className="flex justify-between gap-6 w-full font-semibold">
-                <span className="min-w-0">Amount due</span>
-                <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.amountDueCents)}</span>
-              </div>
-            </>
-          )}
-        </div>
-
-        {invoice.paymentTerms !== null && (
-          <p className="text-sm text-[var(--muted)] m-0">Payment terms: {invoice.paymentTerms}</p>
-        )}
-        {invoice.notes !== null && <p className="text-sm text-[var(--muted)] m-0">{invoice.notes}</p>}
-        {settings?.footerNotes != null && (
-          <p className="text-xs text-[var(--muted)] m-0 border-t border-[var(--border)] pt-3">
-            {settings.footerNotes}
-          </p>
-        )}
-      </div>
+      <InvoiceDocument
+        invoice={invoice}
+        settings={settings}
+        profile={profile}
+        organizationName={organization?.name ?? ''}
+        taxNumber={organization?.taxNumber ?? null}
+        businessNumber={organization?.businessNumber ?? null}
+        legalName={legalName}
+        baseCurrency={baseCurrency}
+        logoSrc={logoSrc}
+        accountHref={(id) => `${base}/accounts/${id}`}
+      />
 
       <dl className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4 m-0">
         {invoice.journalEntryId !== null && (

@@ -372,6 +372,27 @@ export function createAccount(
   return apiFetch('/ledger-core/accounts', { method: 'POST', body: JSON.stringify(input) });
 }
 
+/**
+ * Mirrors server/src/schemas/ledger-core/accountSchema.ts's updateAccountSchema.
+ * `code` and `type` are deliberately absent — the server's zod schema forbids
+ * both, since re-typing a posted account would restate history. Retire an
+ * account with `isActive: false` and create a replacement instead.
+ */
+export interface UpdateAccountInput {
+  name?: string;
+  description?: string | null;
+  isActive?: boolean;
+  parentId?: string | null;
+}
+
+/** PATCH /ledger-core/accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
+export function updateAccount(
+  id: string,
+  input: UpdateAccountInput,
+): Promise<{ success: boolean; account: Account }> {
+  return apiFetch(`/ledger-core/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
 /** Mirrors server/src/types/ledger-core.ts's AccountLedgerRow. */
 export interface AccountLedgerRow {
   lineId: string;
@@ -569,6 +590,17 @@ export interface OnboardingInput {
   cashAccountId: string | null;
 }
 
+/**
+ * The body PATCH /ledger-core/settings accepts: every onboarding field, plus the
+ * three Phase 8 FX posting accounts the wizard never collects
+ * (server/src/schemas/ledger-core/settingsSchema.ts).
+ */
+export type LedgerSettingsPatch = Partial<OnboardingInput> & {
+  realizedFxGainAccountId?: string | null;
+  realizedFxLossAccountId?: string | null;
+  unrealizedFxAccountId?: string | null;
+};
+
 /** GET /ledger-core/settings — a missing settings row means "not yet onboarded", not a 404. */
 export async function getLedgerSettings(signal?: AbortSignal): Promise<LedgerSettings> {
   const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
@@ -587,7 +619,7 @@ export async function completeLedgerOnboarding(input: OnboardingInput): Promise<
 }
 
 /** PATCH /ledger-core/settings — refused with 409 until onboarding has completed once. */
-export async function updateLedgerSettings(input: Partial<OnboardingInput>): Promise<LedgerSettings> {
+export async function updateLedgerSettings(input: LedgerSettingsPatch): Promise<LedgerSettings> {
   const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -677,6 +709,52 @@ export async function updateOrganization(input: {
     body: JSON.stringify(input),
   });
   return body.organization;
+}
+
+/* --------------------------------------------- organizations: postal identity */
+
+/** Mirrors server/src/types/organization.ts's OrganizationProfile. */
+export interface OrganizationProfile {
+  legalName: string | null;
+  industry: string | null;
+  streetAddress1: string | null;
+  streetAddress2: string | null;
+  city: string | null;
+  region: string | null;
+  postalCode: string | null;
+  countryCode: string | null;
+  postalSameAsStreet: boolean;
+  postalAddress1: string | null;
+  postalAddress2: string | null;
+  postalCity: string | null;
+  postalRegion: string | null;
+  postalPostalCode: string | null;
+  postalCountryCode: string | null;
+  phone: string | null;
+  contactEmail: string | null;
+  website: string | null;
+  logoDocumentId: string | null;
+  configured: boolean;
+}
+
+/** GET /organizations/profile — defaults returned even before the org has ever saved one. */
+export async function getOrganizationProfile(signal?: AbortSignal): Promise<OrganizationProfile> {
+  const body = await apiFetch<{ success: boolean; profile: OrganizationProfile }>(
+    '/organizations/profile',
+    { signal: signal ?? null },
+  );
+  return body.profile;
+}
+
+/** PATCH /organizations/profile — OWNER/ADMIN only. */
+export async function updateOrganizationProfile(
+  input: Partial<Omit<OrganizationProfile, 'configured'>>,
+): Promise<OrganizationProfile> {
+  const body = await apiFetch<{ success: boolean; profile: OrganizationProfile }>(
+    '/organizations/profile',
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.profile;
 }
 
 /* ------------------------------------------------------ ledger-core: invoicing */
@@ -1018,6 +1096,15 @@ export function voidInvoice(
   });
 }
 
+/** Must track server/src/config/constants.ts — kept in sync by the plan. */
+export const INVOICE_TEMPLATE_IDS = ['classic', 'modern', 'compact'] as const;
+export const INVOICE_FONT_FAMILIES = ['sans', 'serif'] as const;
+export const INVOICE_DENSITIES = ['comfortable', 'compact'] as const;
+
+export type InvoiceTemplateId = (typeof INVOICE_TEMPLATE_IDS)[number];
+export type InvoiceFontFamily = (typeof INVOICE_FONT_FAMILIES)[number];
+export type InvoiceDensity = (typeof INVOICE_DENSITIES)[number];
+
 /** Mirrors server/src/types/ledger-core.ts's InvoiceSettings. */
 export interface InvoiceSettings {
   numberPrefix: string;
@@ -1036,6 +1123,15 @@ export interface InvoiceSettings {
   paymentTerms: string | null;
   footerNotes: string | null;
   accentColor: string;
+  templateId: InvoiceTemplateId;
+  documentTitle: string;
+  fontFamily: InvoiceFontFamily;
+  density: InvoiceDensity;
+  showLogo: boolean;
+  showOrgAddress: boolean;
+  showPaymentTerms: boolean;
+  showDueDate: boolean;
+  bankDetails: string | null;
   configured: boolean;
 }
 

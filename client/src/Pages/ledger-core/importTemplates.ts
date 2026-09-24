@@ -68,7 +68,13 @@ export const IMPORT_TEMPLATES: Record<MigrationImportKind, ImportTemplate> = {
   },
 };
 
-function csvField(value: string): string {
+/**
+ * CSV-quotes a single field — wraps in double quotes and doubles any embedded
+ * quote whenever the value contains a comma, quote or newline. Exported so
+ * `ConversionBalancesPage` (Phase 30) can build its own CSV body with the same
+ * quoting rule rather than writing a second escaper.
+ */
+export function csvField(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 

@@ -29,7 +29,11 @@ import DebitNoteDetailPage from './DebitNoteDetailPage';
 import CustomersPage from './CustomersPage';
 import PartyAccountPage from './PartyAccountPage';
 import InvoiceSettingsPage from './InvoiceSettingsPage';
+import InvoiceTemplatePage from './InvoiceTemplatePage';
 import PaymentTermsSettingsPage from './PaymentTermsSettingsPage';
+import FinancialSettingsPage from './FinancialSettingsPage';
+import ChartSettingsPage from './ChartSettingsPage';
+import ConversionBalancesPage from './ConversionBalancesPage';
 import ItemsPage from './ItemsPage';
 import VendorsPage from './VendorsPage';
 import BillsPage from './BillsPage';
@@ -141,7 +145,11 @@ function AppPages({ showBanner }: { showBanner: boolean }) {
           <Route path="migration-imports/:importId" element={<MigrationImportDetailPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="settings/invoicing" element={<InvoiceSettingsPage />} />
+          <Route path="settings/invoice-template" element={<InvoiceTemplatePage />} />
           <Route path="settings/payment-terms" element={<PaymentTermsSettingsPage />} />
+          <Route path="settings/financial" element={<FinancialSettingsPage />} />
+          <Route path="settings/chart" element={<ChartSettingsPage />} />
+          <Route path="settings/conversion-balances" element={<ConversionBalancesPage />} />
           {/* An unknown LedgerCore subpath returns to the dashboard, not the 404 page. */}
           <Route path="*" element={<Navigate to={base} replace />} />
         </Routes>

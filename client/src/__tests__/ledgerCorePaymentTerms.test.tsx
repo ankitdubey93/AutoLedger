@@ -211,6 +211,15 @@ const invoiceSettings: InvoiceSettings = {
   paymentTerms: null,
   footerNotes: null,
   accentColor: '#2563eb',
+  templateId: 'classic',
+  documentTitle: 'INVOICE',
+  fontFamily: 'sans',
+  density: 'comfortable',
+  showLogo: true,
+  showOrgAddress: true,
+  showPaymentTerms: true,
+  showDueDate: true,
+  bankDetails: null,
   configured: true,
 };
 
