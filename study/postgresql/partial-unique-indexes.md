@@ -79,15 +79,15 @@ This is the same discipline the codebase already applies with `EXCLUDE ... USING
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/029_ledger-core_migration_imports.sql` — `ux_migration_imports_one_committed_opening`, the index itself.
-- `server/src/services/ledger-core/openingBalanceImportService.ts` — `commitOnClient`'s final `UPDATE ... SET status = 'COMMITTED'` is the statement that can trigger `23505`.
-- `server/src/services/ledger-core/migrationImportService.ts` — `commit()`'s `catch` block maps `pgErrorCode(err) === '23505' && pgConstraint(err) === 'ux_migration_imports_one_committed_opening'` to a friendly `409`. The constraint name is matched explicitly, not inferred from the message text, so a coincidental unique-violation on an unrelated constraint is never mis-reported as "already committed."
-- `server/src/__tests__/ledger-core/openingBalanceImport.test.ts` — `"a second committed opening-balance import is refused"` proves both halves: the HTTP path returns `409`, and then a raw `pool.query` forces a second row to `VALIDATED` and issues the identical `UPDATE` the service issues, asserting it is rejected with `23505` on that exact constraint name — proof that the *database*, not application logic, is what refuses it.
+- `server/src/services/accounting/openingBalanceImportService.ts` — `commitOnClient`'s final `UPDATE ... SET status = 'COMMITTED'` is the statement that can trigger `23505`.
+- `server/src/services/accounting/migrationImportService.ts` — `commit()`'s `catch` block maps `pgErrorCode(err) === '23505' && pgConstraint(err) === 'ux_migration_imports_one_committed_opening'` to a friendly `409`. The constraint name is matched explicitly, not inferred from the message text, so a coincidental unique-violation on an unrelated constraint is never mis-reported as "already committed."
+- `server/src/__tests__/accounting/openingBalanceImport.test.ts` — `"a second committed opening-balance import is refused"` proves both halves: the HTTP path returns `409`, and then a raw `pool.query` forces a second row to `VALIDATED` and issues the identical `UPDATE` the service issues, asserting it is rejected with `23505` on that exact constraint name — proof that the *database*, not application logic, is what refuses it.
 - `server/src/db/migrations/065_stock_setup.sql` — `ux_stock_code_schemes_one_default`
-- `server/src/services/stock/codeSchemeService.ts` — `setDefault`'s two-statement clear-then-set inside one transaction
+- `server/src/services/inventory/codeSchemeService.ts` — `setDefault`'s two-statement clear-then-set inside one transaction
 - `server/src/db/migrations/066_stock_items.sql` — `ux_stock_items_org_barcode`
 - `server/src/db/migrations/067_stock_movements.sql` — `stock_balances`'s `UNIQUE NULLS NOT DISTINCT (org_id, item_id, location_id, lot_id)`
-- `server/src/services/stock/movementService.ts` — `lockBalances`'s `INSERT ... ON CONFLICT (org_id, item_id, location_id, lot_id) DO NOTHING` upsert-then-lock, which depends on the `NULLS NOT DISTINCT` behavior to conflict correctly for lotless items
-- `server/src/__tests__/stock/stockConstraints.test.ts` — DB-tier tests proving a second default scheme is rejected, a duplicate barcode is rejected, and two `NULL`-lot balance rows for the same item/location collide as expected
+- `server/src/services/inventory/movementService.ts` — `lockBalances`'s `INSERT ... ON CONFLICT (org_id, item_id, location_id, lot_id) DO NOTHING` upsert-then-lock, which depends on the `NULLS NOT DISTINCT` behavior to conflict correctly for lotless items
+- `server/src/__tests__/inventory/stockConstraints.test.ts` — DB-tier tests proving a second default scheme is rejected, a duplicate barcode is rejected, and two `NULL`-lot balance rows for the same item/location collide as expected
 
 ## Gotchas
 

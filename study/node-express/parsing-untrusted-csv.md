@@ -52,7 +52,7 @@ A data row with **fewer** cells than the header is padded with `''` — a traili
 
 - `server/src/utils/csv.ts` — `parseCsv`, `detectDelimiter`, `splitRecords`, `splitFields`
 - `server/src/__tests__/csv.test.ts` — BOM stripping, quoted commas, embedded newlines, doubled-quote escaping, CRLF/bare-CR line endings, delimiter detection (including "don't detect inside quotes"), short-row padding, long-row rejection, unterminated-quote rejection, empty-file rejection, blank-row skipping
-- `server/src/services/ledger-core/bankImportService.ts` — the only caller; feeds `parseCsv`'s output into column resolution and per-row parsing
+- `server/src/services/accounting/bankImportService.ts` — the only caller; feeds `parseCsv`'s output into column resolution and per-row parsing
 
 ---
 

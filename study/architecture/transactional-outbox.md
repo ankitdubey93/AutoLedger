@@ -98,7 +98,7 @@ This is the honest shape of **at-least-once** delivery: the durable record (the 
 - `server/src/services/outboxService.ts` — `emitEvent` (on the caller's client), `claimUnpublishedEvents` (the one other documented `org_id`-unscoped query besides `db/integrity.ts`)
 - `server/src/services/webhookDeliveryService.ts` — `createDeliveriesForEvent` (the idempotent fan-out), `claimStaleDeliveries` (the sweep)
 - `server/src/queue/handlers/outboxDrainHandler.ts` — both passes, one transaction each, the enqueue loop outside any transaction
-- `server/src/services/ledger-core/invoiceService.ts`, `billService.ts`, `paymentService.ts`, `fiscalPeriodService.ts`, `bankImportService.ts` — the five `emitEvent` call sites, each on the same `client` as the financial write it describes
+- `server/src/services/accounting/invoiceService.ts`, `billService.ts`, `paymentService.ts`, `fiscalPeriodService.ts`, `bankImportService.ts` — the five `emitEvent` call sites, each on the same `client` as the financial write it describes
 
 ## Gotchas
 

@@ -169,13 +169,13 @@ The prior build enforced this class of rule in application code alone, and compu
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/004_ledger-core_journals.sql` — `assert_journal_entry_balanced()` and its two constraint triggers; `reject_mutation()` for immutability; `assert_account_is_postable()` as a plain `BEFORE INSERT` trigger, undeferred because it depends on one row only
-- `server/src/services/ledger-core/journalService.ts` — the application-layer check, and the `catch` that translates SQLSTATE `P0001` into `ApiError(422)`
-- `server/src/__tests__/ledger-core/ledgerConstraints.test.ts` — every case goes around the service, straight at the pool, because that is the only way to prove the database is doing the work
+- `server/src/services/accounting/journalService.ts` — the application-layer check, and the `catch` that translates SQLSTATE `P0001` into `ApiError(422)`
+- `server/src/__tests__/accounting/ledgerConstraints.test.ts` — every case goes around the service, straight at the pool, because that is the only way to prove the database is doing the work
 - `server/src/db/migrations/009_ledger-core_invoices.sql` — `reject_issued_invoice_mutation()`, the row-diff `ISSUED -> VOID` carve-out; `reject_non_draft_invoice_line_mutation()`, the absolute (no carve-out) version for `invoice_lines`
-- `server/src/__tests__/ledger-core/invoiceConstraints.test.ts` — the invoice half of the same "bypass the service, hit the pool directly" testing discipline, including a case that asserts the *allowed* `ISSUED -> VOID` update still succeeds
+- `server/src/__tests__/accounting/invoiceConstraints.test.ts` — the invoice half of the same "bypass the service, hit the pool directly" testing discipline, including a case that asserts the *allowed* `ISSUED -> VOID` update still succeeds
 - `server/src/db/migrations/014_ledger-core_payments.sql` — `assert_payment_allocations_complete()` (parent-completeness pair, mirrors `004`'s `journal_entries`-has-lines trigger), `assert_no_overallocation()` (the cross-table, cross-transaction invariant), `reject_payment_mutation()`/`reject_allocation_mutation()` (immutability, `0A000`)
-- `server/src/services/ledger-core/paymentService.ts` — `createPayment`'s `try/catch` translating `P0001` into `ApiError(422, ...)`, the same pattern `journalService.createEntry` uses
-- `server/src/__tests__/ledger-core/paymentConstraints.test.ts` — proves both deferred triggers fire at `COMMIT` by asserting the `INSERT`s inside the transaction succeed and only the `COMMIT` itself rejects
+- `server/src/services/accounting/paymentService.ts` — `createPayment`'s `try/catch` translating `P0001` into `ApiError(422, ...)`, the same pattern `journalService.createEntry` uses
+- `server/src/__tests__/accounting/paymentConstraints.test.ts` — proves both deferred triggers fire at `COMMIT` by asserting the `INSERT`s inside the transaction succeed and only the `COMMIT` itself rejects
 
 ---
 

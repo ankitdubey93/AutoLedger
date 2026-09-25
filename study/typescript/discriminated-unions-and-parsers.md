@@ -80,8 +80,8 @@ The reason is what the caller needs to do with a failure. An HTTP request handle
 
 - `server/src/utils/stockCodePattern.ts` — `ParsedCodePattern`, `RenderedCode`, `CodeSegment`, and every function operating on them
 - `server/src/utils/uniteconPvm.ts`, `server/src/utils/forecasterBuild.ts` — the two earlier pure-calculation modules that followed the same no-throw convention (pre-dating this note); both removed in Phase 29 along with UnitEcon and ForecasterPro
-- `server/src/services/stock/itemService.ts` — `createItem`'s retry loop branching on `renderCode`'s `ok` field to decide "retry" vs. "surface a 422"
-- `server/src/services/stock/codeSchemeService.ts` — `previewPattern`, returning `parseCodePattern`'s failure message directly to a settings-form field
+- `server/src/services/inventory/itemService.ts` — `createItem`'s retry loop branching on `renderCode`'s `ok` field to decide "retry" vs. "surface a 422"
+- `server/src/services/inventory/codeSchemeService.ts` — `previewPattern`, returning `parseCodePattern`'s failure message directly to a settings-form field
 - `server/src/__tests__/stockCodePattern.test.ts` — 19 tests exercising both branches of every function, including the exhaustiveness-relevant "every declared token kind renders" cases
 
 ## Gotchas

@@ -13,7 +13,7 @@ import ConfirmDialog from './ConfirmDialog';
 /**
  * A reusable panel of the documents attached to one record — dropped onto
  * Accounting's invoice, bill and journal-entry detail pages, but itself
- * app-agnostic: it lives in components/, not Pages/ledger-core/, because the
+ * app-agnostic: it lives in components/, not Pages/, because the
  * Document Vault is platform infrastructure (Phase 9.5), and this panel is
  * the cross-app proof of that — any app's detail page can mount it.
  */

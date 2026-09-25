@@ -74,8 +74,8 @@ A service check (`SELECT 1 FROM accounts WHERE id = $1 AND org_id = $2`) followe
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/005_ledger-core_settings.sql` — `ux_accounts_org_id_id`, `fk_ledger_settings_cash_account`, and the `MATCH SIMPLE`/`ON DELETE RESTRICT` reasoning in the migration's own comments
-- `server/src/services/ledger-core/settingsService.ts` — `completeOnboarding`'s `catch` block, which turns the `23503` this constraint raises into a readable `ApiError(422, 'Cash account does not exist in this organization')` rather than leaking a raw Postgres error to the client
-- `server/src/__tests__/ledger-core/settings.test.ts` — asserts the SQLSTATE `23503` directly against a raw `pool.query`, bypassing the service, matching the pattern `ledgerConstraints.test.ts` uses for the balance and immutability triggers
+- `server/src/services/accounting/settingsService.ts` — `completeOnboarding`'s `catch` block, which turns the `23503` this constraint raises into a readable `ApiError(422, 'Cash account does not exist in this organization')` rather than leaking a raw Postgres error to the client
+- `server/src/__tests__/accounting/settings.test.ts` — asserts the SQLSTATE `23503` directly against a raw `pool.query`, bypassing the service, matching the pattern `ledgerConstraints.test.ts` uses for the balance and immutability triggers
 
 ---
 

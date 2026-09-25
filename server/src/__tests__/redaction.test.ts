@@ -6,7 +6,7 @@ import type { OcrWord } from '../types/capture.js';
 
 /**
  * The phase's acceptance test: proves masking with a raw-pixel comparison,
- * never "the code ran without throwing" (docs/ap-flow.md's requirement).
+ * never "the code ran without throwing" (docs/capture.md's requirement).
  * Every case here injects a fake `OcrAdapter` — `tesseractOcr` is never
  * invoked in this file except under the explicit, opt-in E2E case.
  */

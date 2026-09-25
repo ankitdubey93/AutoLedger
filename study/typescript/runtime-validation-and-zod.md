@@ -91,8 +91,8 @@ Both coexist on purpose. This was an addition, not a rewrite: rewriting Phase 1'
 ## Where it lives in this codebase
 
 - `server/src/utils/parseBody.ts` — the bridge: `safeParse`, and on failure an `ApiError(400)` listing **every** failed path, not just the first
-- `server/src/schemas/ledger-core/journalSchema.ts` — the nested `lines[]` schema, `.min(2)`, and the per-line `.refine`
-- `server/src/schemas/ledger-core/accountSchema.ts` — `z.enum(ACCOUNT_TYPES)`, reusing the same `as const` array that derives the TS union and mirrors the migration's CHECK constraint
+- `server/src/schemas/accounting/journalSchema.ts` — the nested `lines[]` schema, `.min(2)`, and the per-line `.refine`
+- `server/src/schemas/accounting/accountSchema.ts` — `z.enum(ACCOUNT_TYPES)`, reusing the same `as const` array that derives the TS union and mirrors the migration's CHECK constraint
 - `server/src/utils/validate.ts` — the Phase 1 hand-rolled validators, still serving `/auth`
 
 Note what the journal schema deliberately omits: `sourceType` and `sourceId`. A client-posted entry is always `'manual'`; another app passes those service-to-service. Making a field *unparseable* is a cleaner defence than validating it, because there is nothing to get wrong.
@@ -149,7 +149,7 @@ A: No, because it's never treated as trusted structured data at any point it's s
 
 - *"Where else would you validate?"* Environment variables at boot (this codebase already does, fail-fast), and any third-party API response — a provider changing a field shape is the same class of problem as a malformed request.
 - *"What about performance?"* Zod parses per request. For a hot path you'd compile the schema once at module scope (which this does — schemas are module-level constants, not built per call), and if it ever mattered, TypeBox with Ajv compiles to a JIT'd function.
-- *"How do you avoid duplicating the enum three times?"* One `as const` array feeds the TypeScript union, the zod enum, and mirrors the database CHECK — see `types/ledger-core.ts`.
+- *"How do you avoid duplicating the enum three times?"* One `as const` array feeds the TypeScript union, the zod enum, and mirrors the database CHECK — see `types/accounting.ts`.
 - *"Does validation replace authorization?"* No. A well-formed UUID belonging to another tenant validates perfectly. Different layer.
 
 ---

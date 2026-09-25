@@ -83,8 +83,8 @@ This is what closes the same race the service-level pre-check couldn't: two conc
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/015_ledger-core_fiscal_periods.sql` — `CREATE EXTENSION IF NOT EXISTS btree_gist`, `ex_fiscal_periods_no_overlap`
-- `server/src/services/ledger-core/fiscalPeriodService.ts` — `generatePeriods`'s pre-check `SELECT` (a fast, non-authoritative filter) plus the `23P01` → `409` mapping (the real, race-free guarantee)
-- `server/src/__tests__/ledger-core/fiscalPeriodConstraints.test.ts` — proves the constraint directly via raw SQL: two overlapping ranges in one org rejected, the identical overlap permitted across two different orgs, and adjacent non-overlapping ranges accepted
+- `server/src/services/accounting/fiscalPeriodService.ts` — `generatePeriods`'s pre-check `SELECT` (a fast, non-authoritative filter) plus the `23P01` → `409` mapping (the real, race-free guarantee)
+- `server/src/__tests__/accounting/fiscalPeriodConstraints.test.ts` — proves the constraint directly via raw SQL: two overlapping ranges in one org rejected, the identical overlap permitted across two different orgs, and adjacent non-overlapping ranges accepted
 
 ---
 

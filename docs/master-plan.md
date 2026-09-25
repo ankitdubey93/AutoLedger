@@ -1,5 +1,7 @@
 # AutoLedger — Master Plan: from portfolio suite to an AI-native ERP business
 
+> **2026-09-25 (Phase 33):** direction decided — AutoLedger is now **one full-suite accounting and bookkeeping product built to compete with Xero**, not a portfolio suite. LedgerCore, AP-Flow and StockLedger are its accounting, capture (bill inbox) and inventory modules. Where this plan speaks of separately sold "apps", read modules of one product; the per-app entitlement ideas in § 5.6 no longer apply as written. Everything else here remains a proposal.
+>
 > **2026-09-23 (Phase 29):** the suite is now three apps — LedgerCore, AP-Flow, StockLedger. Five apps described below as built were removed. Everything in this file remains a proposal.
 
 **Written:** 2026-09-22, after Phase 26 · **Status: PROPOSAL — nothing in this file is built or approved.**

@@ -74,9 +74,9 @@ The three together mean a sighted user gets the visual shape, a screen-reader us
 
 ## Where it lives in this codebase
 
-- `client/src/Pages/ledger-core/TrendChart.tsx` — the original: grouped bars, hover state, `aria-hidden` SVG + visible caption + shadow table
-- `client/src/Pages/ledger-core/BarChart.tsx` — the AR/AP aging chart: single bars, `role="img"` (no hover), same shadow-table pattern
-- `client/src/Pages/ledger-core/DashboardPage.tsx` — consumes both, side by side
+- `client/src/Pages/TrendChart.tsx` — the original: grouped bars, hover state, `aria-hidden` SVG + visible caption + shadow table
+- `client/src/Pages/BarChart.tsx` — the AR/AP aging chart: single bars, `role="img"` (no hover), same shadow-table pattern
+- `client/src/Pages/DashboardPage.tsx` — consumes both, side by side
 - `client/src/__tests__/ledgerCoreDashboard.test.tsx` — `'renders exactly 6 bar groups for a 6-point trend'` counts `svg rect[data-bar]`/`[data-hit]` directly, proving the chart renders the right shape without a snapshot test
 
 ---

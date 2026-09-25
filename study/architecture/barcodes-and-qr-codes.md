@@ -3,7 +3,7 @@
 > A barcode is a serialization format for a string, nothing more — the interesting engineering questions are what string goes in, how you catch a corrupted read before it reaches the database, and who can act on a code once it's out of your control.
 
 **Category:** Architecture
-**Introduced by:** Phase 28 — StockLedger's GS1 barcode validation (`utils/gtin.ts`) and QR label generation (`services/stock/labelService.ts`)
+**Introduced by:** Phase 28 — StockLedger's GS1 barcode validation (`utils/gtin.ts`) and QR label generation (`services/inventory/labelService.ts`)
 **Verified against:** `qrcode` npm package 1.5.4; GS1 GTIN specification (publicly documented check-digit algorithm, verified by hand-calculation in this codebase's own test suite)
 
 ---
@@ -65,10 +65,10 @@ The generated SVG string reaches the client as a JSON field (`qrSvg`) and is ren
 ## Where it lives in this codebase
 
 - `server/src/utils/gtin.ts` — `isValidGtin`, the mod-10 GTIN checksum
-- `server/src/services/stock/labelService.ts` — `buildLabels`, the QR payload construction and SVG generation, with the payload-minimization reasoning stated directly in the file's header comment
-- `server/src/schemas/stock/labelSchema.ts`, `server/src/controllers/stock/labelController.ts`, `server/src/routes/stock/labelRoutes.ts` — the request/response boundary
+- `server/src/services/inventory/labelService.ts` — `buildLabels`, the QR payload construction and SVG generation, with the payload-minimization reasoning stated directly in the file's header comment
+- `server/src/schemas/inventory/labelSchema.ts`, `server/src/controllers/inventory/labelController.ts`, `server/src/routes/inventory/labelRoutes.ts` — the request/response boundary
 - `client/src/Pages/stock/StockLabelsPage.tsx` — renders each `qrSvg` as an `<img src="data:image/svg+xml...">`, never `dangerouslySetInnerHTML`
-- `server/src/__tests__/stock/labels.test.ts` — 12 tests, including an `<img>`-safe-rendering assertion and a payload-shape assertion
+- `server/src/__tests__/inventory/labels.test.ts` — 12 tests, including an `<img>`-safe-rendering assertion and a payload-shape assertion
 - `server/src/__tests__/stockCodePattern.test.ts` (indirectly) — GTIN validation is exercised alongside code-pattern rendering in the item creation tests
 
 ## Gotchas

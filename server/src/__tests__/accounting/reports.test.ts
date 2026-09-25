@@ -163,7 +163,7 @@ describe('trial balance', () => {
   });
 
   it('is derived, not stored — no summary table exists', async () => {
-    // The claim in docs/ledger-core.md is that statements are computed from raw
+    // The claim in docs/accounting.md is that statements are computed from raw
     // ledger lines with no pre-calculated balances. This asserts the schema
     // genuinely has nowhere to cache one.
     const { rows } = await pool.query<{ table_name: string }>(

@@ -21,7 +21,7 @@ AutoLedger does the second, everywhere in the codebase, for the same reason `rep
 
 ### What "derive" looks like as SQL
 
-`allocatedCentsSubquery` (`server/src/services/ledger-core/paymentService.ts`) is a correlated scalar subquery embedded in `invoiceService.INVOICE_SELECT` and `billService.BILL_SELECT`:
+`allocatedCentsSubquery` (`server/src/services/accounting/paymentService.ts`) is a correlated scalar subquery embedded in `invoiceService.INVOICE_SELECT` and `billService.BILL_SELECT`:
 
 ```sql
 COALESCE((SELECT SUM(pa.amount_cents)
@@ -48,7 +48,7 @@ UPDATE payments SET status = 'VOID', voided_at = now(), void_journal_entry_id = 
 
 ### The precedence function
 
-`settlementStatusOf` (`server/src/types/ledger-core.ts`) is a pure function, no I/O:
+`settlementStatusOf` (`server/src/types/accounting.ts`) is a pure function, no I/O:
 
 ```ts
 export function settlementStatusOf(args: {
@@ -101,11 +101,11 @@ Guardrails rule: this is the same "no summary table" discipline stated in `repor
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the one place "how much of a document is paid" is defined in SQL
-- `server/src/services/ledger-core/invoiceService.ts` / `billService.ts` — consume the subquery in `INVOICE_SELECT`/`BILL_SELECT`; `toInvoice`/`toBill` call `settlementStatusOf`
-- `server/src/types/ledger-core.ts` — `SettlementStatus`, `settlementStatusOf`
-- `server/src/services/ledger-core/agingService.ts` — the same subquery reused for aging buckets, and the control-account `reconciles` cross-check
-- `server/src/__tests__/ledger-core/payments.test.ts` — `'un-settles the invoice it paid'` asserts the void-and-reread behavior directly
+- `server/src/services/accounting/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the one place "how much of a document is paid" is defined in SQL
+- `server/src/services/accounting/invoiceService.ts` / `billService.ts` — consume the subquery in `INVOICE_SELECT`/`BILL_SELECT`; `toInvoice`/`toBill` call `settlementStatusOf`
+- `server/src/types/accounting.ts` — `SettlementStatus`, `settlementStatusOf`
+- `server/src/services/accounting/agingService.ts` — the same subquery reused for aging buckets, and the control-account `reconciles` cross-check
+- `server/src/__tests__/accounting/payments.test.ts` — `'un-settles the invoice it paid'` asserts the void-and-reread behavior directly
 - `server/src/db/migrations/014_ledger-core_payments.sql` — `trg_allocations_immutable`, the trigger that makes "allocations are permanent history" a database guarantee, not a convention
 
 ---

@@ -63,9 +63,9 @@ Nothing about `dedupe_hash` is accepted from the request body — `bankSchema.ts
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/019_ledger-core_bank_reconciliation.sql` — `bank_transactions.dedupe_hash CHAR(64)`, `CONSTRAINT ux_bank_transactions_dedupe UNIQUE (org_id, dedupe_hash)`
-- `server/src/services/ledger-core/bankImportService.ts` — `computeDedupeHashes` (the occurrence-ordinal counting), the `unnest(...) ... ON CONFLICT DO NOTHING RETURNING id` batch insert
-- `server/src/__tests__/ledger-core/bankImports.test.ts` — `'the same statement imported twice yields one set of rows'` (the roadmap's own acceptance criterion, as a named test) and `'two identical lines in one file both survive, and re-import still dedupes'`
-- `server/src/__tests__/ledger-core/bankConstraints.test.ts` — the raw-SQL proof that the constraint holds regardless of what wrote the row, and that it's scoped per-tenant (`'allows the same dedupe_hash in a different organization'`)
+- `server/src/services/accounting/bankImportService.ts` — `computeDedupeHashes` (the occurrence-ordinal counting), the `unnest(...) ... ON CONFLICT DO NOTHING RETURNING id` batch insert
+- `server/src/__tests__/accounting/bankImports.test.ts` — `'the same statement imported twice yields one set of rows'` (the roadmap's own acceptance criterion, as a named test) and `'two identical lines in one file both survive, and re-import still dedupes'`
+- `server/src/__tests__/accounting/bankConstraints.test.ts` — the raw-SQL proof that the constraint holds regardless of what wrote the row, and that it's scoped per-tenant (`'allows the same dedupe_hash in a different organization'`)
 
 ---
 

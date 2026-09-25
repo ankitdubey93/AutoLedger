@@ -20,7 +20,7 @@ import MatchScoreBadge from './MatchScoreBadge';
 /**
  * The bank-line approval queue. Every unmatched line's top candidates are
  * shown inline with their score breakdown — a suggestion must be
- * explainable on screen, not just a number (docs/ledger-core.md § C).
+ * explainable on screen, not just a number (docs/accounting.md § C).
  *
  * Accepting a suggestion at or above the auto-match threshold acts
  * immediately; below it, or matching by hand, is gated by ConfirmDialog,

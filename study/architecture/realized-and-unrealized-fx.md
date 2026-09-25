@@ -76,11 +76,11 @@ Revaluation posts one entry restating balances *and*, in the same transaction, a
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/paymentService.ts`'s `createPaymentOnClient` — the realized-FX plug, resolved lazily (only when `imbalance !== 0`, via `resolveFxAccount`) so an organization that removed `4910`/`6810` from its chart can still take base-currency payments without error
-- `server/src/services/ledger-core/fxRevaluationService.ts`'s `runRevaluation` — the unrealized plug, the automatic next-day reversal, and `computeExposure` (the identical computation, read-only, backing the `GET /reports/fx-exposure` preview)
-- `docs/ledger-core.md § 3` — the worked example this note's mechanics reproduce to the paisa, and the acceptance criterion for the phase
-- `server/src/__tests__/ledger-core/fxRealized.test.ts` — the named test `"reproduces docs/ledger-core.md's worked example to the paisa"`, plus the mirror-case (payable) test proving the sign falls out correctly
-- `server/src/__tests__/ledger-core/fxRevaluation.test.ts` — the next-day-reversal proof and the balance-sheet-still-balances-after-a-revaluation integration case
+- `server/src/services/accounting/paymentService.ts`'s `createPaymentOnClient` — the realized-FX plug, resolved lazily (only when `imbalance !== 0`, via `resolveFxAccount`) so an organization that removed `4910`/`6810` from its chart can still take base-currency payments without error
+- `server/src/services/accounting/fxRevaluationService.ts`'s `runRevaluation` — the unrealized plug, the automatic next-day reversal, and `computeExposure` (the identical computation, read-only, backing the `GET /reports/fx-exposure` preview)
+- `docs/accounting.md § 3` — the worked example this note's mechanics reproduce to the paisa, and the acceptance criterion for the phase
+- `server/src/__tests__/accounting/fxRealized.test.ts` — the named test `"reproduces docs/accounting.md's worked example to the paisa"`, plus the mirror-case (payable) test proving the sign falls out correctly
+- `server/src/__tests__/accounting/fxRevaluation.test.ts` — the next-day-reversal proof and the balance-sheet-still-balances-after-a-revaluation integration case
 
 ## Gotchas
 

@@ -32,7 +32,7 @@ settled = Σ payment_allocations (payment POSTED) + Σ credit_note_allocations (
 amount due = total − settled
 ```
 
-The status predicate does the same job in both halves: voiding a payment *or* a note leaves its allocation rows in place (they are immutable) and they simply stop counting. `server/src/services/ledger-core/settlementSql.ts` is the one place this is defined (`settledCentsSubquery`); every amount-due site — invoice/bill lists, bank-match candidates, FX revaluation exposure, aging, party open items, payment validation — was switched to it in one pass. That was the riskiest part of the phase: a single site left on the payments-only subquery would let a payment over-settle a credited invoice, or have the bank matcher score against the wrong amount due.
+The status predicate does the same job in both halves: voiding a payment *or* a note leaves its allocation rows in place (they are immutable) and they simply stop counting. `server/src/services/accounting/settlementSql.ts` is the one place this is defined (`settledCentsSubquery`); every amount-due site — invoice/bill lists, bank-match candidates, FX revaluation exposure, aging, party open items, payment validation — was switched to it in one pass. That was the riskiest part of the phase: a single site left on the payments-only subquery would let a payment over-settle a credited invoice, or have the bank matcher score against the wrong amount due.
 
 ### Applying a note posts no journal entry
 
@@ -63,10 +63,10 @@ Rules in play: [guardrails](../../docs/guardrails.md) rule 6 (posted documents a
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/063_ledger-core_credit_debit_notes.sql` — six tables, immutability and insert-only triggers, the deferred cap triggers, and the replaced `assert_no_overallocation()`
-- `server/src/services/ledger-core/settlementSql.ts` — `allocatedCentsSubquery`, `noteAppliedCentsSubquery`, `settledCentsSubquery`, `noteOwnAppliedCentsSubquery`, `settledCentsOnClient`
-- `server/src/services/ledger-core/creditNoteService.ts`, `debitNoteService.ts` — draft/issue/void/apply
-- `server/src/services/ledger-core/agingService.ts`, `partyLedgerService.ts` — negative open items, `CREDIT_NOTE`/`DEBIT_NOTE` ledger rows
-- `server/src/__tests__/ledger-core/noteSettlement.test.ts` — the reconciliation claim with an unapplied credit
+- `server/src/services/accounting/settlementSql.ts` — `allocatedCentsSubquery`, `noteAppliedCentsSubquery`, `settledCentsSubquery`, `noteOwnAppliedCentsSubquery`, `settledCentsOnClient`
+- `server/src/services/accounting/creditNoteService.ts`, `debitNoteService.ts` — draft/issue/void/apply
+- `server/src/services/accounting/agingService.ts`, `partyLedgerService.ts` — negative open items, `CREDIT_NOTE`/`DEBIT_NOTE` ledger rows
+- `server/src/__tests__/accounting/noteSettlement.test.ts` — the reconciliation claim with an unapplied credit
 - `walkthrough/08-returns-and-adjustments.md` — month 4 of the hand-entered scenario, replayed through the real API by `walkthrough.test.ts`
 
 ## Gotchas

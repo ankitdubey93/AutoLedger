@@ -4,7 +4,7 @@ import { parseCents } from '../utils/money.js';
 /**
  * Phase 5's standalone integrity checker — the script an auditor is shown.
  * See docs/roadmap.md's "Audit trail & CDC (Phase 5)" entry and
- * docs/ledger-core.md's "Audit trail & internal controls" section.
+ * docs/accounting.md's "Audit trail & internal controls" section.
  *
  * Every query below is **deliberately not scoped by `org_id`** — the single
  * sanctioned exception to guardrails rule 1 in this codebase. The point of

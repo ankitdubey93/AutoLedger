@@ -12,7 +12,7 @@ import { WALKTHROUGH_DATASET } from './walkthroughDataset.js';
  * imports the same two functions so the end-to-end replay uploads the exact
  * bytes that ship in the folder.
  *
- * Column headers match `client/src/Pages/ledger-core/importTemplates.ts`
+ * Column headers match `client/src/Pages/importTemplates.ts`
  * exactly. `Notes` is left blank for every row — the dataset carries no
  * notes field, and a fabricated value would be a lie the answer key never
  * asked for.

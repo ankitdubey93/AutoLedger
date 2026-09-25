@@ -21,7 +21,7 @@ import type { StockMovement, StockMovementType, StockSerialStatus, StockTracking
  * VALUATION-ORDER RULING: movements are valued in PROCESSING order, not
  * `occurred_on` order. A back-dated receipt does not re-cost issues already
  * made against the balance it retroactively affects — a named, deliberate
- * gap (docs/stock.md).
+ * gap (docs/inventory.md).
  *
  * DETERMINISTIC LOCK ORDER (deadlock avoidance): every balance row this
  * call will touch is upserted-then-locked in one pass, sorted by

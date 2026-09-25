@@ -42,7 +42,7 @@ describe('extractionService', () => {
     fetchSpy.mockRestore();
   });
 
-  it('extracts the docs/ap-flow.md worked example correctly', async () => {
+  it('extracts the docs/capture.md worked example correctly', async () => {
     const client = stubClient({
       vendor_name: 'AWS Cloud Services',
       invoice_number: 'INV-2026-8901',

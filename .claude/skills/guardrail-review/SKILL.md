@@ -7,7 +7,7 @@ description: Audit AutoLedger server code against the 16 hard rules — tenant s
 
 Audits a diff (or a directory) against the rules in [CLAUDE.md](../../../CLAUDE.md) and [docs/guardrails.md](../../../docs/guardrails.md). Four of these rules were violated by the prior build and the violations compounded until a rewrite was cheaper than a repair.
 
-All greps below are `-r` — they already reach into an app's subfolder (`server/src/services/ledger-core/…`) as well as the unprefixed platform files (`server/src/services/authService.ts`). Nothing app-specific to add there; the review just covers more files as apps land.
+All greps below are `-r` — they already reach into an app's subfolder (`server/src/services/accounting/…`) as well as the unprefixed platform files (`server/src/services/authService.ts`). Nothing app-specific to add there; the review just covers more files as apps land.
 
 ## Scope the review
 
@@ -132,18 +132,19 @@ A module with no cross-tenant isolation test **is not done** — report it as a 
 git diff HEAD -- server/package.json client/package.json
 ```
 
-Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 7 → violation. An LLM/embeddings SDK anywhere outside Phase 10 (AP-Flow vision extraction) and Phase 16 (TaxGuard AI) → violation — the "no LLM" ruling still applies to every other app.
+Any new dependency must belong to the phase currently being built ([docs/development.md](../../../docs/development.md) dependency table). An ORM in the diff → violation, no exceptions. `ioredis`/`bullmq` before Phase 7 → violation. An LLM/embeddings SDK anywhere outside the capture module's vision extraction and classification (Phases 10, 19) → violation — the "no LLM" ruling still applies everywhere else.
 
-### 13. App boundaries
+### 13. Module boundaries
 
 ```bash
 grep -rn "org_id" server/src/services/*/  2>/dev/null | grep -v "\$"
-grep -rln "req.params.appSlug\|req.params.app" server/src/services/ server/src/controllers/ 2>/dev/null
+grep -rnE "'(ledger-core|ap-flow|stock)'" server/src --include=*.ts | grep -v "config/modules.ts\|__tests__\|db/migrations"
 ```
 
-- The `:appSlug` route param must never be used as (or substitute for) the tenancy scope — `orgId` from the verified token is still the only predicate that matters. A service reading `req.params.appSlug` at all is a smell worth reading closely.
-- An app's service querying a table that belongs to a different app (e.g. `ap-flow`'s service selecting from `journal_entries` directly instead of going through LedgerCore's `journalService`) → violation. Cross-app effects go through the GL via `source_type`/`source_id`, never a direct cross-app query.
-- A slug not present in `server/src/config/apps.ts` reachable through any route → violation; unknown slugs must 404.
+- Nothing in the URL — a module prefix, `:module` on `/onboarding` — may be used as (or substitute for) the tenancy scope. `orgId` from the verified token is the only predicate that matters.
+- A module's service querying a table that belongs to a different module (e.g. a capture service selecting from `journal_entries` directly instead of going through accounting's `journalService`/`billService`) → violation. Cross-module effects go through the owning module's service on the same client, and GL effects through `source_type`/`source_id`.
+- A provenance-tag string literal (`'ledger-core'`, `'ap-flow'`, `'stock'`) outside `config/modules.ts`, tests and migrations → violation; read `MODULE_TAGS`. (Journal `source_type` values such as `'stock'` are a separate vocabulary and are allowed.)
+- A retired prefix (`/ledger-core`, `/stock`, `/ap-flow`, `/apps`) reachable through any route → violation; it must 404.
 
 ## Report
 

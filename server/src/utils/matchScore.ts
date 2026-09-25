@@ -7,7 +7,7 @@ import { similarity } from './levenshtein.js';
  * 100, split across three independent signals — amount, date proximity,
  * and counterparty text similarity. The breakdown is returned alongside
  * the total so a suggestion is explainable rather than a bare number the
- * user is asked to trust (docs/ledger-core.md § C).
+ * user is asked to trust (docs/accounting.md § C).
  *
  * See study/architecture/fuzzy-matching-and-confidence-scoring.md.
  */

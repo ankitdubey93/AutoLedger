@@ -54,7 +54,7 @@ A `NUMBER`-typed attribute (`carpet_area_sqft`) is stored **as a JSON string**, 
 - `server/src/db/migrations/066_stock_items.sql` — `stock_items.attributes JSONB NOT NULL DEFAULT '{}' CHECK (jsonb_typeof(attributes) = 'object')`, the `GIN (attributes jsonb_path_ops)` index
 - `server/src/db/migrations/067_stock_movements.sql` — `stock_serials.attributes`, the same column shape, scoped `SERIAL` rather than `ITEM`
 - `server/src/utils/stockAttributes.ts` — `validateAttributes(definitions, input)`, the entire enforcement layer: required-field check, per-`data_type` coercion/validation, unknown-key rejection
-- `server/src/services/stock/itemService.ts`, `server/src/services/stock/serialService.ts` — the `||` merge-patch on update
+- `server/src/services/inventory/itemService.ts`, `server/src/services/inventory/serialService.ts` — the `||` merge-patch on update
 
 ## Gotchas
 

@@ -35,10 +35,10 @@ The general principle this generalizes to, worth stating for an interview: **whe
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/029_ledger-core_migration_imports.sql` — `migration_imports` (the import, with its own `DRAFT/VALIDATED/COMMITTED` lifecycle) and `migration_import_rows` (one row per staged CSV line, `errors text[]` plus a `VALID/INVALID/EXCLUDED` status).
-- `server/src/services/ledger-core/migrationImportService.ts` — `createImport` (parse + stage + initial validate), `patchRow` (apply a fix, then re-validate the whole import), `revalidateOnClient` (the shared validate-and-recompute-status routine both paths call), `commit` (the all-or-nothing dispatch to the per-kind committer).
-- `server/src/services/ledger-core/chartImportService.ts` / `openingBalanceImportService.ts` — the per-kind `validateRows`/`preview`/`commitOnClient` halves.
-- `server/src/services/ledger-core/bankImportService.ts` (Phase 6) — the contrasted abort-on-first-error shape this note measures against.
-- `server/src/__tests__/ledger-core/chartImport.test.ts` — `"a chart CSV with two deliberately corrupt rows stages the rest as VALID and commits only after both are fixed"`, the named acceptance test proving the shape end to end.
+- `server/src/services/accounting/migrationImportService.ts` — `createImport` (parse + stage + initial validate), `patchRow` (apply a fix, then re-validate the whole import), `revalidateOnClient` (the shared validate-and-recompute-status routine both paths call), `commit` (the all-or-nothing dispatch to the per-kind committer).
+- `server/src/services/accounting/chartImportService.ts` / `openingBalanceImportService.ts` — the per-kind `validateRows`/`preview`/`commitOnClient` halves.
+- `server/src/services/accounting/bankImportService.ts` (Phase 6) — the contrasted abort-on-first-error shape this note measures against.
+- `server/src/__tests__/accounting/chartImport.test.ts` — `"a chart CSV with two deliberately corrupt rows stages the rest as VALID and commits only after both are fixed"`, the named acceptance test proving the shape end to end.
 
 ## Gotchas
 

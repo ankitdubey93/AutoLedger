@@ -66,7 +66,7 @@ The first call's `jobId` is deterministic from the document's own id — BullMQ 
 
 ### Why this enqueue sits outside its transaction, when the outbox exists for exactly that problem
 
-`apFlowDocumentService.createApFlowDocument` calls `enqueue()` *after* its `withTransaction` block returns — deliberately outside the transaction, not inside it. That looks, at first glance, like exactly the dual-write problem the transactional outbox ([transactional-outbox.md](transactional-outbox.md)) exists to solve: a Postgres commit and a Redis write are two separate systems, and nothing atomically ties them together. A crash in the gap between them leaves the database saying one thing (`ap_flow_documents.status = 'PENDING'`) and Redis saying nothing happened.
+`captureDocumentService.createApFlowDocument` calls `enqueue()` *after* its `withTransaction` block returns — deliberately outside the transaction, not inside it. That looks, at first glance, like exactly the dual-write problem the transactional outbox ([transactional-outbox.md](transactional-outbox.md)) exists to solve: a Postgres commit and a Redis write are two separate systems, and nothing atomically ties them together. A crash in the gap between them leaves the database saying one thing (`ap_flow_documents.status = 'PENDING'`) and Redis saying nothing happened.
 
 The reason this isn't routed through the outbox is what's actually at stake on either side of that gap. The outbox exists because losing a *financial* event silently — a webhook nobody gets told about, a payment notification that vanishes — is unacceptable, and the cost of the mechanism (a durable event row, a drain process, `FOR UPDATE SKIP LOCKED` claiming) is worth paying for that guarantee. Here, the entire phase posts nothing to the ledger — the worst case of the gap is a document visibly stuck at `PENDING` with no job ever queued for it, which is both visible (the status says so) and repairable by the user themselves (`POST /:id/reextract`, which enqueues fresh). Reaching for the outbox pattern everywhere a Postgres write and a Redis write are adjacent — rather than only where losing the second write silently is genuinely costly — would be solving a problem this phase doesn't have at the price of a mechanism it doesn't need.
 
@@ -145,7 +145,7 @@ A long-sleeping handler doesn't lose its job: BullMQ renews the job lock on a ti
 - `server/src/queue/worker.ts` — `startWorkers()`/`stopWorkers()`, the dead-letter `'failed'` listener, the two `upsertJobScheduler` calls
 - `server/src/worker.ts` — the process entry point (`npm run worker`), mirroring `index.ts`'s shutdown discipline
 - `server/src/queue/handlers/` — `integrityCheckHandler.ts` (Phase 5's on-demand check, now scheduled daily), `outboxDrainHandler.ts`, `webhookDeliverHandler.ts`, `apFlowExtractHandler.ts` (Phase 10, event-driven, no scheduler entry)
-- `server/src/services/ap-flow/apFlowDocumentService.ts` — the two `enqueue()` call sites, one deterministic `jobId` (registration), one timestamp-suffixed (re-extraction)
+- `server/src/services/capture/captureDocumentService.ts` — the two `enqueue()` call sites, one deterministic `jobId` (registration), one timestamp-suffixed (re-extraction)
 
 ## Gotchas
 

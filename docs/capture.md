@@ -1,7 +1,9 @@
-# AP-Flow — App Spec & Build Ladder
+# Capture (the bill inbox) — Module Spec & Build Ladder
 
-**Slug:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2, 19.4
-**Status: Phases 10, 11, 19, 19.1, 19.2 and 19.4 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2 — then **moved to the platform in Phase 19.3** (not an AP-Flow phase; see [roadmap.md](roadmap.md#phase-193-as-delivered) and [api.md](api.md#integrations--apiv1integrationsdrive--phase-193)). AP-Flow still *receives* files imported this way, unchanged — it just no longer owns the connection. Phase 19.4 fixed a real bug 19.3's own use surfaced: a repeat capture of identical bytes is now a visible `DUPLICATE` row, not a silent no-op — see [roadmap.md](roadmap.md#phase-194-as-delivered). `config/apps.ts` marks it `'building'`. See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
+> **Phase 33 (2026-09-25):** AP-Flow is now the **capture module** of the single AutoLedger product, shown to users as the **Bill inbox** under Purchases. Its API moved to `/api/v1/capture` (was `/api/v1/ap-flow`), its code to `*/capture/` folders (`captureDocumentService`, queue `capture-extract`, env `CAPTURE_AI_PROVIDER`/`CAPTURE_GEMINI_MODEL`); tables keep the `ap_flow_*` prefix and the provenance tag stays `ap-flow` (see [architecture.md](architecture.md#product-structure)). The spec below keeps the original name where it records history.
+
+**Provenance tag:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2, 19.4
+**Status: Phases 10, 11, 19, 19.1, 19.2 and 19.4 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2 — then **moved to the platform in Phase 19.3** (not an AP-Flow phase; see [roadmap.md](roadmap.md#phase-193-as-delivered) and [api.md](api.md#integrations--apiv1integrationsdrive--phase-193)). AP-Flow still *receives* files imported this way, unchanged — it just no longer owns the connection. Phase 19.4 fixed a real bug 19.3's own use surfaced: a repeat capture of identical bytes is now a visible `DUPLICATE` row, not a silent no-op — see [roadmap.md](roadmap.md#phase-194-as-delivered). See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
 
 AP-Flow turns a photograph of a receipt into a balanced, auditable bill in LedgerCore. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
 
@@ -55,7 +57,7 @@ Every suggestion is a suggestion. Nothing reaches the ledger without a human acc
 ### C. Tax & currency normalization — Phase 11
 
 - **Input tax is split out** of the total into its own line rather than buried in the expense: GST/VAT goes to `1180 GST/VAT Input Credit`, which is an asset — a claim against the tax authority, not a cost of doing business. Getting this wrong overstates expenses and loses a refund.
-- **Foreign currency is detected** from the document and normalized through LedgerCore's `fx_rates` at the **invoice date**, not today's rate. An August invoice booked at September's rate is wrong, and it is exactly the error that produces the FX gain/loss that [LedgerCore's Phase 8](ledger-core.md#3-realized-fx--the-worked-example) then has to post on settlement.
+- **Foreign currency is detected** from the document and normalized through LedgerCore's `fx_rates` at the **invoice date**, not today's rate. An August invoice booked at September's rate is wrong, and it is exactly the error that produces the FX gain/loss that [LedgerCore's Phase 8](accounting.md#3-realized-fx--the-worked-example) then has to post on settlement.
 
 ### D. Human-in-the-loop review queue — Phase 11
 
@@ -122,7 +124,7 @@ Produces a draft. Posts nothing to the ledger.
 - [x] Arithmetic validation: line items sum to subtotal, subtotal + tax = total — **flags** (`arithmeticOk: false`), never silently accepts or auto-rejects, since nothing posts yet
 - [x] Queued as a background job (Phase 7) — registration returns `201` immediately; the job runs async, not a returned job handle to poll
 - [x] Vision calls stubbed in tests — never a live API call in CI
-- [x] Cross-tenant isolation test under `__tests__/ap-flow/` — at both the API layer and the worker/handler layer
+- [x] Cross-tenant isolation test under `__tests__/capture/` — at both the API layer and the worker/handler layer
 
 **Acceptance ✅ — verified.** A fixture receipt containing a card number produces a redacted image in which those pixels are demonstrably altered, verified by comparing the region before and after (`redaction.test.ts`) — not by trusting that the code ran. No test makes a network call or needs `ANTHROPIC_API_KEY`.
 
@@ -140,7 +142,7 @@ Produces a draft. Posts nothing to the ledger.
 
 ### Phase 19 — automated intake
 
-- [x] A second extraction/classification provider (Gemini), env-selected via `AP_FLOW_AI_PROVIDER`, behind one `StructuredModelClient` seam — no new dependency, `fetch` only
+- [x] A second extraction/classification provider (Gemini), env-selected via `CAPTURE_AI_PROVIDER`, behind one `StructuredModelClient` seam — no new dependency, `fetch` only
 - [x] Posting rewritten onto a real LedgerCore bill (`createCapturedBillOnClient` + `approveBillOnClient`), fixing AP aging's reconciliation and making AP-Flow payables payable through `/payments`
 - [x] Vendor find-or-create by normalized name, race-safe via a transaction-scoped advisory lock
 - [x] Tax allocated across bill lines by the largest-remainder method (`utils/money.ts`'s `allocateCents`), exact to the cent
@@ -188,7 +190,7 @@ Produces a draft. Posts nothing to the ledger.
 - [x] No extraction enqueued for a `DUPLICATE` row — no AI spend on a capture nobody has confirmed is worth processing
 - [x] `DUPLICATE -> PENDING` reuses the existing `POST /documents/:id/reextract` action ("Not a duplicate — process it") — no new endpoint
 - [x] `duplicateOfId` survives being pushed through, as history
-- [x] One function, `apFlowDocumentService.createApFlowDocument`, is the single place every entry point's duplicate check runs — not re-implemented per caller
+- [x] One function, `captureDocumentService.createApFlowDocument`, is the single place every entry point's duplicate check runs — not re-implemented per caller
 
 **Acceptance ✅ — verified.** See [roadmap.md](roadmap.md#phase-194-as-delivered).
 
@@ -200,7 +202,7 @@ Not built, and deliberately out of scope for Phase 11 despite appearing elsewher
 
 Phase 19 left one item of its own original scope unbuilt — **Google Drive folder intake** — and Phase 19.2 built it; see [roadmap.md](roadmap.md#phase-192-as-delivered). Also not built by Phase 19: per-org AI provider choice (one server-wide env var selects the provider for every organization); auto-post re-evaluation after a manual line-item edit; posting or auto-posting a negative line item (a credit note); an outbox event or webhook on an auto-post.
 
-Not built by Phase 19.2, **as it shipped that day** — several of these were addressed by Phase 19.3's rework, noted inline: per-org AI provider choice, still true today — Drive-imported files use the same one server-wide `AP_FLOW_AI_PROVIDER`; a second Drive folder or a second connected Google account per organization (**addressed in 19.3** — many purposed folders per connection are now supported, though still one connection per org); OAuth application verification with Google (**side-stepped in 19.3** — a service-account connection needs no Google review at all; the retained OAuth path still carries this gap); Drive push notifications, still true today — polling only, no public HTTPS endpoint exists for this dev setup to receive one; an outbox event or webhook firing on an import, still true today. Not built by Phase 19.1: retention or partitioning on `ai_model_calls` despite unbounded growth (the same accepted posture `audit_logs` already carries); a cached-input pricing rate distinct from the plain input rate (irrelevant today since AP-Flow sends no `cache_control`, but a real over-estimate the moment prompt caching is introduced — `config/aiPricing.ts` says so).
+Not built by Phase 19.2, **as it shipped that day** — several of these were addressed by Phase 19.3's rework, noted inline: per-org AI provider choice, still true today — Drive-imported files use the same one server-wide `CAPTURE_AI_PROVIDER`; a second Drive folder or a second connected Google account per organization (**addressed in 19.3** — many purposed folders per connection are now supported, though still one connection per org); OAuth application verification with Google (**side-stepped in 19.3** — a service-account connection needs no Google review at all; the retained OAuth path still carries this gap); Drive push notifications, still true today — polling only, no public HTTPS endpoint exists for this dev setup to receive one; an outbox event or webhook firing on an import, still true today. Not built by Phase 19.1: retention or partitioning on `ai_model_calls` despite unbounded growth (the same accepted posture `audit_logs` already carries); a cached-input pricing rate distinct from the plain input rate (irrelevant today since AP-Flow sends no `cache_control`, but a real over-estimate the moment prompt caching is introduced — `config/aiPricing.ts` says so).
 
 Also not built: editing an extracted amount (only the account per line is editable — a wrong number is fixed by re-extracting, which discards prior overrides); un-posting or reversing from AP-Flow's own side (correction is LedgerCore's `POST /journals/:id/reverse`, reached from the linked journal entry — `POSTED` has no outbound edge in AP-Flow's own FSM); an outbox event or webhook firing on a posting; open-item or partial-document posting; duplicate-invoice detection; a measured PII-detection recall figure (the honest claim stays "redaction pipeline implemented," never "PII cannot leak" — see the redaction section above); handwriting or non-English OCR; multi-document PDF splitting; and re-extraction history (a re-extract replaces the prior attempt in `ap_flow_extractions`, and now also its materialized line items; only `audit_logs` remembers either existed).
 

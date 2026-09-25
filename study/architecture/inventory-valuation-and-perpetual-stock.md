@@ -34,7 +34,7 @@ Ind AS 2 (and IFRS's IAS 2) permit FIFO and weighted average for fungible invent
 
 ### The valuation-order gap
 
-Every movement is valued in **processing order**, using whatever the balance says *at that moment* — never re-ordered by `occurred_on`. Post a receipt dated last week, after three issues have already happened this week: those three issues were valued against the balance as it stood before the late receipt existed, and they are not retroactively re-priced. This is a deliberate, named gap (not silently wrong — the header comment in `movementService.ts` and `docs/stock.md` both say so): a fully correct system would need to replay every movement after the earliest back-dated one in date order, recomputing every downstream balance and value — expensive, and StockLedger doesn't do it. A user who consistently back-dates receipts after issuing against them will see a small, understood distortion in valuation, not a crash or a silently wrong invariant (the balance quantity is still exactly right; only which value each *historical* movement carries can drift from what a perfectly-ordered replay would have produced).
+Every movement is valued in **processing order**, using whatever the balance says *at that moment* — never re-ordered by `occurred_on`. Post a receipt dated last week, after three issues have already happened this week: those three issues were valued against the balance as it stood before the late receipt existed, and they are not retroactively re-priced. This is a deliberate, named gap (not silently wrong — the header comment in `movementService.ts` and `docs/inventory.md` both say so): a fully correct system would need to replay every movement after the earliest back-dated one in date order, recomputing every downstream balance and value — expensive, and StockLedger doesn't do it. A user who consistently back-dates receipts after issuing against them will see a small, understood distortion in valuation, not a crash or a silently wrong invariant (the balance quantity is still exactly right; only which value each *historical* movement carries can drift from what a perfectly-ordered replay would have produced).
 
 ### Negative stock, refused twice
 
@@ -73,10 +73,10 @@ COGS is unknowable until the stock ledger says what the units cost, so the **ord
 ## Where it lives in this codebase
 
 - `server/src/utils/stockValuation.ts` — `receiptValueCents`, `outflowValueCents`, `averageUnitCostCents`
-- `server/src/services/stock/movementService.ts` — the four movement-type handlers, each deciding which valuation applies
+- `server/src/services/inventory/movementService.ts` — the four movement-type handlers, each deciding which valuation applies
 - `server/src/db/migrations/067_stock_movements.sql` — the append-only trigger, the `quantity_milli >= 0` CHECK, `stock_balances`
 - `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements` and (Phase 32) `checkStockMovementsReconcileWithGl`
-- `server/src/services/stock/documentStockService.ts` — receive/issue/reverse for invoice and bill lines; `stockGlService.ts` — journals for manual movements; `movementService.reverseMovementsOnClient` — the void value rules
+- `server/src/services/inventory/documentStockService.ts` — receive/issue/reverse for invoice and bill lines; `stockGlService.ts` — journals for manual movements; `movementService.reverseMovementsOnClient` — the void value rules
 - `server/src/db/migrations/072_stock_ledger_link.sql` — provenance columns, reversal types, single-reversal index
 
 ## Gotchas

@@ -1,11 +1,11 @@
 # API Reference
 
-**Built: `/health`, `/auth`, `/organizations`, `/apps`, `/audit-logs`, `/ai-usage`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/integrations`, `/ledger-core`, `/ap-flow`, `/stock`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
+**Built: `/health`, `/auth`, `/organizations`, `/audit-logs`, `/ai-usage`, `/webhooks`, `/webhook-deliveries`, `/onboarding`, `/documents`, `/integrations`, the accounting resources at the root (`/accounts`, `/journals`, `/invoices`, `/bills`, …), `/inventory`, `/capture`.** Everything below the *Built* section is the planned surface. Document each route here as it lands, and keep this file verified against `server/src/routes/`.
 
 ## Conventions
 
 - All routes prefixed `/api/v1/`. The prefix is declared once, in `server/src/config/constants.ts`, and applied in `app.ts`; every router mounts on the shared `apiRouter` in `server/src/routes/index.ts`.
-- **Platform routes are app-less:** `/auth`, `/organizations`, `/apps`, `/health`. **App routes are namespaced:** `/api/v1/<app-slug>/<module>`, e.g. `/api/v1/ledger-core/journals`. The slugs are the single source of truth in `server/src/config/apps.ts` — see [architecture.md](architecture.md#suite-structure).
+- **One product, one namespace (Phase 33).** Platform routes (`/auth`, `/organizations`, `/health`, `/onboarding`, `/documents`, …) and the accounting module's resources (`/accounts`, `/journals`, `/invoices`, `/bills`, `/items`, `/settings`, `/reports`, …) sit directly under `/api/v1`. Two modules keep a prefix because their resource names would otherwise collide: **inventory** at `/api/v1/inventory/*` (its own `/items`, `/settings`) and **capture** (the bill inbox) at `/api/v1/capture/*` (its `/documents` sits beside the vault's). Until Phase 33 every app had its own prefix (`/ledger-core`, `/stock`, `/ap-flow`); those prefixes, `/apps` and `/organizations/apps` now answer `404`. See [architecture.md](architecture.md).
 - From Phase 1, every route except `/auth/*` and `/health` requires the `auth` middleware.
 - Success: `{ success: true, ... }`. List endpoints add `count`, `totalCount`, `currentPage`, `totalPages`.
 - Pagination defaults to `page=1&limit=20`, `limit` capped at 100.
@@ -141,8 +141,6 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | GET | `/` | any member | The caller's active organization |
 | GET | `/members` | `OWNER`, `ADMIN` | Everyone in the active organization |
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
-| GET | `/apps` | any member | Every app, flagged enabled or not for the active organization — Phase 27 |
-| PUT | `/apps` | `OWNER`, `ADMIN` | Replace the organization's enabled-app set — Phase 27 |
 | GET | `/profile` | any member | The organization's postal identity — address, contact details, logo — Phase 30 |
 | PATCH | `/profile` | `OWNER`, `ADMIN` | Edit the organization's postal identity; creates the row on first write — Phase 30 |
 
@@ -150,65 +148,21 @@ The active organization comes **only** from the verified access token. `orgId` i
 
 `/members` is `OWNER`/`ADMIN` only because it exposes every colleague's email address. Other roles get `403`, which the client renders as an explanatory notice rather than an error.
 
-`PATCH /` (Phase 3.5) is the platform half of LedgerCore's onboarding — organization name and `base_currency` are platform fields, not LedgerCore ones, so they are edited here rather than under `/ledger-core/settings`. Phase 3.8 adds `taxNumber` and `businessNumber` (each `string | null`, max 64 chars) — a business's tax and legal-entity registration numbers, also platform fields since they identify the legal entity rather than any one app. Whether they print on a LedgerCore invoice is a separate, app-owned choice — see `/ledger-core/settings/invoicing`'s `showTaxNumber`/`showBusinessNumber`. All fields optional, at least one required (`400 No fields to update`).
+`PATCH /` (Phase 3.5) is the platform half of accounting's onboarding — organization name and `base_currency` are platform fields, not accounting ones, so they are edited here rather than under `/settings`. Phase 3.8 adds `taxNumber` and `businessNumber` (each `string | null`, max 64 chars) — a business's tax and legal-entity registration numbers, also platform fields since they identify the legal entity rather than any one app. Whether they print on a accounting invoice is a separate, app-owned choice — see `/settings/invoicing`'s `showTaxNumber`/`showBusinessNumber`. All fields optional, at least one required (`400 No fields to update`).
 
-**The base-currency lock (Phase 9a).** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` here returns `422 Base currency cannot be changed once journal entries exist` — the identical message and status `POST /ledger-core/settings/onboarding` has always returned (see the LedgerCore Settings section below). Before Phase 9a this route had no such check, leaving a gap where a base-currency change could bypass the lock entirely; the guard and the write now run inside one transaction here too. Re-submitting the *same* currency is always accepted.
-
-**App selection (Phase 27).** `GET /apps` returns every app in registry order, each extended with `enabled` and `enabledAt`, plus `selectionCompletedAt` — when the org last saved its selection (the `'platform'` onboarding row's `completed_at`), or `null` if it never has, which is what sends the client to `/welcome`:
-
-```json
-{
-  "success": true,
-  "selectionCompletedAt": "2026-09-22T10:00:00.000Z",
-  "count": 3,
-  "apps": [
-    { "slug": "ledger-core", "name": "LedgerCore", "…": "every /api/v1/apps field", "requires": [], "enabled": true, "enabledAt": "2026-09-22T10:00:00.000Z" },
-    { "slug": "ap-flow", "name": "AP-Flow", "…": "…", "requires": ["ledger-core"], "enabled": false, "enabledAt": null }
-  ]
-}
-```
-
-`PUT /apps` takes `{ "appSlugs": string[] }` (1–20 entries, each 1–40 chars; else `400`) and **replaces** the whole set, returning the same shape with `200`. Duplicates are collapsed. `422` for `Unknown app "<slug>"`, `<App> is not available yet` (a `planned` app), or `<App> requires <App>` (a `requires` entry missing from the same set — e.g. `AP-Flow requires LedgerCore`). An app that stays enabled keeps its original `enabledAt`. Removing an app deletes nothing but its selection row. Every save also marks the `'platform'` onboarding row `COMPLETED`, in the same transaction. **This is visibility, not access control:** a disabled app's own routes still answer — the client hides the app and redirects away from its URL.
+**The base-currency lock (Phase 9a).** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` here returns `422 Base currency cannot be changed once journal entries exist` — the identical message and status `POST /settings/onboarding` has always returned (see the accounting Settings section below). Before Phase 9a this route had no such check, leaving a gap where a base-currency change could bypass the lock entirely; the guard and the write now run inside one transaction here too. Re-submitting the *same* currency is always accepted.
 
 **Organization profile (Phase 30).** `GET /profile` is open to any member — the invoice document renders it, and a `VIEWER` can open an invoice. A missing `organization_profiles` row is **not** a `404`: it returns `200` with every field `null` (`postalSameAsStreet: true`) and `configured: false`. `PATCH /profile`, `OWNER`/`ADMIN` only, upserts the row and returns `configured: true`. Body (all optional, at least one required — `400 No fields to update`): `legalName`, `industry` (free text, no fixed list), `streetAddress1`/`streetAddress2`, `city`, `region`, `postalCode`, `countryCode` (2-letter, case-insensitive on write, stored upper-case), `postalSameAsStreet` (boolean — when `true`, the six `postal*` fields are ignored by the renderer, not cleared), `postalAddress1`/`postalAddress2`/`postalCity`/`postalRegion`/`postalPostalCode`/`postalCountryCode`, `phone`, `contactEmail` (lowercased on write, rule 9), `website`, `logoDocumentId` (a `documents.id` — must belong to the caller's organization).
 
 Failure paths: `400` from the schema (e.g. a `countryCode` that isn't 2 letters) · `400 No fields to update` · `401` no session · `403` non-`OWNER`/`ADMIN` on `PATCH` · `422 Logo document does not exist in this organization` (`logoDocumentId` missing or belongs to another tenant — the composite FK `fk_organization_profiles_logo_document` rejects it) · `422` any other CHECK violation (e.g. a blank `legalName`).
 
-`legalName` and `industry` are **also** readable/writable through `GET`/`PATCH /ledger-core/settings` (they round-trip as part of `LedgerSettings`, unchanged in shape) — `settingsService` delegates those two fields to `organizationProfileService` under the hood as of Phase 30; see [schema.md § Phase 30](schema.md#phase-30--organization-profile--invoice-templates-platform--ledgercore--applied). A `PATCH /ledger-core/settings` body containing only `legalName`/`industry` (no `ledger_settings` column) still returns the same `409 Complete LedgerCore onboarding before changing settings` as every other settings write until onboarding has completed once — the profile itself stays editable before onboarding through `PATCH /organizations/profile` directly.
-
----
-
-### Apps — `/api/v1/apps`
-
-| Method | Path | Auth | Description |
-|---|---|---|---|
-| GET | `/` | any member | The suite's app registry |
-
-```json
-{
-  "success": true,
-  "count": 3,
-  "apps": [
-    {
-      "slug": "ledger-core",
-      "name": "LedgerCore",
-      "domain": "Core Accounting & Systems",
-      "tagline": "Double-entry ledger, multi-currency, QuickBooks sync.",
-      "skills": ["Double-entry integrity", "DB constraints", "Multi-currency", "QuickBooks API sync"],
-      "status": "building",
-      "requires": []
-    }
-  ]
-}
-```
-
-Not role-gated — every member of an organization may see which apps exist. `status` is `"building"` (has real routes) or `"planned"` (roadmap only); the client uses it to decide whether a card is a link or a disabled placeholder. `requires` (Phase 27) lists the slugs an app reads from or posts to; AP-Flow requires `ledger-core` — LedgerCore and StockLedger (Phase 28) both require nothing, `requires: []`. This is the static registry — every organization sees the same three apps here; which ones an organization has *enabled* is `GET /organizations/apps` above. See [roadmap.md](roadmap.md#app-map).
+`legalName` and `industry` are **also** readable/writable through `GET`/`PATCH /settings` (they round-trip as part of `LedgerSettings`, unchanged in shape) — `settingsService` delegates those two fields to `organizationProfileService` under the hood as of Phase 30; see [schema.md § Phase 30](schema.md#phase-30--organization-profile--invoice-templates-platform--ledgercore--applied). A `PATCH /settings` body containing only `legalName`/`industry` (no `ledger_settings` column) still returns the same `409 Complete setup before changing settings` as every other settings write until onboarding has completed once — the profile itself stays editable before onboarding through `PATCH /organizations/profile` directly.
 
 ---
 
 ### Audit trail — `/api/v1/audit-logs` — Phase 5
 
-Platform-level, not namespaced under any app slug — the trail spans every app, and `appSlug` on each row carries the namespace instead (guardrails rule 16). Rows are written only by database triggers (migrations 017/018); there is no `POST`, `PATCH`, `PUT` or `DELETE` on this resource, and there never will be.
+Platform-level — the trail spans every module, and `module` on each row names the one that wrote it (a frozen provenance tag from `server/src/config/modules.ts`: `ledger-core` = accounting, `ap-flow` = capture, `stock` = inventory, or `platform`; guardrails rule 16). Rows are written only by database triggers (migrations 017/018); there is no `POST`, `PATCH`, `PUT` or `DELETE` on this resource, and there never will be.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -217,7 +171,7 @@ Platform-level, not namespaced under any app slug — the trail spans every app,
 
 Deliberately narrower than every other read endpoint in this codebase (`/reports`, `/fiscal-periods` are open to any member): the trail records who did what, including an `ACCOUNTANT`'s own actions, so it is a control surface rather than a report.
 
-`GET /` query parameters, all optional: `page`, `limit` (caps at 100, same as every other list endpoint) · `appSlug` (`platform` or an app slug from `config/apps.ts`) · `tableName` (exact match) · `rowId` (UUID) · `operation` (`INSERT`/`UPDATE`/`DELETE`) · `actorUserId` (UUID) · `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD`.
+`GET /` query parameters, all optional: `page`, `limit` (caps at 100, same as every other list endpoint) · `module` (`platform` or a module tag from `config/modules.ts`) · `tableName` (exact match) · `rowId` (UUID) · `operation` (`INSERT`/`UPDATE`/`DELETE`) · `actorUserId` (UUID) · `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD`.
 
 ```json
 {
@@ -230,7 +184,7 @@ Deliberately narrower than every other read endpoint in this codebase (`/reports
     {
       "id": "412",
       "txid": "918273",
-      "appSlug": "ledger-core",
+      "module": "ledger-core",
       "tableName": "invoices",
       "rowId": "b6b6...",
       "operation": "UPDATE",
@@ -255,13 +209,13 @@ Failure paths: `400 operation must be one of INSERT, UPDATE, DELETE` · `403` fo
 
 ### AI usage — `/api/v1/ai-usage` — Phase 19.1
 
-Platform-level, not namespaced under any app slug — every app that calls a model records here (`app_slug` on the row carries the namespace, guardrails rule 16), the same convention `/audit-logs` uses. Unlike the audit trail, this is **open to every member**, `VIEWER` included: token spend is operational telemetry about the organization's own processing, the same class of thing `/ledger-core/reports` is, not a control surface. There is no write route on this resource, now or ever — rows are written only by `aiUsageService.recordCall`, called from inside a service (currently AP-Flow's extraction/classification pipeline).
+Platform-level — every module that calls a model records here (`app_slug` on the row, exposed as `module`, carries the provenance tag; guardrails rule 16), the same convention `/audit-logs` uses. Unlike the audit trail, this is **open to every member**, `VIEWER` included: token spend is operational telemetry about the organization's own processing, the same class of thing `/reports` is, not a control surface. There is no write route on this resource, now or ever — rows are written only by `aiUsageService.recordCall`, called from inside a service (currently capture's extraction/classification pipeline).
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | any member | Aggregate token/cost usage — totals, and grouped by model, by app, by purpose, and by day |
 
-`GET /` query parameters, all optional: `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD` · `appSlug` (an app slug from `config/apps.ts`).
+`GET /` query parameters, all optional: `from` / `to` — inclusive `created_at` date bounds, `YYYY-MM-DD` · `module` (a module tag from `config/modules.ts`).
 
 ```json
 {
@@ -278,7 +232,7 @@ Platform-level, not namespaced under any app slug — every app that calls a mod
       "unpricedCallCount": 3
     },
     "byModel": [{ "key": "claude-sonnet-5", "provider": "anthropic", "callCount": 39, "...": "..." }],
-    "byApp": [{ "key": "ap-flow", "provider": null, "callCount": 42, "...": "..." }],
+    "byModule": [{ "key": "ap-flow", "provider": null, "callCount": 42, "...": "..." }],
     "byPurpose": [{ "key": "EXTRACT", "provider": null, "callCount": 30, "...": "..." }],
     "byDay": [{ "date": "2026-09-17", "callCount": 12, "...": "..." }],
     "pricingVersion": "2026-06-24"
@@ -288,9 +242,9 @@ Platform-level, not namespaced under any app slug — every app that calls a mod
 
 `costMicroUsd` is millionths of one US dollar (see `utils/microUsd.ts`) — operational AI spend, never ledger money, and never in `utils/money.ts`'s `Cents`. `totals.costMicroUsd` sums only rows whose model carried a verified price in `config/aiPricing.ts` at the time of the call; `unpricedCallCount` is how many rows were excluded from that sum, so a client can say plainly that some spend is not represented in the total rather than silently understating it. A model with no verified price still contributes its real token counts to `inputTokens`/`outputTokens`/`totalTokens`.
 
-Failure paths: `400 from must be a date in YYYY-MM-DD format` · `400 to must be a date in YYYY-MM-DD format` · `400 appSlug must be at most 50 characters` · `401`.
+Failure paths: `400 from must be a date in YYYY-MM-DD format` · `400 to must be a date in YYYY-MM-DD format` · `400 module must be at most 50 characters` · `401`.
 
-`GET /ap-flow/documents/:id` (below) also carries `modelCalls: AiModelCall[]` — every metered call attributed to that one document, via `aiUsageService.listCallsForEntity`, never a direct join into `ai_model_calls` from AP-Flow's own query (rule 16).
+`GET /capture/documents/:id` (below) also carries `modelCalls: AiModelCall[]` — every metered call attributed to that one document, via `aiUsageService.listCallsForEntity`, never a direct join into `ai_model_calls` from capture's own query (rule 16).
 
 See [study/architecture/metering-and-cost-attribution.md](../study/architecture/metering-and-cost-attribution.md).
 
@@ -406,22 +360,22 @@ Resumable, skippable setup-wizard state, one row per `(org, app)` plus a `'platf
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | any member | The checklist — one item per app in the registry plus `'platform'`, a missing row reads as `NOT_STARTED` |
-| GET | `/:appSlug` | any member | One app's onboarding state |
-| PUT | `/:appSlug/draft` | `OWNER`, `ADMIN` | Upsert the current step and draft; moves to `IN_PROGRESS` |
-| POST | `/:appSlug/skip` | `OWNER`, `ADMIN` | Upsert to `SKIPPED`; the draft is preserved |
-| POST | `/:appSlug/resume` | `OWNER`, `ADMIN` | Upsert to `IN_PROGRESS`; legal from `SKIPPED` or `COMPLETED` |
+| GET | `/:module` | any member | One setup task's onboarding state |
+| PUT | `/:module/draft` | `OWNER`, `ADMIN` | Upsert the current step and draft; moves to `IN_PROGRESS` |
+| POST | `/:module/skip` | `OWNER`, `ADMIN` | Upsert to `SKIPPED`; the draft is preserved |
+| POST | `/:module/resume` | `OWNER`, `ADMIN` | Upsert to `IN_PROGRESS`; legal from `SKIPPED` or `COMPLETED` |
 
-`:appSlug` is a routing target validated against `config/apps.ts` (plus `'platform'`), never a tenancy boundary — `orgId` from the verified access token is still the only scope predicate. Every write is an upsert; there is no 409 for "you already started." `draft` is untrusted JSON — bound as one JSONB parameter, never spread into a query, and re-parsed through the target app's own schema when that app's own completion route (e.g. `POST /ledger-core/settings/onboarding`) runs. Completion is not a route here — each app's own wizard-completer calls `markCompletedOnClient` on its own transaction, so the app's data and its onboarding row commit together.
+`:module` is a setup task's module tag (`ledger-core` for accounting, `stock` for the optional inventory step; anything else, including the retired `platform`, is `404`), never a tenancy boundary — `orgId` from the verified access token is still the only scope predicate. Every write is an upsert; there is no 409 for "you already started." `draft` is untrusted JSON — bound as one JSONB parameter, never spread into a query, and re-parsed through the target app's own schema when that app's own completion route (e.g. `POST /settings/onboarding`) runs. Completion is not a route here — each app's own wizard-completer calls `markCompletedOnClient` on its own transaction, so the app's data and its onboarding row commit together.
 
 Failure paths: `400` from the schema · `403` for anything below `OWNER`/`ADMIN` on a write · `404 Unknown app` for a slug not in the registry · `409 Cannot move onboarding from <FROM> to <TO>` for an illegal transition (e.g. skip after already `COMPLETED` — completion only ever moves back to `IN_PROGRESS`, never to `SKIPPED`).
 
 ---
 
-### LedgerCore — `/api/v1/ledger-core` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅, Phase 6 ✅, Phase 8 ✅, Phase 9b ✅, Phase 24 ✅
+### Accounting — `/api/v1` — Phase 3 ✅, Phase 3.5 ✅, Phase 3.8 ✅, Phase 6 ✅, Phase 8 ✅, Phase 9b ✅, Phase 24 ✅
 
-Full feature spec and the remaining phases: [ledger-core.md](ledger-core.md).
+Full feature spec and the remaining phases: [accounting.md](accounting.md).
 
-#### Accounts — `/api/v1/ledger-core/accounts`
+#### Accounts — `/api/v1/accounts`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -446,7 +400,7 @@ Every new organization is seeded with the [44-account default chart](schema.md#d
 
 **`GET /:id/ledger`** (Phase 3.6) — the standard "account detail" view. Balances are type-aware, matching the trial balance's `netBalanceCents`: debit-positive for Asset and Expense, credit-positive otherwise. Rows are oldest-first; `runningBalanceCents` is a window function over the full filtered set, so it continues correctly across pages rather than restarting per page. Every figure is aggregated from raw `ledger_lines` on every request — no summary table. Header accounts are refused: `422 Account <code> is a header account and has no ledger of its own`. Other failure paths: `404 Account not found` · `400 <name> must be a date in YYYY-MM-DD format`.
 
-#### Journals — `/api/v1/ledger-core/journals`
+#### Journals — `/api/v1/journals`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -457,7 +411,7 @@ Every new organization is seeded with the [44-account default chart](schema.md#d
 
 **No `PUT`, no `DELETE`, at any phase** — rule 6. A database trigger rejects the write with SQLSTATE `0A000` even if such a route were added by mistake.
 
-`sourceType` and `sourceId` are **not accepted from the request body**; a client-posted entry is always `'manual'`. Another app posting into the GL passes them service-to-service, so no caller can forge an entry claiming to have come from AP-Flow.
+`sourceType` and `sourceId` are **not accepted from the request body**; a client-posted entry is always `'manual'`. Another app posting into the GL passes them service-to-service, so no caller can forge an entry claiming to have come from capture.
 
 **`GET /` query parameters** (Phase 3.6), all optional: `page`, `limit` (caps at 100, same as every other list endpoint) · `from` / `to` — inclusive `entry_date` bounds, `YYYY-MM-DD` · `accountId` — only entries with at least one line on this account · `sourceType` — exact match · `q` — case-insensitive substring match on `description`. `totalCount` and `totalPages` reflect the applied filters, not the whole table.
 
@@ -467,7 +421,7 @@ Failure paths: `400` from the schema (fewer than two lines, a line with both sid
 
 **Control accounts refuse manual journals (Phase 25).** `POST /` rejects any line on the receivable control account (`ledger_invoice_settings.receivableAccountId`, falling back to the postable default-chart `1120`) or the payable control account (`ledger_settings.payableAccountId`, falling back to `2100`). A journal line names no customer or vendor, so it could only ever break the tie between a party's subledger and the control account (`/reports/ar-aging`'s `reconciles`). Documents (invoice issue/void, bill approve/void, payments, FX revaluation) still post there through the service-to-service path, which this check does not apply to. `POST /:id/reverse` is **not** refused: reversing a pre-Phase-25 manual entry on a control account can only restore agreement.
 
-#### Reports — `/api/v1/ledger-core/reports`
+#### Reports — `/api/v1/reports`
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -483,7 +437,7 @@ Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invo
 
 **`/profit-and-loss`** returns `{ from, to, revenue, costOfSales, grossProfitCents, operatingExpenses, netIncomeCents }`, each of `revenue`/`costOfSales`/`operatingExpenses` a `{ rows, totalCents }` section. Only accounts with activity in the window appear (an `INNER JOIN`, unlike the trial balance's `LEFT JOIN`, which lists every account including zero-activity ones). COGS is the `5xxx` code range — not a sixth account type. `422 from must not be after to`.
 
-**`/balance-sheet`** returns `{ asOf, fiscalYearStartDate, assets, liabilities, equity, totalLiabilitiesAndEquityCents, balances }`. `equity` extends the `{ rows, totalCents }` shape with `retainedEarningsCents` (every prior fiscal year's net income) and `currentEarningsCents` (this fiscal year's, up to `asOf`) — both **derived on every read**, never stored, because LedgerCore posts no year-end closing entry. `equity.totalCents` already includes both derived figures on top of the posted equity rows. `balances` is `assets.totalCents === totalLiabilitiesAndEquityCents`, integer equality.
+**`/balance-sheet`** returns `{ asOf, fiscalYearStartDate, assets, liabilities, equity, totalLiabilitiesAndEquityCents, balances }`. `equity` extends the `{ rows, totalCents }` shape with `retainedEarningsCents` (every prior fiscal year's net income) and `currentEarningsCents` (this fiscal year's, up to `asOf`) — both **derived on every read**, never stored, because accounting posts no year-end closing entry. `equity.totalCents` already includes both derived figures on top of the posted equity rows. `balances` is `assets.totalCents === totalLiabilitiesAndEquityCents`, integer equality.
 
 `/dashboard` (Phase 3.5) is not the Phase 4 balance sheet — it exposes `currentEarningsCents` (Revenue − Expenses, all time) alongside `assetsCents`/`liabilitiesCents`/`equityCents` and an `equationHolds` flag, because Assets = Liabilities + Equity only holds once current-period earnings are folded in. `position.cashCents` is `null` when no cash account is configured in settings; when configured, it sums the account's whole subtree via a recursive walk. `trend` is always exactly 6 points, oldest first, gap-filled so a month with no postings still appears at zero. Phase 3.9 adds `receivables`/`payables`, each carrying `outstandingCents`, `overdueCents`, `draftCount`/`draftCents`, and a 5-bucket aging series identical in shape to `/ar-aging`/`/ap-aging`'s `buckets`; `payables` additionally carries `awaitingReviewCount`/`awaitingReviewCents` — bills entered but not yet approved, **not** an employee expense-claim inbox (AutoLedger has no such document).
 
@@ -495,11 +449,11 @@ Aggregated from raw `ledger_lines` (and, for `/ar-aging`/`/ap-aging`, from `invo
 
 Failure paths: `400 asOf must be a date in YYYY-MM-DD format` · `400 from/to must be a date in YYYY-MM-DD format` · `422 from must not be after to` (`/profit-and-loss` only).
 
-#### Settings — `/api/v1/ledger-core/settings` — Phase 3.5
+#### Settings — `/api/v1/settings` — Phase 3.5
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | any member | LedgerCore's onboarding/settings state for the active organization |
+| GET | `/` | any member | accounting's onboarding/settings state for the active organization |
 | POST | `/onboarding` | `OWNER`, `ADMIN` | Complete (or re-complete) onboarding: workspace name, currency, fiscal year, cash account |
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit settings after onboarding |
 
@@ -509,15 +463,15 @@ A missing `ledger_settings` row is **not** a 404 — `GET /` returns `200` with 
 
 **The base-currency lock.** Once any `ledger_lines` row exists for the organization, submitting a *different* `baseCurrency` to `POST /onboarding` returns `422` (`Base currency cannot be changed once journal entries exist`) — `ledger_lines.currency_code` is stamped at write time on rows that are immutable by trigger, so a retroactive change would silently invalidate every posted line. Re-submitting the *same* currency is always accepted. `settings.baseCurrencyLocked` tells the client when to disable the field. **As of Phase 9a, `PATCH /organizations` enforces the identical lock** (see the Organizations section above) — the two doors can no longer disagree.
 
-Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete LedgerCore onboarding before changing settings` (PATCH only).
+Failure paths: `400` from the schema (missing/invalid field, unsupported currency) · `422 Base currency cannot be changed once journal entries exist` · `422 Cash account does not exist in this organization` (also returned for a cash account belonging to another organization) · `409 Complete setup before changing settings` (PATCH only).
 
-Phase 7 adds `unmatchedAlertThresholdCents` (integer cents, `PATCH` only, `≥ 0`) — the minimum absolute value of an unmatched bank line's `amountCents` that fires a `bank.large_unmatched` webhook event on import. Defaults to `0`, which means **disabled**: every organization starts with no alerting, and existing organizations are unaffected by the migration that added the column. See [ledger-core.md#webhooks-for-financial-events--phase-7](ledger-core.md#webhooks-for-financial-events--phase-7--delivered).
+Phase 7 adds `unmatchedAlertThresholdCents` (integer cents, `PATCH` only, `≥ 0`) — the minimum absolute value of an unmatched bank line's `amountCents` that fires a `bank.large_unmatched` webhook event on import. Defaults to `0`, which means **disabled**: every organization starts with no alerting, and existing organizations are unaffected by the migration that added the column. See [ledger-core.md#webhooks-for-financial-events--phase-7](accounting.md#webhooks-for-financial-events--phase-7--delivered).
 
 Phase 8 adds `realizedFxGainAccountId`/`realizedFxLossAccountId`/`unrealizedFxAccountId` (each `PATCH`-only, a UUID or `null`) — the posting accounts `paymentService`'s realized-FX plug and (once it lands) period-end revaluation use. `null` (the default) falls back to chart codes `4910`/`6810`/`6820`.
 
-This module only stores a fiscal-year *setting*; period rows themselves — `fiscal_periods`, close/lock, and the posting guard — are a separate module, `/api/v1/ledger-core/fiscal-periods` (Phase 4, below).
+This module only stores a fiscal-year *setting*; period rows themselves — `fiscal_periods`, close/lock, and the posting guard — are a separate module, `/api/v1/fiscal-periods` (Phase 4, below).
 
-#### Fiscal periods — `/api/v1/ledger-core/fiscal-periods` — Phase 4
+#### Fiscal periods — `/api/v1/fiscal-periods` — Phase 4
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -534,9 +488,9 @@ The close/lock lifecycle is a three-state FSM (`OPEN -> CLOSED -> LOCKED`, plus 
 
 Posting a journal entry (manual, or via invoice issuance, bill approval, or a payment) dated inside a `CLOSED` or `LOCKED` period is rejected with `422` by `journalService`, and independently by a database trigger (migration 016) that fires regardless of what wrote the row. See [study/postgresql/exclusion-constraints-and-gist.md](../study/postgresql/exclusion-constraints-and-gist.md) for the `EXCLUDE USING GIST` constraint that makes two overlapping periods in one organization physically impossible.
 
-Failure paths: `400 status must be one of OPEN, CLOSED, LOCKED` · `404 Fiscal period not found` · `409 Complete LedgerCore onboarding before generating fiscal periods` · `409 A fiscal period already overlaps this fiscal year` · `409 Cannot close/reopen/lock a <status> period` (the FSM rejection, naming the actual blocking state) · `422 The fiscal period covering <date> is closed/locked; reopen it or post to an open period` (from any endpoint that posts a journal entry).
+Failure paths: `400 status must be one of OPEN, CLOSED, LOCKED` · `404 Fiscal period not found` · `409 Complete setup before generating fiscal periods` · `409 A fiscal period already overlaps this fiscal year` · `409 Cannot close/reopen/lock a <status> period` (the FSM rejection, naming the actual blocking state) · `422 The fiscal period covering <date> is closed/locked; reopen it or post to an open period` (from any endpoint that posts a journal entry).
 
-#### Invoice settings — `/api/v1/ledger-core/settings/invoicing` — Phase 3.8
+#### Invoice settings — `/api/v1/settings/invoicing` — Phase 3.8
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -547,11 +501,11 @@ A missing `ledger_invoice_settings` row is **not** a 404 — `GET /` returns `20
 
 `receivableAccountId`, `defaultRevenueAccountId`, and `taxPayableAccountId` are optional overrides — when unset, issuing an invoice falls back to the default chart's `1120`/`4100`-per-line/`2140`. Each is validated against the org's own chart (composite FK): `422 Account does not exist in this organization` if it points at a foreign or missing account.
 
-**Invoice template fields — Phase 30.** Nine more optional fields on the same `PATCH /`: `templateId` — one of `'classic'`/`'modern'`/`'compact'`, a **closed set of code-defined layouts**, not user-authored markup (`400` for any other value; zod rejects it before it reaches SQL, and the DB CHECK `ck_invoice_settings_template_id` rejects it a second time if the schema is ever bypassed) · `documentTitle` — non-blank, `<= 24` chars, the label printed above the invoice number (default `'INVOICE'`) · `fontFamily` — `'sans'`/`'serif'` · `density` — `'comfortable'`/`'compact'` · `showLogo`/`showOrgAddress`/`showPaymentTerms`/`showDueDate` — booleans, each gating one disclosure block on the rendered document · `bankDetails` — free text, `<= 500` chars, nullable, rendered as its own footer block when set. These render through one shared component, `InvoiceDocument.tsx`, used identically by the real invoice page and the template editor's live preview — see [ledger-core.md § Phase 30](ledger-core.md#phase-30--invoice-templates-organization-profile--settings-tabs--shipped).
+**Invoice template fields — Phase 30.** Nine more optional fields on the same `PATCH /`: `templateId` — one of `'classic'`/`'modern'`/`'compact'`, a **closed set of code-defined layouts**, not user-authored markup (`400` for any other value; zod rejects it before it reaches SQL, and the DB CHECK `ck_invoice_settings_template_id` rejects it a second time if the schema is ever bypassed) · `documentTitle` — non-blank, `<= 24` chars, the label printed above the invoice number (default `'INVOICE'`) · `fontFamily` — `'sans'`/`'serif'` · `density` — `'comfortable'`/`'compact'` · `showLogo`/`showOrgAddress`/`showPaymentTerms`/`showDueDate` — booleans, each gating one disclosure block on the rendered document · `bankDetails` — free text, `<= 500` chars, nullable, rendered as its own footer block when set. These render through one shared component, `InvoiceDocument.tsx`, used identically by the real invoice page and the template editor's live preview — see [ledger-core.md § Phase 30](accounting.md#phase-30--invoice-templates-organization-profile--settings-tabs--shipped).
 
 Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb`, invalid basis points, invalid padding, invalid `templateId`/`fontFamily`/`density`, blank `documentTitle`) · `400 No fields to update` · `422 Account does not exist in this organization`.
 
-#### Customers — `/api/v1/ledger-core/customers` — Phase 3.8
+#### Customers — `/api/v1/customers` — Phase 3.8
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -574,7 +528,7 @@ Failure paths: `400` from the schema (blank name, invalid email) · `400 No fiel
 
 Failure paths: `404 Customer not found` / `404 Vendor not found` (also another org's id) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`/`asOf`).
 
-#### Invoices — `/api/v1/ledger-core/invoices` — Phase 3.8
+#### Invoices — `/api/v1/invoices` — Phase 3.8
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -588,7 +542,7 @@ Failure paths: `404 Customer not found` / `404 Vendor not found` (also another o
 
 An invoice is a sales (accounts-receivable) document. Through Phase 3.8 it was always in the organization's base currency; **Phase 8 lets it carry any currency with a resolvable exchange rate.** `PATCH`/`DELETE` are legal despite rule 6 because they operate only on `DRAFT` rows, which have posted nothing — refused with `409` by the service and with SQLSTATE `0A000` by a database trigger the instant an invoice leaves `DRAFT`. The only correction path once issued is `POST /:id/void`, which posts a reversing journal entry through the same mechanism `POST /journals/:id/reverse` uses.
 
-**`POST /`** — `customerId`, `issueDate`, `dueDate` (`YYYY-MM-DD`, `>= issueDate`, **optional since Phase 24** — required only when `paymentTermsCode` is omitted), `paymentTermsCode` (Phase 24, optional, a `payment_terms.code` — when present and `dueDate` is omitted, the server derives `dueDate = issueDate + term.netDays`; an explicit `dueDate` always wins over the term), `currencyCode` (Phase 8, optional — a `SUPPORTED_CURRENCIES` code; omitted means the organization's base currency), `notes`, `paymentTerms` (a free-text label; when `paymentTermsCode` resolves a term and `paymentTerms` is omitted, the term's own name is stored here), and `lines` (min 1): each line is `description`, `quantityMilli` (thousandths of a unit — `2500` means `2.5`), `unitPriceCents`, `revenueAccountId` (must be a postable `Revenue` account), `taxRateBp` (basis points, default `0`), `itemId` (Phase 24, optional — a `items.id`; recorded on the line but never read by the server to fill any other field, since the client already copies the item's defaults into the line before sending — **except** that from Phase 32 an `itemId` pointing at an `INVENTORY` product makes the line move stock at issue, see below), `stockLocationId` (Phase 32, optional — the StockLedger location an `INVENTORY` line issues stock from; omitted means `stock_settings.default_location_id`; a location on a line that is not an `INVENTORY` item is `422`). The server computes `netCents`/`taxCents` per line and `subtotalCents`/`taxCents`/`totalCents` on the header — the client may not supply totals, a number, a status, or a rate.
+**`POST /`** — `customerId`, `issueDate`, `dueDate` (`YYYY-MM-DD`, `>= issueDate`, **optional since Phase 24** — required only when `paymentTermsCode` is omitted), `paymentTermsCode` (Phase 24, optional, a `payment_terms.code` — when present and `dueDate` is omitted, the server derives `dueDate = issueDate + term.netDays`; an explicit `dueDate` always wins over the term), `currencyCode` (Phase 8, optional — a `SUPPORTED_CURRENCIES` code; omitted means the organization's base currency), `notes`, `paymentTerms` (a free-text label; when `paymentTermsCode` resolves a term and `paymentTerms` is omitted, the term's own name is stored here), and `lines` (min 1): each line is `description`, `quantityMilli` (thousandths of a unit — `2500` means `2.5`), `unitPriceCents`, `revenueAccountId` (must be a postable `Revenue` account), `taxRateBp` (basis points, default `0`), `itemId` (Phase 24, optional — a `items.id`; recorded on the line but never read by the server to fill any other field, since the client already copies the item's defaults into the line before sending — **except** that from Phase 32 an `itemId` pointing at an `INVENTORY` product makes the line move stock at issue, see below), `stockLocationId` (Phase 32, optional — the inventory location an `INVENTORY` line issues stock from; omitted means `stock_settings.default_location_id`; a location on a line that is not an `INVENTORY` item is `422`). The server computes `netCents`/`taxCents` per line and `subtotalCents`/`taxCents`/`totalCents` on the header — the client may not supply totals, a number, a status, or a rate.
 
 **Phase 8 fields on every invoice:** `fxRate` (`NUMERIC(18,8)` as a string — `"1.00000000"` for a base-currency invoice), `baseSubtotalCents`/`baseTaxCents`/`baseTotalCents` (the same totals converted to the organization's base currency). Re-resolved from `fx_rates` on every draft save against `issueDate` — a draft's base total is always honest — and **frozen** again at `issue`, re-resolved for the actual posting date (`entryDate ?? issueDate`), since that is the date that determines the rate a real-world settlement will be compared against. Once issued, `fxRate` never changes again.
 
@@ -604,7 +558,7 @@ Failure paths: `400` from the schema · `400 status must be one of DRAFT, ISSUED
 
 **Not built (as of Phase 3.8):** payment recording, a `PAID` status, AR aging, an AR subledger report, PDF generation, multi-currency invoices. Payment recording, AR aging, and the AR/AP subledger reconciliation **landed in Phase 3.9**; multi-currency invoicing **landed in Phase 8** — see the Payments, Reports, and Exchange rates sections. PDF generation remains unbuilt.
 
-#### Payment terms — `/api/v1/ledger-core/payment-terms` — Phase 24
+#### Payment terms — `/api/v1/payment-terms` — Phase 24
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -618,7 +572,7 @@ Every organization starts with seven standard terms — `DUE_ON_RECEIPT`, `NET_7
 
 Failure paths: `400` from the schema · `400 No fields to update` (PATCH) · `404 Payment term not found` · `409 Payment term code already exists` · `409 A standard payment term cannot be renamed or re-dated — deactivate it and add your own`.
 
-#### Vendors — `/api/v1/ledger-core/vendors` — Phase 3.9
+#### Vendors — `/api/v1/vendors` — Phase 3.9
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -633,7 +587,7 @@ Email is lowercased on write. **There is no DELETE** — a vendor is retired wit
 
 Failure paths: `400` from the schema (blank name, invalid email) · `400 No fields to update` (PATCH) · `404 Vendor not found`. `/:id/ledger` and `/:id/open-items`: see the customers section's Phase 25 note.
 
-#### Bills — `/api/v1/ledger-core/bills` — Phase 3.9
+#### Bills — `/api/v1/bills` — Phase 3.9
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -660,11 +614,11 @@ A bill is a purchase (accounts-payable) document. Through Phase 3.9 it was alway
 
 Every bill also carries `allocatedCents`, `amountDueCents`, and `settlementStatus` (`NOT_APPLICABLE`/`UNPAID`/`PARTIALLY_PAID`/`PAID`/`OVERDUE`) — all **derived** on every read from `POSTED` payment allocations, never stored; `0`/`NOT_APPLICABLE` unless the bill is `POSTED`. **Phase 26** adds `debitedCents` (applied `ISSUED` debit notes); `amountDueCents = totalCents − allocatedCents − debitedCents`, and a bill cannot be voided while an issued debit note is raised against or applied to it (`409 This bill has debit notes. Void the debit notes first.`).
 
-Failure paths: `400` from the schema · `400 status must be one of DRAFT, AWAITING_APPROVAL, POSTED, VOID` · `400 Invalid request body: Provide a due date or a payment term` (neither `dueDate` nor `paymentTermsCode` sent) · `422 A bill needs at least one line` · `422 Due date cannot be before the bill date` · `422 Payment term "<code>" does not exist in this organization` · `422 Payment term "<code>" is inactive` · `422 Vendor not found` (also another org's vendor) · `422 Expense account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> must be an Expense or Asset account` / `422 A referenced account or item does not exist in this organization` (an `itemId` from another organization) · `409 This vendor reference has already been entered for this vendor` · `409 Only a draft or in-review bill can be edited` / `409 Only a draft or in-review bill can be deleted` · `403` approving as anything below `OWNER`/`ADMIN` · `422 No payable account is configured. Set one in settings.` / `422 No tax account is configured. Set one in settings.` (approve only) · `422 No exchange rate for <currency> to <base> on or before <date>` (Phase 8, draft save and approve) · `409 A bill that is <status> cannot be approved` · `409 This bill has already been voided` · **Phase 32 stock paths:** `422 Line N: item <code> is lot-tracked — lot/serial selection on invoice and bill lines is not supported yet; record it in StockLedger` (also `serial-tracked`; at draft save and again at approve) · `422 Line N: item <code> is a fixed asset — capitalising fixed assets on bills is not supported yet` · `422 Line N: a stock location applies only to inventory items` · `422 Choose a stock location for line N` (no line location and no default) · `422 Line N posts to an inventory account that only inventory items may use on a bill` · `422 No inventory account is configured for item <code>. Set one in settings.` / `422 No cost-of-sales account is configured …` · `409 Stock received on this bill has since been issued: only X of item <code> remain at location <loc>` (void only) · `409 This document has payments applied. Void the payments first.` (void only).
+Failure paths: `400` from the schema · `400 status must be one of DRAFT, AWAITING_APPROVAL, POSTED, VOID` · `400 Invalid request body: Provide a due date or a payment term` (neither `dueDate` nor `paymentTermsCode` sent) · `422 A bill needs at least one line` · `422 Due date cannot be before the bill date` · `422 Payment term "<code>" does not exist in this organization` · `422 Payment term "<code>" is inactive` · `422 Vendor not found` (also another org's vendor) · `422 Expense account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> must be an Expense or Asset account` / `422 A referenced account or item does not exist in this organization` (an `itemId` from another organization) · `409 This vendor reference has already been entered for this vendor` · `409 Only a draft or in-review bill can be edited` / `409 Only a draft or in-review bill can be deleted` · `403` approving as anything below `OWNER`/`ADMIN` · `422 No payable account is configured. Set one in settings.` / `422 No tax account is configured. Set one in settings.` (approve only) · `422 No exchange rate for <currency> to <base> on or before <date>` (Phase 8, draft save and approve) · `409 A bill that is <status> cannot be approved` · `409 This bill has already been voided` · **Phase 32 stock paths:** `422 Line N: item <code> is lot-tracked — lot/serial selection on invoice and bill lines is not supported yet; record it in inventory` (also `serial-tracked`; at draft save and again at approve) · `422 Line N: item <code> is a fixed asset — capitalising fixed assets on bills is not supported yet` · `422 Line N: a stock location applies only to inventory items` · `422 Choose a stock location for line N` (no line location and no default) · `422 Line N posts to an inventory account that only inventory items may use on a bill` · `422 No inventory account is configured for item <code>. Set one in settings.` / `422 No cost-of-sales account is configured …` · `409 Stock received on this bill has since been issued: only X of item <code> remain at location <loc>` (void only) · `409 This document has payments applied. Void the payments first.` (void only).
 
 **Not built:** an expense-claim / employee-reimbursement document (there is none, by design — see [roadmap.md § Phase 3.9](roadmap.md#phase-39-as-delivered)), partial void. Credit notes and vendor credits (debit notes) landed in Phase 26 — see the next section.
 
-#### Credit notes — `/api/v1/ledger-core/credit-notes` · Debit notes — `/api/v1/ledger-core/debit-notes` — Phase 26
+#### Credit notes — `/api/v1/credit-notes` · Debit notes — `/api/v1/debit-notes` — Phase 26
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -695,7 +649,7 @@ Failure paths (credit-note wording; the debit-note messages say *debit note*, *b
 
 **Not built:** cash refunds of unapplied credit, bad-debt write-offs, outbox events/webhooks for notes, PDF/email of notes, a settings UI for the `CN-`/`DN-` prefixes.
 
-#### Products & Services (items) — `/api/v1/ledger-core/items` — Phase 24, extended in Phase 32
+#### Products & Services (items) — `/api/v1/items` — Phase 24, extended in Phase 32
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -704,13 +658,13 @@ Failure paths (credit-note wording; the debit-note messages say *debit note*, *b
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create an item |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Edit an item, including retiring it (`isActive: false`) |
 
-**Phase 32 — one product master.** Every item has an `itemType`: `SERVICE` and `NON_INVENTORY` (goods bought or sold but not quantity-tracked, e.g. office supplies) are created here; `INVENTORY` (and, reserved for a later step, `FIXED_ASSET`) are created in StockLedger (`POST /stock/items`), which creates the linked product in the same transaction — `POST /` with either returns `422 Create inventory and asset items in StockLedger — they appear here automatically`. `kind` is derived (`SERVICE` ↔ `SERVICE`, everything else `GOODS`); a create body sends `itemType`, or the Phase 24 `kind` (`GOODS` → `NON_INVENTORY`), and if both are sent they must agree (`400`). Responses carry `itemType`, `kind`, `stockManaged` (`true` for `INVENTORY`/`FIXED_ASSET`), `assetAccountId` and `cogsAccountId`. For a stock-managed item `PATCH` refuses `name`/`isActive` (`422 Edit the name and status of inventory and asset items in StockLedger`) and accepts `assetAccountId` (an `Asset` account) and `cogsAccountId` (an `Expense` account); on any other type those two are refused (`422`). On-hand quantities are **not** on this route — the client reads them from `GET /stock/product-balances`. The description below is otherwise unchanged: picking an item on an invoice or bill line copies its defaults into that line once; the line never reads through to the item afterward, so editing an item after the fact never changes an already-saved line. `code`, `kind` and `itemType` are **not** updatable, matching `accounts` refusing `code`/`type` on a live account. **There is no DELETE** — an item is retired with `isActive: false`.
+**Phase 32 — one product master.** Every item has an `itemType`: `SERVICE` and `NON_INVENTORY` (goods bought or sold but not quantity-tracked, e.g. office supplies) are created here; `INVENTORY` (and, reserved for a later step, `FIXED_ASSET`) are created in inventory (`POST /stock/items`), which creates the linked product in the same transaction — `POST /` with either returns `422 Create inventory and asset items in inventory — they appear here automatically`. `kind` is derived (`SERVICE` ↔ `SERVICE`, everything else `GOODS`); a create body sends `itemType`, or the Phase 24 `kind` (`GOODS` → `NON_INVENTORY`), and if both are sent they must agree (`400`). Responses carry `itemType`, `kind`, `stockManaged` (`true` for `INVENTORY`/`FIXED_ASSET`), `assetAccountId` and `cogsAccountId`. For a stock-managed item `PATCH` refuses `name`/`isActive` (`422 Edit the name and status of inventory and asset items in inventory`) and accepts `assetAccountId` (an `Asset` account) and `cogsAccountId` (an `Expense` account); on any other type those two are refused (`422`). On-hand quantities are **not** on this route — the client reads them from `GET /stock/product-balances`. The description below is otherwise unchanged: picking an item on an invoice or bill line copies its defaults into that line once; the line never reads through to the item afterward, so editing an item after the fact never changes an already-saved line. `code`, `kind` and `itemType` are **not** updatable, matching `accounts` refusing `code`/`type` on a live account. **There is no DELETE** — an item is retired with `isActive: false`.
 
 **`POST /`** — `code` (1–40 chars), `name` (1–200 chars), `description` (optional, ≤500 chars), `kind` (`SERVICE` or `GOODS`), `salePriceCents`/`purchasePriceCents` (optional, integer cents), `revenueAccountId`/`expenseAccountId` (optional — must be a postable `Revenue`/`Expense` account respectively when present), `saleTaxRateBp`/`purchaseTaxRateBp` (basis points, default `0`).
 
 Failure paths: `400` from the schema · `400 No fields to update` (PATCH) · `404 Item not found` · `409 Item code already exists` · `422 Revenue account does not exist in this organization` / `422 Item revenue account must be a Revenue account` / `422 Item revenue account must be postable` (and the `expense` mirrors of each).
 
-#### Payments — `/api/v1/ledger-core/payments` — Phase 3.9
+#### Payments — `/api/v1/payments` — Phase 3.9
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -723,7 +677,7 @@ A payment settles one or more invoices (`direction: 'RECEIVE'`) or one or more b
 
 **`POST /`** — `direction` (`RECEIVE`/`PAY`), `paymentDate`, `amountCents`, `currencyCode` (Phase 8, optional — a `SUPPORTED_CURRENCIES` code; omitted means the organization's base currency), `cashAccountId` (a postable `Asset` account), `customerId` (RECEIVE) or `vendorId` (PAY, the other must be `null`), `method`, `reference`, `notes`, `allocations` (min 1, each `{ invoiceId | billId, amountCents }`, exactly one of `invoiceId`/`billId` per allocation), optional `entryDate`. `allocations[].amountCents` must sum to exactly `amountCents`. Posts one journal entry (`sourceType: 'payment'`, `sourceId: <payment id>`): `RECEIVE` debits the cash account and credits the receivable account; `PAY` debits the payable account and credits the cash account.
 
-**Phase 8 fields on every payment:** `fxRate`, `baseAmountCents`; each allocation also carries `baseAmountCents`. For a base-currency payment these are unchanged from Phase 3.9 (`fxRate: "1.00000000"`, `baseAmountCents === amountCents`) — the GL shape is byte-identical to before. For a foreign-currency payment, the cash line posts at the settlement-date rate and each control line posts at *its own document's frozen rate*; the difference — the imbalance those two rates create in base currency — is posted automatically to `4910 Realized FX Gain` (credit) or `6810 Realized FX Loss` (debit), or omitted entirely when the rates match. See the worked example: [ledger-core.md § 3](ledger-core.md#3-realized-fx--the-worked-example).
+**Phase 8 fields on every payment:** `fxRate`, `baseAmountCents`; each allocation also carries `baseAmountCents`. For a base-currency payment these are unchanged from Phase 3.9 (`fxRate: "1.00000000"`, `baseAmountCents === amountCents`) — the GL shape is byte-identical to before. For a foreign-currency payment, the cash line posts at the settlement-date rate and each control line posts at *its own document's frozen rate*; the difference — the imbalance those two rates create in base currency — is posted automatically to `4910 Realized FX Gain` (credit) or `6810 Realized FX Loss` (debit), or omitted entirely when the rates match. See the worked example: [ledger-core.md § 3](accounting.md#3-realized-fx--the-worked-example).
 
 **`POST /:id/void`** — optional `entryDate`. Posts the reversing entry and flips the payment to `VOID`. The payment's allocation rows are **never modified or deleted** (immutable, insert-only by trigger) — they simply stop counting toward any document's `allocatedCents`, because every settlement read filters on `status = 'POSTED'`. This is what un-settles the paid documents without a second write. Voiding a foreign-currency payment reverses its realized gain/loss line along with everything else, since the reversal copies every line's `currency_code`/`fx_rate` verbatim.
 
@@ -731,7 +685,7 @@ A payment settles one or more invoices (`direction: 'RECEIVE'`) or one or more b
 
 Failure paths: `400` from the schema (including an allocation naming both `invoiceId` and `billId`, or neither) · `400 direction must be RECEIVE or PAY` · `400 status must be POSTED or VOID` · `422 Allocations must sum to the payment amount` · `422 Cash account not found` / `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not an Asset account` · `422 Customer not found` / `422 Vendor not found` · `422 A RECEIVE payment cannot allocate to a bill` / `422 A PAY payment cannot allocate to an invoice` · `422 That document belongs to a different counterparty` · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 Allocation exceeds the amount still due on this document` · `422 A <currency> payment cannot settle a document in <currency>` (Phase 8) · `422 No exchange rate for <currency> to <base> on or before <date>` (Phase 8) · `422 No realized FX gain/loss account is configured. Set one in settings.` (Phase 8, only when a settlement actually realizes one) · `404 Payment not found` · `409 This payment has already been voided`.
 
-#### Bank statement imports — `/api/v1/ledger-core/bank-imports` — Phase 6
+#### Bank statement imports — `/api/v1/bank-imports` — Phase 6
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -747,7 +701,7 @@ Failure paths: `400` from the schema (including an allocation naming both `invoi
 
 Failure paths: `400` from the schema · `422 Bank account not found` (also another org's account) · `422 Account <code> is a header account and cannot be posted to` / `422 Account <code> is not an Asset account` · `422 The file is empty` / `422 Malformed CSV: ...` (from the CSV parser) · `422 Could not find a date/description column in the file` / `422 Could not find an amount column, or a debit/credit pair, in the file` · `422 Column "<name>" is not in the file` (explicit `columnMap` only) · `422 Import failed: N row(s) could not be parsed (...)` · `422 The file contains no transaction rows` · `409 That statement is already being imported` · `404 Bank statement import not found`.
 
-#### Bank transactions — `/api/v1/ledger-core/bank-transactions` — Phase 6
+#### Bank transactions — `/api/v1/bank-transactions` — Phase 6
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -774,7 +728,7 @@ Each `BankTransaction` carries `amountCents` **signed** — positive is money in
 
 Failure paths: `400 status must be UNMATCHED, MATCHED or IGNORED` · `400 minScore must be a whole number between 0 and 100` · `400` from the schema (`match` naming zero or two of `suggestionId`/`invoiceId`/`billId`) · `404 Bank transaction not found` · `404 Suggestion not found` · `422 A deposit can only be matched to an invoice` / `422 A withdrawal can only be matched to a bill` · `422 Invoice not found` / `422 Bill not found` (also another org's) · `422 Only an issued invoice can be paid` / `422 Only an approved bill can be paid` · `422 That document is already settled` · `422 The bank line exceeds the amount still due on that document` · `422 A base-currency bank line cannot settle a foreign-currency document` (Phase 8) · `422 The journal entry cannot post back to the same bank account` (Phase 6.1) · `422 Account <code> is the receivable control account — …` / `422 Account <code> is the payable control account — …` (Phase 25, `post-journal` to AR/AP; settle a customer or vendor line through `match` instead) · `422 Only an unmatched bank line can be rescored` · `422 The fiscal period covering <date> is closed/locked; ...` (from the underlying payment or journal post) · `409 This bank line is already matched` / `409 This bank line is ignored — un-ignore it first` · `409 This bank line is not matched` · `409 This bank line is matched — unmatch it first`.
 
-#### Exchange rates — `/api/v1/ledger-core/fx-rates` — Phase 8
+#### Exchange rates — `/api/v1/fx-rates` — Phase 8
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -791,7 +745,7 @@ Failure paths: `400 status must be UNMATCHED, MATCHED or IGNORED` · `400 minSco
 
 Failure paths: `400` from the schema (missing/invalid `fromCode`/`toCode`/`rateDate`/`rate`) · `400 from must be a supported 3-letter ISO currency code` (`/latest`) · `422 A currency cannot have a rate against itself` · `422 Rate must be a positive number no greater than 1,000,000` · `422 No exchange rate for <from> to <to> on or before <date>` (`/latest`) · `404 Exchange rate not found` (`DELETE`, also another org's rate).
 
-#### FX revaluation — `/api/v1/ledger-core/fx-revaluations` — Phase 8
+#### FX revaluation — `/api/v1/fx-revaluations` — Phase 8
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
@@ -799,15 +753,15 @@ Failure paths: `400` from the schema (missing/invalid `fromCode`/`toCode`/`rateD
 | GET | `/:id` | any member | One revaluation, with its per-document lines |
 | POST | `/` | **`OWNER`, `ADMIN` only** | Post a revaluation for `asOfDate` |
 
-Also **`GET /ledger-core/reports/fx-exposure?asOf=YYYY-MM-DD`** (any member, defaults to today) — the identical computation, read-only: `{ asOfDate, baseCurrency, documents, byCurrency, totalDeltaCents, alreadyRevalued }`. Writes nothing and posts nothing — the preview `POST /fx-revaluations` re-computes and commits.
+Also **`GET /reports/fx-exposure?asOf=YYYY-MM-DD`** (any member, defaults to today) — the identical computation, read-only: `{ asOfDate, baseCurrency, documents, byCurrency, totalDeltaCents, alreadyRevalued }`. Writes nothing and posts nothing — the preview `POST /fx-revaluations` re-computes and commits.
 
-Narrower than every other LedgerCore write route except `POST /fiscal-periods/:id/lock` — a revaluation posts to the GL on someone's behalf, closer to a period close than to an ordinary document post, so the `ACCOUNTANT` tier that can post invoices/bills/payments cannot run one.
+Narrower than every other accounting write route except `POST /fiscal-periods/:id/lock` — a revaluation posts to the GL on someone's behalf, closer to a period close than to an ordinary document post, so the `ACCOUNTANT` tier that can post invoices/bills/payments cannot run one.
 
 **`POST /`** — `{ asOfDate }` only. Re-computes the exposure **on its own transaction**, never trusting a figure the client might have cached from an earlier `GET /reports/fx-exposure` call. Posts one journal entry dated `asOfDate` restating every open foreign-currency invoice/bill at the as-of rate through `6820 Unrealized FX Gain/Loss`, then immediately posts a second entry reversing it, dated the calendar day after `asOfDate` — so a later real settlement's realized gain/loss always compares against a document's original frozen rate, never a revalued one. **There is no `PATCH`/`DELETE`** — a revaluation has no status and no lifecycle; a wrong one is corrected by the next period's revaluation, not by editing this one.
 
 Failure paths: `400` from the schema (`asOfDate` missing/malformed) · `403` for anything below `OWNER`/`ADMIN` · `422 There is no open foreign-currency balance to revalue on this date` · `422 No exchange rate for <currency> to <base> on or before <date>` · `422 The fiscal period covering <date> is closed/locked; ...` (from the entry or its next-day reversal — the whole attempt rolls back, writing nothing) · `409 A revaluation already exists for this date` · `404 FX revaluation not found`.
 
-#### Migration imports — `/api/v1/ledger-core/migration-imports` — Phase 9b, Phase 24
+#### Migration imports — `/api/v1/migration-imports` — Phase 9b, Phase 24
 
 A business moving off another system's way in: stage a chart-of-accounts, opening-balance, customer or vendor CSV, fix per-row errors, then commit once. `CUSTOMERS`/`VENDORS` (Phase 24) **extend** this same staged importer rather than a second pipeline. Deliberately the inverse of `/bank-imports` (Phase 6) — every row stages, good and bad, instead of the whole file aborting on the first bad one.
 
@@ -829,29 +783,29 @@ There is no `dateFormat` and no `columnMap`, unlike `/bank-imports` — neither 
 
 **Kind `OPENING_BALANCES`.** Every `VALID` row becomes one line in **one** journal entry, posted through `journalService.createEntryOnClient` at `ledger_settings.books_start_date`, `sourceType: 'opening_balance'` — never a direct `ledger_lines` write, so the period-lock guard and the balance triggers apply unchanged. Any imbalance is plugged to `3400 Opening Balance Equity`, shown in `preview.plugCents` (signed: positive is a credit plug, negative a debit plug) before commit, never applied silently. `3200 Retained Earnings` and the AR/AP control accounts (`ledger_invoice_settings.receivableAccountId`/`ledger_settings.payableAccountId`, falling back to codes `1120`/`2100`) are refused per row — see the failure paths. `commit`'s `result` is `{ kind: 'OPENING_BALANCES', journalEntryId, plugCents }`. **A second committed opening-balance import for the same organization is refused, enforced by a partial unique index, not just the service** — see [schema.md](schema.md).
 
-**Kinds `CUSTOMERS`/`VENDORS` (Phase 24).** Column headers resolve by synonym exactly like the other two kinds — `Name`/`Customer`/`Company`/…, `Email`, `Phone`, `Billing Address`, `Tax Number`, `Payment Terms` (`VENDORS` only), `Notes`. `commit` matches a staged row to an existing `customers`/`vendors` row by lowercased email first, then by lowercased name; a match **merges**, filling only the columns that are currently `NULL` on the existing row — an import never overwrites data already in the system — no match **creates** a new row. `customers` has no `payment_terms` column, so an imported customer's terms text is appended to `notes` on its own line instead of dropped; a vendor's maps onto `vendors.payment_terms` directly. `preview` reports `partiesToCreate`/`partiesToMerge`; `commit`'s `result` is `{ kind: 'CUSTOMERS' | 'VENDORS', createdCount, mergedCount }`. A customer/vendor import may be committed any number of times as separate uploads, matching the chart-of-accounts kind. Client templates (one per kind, with the required/optional columns and a worked example row) are static data in `client/src/Pages/ledger-core/importTemplates.ts` — no server endpoint.
+**Kinds `CUSTOMERS`/`VENDORS` (Phase 24).** Column headers resolve by synonym exactly like the other two kinds — `Name`/`Customer`/`Company`/…, `Email`, `Phone`, `Billing Address`, `Tax Number`, `Payment Terms` (`VENDORS` only), `Notes`. `commit` matches a staged row to an existing `customers`/`vendors` row by lowercased email first, then by lowercased name; a match **merges**, filling only the columns that are currently `NULL` on the existing row — an import never overwrites data already in the system — no match **creates** a new row. `customers` has no `payment_terms` column, so an imported customer's terms text is appended to `notes` on its own line instead of dropped; a vendor's maps onto `vendors.payment_terms` directly. `preview` reports `partiesToCreate`/`partiesToMerge`; `commit`'s `result` is `{ kind: 'CUSTOMERS' | 'VENDORS', createdCount, mergedCount }`. A customer/vendor import may be committed any number of times as separate uploads, matching the chart-of-accounts kind. Client templates (one per kind, with the required/optional columns and a worked example row) are static data in `client/src/Pages/importTemplates.ts` — no server endpoint.
 
 Row-level `errors: string[]` accumulate rather than abort; an import's `status` is `DRAFT` while any row is `INVALID`, `VALIDATED` once every non-excluded row is `VALID`, `COMMITTED` once posted (terminal). `PATCH .../rows/:rowId` accepts `accountCode`, `accountName`, `accountType`, `parentCode`, `description`, `debitCents`, `creditCents` (account/opening-balance kinds) or `partyName`, `partyEmail`, `partyPhone`, `partyAddress`, `partyTaxNumber`, `partyPaymentTerms`, `partyNotes` (Phase 24, party kinds), plus `status` (`VALID`/`EXCLUDED` only) — whichever fields are sent — then re-validates the whole import, so fixing one row can change another row's errors (e.g. resolving a duplicate code or a duplicate name).
 
-Failure paths: `400` from the schema · `403` for a write below its role tier · `404` for another org's import or row, or an unknown `id`/`rowId` · `409 Fix N invalid row(s) before committing` (commit attempted before `VALIDATED`) · `409 This import has already been committed` (any write to a `COMMITTED` import) · `409 A committed import cannot be deleted` · `409 This organization already has a committed opening-balance import` · `422 Could not find a(n) <field> column in the file` (a required header missing — the one whole-file failure; for `CUSTOMERS`/`VENDORS` this is `422 Could not find a name column in the file`) · `422 Complete LedgerCore onboarding before importing opening balances` · `422 Account 3400 Opening Balance Equity is missing — run migrations` · `422` from the period-lock guard if `books_start_date` falls inside a closed/locked period · (Phase 24, staged-row errors, never a whole-file failure) `name is required` · `duplicate name "<name>" in this file` · `"<email>" is not a valid email address` · `duplicate email "<email>" in this file`.
+Failure paths: `400` from the schema · `403` for a write below its role tier · `404` for another org's import or row, or an unknown `id`/`rowId` · `409 Fix N invalid row(s) before committing` (commit attempted before `VALIDATED`) · `409 This import has already been committed` (any write to a `COMMITTED` import) · `409 A committed import cannot be deleted` · `409 This organization already has a committed opening-balance import` · `422 Could not find a(n) <field> column in the file` (a required header missing — the one whole-file failure; for `CUSTOMERS`/`VENDORS` this is `422 Could not find a name column in the file`) · `422 Complete setup before importing opening balances` · `422 Account 3400 Opening Balance Equity is missing — run migrations` · `422` from the period-lock guard if `books_start_date` falls inside a closed/locked period · (Phase 24, staged-row errors, never a whole-file failure) `name is required` · `duplicate name "<name>" in this file` · `"<email>" is not a valid email address` · `duplicate email "<email>" in this file`.
 
 ### Documents — `/api/v1/documents` — Phase 9.5
 
-Platform-level, not namespaced under `/ledger-core` (rule 16): LedgerCore attaching a PDF to an invoice and AP-Flow attaching a source image (Phase 10) are both apps talking to the platform, never to each other. Full spec: [ledger-core.md](ledger-core.md) is silent on this — see [roadmap.md](roadmap.md#phase-95-as-delivered) instead.
+Platform-level (rule 16): accounting attaching a PDF to an invoice and capture attaching a source image (Phase 10) are both modules talking to the platform, never to each other. Full spec: [accounting.md](accounting.md) is silent on this — see [roadmap.md](roadmap.md#phase-95-as-delivered) instead.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Upload a file — multipart, field name `file`. `201` for new bytes, `200` when identical bytes already exist for this org (upload is idempotent by content hash) |
-| GET | `/` | any member | Paginated documents, optional `?appSlug=&entityType=&entityId=` (an `EXISTS` filter against `document_links`) |
+| GET | `/` | any member | Paginated documents, optional `?module=&entityType=&entityId=` (an `EXISTS` filter against `document_links`) |
 | GET | `/:id` | any member | One document's metadata plus every `document_links` row attached to it |
 | GET | `/:id/file` | any member | Streams the stored original. Sets `Content-Disposition: attachment`, `Content-Type` (the sniffed MIME type), and `X-Content-Type-Options: nosniff` |
-| POST | `/:id/links` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Attach a document to `{ appSlug, entityType, entityId }` |
+| POST | `/:id/links` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Attach a document to `{ module, entityType, entityId }` |
 | DELETE | `/:id/links/:linkId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Detach one link |
 | DELETE | `/:id` | `OWNER`, `ADMIN` | Delete a document. Refused while any link exists |
 
 Upload takes `multer` in **memory** storage, capped at `MAX_UPLOAD_BYTES` (10 MB). The MIME type is decided by **magic bytes**, never the client's `Content-Type` header — PDF/PNG/JPEG by signature, CSV by a UTF-8-round-trip text check plus a `.csv` filename — and restricted to that four-type allowlist (`server/src/utils/mimeSniff.ts`). A document's metadata row is update-immutable by trigger once written; there is no `PUT`/`PATCH` — the file itself is content-addressed, so an edit would mean the row no longer describes the bytes it names.
 
-`entityType` is validated against a per-app registry (`server/src/types/documents.ts`'s `DOCUMENT_ENTITY_TYPES_BY_APP`) — currently `ledger-core`: `invoice`, `bill`, `journal_entry`, `payment`, `customer`, `vendor`. `entity_id` carries **no foreign key**: checking one would mean the platform querying an app's own tables, which rule 16 forbids, so a link can in principle outlive the entity it points at — accepted and tested, not prevented.
+`entityType` is validated against a per-module registry (`server/src/types/documents.ts`'s `DOCUMENT_ENTITY_TYPES_BY_MODULE`) — currently `ledger-core` (accounting): `invoice`, `bill`, `journal_entry`, `payment`, `customer`, `vendor`. `entity_id` carries **no foreign key**: checking one would mean the platform querying an app's own tables, which rule 16 forbids, so a link can in principle outlive the entity it points at — accepted and tested, not prevented.
 
 Failure paths: `400 Send exactly one file in a field named "file"` (no file, or wrong field) · `400 Uploaded file is empty` · `400 Invalid request body` (schema — `links`) · `403` for a write below its role tier · `404 Document not found` (also another org's) · `404 Attachment not found` · `409 This document is already attached to that record` · `409 Detach this document from every record before deleting it` · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG, CSV` · `422 Unknown app slug: <slug>` · `422 <app> documents cannot be attached to "<type>"`.
 
@@ -861,14 +815,14 @@ Storage is org-keyed and content-addressed (`server/storage/<org_id>/<ab>/<cd>/<
 
 ### Integrations — `/api/v1/integrations/drive` — Phase 19.3
 
-Platform-level, not namespaced under any app (rule 16): a folder's `purpose` routes its files to whichever app owns that purpose — `VENDOR_BILL` to AP-Flow, `BANK_STATEMENT` to LedgerCore — through that app's own service function, never its tables. Promoted here from `/api/v1/ap-flow/drive` (Phase 19.2), which watched exactly one folder per org and only ever fed AP-Flow. See [study/security-auth/oauth2-pkce-and-secrets-at-rest.md](../study/security-auth/oauth2-pkce-and-secrets-at-rest.md) and [study/security-auth/service-accounts-and-jwt-bearer.md](../study/security-auth/service-accounts-and-jwt-bearer.md).
+Platform-level (rule 16): a folder's `purpose` routes its files to whichever module owns that purpose — `VENDOR_BILL` to capture (the bill inbox), `BANK_STATEMENT` to accounting's bank import — through that app's own service function, never its tables. Promoted here from `/api/v1/capture/drive` (Phase 19.2), which watched exactly one folder per org and only ever fed capture. See [study/security-auth/oauth2-pkce-and-secrets-at-rest.md](../study/security-auth/oauth2-pkce-and-secrets-at-rest.md) and [study/security-auth/service-accounts-and-jwt-bearer.md](../study/security-auth/service-accounts-and-jwt-bearer.md).
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | any member | This org's connection (`null` if none), its folders, and `{ modes: { oauth, serviceAccount, serviceAccountEmail } }` |
 | POST | `/connect` | `OWNER`, `ADMIN` | Starts (or restarts) the OAuth 2.0 + PKCE flow. Returns `{ authorizationUrl }`. `503` when the server has no Google OAuth credentials configured |
 | POST | `/connect/service-account` | `OWNER`, `ADMIN` | Connects using the server's service account — no redirect, no consent, `CONNECTED` immediately. `503` when unconfigured; `409` when an OAuth connection already exists (disconnect it first) |
-| GET | `/oauth/callback` | none (no session) | Google's OAuth redirect target. The `state` value alone is the credential. Always `302`s to `<FRONTEND_URL>/integrations?drive=connected` or `...?drive=error`; never returns JSON. The pre-19.3 path, `/api/v1/ap-flow/drive/oauth/callback`, is kept as a one-route alias — see [roadmap.md](roadmap.md#phase-193-as-delivered) |
+| GET | `/oauth/callback` | none (no session) | Google's OAuth redirect target. The `state` value alone is the credential. Always `302`s to `<FRONTEND_URL>/integrations?drive=connected` or `...?drive=error`; never returns JSON. The pre-19.3 path, `/api/v1/capture/drive/oauth/callback`, is kept as a one-route alias — see [roadmap.md](roadmap.md#phase-193-as-delivered) |
 | DELETE | `/` | `OWNER`, `ADMIN` | Disconnects — deletes the connection and its folders, best-effort revokes the OAuth refresh token at Google (no-op for a service-account connection). Documents already imported are untouched. `204` |
 | GET | `/folders` | any member | Every folder this org watches |
 | POST | `/folders` | `OWNER`, `ADMIN` | Adds a folder: `{ purpose, folder, ledgerAccountId, dateFormat, columnMap }`. `ledgerAccountId`/`dateFormat` required for `BANK_STATEMENT`, forbidden for `VENDOR_BILL` |
@@ -878,7 +832,7 @@ Platform-level, not namespaced under any app (rule 16): a folder's `purpose` rou
 
 **Connecting.** Two independent auth modes, mutually exclusive on one connection row. **Service account (recommended):** the tenant shares a Drive folder with the server's own service-account address (`GET /` returns it as `modes.serviceAccountEmail`) — no consent screen, no Google app verification, and no refresh token to expire (RFC 7523's JWT-bearer grant, `node:crypto`-signed, no SDK — rule 14). **OAuth 2.0 + PKCE** (retained from Phase 19.2, `drive.readonly` scope): a per-org consent flow storing an AES-256-GCM-encrypted refresh token; some Workspace admins block external sharing to a `gserviceaccount.com` address, which is why this path stays available. A refresh that fails with Google's `invalid_grant` (the user revoked access) moves an OAuth connection to `NEEDS_REAUTH` — a service-account connection cannot reach that state, since there is no user grant to revoke.
 
-**Folders and purpose.** Many folders per org, each tagged `VENDOR_BILL` or `BANK_STATEMENT`. A sweep polls every ~60 seconds (`INTEGRATION_DRIVE_POLL_INTERVAL_MS`), listing only files modified since each folder's own stored cursor and skipping any Drive file id already seen (`integration_drive_files`, unique per org — one file is imported at most once, even across a reconnect). Up to `INTEGRATION_DRIVE_MAX_FILES_PER_SYNC` (25) new files import per run. `VENDOR_BILL` files (PDF/PNG/JPEG) go through the identical `captureFile` path direct upload uses, so they are metered, extracted, classified and (if enabled) auto-posted like any other AP-Flow document. `BANK_STATEMENT` files (CSV) go through LedgerCore's `bankImportService.importStatement`, using the folder's stored account, date format and column map — a parse failure surfaces the same row-naming message the manual import form would show, on the folder itself. Google Sheets are out of scope (no `alt=media` export); a Sheet in a watched folder is simply never listed.
+**Folders and purpose.** Many folders per org, each tagged `VENDOR_BILL` or `BANK_STATEMENT`. A sweep polls every ~60 seconds (`INTEGRATION_DRIVE_POLL_INTERVAL_MS`), listing only files modified since each folder's own stored cursor and skipping any Drive file id already seen (`integration_drive_files`, unique per org — one file is imported at most once, even across a reconnect). Up to `INTEGRATION_DRIVE_MAX_FILES_PER_SYNC` (25) new files import per run. `VENDOR_BILL` files (PDF/PNG/JPEG) go through the identical `captureFile` path direct upload uses, so they are metered, extracted, classified and (if enabled) auto-posted like any other capture document. `BANK_STATEMENT` files (CSV) go through accounting's `bankImportService.importStatement`, using the folder's stored account, date format and column map — a parse failure surfaces the same row-naming message the manual import form would show, on the folder itself. Google Sheets are out of scope (no `alt=media` export); a Sheet in a watched folder is simply never listed.
 
 No token, verifier, state, key, or ciphertext ever appears in a log line, error message, or API response — `GET /` returns only status, auth mode, email, folder metadata, and counts.
 
@@ -886,43 +840,43 @@ Failure paths: `503 Google Drive is not configured on this server` · `503 Googl
 
 ---
 
-### AP-Flow — `/api/v1/ap-flow` — Phases 10–11, 19, 19.1
+### Capture (bill inbox) — `/api/v1/capture` — Phases 10–11, 19, 19.1
 
-Full spec: [ap-flow.md](ap-flow.md). A document reaches AP-Flow by uploading to `/api/v1/documents` first and registering it here by id, via `/documents/upload` (both in one call, Phase 19), or via a Drive folder connected at `/api/v1/integrations/drive` (Phase 19.2, promoted to the platform in Phase 19.3 — see the Integrations section above). Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into LedgerCore; Phase 19 adds a second extraction provider (Gemini), rewrites posting onto a real LedgerCore bill, and adds a confidence-gated auto-post; Phase 19.1 adds AI token/cost visibility per document (see `/api/v1/ai-usage` above); a 2026-09-18 fix (below) adds a `DUPLICATE` status so a repeat capture of identical bytes is a visible, reviewable row instead of a silent no-op.
+Full spec: [capture.md](capture.md). A document reaches capture by uploading to `/api/v1/documents` first and registering it here by id, via `/documents/upload` (both in one call, Phase 19), or via a Drive folder connected at `/api/v1/integrations/drive` (Phase 19.2, promoted to the platform in Phase 19.3 — see the Integrations section above). Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into accounting; Phase 19 adds a second extraction provider (Gemini), rewrites posting onto a real accounting bill, and adds a confidence-gated auto-post; Phase 19.1 adds AI token/cost visibility per document (see `/api/v1/ai-usage` above); a 2026-09-18 fix (below) adds a `DUPLICATE` status so a repeat capture of identical bytes is a visible, reviewable row instead of a silent no-op.
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | POST | `/documents` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Registers an already-vaulted PDF/PNG/JPEG document for extraction. `201`. Status `PENDING`, or `DUPLICATE` when this org already has a non-`DUPLICATE` registration for the same vault document — see below. Enqueues a background job only when `PENDING` — the response returns before extraction runs |
-| POST | `/documents/upload` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Phase 19. Multipart, field `file`. Vaults the bytes and registers them with AP-Flow in one call. Always `201` now — a repeat upload of identical bytes creates a new `DUPLICATE` row rather than returning the earlier one (`created` is always `true`; the pre-19.4 `200`/`created: false` reuse was removed, see below) |
+| POST | `/documents/upload` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Phase 19. Multipart, field `file`. Vaults the bytes and registers them with capture in one call. Always `201` now — a repeat upload of identical bytes creates a new `DUPLICATE` row rather than returning the earlier one (`created` is always `true`; the pre-19.4 `200`/`created: false` reuse was removed, see below) |
 | GET | `/documents` | any member | Paginated, optional `?status=PENDING\|PROCESSING\|EXTRACTED\|FAILED\|POSTED\|DUPLICATE` |
 | GET | `/documents/:id` | any member | One document plus its pages (redacted metadata, never `ocrText`), its extraction if any (now including `dueDate`), and its line items (each carrying `accountId`/`accountCode`/`accountName`, `mappingSource`, `mappingConfidence`). Also carries `billId`, `autoPosted`, `autoPostBlockers` (Phase 19), `modelCalls` (Phase 19.1), and `duplicateOfId`/`duplicateOfFilename` — non-null only when `status = DUPLICATE` |
 | GET | `/documents/:id/pages/:pageNumber/image` | any member | The **redacted** page image — PII pixels painted over, this is what was sent to the vision model, never the original |
 | POST | `/documents/:id/reextract` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Resets to `PENDING` and re-enqueues, discarding any line items, account overrides and `autoPostBlockers` from the prior run. `409` unless the document is `EXTRACTED`, `FAILED`, or `DUPLICATE` — the last of these is how a flagged duplicate is confirmed legitimate and pushed into the normal pipeline ("Not a duplicate — process it" client-side); `duplicateOfId` is left in place afterward as history, not cleared |
 | GET | `/review-queue` | any member | Documents with `status = EXTRACTED`, ordered arithmetic failure first, then any unmapped line, then lowest model confidence, then newest. Each entry carries `autoPostBlockers` |
 | PATCH | `/documents/:id/line-items/:lineId` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Overrides one line item's account. Only legal while the document is `EXTRACTED`; sets `mappingSource` to `MANUAL` |
-| POST | `/documents/:id/post` | `OWNER`, `ADMIN`, `ACCOUNTANT` | One-click approve & post. Phase 19: this now finds-or-creates the vendor and posts a real LedgerCore **bill** (`createCapturedBillOnClient` + `approveBillOnClient`), not a raw journal entry — `source_type = 'bill'`, `source_id` = the bill's id — freezing `journalEntryId`/`billId`/`postedSha256`/`postedAt`/`autoPosted` on this row. No request body. `EXTRACTED → POSTED` only; `POSTED` is terminal, so re-posting is `409`, not a second entry |
+| POST | `/documents/:id/post` | `OWNER`, `ADMIN`, `ACCOUNTANT` | One-click approve & post. Phase 19: this now finds-or-creates the vendor and posts a real accounting **bill** (`createCapturedBillOnClient` + `approveBillOnClient`), not a raw journal entry — `source_type = 'bill'`, `source_id` = the bill's id — freezing `journalEntryId`/`billId`/`postedSha256`/`postedAt`/`autoPosted` on this row. No request body. `EXTRACTED → POSTED` only; `POSTED` is terminal, so re-posting is `409`, not a second entry |
 | GET | `/settings` | any member | Phase 19. This org's auto-post gates — `autoPostEnabled`, `autoPostMinConfidence` (0.5–1), `autoPostMaxTotalCents` (`null` = no limit), `updatedAt`. Defaults (`false`, `0.9`, `null`, `null`) when never saved |
 | PUT | `/settings` | `OWNER`, `ADMIN` | Phase 19. Replaces the auto-post gates. `400` on a bad body (schema) |
 
-Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `400 accountId must be a UUID` · `400 Send exactly one file in a field named "file"` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 AP-Flow document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `404 Line item not found` (also another document's) · `409 Cannot re-extract a document in status <status>` · `409 Cannot edit line items on a document in status <status>` · `409 Cannot post a document in status <status>` · `409 A bill with this invoice number already exists for this vendor` (Phase 19 — duplicate-invoice detection, via `ux_bills_vendor_reference`) · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG` · `422 AP-Flow can only process PDF, PNG and JPEG documents` · `422 Account is a header and cannot be posted to` · `422 Account is inactive` · `422 This document has no extraction to post` · `422 Extraction totals do not reconcile — re-extract before posting` · `422 This document needs an invoice date before it can be posted` · `422 This document needs a positive total before it can be posted` · `422 This document needs a vendor name before it can be posted` (Phase 19) · `422 This document needs an invoice number before it can be posted` (Phase 19) · `422 This document needs at least one line item before it can be posted` · `422 Every line item needs an account before this document can be posted` · `422 A line item with a negative amount cannot be posted as a bill` (Phase 19) · `422 Extracted line items and tax do not sum to the document total` · `422 No exchange rate for <from> to <to> on or before <date>`. Drive-connection failure paths moved to the Integrations section above. (`409 This document is already registered with AP-Flow` no longer fires from any real path since the 2026-09-18 duplicate-capture change removed the unique constraint it guarded — the code path is unreachable dead code, kept only as defensive handling.)
+Failure paths: `400 documentId must be a UUID` · `400 Invalid page number` · `400 Unknown status filter` · `400 accountId must be a UUID` · `400 Send exactly one file in a field named "file"` · `403` for a write below its role tier · `404 Document not found` (the vault document, also another org's) · `404 Captured document not found` (also another org's) · `404 Page not found` / `404 Redacted page image not found` · `404 Line item not found` (also another document's) · `409 Cannot re-extract a document in status <status>` · `409 Cannot edit line items on a document in status <status>` · `409 Cannot post a document in status <status>` · `409 A bill with this invoice number already exists for this vendor` (Phase 19 — duplicate-invoice detection, via `ux_bills_vendor_reference`) · `413 File exceeds the 10 MB limit` · `415 Unsupported file type. Allowed: PDF, PNG, JPEG` · `422 The bill inbox can only process PDF, PNG and JPEG documents` · `422 Account is a header and cannot be posted to` · `422 Account is inactive` · `422 This document has no extraction to post` · `422 Extraction totals do not reconcile — re-extract before posting` · `422 This document needs an invoice date before it can be posted` · `422 This document needs a positive total before it can be posted` · `422 This document needs a vendor name before it can be posted` (Phase 19) · `422 This document needs an invoice number before it can be posted` (Phase 19) · `422 This document needs at least one line item before it can be posted` · `422 Every line item needs an account before this document can be posted` · `422 A line item with a negative amount cannot be posted as a bill` (Phase 19) · `422 Extracted line items and tax do not sum to the document total` · `422 No exchange rate for <from> to <to> on or before <date>`. Drive-connection failure paths moved to the Integrations section above. (`409 This document is already in the bill inbox` no longer fires from any real path since the 2026-09-18 duplicate-capture change removed the unique constraint it guarded — the code path is unreachable dead code, kept only as defensive handling.)
 
-The capture pipeline (rasterize → local OCR → PII-mask → vision extraction → account classification → persist → attempt auto-post) runs entirely inside the background job, never inside the request. Extraction and classification run against whichever provider `AP_FLOW_AI_PROVIDER` selects — `anthropic` (Claude, `claude-sonnet-5`, the SDK) or `gemini` (`gemini-3.6-flash` by default, plain `fetch`, no SDK) — behind one `StructuredModelClient` seam (`services/ap-flow/modelClient.ts`). A server with no key configured for the selected provider processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` (or `GEMINI_API_KEY`) — nothing else in the app degrades. Account classification degrades quietly instead: a missing key or a model error leaves any still-unmapped line `NONE` rather than failing the document, since the extraction already succeeded. A Gemini call that itself fails (non-2xx) surfaces as `FAILED` / `"Gemini request failed with status <code>"`, with Google's error `status` enum appended in parentheses when the response carries one (e.g. `"... status 404 (NOT_FOUND)"`) — never the provider's free-text error message, which is never echoed.
+The capture pipeline (rasterize → local OCR → PII-mask → vision extraction → account classification → persist → attempt auto-post) runs entirely inside the background job, never inside the request. Extraction and classification run against whichever provider `CAPTURE_AI_PROVIDER` selects — `anthropic` (Claude, `claude-sonnet-5`, the SDK) or `gemini` (`gemini-3.6-flash` by default, plain `fetch`, no SDK) — behind one `StructuredModelClient` seam (`services/capture/modelClient.ts`). A server with no key configured for the selected provider processes every step through masking and then fails that one document with `FAILED` / `"Vision extraction is not configured (ANTHROPIC_API_KEY is unset)"` (or `GEMINI_API_KEY`) — nothing else in the app degrades. Account classification degrades quietly instead: a missing key or a model error leaves any still-unmapped line `NONE` rather than failing the document, since the extraction already succeeded. A Gemini call that itself fails (non-2xx) surfaces as `FAILED` / `"Gemini request failed with status <code>"`, with Google's error `status` enum appended in parentheses when the response carries one (e.g. `"... status 404 (NOT_FOUND)"`) — never the provider's free-text error message, which is never echoed.
 
-GL coding is inferred in a fixed order, cheapest and most explainable first, and each tier that hits skips the ones after it: (1) the organization's own posting history for this vendor (`ap_flow_vendor_account_map`, keyed by a normalized vendor-name string, never LedgerCore's `vendors` table — rule 16), (2) a name-similarity match against the org's own postable expense accounts, (3) the model, given only the line descriptions and the chart's account codes, forced into a tool call (or, on Gemini, constrained JSON output) so a code outside the chart is structurally discarded rather than becoming a suggestion. Posting itself finds-or-creates the vendor by normalized name (`vendorService.findOrCreateVendorByNameOnClient`), allocates any tax across the line items by the largest-remainder method (`utils/money.ts`'s `allocateCents`, exact to the cent), and creates + approves a LedgerCore bill in one transaction — debiting the line items' own summed amount per account (never `subtotal_cents`, so a reviewer's override can never silently change the money), crediting the AP control account, splitting input tax to `1180 GST/VAT Input Credit` when present (never `2140`), and resolving its exchange rate at the **invoice date** via LedgerCore's `fx_rates`. The due date is the extracted one when present and not before the invoice date, else invoice date + 30 days.
+GL coding is inferred in a fixed order, cheapest and most explainable first, and each tier that hits skips the ones after it: (1) the organization's own posting history for this vendor (`ap_flow_vendor_account_map`, keyed by a normalized vendor-name string, never accounting's `vendors` table — rule 16), (2) a name-similarity match against the org's own postable expense accounts, (3) the model, given only the line descriptions and the chart's account codes, forced into a tool call (or, on Gemini, constrained JSON output) so a code outside the chart is structurally discarded rather than becoming a suggestion. Posting itself finds-or-creates the vendor by normalized name (`vendorService.findOrCreateVendorByNameOnClient`), allocates any tax across the line items by the largest-remainder method (`utils/money.ts`'s `allocateCents`, exact to the cent), and creates + approves a accounting bill in one transaction — debiting the line items' own summed amount per account (never `subtotal_cents`, so a reviewer's override can never silently change the money), crediting the AP control account, splitting input tax to `1180 GST/VAT Input Credit` when present (never `2140`), and resolving its exchange rate at the **invoice date** via accounting's `fx_rates`. The due date is the extracted one when present and not before the invoice date, else invoice date + 30 days.
 
-**Auto-posting (Phase 19).** Off by default, per organization. When enabled, the worker calls `evaluateAutoPost` (pure, `services/ap-flow/autoPostPolicy.ts`) directly after an extraction saves; every gate is checked (not just the first), and a document that fails any of them is left `EXTRACTED` with the reasons recorded in `autoPostBlockers` (`ap_flow_documents.auto_post_blockers`) for the review queue to show. A document that clears every gate is posted with `autoPosted: true` by the worker itself — the actor recorded is the document's original uploader. A posting-time rejection (duplicate invoice, locked fiscal period, missing FX rate) degrades to a `POSTING_REJECTED` blocker rather than failing the document. See [ap-flow.md](ap-flow.md) for the full gate list. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
+**Auto-posting (Phase 19).** Off by default, per organization. When enabled, the worker calls `evaluateAutoPost` (pure, `services/capture/autoPostPolicy.ts`) directly after an extraction saves; every gate is checked (not just the first), and a document that fails any of them is left `EXTRACTED` with the reasons recorded in `autoPostBlockers` (`ap_flow_documents.auto_post_blockers`) for the review queue to show. A document that clears every gate is posted with `autoPosted: true` by the worker itself — the actor recorded is the document's original uploader. A posting-time rejection (duplicate invoice, locked fiscal period, missing FX rate) degrades to a `POSTING_REJECTED` blocker rather than failing the document. See [capture.md](capture.md) for the full gate list. See [study/architecture/document-capture-pipeline.md](../study/architecture/document-capture-pipeline.md), [study/security-auth/pii-detection-and-redaction.md](../study/security-auth/pii-detection-and-redaction.md), and [study/architecture/llm-structured-extraction.md](../study/architecture/llm-structured-extraction.md).
 
-**AI usage metering (Phase 19.1).** Every extraction and classification call — success or failure, whichever provider `AP_FLOW_AI_PROVIDER` selects — is recorded to the platform's `ai_model_calls` table (see `/api/v1/ai-usage` above) with its token counts, latency, and cost when the model carries a verified price. Recording happens through an injected callback so `extractionService.ts`/`mappingService.ts` stay database-free; a metering failure is logged and swallowed, never surfaced to the pipeline — a spend-tracking bug must not be able to fail a document that extracted fine. Only calls that actually reached a provider are recorded — a `503 "... is not configured"` throws before any request and records nothing.
+**AI usage metering (Phase 19.1).** Every extraction and classification call — success or failure, whichever provider `CAPTURE_AI_PROVIDER` selects — is recorded to the platform's `ai_model_calls` table (see `/api/v1/ai-usage` above) with its token counts, latency, and cost when the model carries a verified price. Recording happens through an injected callback so `extractionService.ts`/`mappingService.ts` stay database-free; a metering failure is logged and swallowed, never surfaced to the pipeline — a spend-tracking bug must not be able to fail a document that extracted fine. Only calls that actually reached a provider are recorded — a `503 "... is not configured"` throws before any request and records nothing.
 
-**Google Drive folder intake (Phase 19.2 — moved to the platform in 19.3).** AP-Flow still *receives* files imported this way — it just no longer owns the connection. See [the Integrations section above](#integrations--apiv1integrationsdrive--phase-193).
+**Google Drive folder intake (Phase 19.2 — moved to the platform in 19.3).** capture still *receives* files imported this way — it just no longer owns the connection. See [the Integrations section above](#integrations--apiv1integrationsdrive--phase-193).
 
-**Duplicate-content capture (2026-09-18 fix).** Every entry point that registers a document with AP-Flow — `/documents/upload`, the two-step `POST /documents`, and a Drive folder's sync — funnels through one function, `apFlowDocumentService.createApFlowDocument`, which is now the single place a repeat capture is detected: if this org already has a non-`DUPLICATE` registration for the same vault document (the Document Vault is content-addressed by SHA-256, so a renamed re-upload or a second Drive file with identical bytes resolves to the same vault row), the new row is born `status = DUPLICATE` with `duplicateOfId` pointing at the earlier one, and **no extraction is enqueued** — no AI spend on a capture nobody has confirmed is worth processing. This replaced the original behaviour (returning the pre-existing registration untouched, with no new row and no signal anywhere that a repeat capture happened) reported as a real bug: a genuine re-submission arriving through Drive under a different filename was invisible, with nothing for a reviewer to act on. A human decides from the document's own page — dismiss it, or `POST /documents/:id/reextract` ("Not a duplicate — process it"), which reuses the identical `DUPLICATE -> PENDING` transition `FAILED -> PENDING` already uses to re-run a failed extraction. `duplicateOfId` is left in place as history even after being pushed through. See [study/architecture/document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md).
+**Duplicate-content capture (2026-09-18 fix).** Every entry point that registers a document with capture — `/documents/upload`, the two-step `POST /documents`, and a Drive folder's sync — funnels through one function, `captureDocumentService.createApFlowDocument`, which is now the single place a repeat capture is detected: if this org already has a non-`DUPLICATE` registration for the same vault document (the Document Vault is content-addressed by SHA-256, so a renamed re-upload or a second Drive file with identical bytes resolves to the same vault row), the new row is born `status = DUPLICATE` with `duplicateOfId` pointing at the earlier one, and **no extraction is enqueued** — no AI spend on a capture nobody has confirmed is worth processing. This replaced the original behaviour (returning the pre-existing registration untouched, with no new row and no signal anywhere that a repeat capture happened) reported as a real bug: a genuine re-submission arriving through Drive under a different filename was invisible, with nothing for a reviewer to act on. A human decides from the document's own page — dismiss it, or `POST /documents/:id/reextract` ("Not a duplicate — process it"), which reuses the identical `DUPLICATE -> PENDING` transition `FAILED -> PENDING` already uses to re-run a failed extraction. `duplicateOfId` is left in place as history even after being pushed through. See [study/architecture/document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md).
 
 ---
 
-### StockLedger — `/api/v1/stock` — Phase 28
+### Inventory — `/api/v1/inventory` — Phase 28
 
-Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom item/serial attributes, configurable item-code schemes, movements with a moving-average/specific-identification balance cache, QR labels. Reading is open to every member including `VIEWER`. Catalogue configuration (UoMs, categories, attributes, code schemes, locations, applying an industry profile) needs `OWNER`/`ADMIN`. Items, movements and serial changes are bookkeeping, so they need `ACCOUNTANT` and above, matching LedgerCore's own item/document routes. Posts nothing to LedgerCore's GL — every route here reads or writes only StockLedger's own 12 tables.
+Full spec: [inventory.md](inventory.md). Perpetual inventory: industry setup, custom item/serial attributes, configurable item-code schemes, movements with a moving-average/specific-identification balance cache, QR labels. Reading is open to every member including `VIEWER`. Catalogue configuration (UoMs, categories, attributes, code schemes, locations, applying an industry profile) needs `OWNER`/`ADMIN`. Items, movements and serial changes are bookkeeping, so they need `ACCOUNTANT` and above, matching accounting's own item/document routes. Posts nothing to accounting's GL — every route here reads or writes only inventory's own 12 tables.
 
 **Setup & settings:**
 
@@ -964,7 +918,7 @@ Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom ite
 | POST | `/items` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `{ name, categoryId, itemType, tracking, uomId, attributes, code? \| codeSchemeId?, barcode?, reorderPointMilli? }`. Generates a code via the scheme if `code` is omitted; validates `attributes` against the category's definitions |
 | PATCH | `/items/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Name/description/`attributes` (merged, not replaced)/barcode/reorder point/`isActive` — `code`, `categoryId`, `tracking`, `uomId` are frozen |
 
-**Phase 32 — linked products.** `POST /items` takes an optional `product: { salePriceCents, purchasePriceCents, revenueAccountId, assetAccountId, cogsAccountId, saleTaxRateBp, purchaseTaxRateBp }` (every field optional; blank accounts fall back to the org's inventory settings, then the default chart 1140 / 5050) and creates the LedgerCore `INVENTORY` product with the same code in the same transaction — `409 A product with code X already exists in Products & Services` rolls back the stock item and its code-counter bump. Items carry `ledgerItemId`. `PATCH /items/:id` pushes `name`/`isActive` to the product. `POST /items/:id/link-product` (`OWNER`/`ADMIN`/`ACCOUNTANT`, body is the same `product` block) links an item created before Phase 32 — `409 Item is already linked to a product`; if it already holds stock it posts an opening entry (Dr Inventory / Cr Opening Balance Equity 3400). `GET /product-balances` (any member) returns `[{ ledgerItemId, stockItemId, tracking, uomCode, uomDecimalPlaces, onHandQuantityMilli, isActive }]` for linked items — what Products & Services and the line pickers show. Movements carry `sourceType`, `sourceId`, `glAccountId`, `reversesMovementId`, and the movement types `RECEIPT_REVERSAL` / `ISSUE_REVERSAL`. **A movement of a linked item posts one journal entry in the same transaction** (`sourceType 'stock'`, `sourceId` = the movement group): receipt → Dr Inventory / Cr Opening Balance Equity; issue and adjustment-out → Dr Inventory Adjustments (5400) / Cr Inventory; adjustment-in the reverse; transfers post nothing. New failure paths on the movement routes for a linked item: `422` when the movement date falls in a closed fiscal period (the stock does not move), `422 No opening-stock equity account is configured` / `422 No inventory-adjustment account is configured`. Unlinked items are unchanged.
+**Phase 32 — linked products.** `POST /items` takes an optional `product: { salePriceCents, purchasePriceCents, revenueAccountId, assetAccountId, cogsAccountId, saleTaxRateBp, purchaseTaxRateBp }` (every field optional; blank accounts fall back to the org's inventory settings, then the default chart 1140 / 5050) and creates the accounting `INVENTORY` product with the same code in the same transaction — `409 A product with code X already exists in Products & Services` rolls back the stock item and its code-counter bump. Items carry `ledgerItemId`. `PATCH /items/:id` pushes `name`/`isActive` to the product. `POST /items/:id/link-product` (`OWNER`/`ADMIN`/`ACCOUNTANT`, body is the same `product` block) links an item created before Phase 32 — `409 Item is already linked to a product`; if it already holds stock it posts an opening entry (Dr Inventory / Cr Opening Balance Equity 3400). `GET /product-balances` (any member) returns `[{ ledgerItemId, stockItemId, tracking, uomCode, uomDecimalPlaces, onHandQuantityMilli, isActive }]` for linked items — what Products & Services and the line pickers show. Movements carry `sourceType`, `sourceId`, `glAccountId`, `reversesMovementId`, and the movement types `RECEIPT_REVERSAL` / `ISSUE_REVERSAL`. **A movement of a linked item posts one journal entry in the same transaction** (`sourceType 'stock'`, `sourceId` = the movement group): receipt → Dr Inventory / Cr Opening Balance Equity; issue and adjustment-out → Dr Inventory Adjustments (5400) / Cr Inventory; adjustment-in the reverse; transfers post nothing. New failure paths on the movement routes for a linked item: `422` when the movement date falls in a closed fiscal period (the stock does not move), `422 No opening-stock equity account is configured` / `422 No inventory-adjustment account is configured`. Unlinked items are unchanged.
 
 **Movements, balances, lots, serials, summary:**
 
@@ -994,15 +948,15 @@ Full spec: [stock.md](stock.md). Perpetual inventory: industry setup, custom ite
 | GET | `/lookup?code=` | any member | Exact-match across items/lots/serials. `?kind=` narrows to one |
 | POST | `/labels` | any member | `{ targets: [{ kind, id, copies }] }`, capped at 500 total copies. Returns each target's code/title/subtitle/scan payload/QR SVG |
 
-Failure paths: `400 Invalid request body` (schema) · `403` for a write below its role tier · `404` on any StockLedger entity id (also another org's, or a malformed uuid) · `409 StockLedger is already configured for this organization` · `409` on a duplicate UoM/category/scheme/location code or item barcode · `409` on insufficient stock for an issue/transfer-out · `409` on a serial status transition already satisfied · `422` on a category depth/location-kind/attribute-validation/code-pattern violation · `422 A label sheet is limited to 500 labels`.
+Failure paths: `400 Invalid request body` (schema) · `403` for a write below its role tier · `404` on any inventory entity id (also another org's, or a malformed uuid) · `409 inventory is already configured for this organization` · `409` on a duplicate UoM/category/scheme/location code or item barcode · `409` on insufficient stock for an issue/transfer-out · `409` on a serial status transition already satisfied · `422` on a category depth/location-kind/attribute-validation/code-pattern violation · `422 A label sheet is limited to 500 labels`.
 
-`services/stock/` and `controllers/stock/` contain no query against any other app's tables — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/` returns nothing. `utils/stockCodePattern.ts`, `utils/stockAttributes.ts`, `utils/stockValuation.ts` and `utils/gtin.ts` are all pure functions with no database import, unit-tested without Postgres. No GL posting, no outbox event, no webhook from this phase — see [stock.md](stock.md#deliberately-not-built).
+`services/inventory/` and `controllers/inventory/` contain no query against any other app's tables — proven structurally: `grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|ap_flow_)" server/src/services/inventory/ server/src/controllers/inventory/` returns nothing. `utils/stockCodePattern.ts`, `utils/stockAttributes.ts`, `utils/stockValuation.ts` and `utils/gtin.ts` are all pure functions with no database import, unit-tested without Postgres. No GL posting, no outbox event, no webhook from this phase — see [inventory.md](inventory.md#deliberately-not-built).
 
 ---
 
 ## Planned surface — by app
 
-### LedgerCore — remaining phases
+### Accounting — remaining phases
 
 Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in the section above — the FX engine's `fx_rates`, foreign-currency invoices/bills/payments with realized settlement gain/loss, period-end unrealized revaluation, and the staged chart-of-accounts/opening-balance importer are all complete. Still to come:
 
@@ -1010,4 +964,4 @@ Phase 3, Phase 4, Phase 6, Phase 8, and Phase 9b are **built** and documented in
 
 `/quickbooks/{connect,callback,status,sync}` for the OAuth 2.0 authorization-code flow and journal push. Documented properly when it lands.
 
-AP-Flow and StockLedger are fully documented in the section above. LedgerCore's QuickBooks Online sync (Phase 17) is the only remaining unbuilt surface. Five other apps were built and then removed from the suite in Phase 29 — see [roadmap.md](roadmap.md#phase-29-as-delivered) for what they were and why.
+capture and inventory are fully documented in the section above. accounting's QuickBooks Online sync (Phase 17) is the only remaining unbuilt surface. Five other apps were built and then removed from the suite in Phase 29 — see [roadmap.md](roadmap.md#phase-29-as-delivered) for what they were and why.

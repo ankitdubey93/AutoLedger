@@ -23,36 +23,35 @@ Server, in `server/src/__tests__/`:
 
 | File | Tier | Covers |
 |---|---|---|
-| `app.test.ts` | unit | Middleware wiring, 404 shape, no `X-Powered-By` |
+| `app.test.ts` | unit | Middleware wiring, 404 shape, no `X-Powered-By`, and (Phase 33) that the root-mounted accounting routes and the retired `/ledger-core`, `/stock`, `/ap-flow`, `/apps` prefixes all fall through to `404` |
 | `health.test.ts` | integration | A real `SELECT 1` |
 | `migrations.test.ts` | integration | Runner behaviour, SQL idempotency, checksum guard, every CHECK/UNIQUE/trigger/cascade in migration 001 |
 | `auth.test.ts` | integration | register/login/check/refresh/logout, cookie flags, rotation, reuse detection |
 | `tenantIsolation.test.ts` | integration | **The mandatory cross-tenant suite** |
 | `validate.test.ts`, `jwt.test.ts`, `rbac.test.ts` | unit | Pure logic — no database |
-| `platform/apps.test.ts` | integration | `GET /apps` auth requirement, registry shape, `isAppSlug` |
 | `money.test.ts` | unit | Branded `Cents`, rounding half-away-from-zero, the `BIGINT`-string parser and its precision cliff |
 | `rateLimit.test.ts` | unit | 429 after the limit, the error envelope, successful logins not counted |
-| `ledger-core/accounts.test.ts` | integration | The 44-account seed, the tree, re-parent cycle rejection, **cross-tenant isolation** |
-| `ledger-core/journals.test.ts` | integration | Posting, unbalanced rejection, reversal, ROLLBACK, forged `sourceType`, **cross-tenant isolation** |
-| `ledger-core/ledgerConstraints.test.ts` | integration | **The database as the guardrail** — every case bypasses the service and writes raw SQL |
-| `ledger-core/reports.test.ts` | integration | Trial balance totals, type-aware balances, `asOf`, and that no summary table exists |
+| `accounting/accounts.test.ts` | integration | The 44-account seed, the tree, re-parent cycle rejection, **cross-tenant isolation** |
+| `accounting/journals.test.ts` | integration | Posting, unbalanced rejection, reversal, ROLLBACK, forged `sourceType`, **cross-tenant isolation** |
+| `accounting/ledgerConstraints.test.ts` | integration | **The database as the guardrail** — every case bypasses the service and writes raw SQL |
+| `accounting/reports.test.ts` | integration | Trial balance totals, type-aware balances, `asOf`, and that no summary table exists |
 | `platform/queue.test.ts` | integration (Redis) | Job processing via a real `Worker`, retry-then-dead-letter, `jobId` dedup |
 | `platform/webhookEndpoints.test.ts` | integration | `assertDeliverableUrl`'s SSRF rules, signature unit cases, endpoint CRUD, secret never leaked, **cross-tenant isolation** |
 | `platform/outboxDrain.test.ts` | integration (Redis) | `emitEvent` rollback-leaves-no-row proof, fan-out, idempotent re-drain, stale-delivery sweep, **cross-org isolation** |
 | `platform/webhookDelivery.test.ts` | integration (Redis, `fetch` stubbed) | Signed delivery, retry/status transitions, no-secret-in-body, **cross-tenant isolation** |
-| `ledger-core/outboxEmission.test.ts` | integration | One case per event type from the real posting services, rollback emits nothing, **cross-org scoping** |
+| `accounting/outboxEmission.test.ts` | integration | One case per event type from the real posting services, rollback emits nothing, **cross-org scoping** |
 | `mimeSniff.test.ts` | unit | Magic-byte detection for PDF/PNG/JPEG, the CSV UTF-8-round-trip carve-out, a renamed-file spoof and an executable-disguised-as-PDF spoof both refused |
 | `storageService.test.ts` | unit (real `fs` against `storage-test/`) | Idempotent `put`, the two-level hex fan-out path, cross-org isolation (`two orgs uploading identical bytes get two blobs`), `blobPath`'s traversal/non-UUID rejection |
 | `platform/documents.test.ts` | integration | Upload idempotency (`201`→`200`), MIME/size rejection (`415`/`413`), role gates, pagination, download headers, attach/detach, **cross-tenant isolation** (3 cases: `GET`/`GET .../file`/`DELETE` on another org's document, all `404`) |
 | `platform/documentConstraints.test.ts` | integration | **The database as the guardrail** — the composite FK rejecting a cross-tenant link, `0A000` on `UPDATE` for both tables, `23505`/`23514` constraint violations, cascade delete, the audit trail — all via raw SQL, bypassing the service |
 
-Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `AppChooserPage.test.tsx` (a `building` app links, a `planned` app doesn't, API failure shows an error), `ledgerCoreMoney.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `ledgerCoreWebhooks.test.tsx` / `ledgerCoreWebhookDeliveries.test.tsx`. (Phase 9.5) `DocumentsPage.test.tsx` (upload/list/delete, the `415` message surfaced verbatim, Delete hidden while linked) and `AttachmentsPanel.test.tsx` (upload-then-link ordering, a `409` rendered as "Already attached to this record", detach-after-confirm, `readOnly` hiding every control).
+Client, in `client/src/__tests__/`: `fetchWithAutoRefresh.test.ts` (single-flight refresh), `ProtectedRoute.test.tsx` (the `checking` state), `money.test.ts` (the client's half of the integer-cents rule, including the balance check the entry form performs), and (Phase 7) `webhooks.test.tsx` / `webhookDeliveries.test.tsx`. (Phase 9.5) `DocumentsPage.test.tsx` (upload/list/delete, the `415` message surfaced verbatim, Delete hidden while linked) and `AttachmentsPanel.test.tsx` (upload-then-link ordering, a `409` rendered as "Already attached to this record", detach-after-confirm, `readOnly` hiding every control). (Phase 33) client test files dropped their app prefixes (`ledgerCoreX` → `x`, `apFlowX` → `inboxX`, `stockX` → `inventoryX`) and gained `workspaceNav.test.tsx` (one sidebar, section order, absolute links), `legacyAppRedirect.test.tsx` (every `/app/<slug>/…` shape, including printed QR labels), `inventoryGate.test.tsx` (the optional-inventory invitation), and one-home cases in `dashboard.test.tsx`; the chooser, app-picker, `appSelection` and `useEnabledApps` tests were deleted with their code.
 
 Integration tests need **`docker compose up -d postgres-test`** — a second Postgres on port **5433**, separate from the dev one on 5432. They are not mocked and will fail if it is down, which is the point (and from the `fsync` fix below, they now fail in ~5s with an actionable message rather than hanging). From Phase 7, tests that exercise the job queue also need `docker compose up -d redis` — `globalSetup` flushes Redis database index **1** (never index 0) before the run, the same `autodb_test`-not-`autodb` discipline applied to Redis.
 
 There is no CI yet. The prior build's `entrypoint.sh` ran the suite before server startup; that gate has no host equivalent and belongs in CI when it is set up.
 
-Tests live in `server/src/__tests__/`, mirroring the source layout — platform tests under `__tests__/platform/`, an app's tests under `__tests__/<app-slug>/` (e.g. `__tests__/ledger-core/journalService.test.ts`). One test root and one test database for the whole suite; apps do not get their own. Set `globals: true` in `vitest.config.ts` so `describe`/`it`/`expect` need no import.
+Tests live in `server/src/__tests__/`, mirroring the source layout — platform tests under `__tests__/platform/`, a module's tests under `__tests__/<module>/` (`accounting`, `capture`, `inventory`) (e.g. `__tests__/accounting/journalService.test.ts`). One test root and one test database for the whole suite; apps do not get their own. Set `globals: true` in `vitest.config.ts` so `describe`/`it`/`expect` need no import.
 
 ### Test database
 

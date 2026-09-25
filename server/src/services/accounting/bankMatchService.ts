@@ -723,7 +723,7 @@ export interface PostJournalInput {
 
 /**
  * Settles a bank line by posting a journal entry directly, rather than by
- * matching it to an invoice or bill (Phase 6.1 — docs/ledger-core.md § Phase
+ * matching it to an invoice or bill (Phase 6.1 — docs/accounting.md § Phase
  * 6 previously named this gap explicitly). Money in debits the bank
  * account and credits the chosen account; money out is the reverse — one
  * side per line, and the entry balances by construction (guardrails rule

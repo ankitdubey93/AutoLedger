@@ -1,8 +1,8 @@
 # Build plan — LedgerCore Phase 8: multi-currency FX engine
 
 **Date:** 2026-09-08
-**Status: DONE — 2026-09-10.** All 6 slices (A–F) plus the spine executed. **776 server tests** (up from 717, plan estimated 790–820 — landed slightly under estimate) **+ 150 client tests** (up from 144). `guardrail-review` ran clean after one fix (two signed money columns in `fxRevaluationService.ts` parsed via bare `Number()` instead of `parseCents()` — corrected). `docs-sync` ran clean for every file in scope. The worked example passes as the named test `fxRealized.test.ts`'s `"reproduces docs/ledger-core.md's worked example to the paisa"`. `npm run verify:integrity` passes. This file is now a historical record; safe to delete.
-**Phase:** 8 (LedgerCore) · **Spec:** [docs/ledger-core.md § D](../docs/ledger-core.md) and [§ 3 the worked example](../docs/ledger-core.md#3-realized-fx--the-worked-example) · **Roadmap:** [docs/roadmap.md § Phase 8, as delivered](../docs/roadmap.md#phase-8-as-delivered) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
+**Status: DONE — 2026-09-10.** All 6 slices (A–F) plus the spine executed. **776 server tests** (up from 717, plan estimated 790–820 — landed slightly under estimate) **+ 150 client tests** (up from 144). `guardrail-review` ran clean after one fix (two signed money columns in `fxRevaluationService.ts` parsed via bare `Number()` instead of `parseCents()` — corrected). `docs-sync` ran clean for every file in scope. The worked example passes as the named test `fxRealized.test.ts`'s `"reproduces docs/accounting.md's worked example to the paisa"`. `npm run verify:integrity` passes. This file is now a historical record; safe to delete.
+**Phase:** 8 (LedgerCore) · **Spec:** [docs/accounting.md § D](../docs/accounting.md) and [§ 3 the worked example](../docs/accounting.md#3-realized-fx--the-worked-example) · **Roadmap:** [docs/roadmap.md § Phase 8, as delivered](../docs/roadmap.md#phase-8-as-delivered) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
 
 **Deviations from the plan as written, all recorded in the roadmap and study notes:** (1) `settingsService`/`settingsSchema` expose the three new FX posting-account columns through `GET`/`PATCH /ledger-core/settings` — the plan said to follow `payable_account_id`'s "existing pattern," but that pattern turned out to have no read/write path through the API at all (a pre-existing Phase 3.9 gap discovered mid-execution); the FX columns were wired properly instead, which is the more complete and clearly-intended behavior. (2) Step D4's aging/dashboard rework did not add a separate `baseOutstandingCents` field as sketched — `AgingCounterpartyRow`/`AgingBucketAmount` had no native-currency field to begin with, so the existing fields were simply switched to sum `base_amount_cents`/`base_total_cents`, matching the convention `reportService`'s trial balance, P&L, and balance sheet already followed (which, on inspection, were already on `base_*` columns — Slice B's step for those two files turned out to be a no-op; only `db/integrity.ts` needed the native→base switch). (3) The Phase 8+ schema sketch's `fx_rates` design (no `org_id`, `base_code`/`quote_code` naming) was superseded by an org-scoped table (`from_code`/`to_code`) — recorded as a deliberate change in `docs/schema.md`, reasoned through in decision 1 of this plan's §4. (4) `payment_allocations.base_amount_cents` is a deliberate, single exception to this codebase's "derive, never store" rule — anticipated by the plan (§7 risk 3) and confirmed necessary during D3.
 
@@ -29,12 +29,12 @@ Two client tests needed fixing unrelated to new functionality: `ledgerCoreInvoic
 - **`utils/money.ts`** — `Cents` brand, `cents`, `toCents`, `parseCents`, `formatCents`, `addCents`, `sumCents`, `scaleCents(amount, numerator, denominator)` (exact `BigInt`, rounds half up, rejects a negative or non-integer numerator/denominator), `parseMoneyText`. **There is no rate type and no rate arithmetic anywhere.**
 - **`utils/`** also has: `apiError`, `cookies`, `csv`, `dateParse`, `fiscalYear`, `jwt`, `levenshtein`, `matchScore`, `parseBody`, `queryParam` (`readPagination`, `optionalIsoDate`, `optionalUuid`, `optionalText`), `requestContext`, `requireUser`, `routeParam` (`requireParam`), `validate`, `webhookSignature`, `webhookUrl`.
 - **`db/transaction.ts`** — `beginTransaction(client)`, `withTransaction(fn)`, `applyAuditContext(client)`. A bare `client.query('BEGIN')` is a bug (Phase 5).
-- **`types/ledger-core.ts`** (~800 lines) holds every FSM table: `INVOICE_TRANSITIONS`, `BILL_TRANSITIONS`, `PAYMENT_TRANSITIONS`, `FISCAL_PERIOD_TRANSITIONS`, `BANK_TRANSACTION_TRANSITIONS`, each with a `canTransitionX` helper.
+- **`types/accounting.ts`** (~800 lines) holds every FSM table: `INVOICE_TRANSITIONS`, `BILL_TRANSITIONS`, `PAYMENT_TRANSITIONS`, `FISCAL_PERIOD_TRANSITIONS`, `BANK_TRANSACTION_TRANSITIONS`, each with a `canTransitionX` helper.
 - **`types/webhooks.ts`** — `OUTBOX_EVENT_TYPES` is a 5-element `as const` array. `outbox_events.event_type` is plain `TEXT` with only a length CHECK, so **adding an event type needs no migration**.
-- **`routes/ledger-core/index.ts`** mounts 12 sub-routers: accounts, bank-imports, bank-transactions, bills, customers, fiscal-periods, invoices, journals, payments, reports, settings, vendors.
+- **`routes/accounting/index.ts`** mounts 12 sub-routers: accounts, bank-imports, bank-transactions, bills, customers, fiscal-periods, invoices, journals, payments, reports, settings, vendors.
 - **The default chart already seeds the three FX accounts** (`accountService.DEFAULT_CHART` and migration 003): `4910 Realized FX Gain` (Revenue), `6810 Realized FX Loss` (Expense), `6820 Unrealized FX Gain/Loss` (Expense). **No backfill is owed** — this debt was paid forward in Phase 3.
 - **`ledger_settings`** has `payable_account_id`, `tax_input_account_id`, `default_expense_account_id` (migration 012, composite FKs to `accounts (org_id, id)`), plus `base_currency` living on `organizations`, not here. **There are no FX posting-account columns.**
-- **Client** — `client/src/Pages/ledger-core/` holds 40+ files including `LedgerCoreSidebar.tsx`, `LedgerCoreRoutes.tsx`, `NewInvoicePage.tsx`, `NewBillPage.tsx`, `PaymentDialog.tsx`, `ConfirmDialog.tsx`, `BackLink.tsx`, `money.ts`.
+- **Client** — `client/src/Pages/` holds 40+ files including `LedgerCoreSidebar.tsx`, `LedgerCoreRoutes.tsx`, `NewInvoicePage.tsx`, `NewBillPage.tsx`, `PaymentDialog.tsx`, `ConfirmDialog.tsx`, `BackLink.tsx`, `money.ts`.
 - **Tests:** 717 server (`server/src/__tests__/`, 25 files under `ledger-core/`) + 144 client. `helpers/factories.ts` exports `resetTables`, `uniqueEmail`, `createUserWithOrg`, `addMember`, `loginAgent`.
 
 **Does NOT exist — do not assume it:**
@@ -54,7 +54,7 @@ Two client tests needed fixing unrelated to new functionality: `ledgerCoreInvoic
 
 `ledger-core` is already `status: 'building'` in `server/src/config/apps.ts` — no registry change is needed.
 
-**Roadmap debt this phase carries:** none owed *to* it. Phase 3 pre-seeded `4910`/`6810`/`6820` precisely so Phase 8 would not need a chart backfill; verify with `grep -n "4910" server/src/services/ledger-core/accountService.ts` before assuming otherwise.
+**Roadmap debt this phase carries:** none owed *to* it. Phase 3 pre-seeded `4910`/`6810`/`6820` precisely so Phase 8 would not need a chart backfill; verify with `grep -n "4910" server/src/services/accounting/accountService.ts` before assuming otherwise.
 
 **Debt this phase pays off:** the "FX columns exist but every line is written at rate 1" gap that Phases 3, 3.8, and 3.9 each recorded.
 
@@ -133,14 +133,14 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 | Constraints | `ux_fx_rates_org_pair_date`, `chk_fx_rates_from_code`, `chk_fx_rates_to_code`, `chk_fx_rates_different`, `chk_fx_rates_rate_range`, `chk_fx_rates_source` |
 | Indexes | `idx_fx_rates_lookup` |
 | Util file | `server/src/utils/fxRate.ts` → `RATE_SCALE`, `MAX_RATE`, `isCurrencyCode`, `rateNumerator`, `convertToBase`, `formatRate`, `ONE_RATE` |
-| Types | `FxRate`, `ResolvedRate` in `server/src/types/ledger-core.ts` |
-| Constants | `FX_RATE_SOURCES` in `server/src/types/ledger-core.ts` |
-| Service file / exports | `server/src/services/ledger-core/fxRateService.ts` → `listRates`, `upsertRate`, `deleteRate`, `resolveRateOnClient`, `requireRateOnClient` |
-| Schema file | `server/src/schemas/ledger-core/fxRateSchema.ts` → `upsertFxRateSchema` |
-| Controller | `server/src/controllers/ledger-core/fxRateController.ts` → `list`, `upsert`, `remove`, `latest` |
-| Routes file | `server/src/routes/ledger-core/fxRateRoutes.ts` |
-| Route base | `/api/v1/ledger-core/fx-rates` |
-| Test files | `server/src/__tests__/ledger-core/fxRates.test.ts`, `server/src/__tests__/fxRate.test.ts` |
+| Types | `FxRate`, `ResolvedRate` in `server/src/types/accounting.ts` |
+| Constants | `FX_RATE_SOURCES` in `server/src/types/accounting.ts` |
+| Service file / exports | `server/src/services/accounting/fxRateService.ts` → `listRates`, `upsertRate`, `deleteRate`, `resolveRateOnClient`, `requireRateOnClient` |
+| Schema file | `server/src/schemas/accounting/fxRateSchema.ts` → `upsertFxRateSchema` |
+| Controller | `server/src/controllers/accounting/fxRateController.ts` → `list`, `upsert`, `remove`, `latest` |
+| Routes file | `server/src/routes/accounting/fxRateRoutes.ts` |
+| Route base | `/api/v1/fx-rates` |
+| Test files | `server/src/__tests__/accounting/fxRates.test.ts`, `server/src/__tests__/fxRate.test.ts` |
 
 ---
 
@@ -235,8 +235,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** A1 (column names), A2 (`ONE_RATE`).
 - **Skill:** none.
-- **Read first:** `server/src/types/ledger-core.ts` lines 700–800 (the Phase 6 block) for the section-comment style and where new blocks go — **append at the end of the file**, do not interleave.
-- **Files:** `server/src/types/ledger-core.ts` (edit — append)
+- **Read first:** `server/src/types/accounting.ts` lines 700–800 (the Phase 6 block) for the section-comment style and where new blocks go — **append at the end of the file**, do not interleave.
+- **Files:** `server/src/types/accounting.ts` (edit — append)
 - **Contract — write these literally:**
   ```ts
   // ------------------------------------------------------------------ Phase 8 — FX
@@ -282,8 +282,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** A1, A2, A3.
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/vendorService.ts` (a plain org-scoped CRUD service — copy its structure, `ApiError` usage, row-typing, and `23505` handling) and `server/src/services/ledger-core/fiscalPeriodService.ts`'s `assertPeriodOpenOnClient` (the `*OnClient` shape that takes a caller's transaction client).
-- **Files:** `server/src/services/ledger-core/fxRateService.ts` (new)
+- **Read first:** `server/src/services/accounting/vendorService.ts` (a plain org-scoped CRUD service — copy its structure, `ApiError` usage, row-typing, and `23505` handling) and `server/src/services/accounting/fiscalPeriodService.ts`'s `assertPeriodOpenOnClient` (the `*OnClient` shape that takes a caller's transaction client).
+- **Files:** `server/src/services/accounting/fxRateService.ts` (new)
 - **Contract — write these signatures literally:**
   ```ts
   export interface ListRatesOptions {
@@ -348,7 +348,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
     Note in a comment: `rate_date <= $4`, never `= $4` — a rate feed has weekend and holiday gaps, and an exact-date match is a bug waiting for a Saturday.
   - `requireRateOnClient` → on `null`, `throw new ApiError(422, \`No exchange rate for ${fromCode} to ${toCode} on or before ${onDate}\`)` — this exact message shape; several tests assert on it.
 - **Guardrails:** #1 `org_id = $1` in every statement, including the lookup · #2 no `req`/`res` in this file · #4 parameterized only; the optional filters append `$n` placeholders, never interpolate · #5 `upsertRate` uses `withTransaction`; the `*OnClient` functions run no `BEGIN`/`COMMIT`
-- **Proof:** `npm run typecheck` exits 0, and `grep -c "org_id" server/src/services/ledger-core/fxRateService.ts` is at least 6 (one per statement).
+- **Proof:** `npm run typecheck` exits 0, and `grep -c "org_id" server/src/services/accounting/fxRateService.ts` is at least 6 (one per statement).
 - **If it fails:** if `rate` comes back as a JS number, you forgot `rate::text` in the SELECT — add it rather than converting in TS.
 - **Owes:** `docs/api.md` (Step A7).
 
@@ -358,12 +358,12 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** A4.
 - **Skill:** `new-module` (controller + routes layers)
-- **Read first:** `server/src/schemas/ledger-core/fiscalPeriodSchema.ts` (a small zod schema with an ISO-date field), `server/src/controllers/ledger-core/fiscalPeriodController.ts` (thin adapters, `requireUser`, `parseBody`, `requireParam`), `server/src/routes/ledger-core/fiscalPeriodRoutes.ts` (role gating per verb).
+- **Read first:** `server/src/schemas/accounting/fiscalPeriodSchema.ts` (a small zod schema with an ISO-date field), `server/src/controllers/accounting/fiscalPeriodController.ts` (thin adapters, `requireUser`, `parseBody`, `requireParam`), `server/src/routes/accounting/fiscalPeriodRoutes.ts` (role gating per verb).
 - **Files:**
-  - `server/src/schemas/ledger-core/fxRateSchema.ts` (new)
-  - `server/src/controllers/ledger-core/fxRateController.ts` (new)
-  - `server/src/routes/ledger-core/fxRateRoutes.ts` (new)
-  - `server/src/routes/ledger-core/index.ts` (edit — add the import and `router.use('/fx-rates', fxRateRoutes);`, both in alphabetical position, after `/fiscal-periods`)
+  - `server/src/schemas/accounting/fxRateSchema.ts` (new)
+  - `server/src/controllers/accounting/fxRateController.ts` (new)
+  - `server/src/routes/accounting/fxRateRoutes.ts` (new)
+  - `server/src/routes/accounting/index.ts` (edit — add the import and `router.use('/fx-rates', fxRateRoutes);`, both in alphabetical position, after `/fiscal-periods`)
 - **Contract:**
   ```ts
   // fxRateSchema.ts
@@ -381,15 +381,15 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
   | Method | Path | Roles | Controller | Success | Failures |
   |---|---|---|---|---|---|
-  | GET | `/api/v1/ledger-core/fx-rates` | any member | `list` | `200` `{ success: true, rates, count, totalCount, currentPage, totalPages }` | — |
-  | GET | `/api/v1/ledger-core/fx-rates/latest` | any member | `latest` | `200` `{ success: true, rate: ResolvedRate }` | `400` missing/invalid `from`; `422` no rate on or before |
-  | POST | `/api/v1/ledger-core/fx-rates` | `OWNER`,`ADMIN`,`ACCOUNTANT` | `upsert` | `201` `{ success: true, rate }` | `400` body; `422` same-currency pair |
-  | DELETE | `/api/v1/ledger-core/fx-rates/:id` | `OWNER`,`ADMIN` | `remove` | `204` no body | `404` not found / other tenant |
+  | GET | `/api/v1/fx-rates` | any member | `list` | `200` `{ success: true, rates, count, totalCount, currentPage, totalPages }` | — |
+  | GET | `/api/v1/fx-rates/latest` | any member | `latest` | `200` `{ success: true, rate: ResolvedRate }` | `400` missing/invalid `from`; `422` no rate on or before |
+  | POST | `/api/v1/fx-rates` | `OWNER`,`ADMIN`,`ACCOUNTANT` | `upsert` | `201` `{ success: true, rate }` | `400` body; `422` same-currency pair |
+  | DELETE | `/api/v1/fx-rates/:id` | `OWNER`,`ADMIN` | `remove` | `204` no body | `404` not found / other tenant |
 
   **`/latest` must be registered before any `/:id` route** in `fxRateRoutes.ts` or Express will match `latest` as an id. There is no `GET /:id` in this plan — do not add one.
   `latest` reads `from` (required, 3-letter, else `ApiError(400, 'from must be a 3-letter ISO currency code')`) and `on` (optional ISO date via `optionalIsoDate`, defaulting to today's UTC date), resolves `toCode` from `organizations.base_currency` **through a service call, never a query in the controller** — add `getBaseCurrency(orgId): Promise<string>` to `server/src/services/organizationService.ts` if one does not already exist, and check first with `grep -n "base_currency" server/src/services/organizationService.ts`.
 - **Guardrails:** #2 **zero SQL in the controller** — if you find yourself writing `pool.query` here, the query belongs in a service · #1 the org comes from `requireUser(req).orgId`, never from a body, header, or param · #16 `/fx-rates` sits under `/ledger-core`, a namespace and not a tenancy boundary
-- **Proof:** `npm run typecheck` exits 0 and `npm run dev` boots without an unhandled route error; `grep -n "pool" server/src/controllers/ledger-core/fxRateController.ts` returns nothing.
+- **Proof:** `npm run typecheck` exits 0 and `npm run dev` boots without an unhandled route error; `grep -n "pool" server/src/controllers/accounting/fxRateController.ts` returns nothing.
 - **If it fails:** a 404 on `/fx-rates/latest` means route order — move it above any parameterized route.
 - **Owes:** `docs/api.md` (Step A7).
 
@@ -399,10 +399,10 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** A1–A5.
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/money.test.ts` (pure-unit style) and `server/src/__tests__/ledger-core/fiscalPeriods.test.ts` (API-level style with `createUserWithOrg` + `loginAgent`, and its cross-tenant block).
+- **Read first:** `server/src/__tests__/money.test.ts` (pure-unit style) and `server/src/__tests__/accounting/fiscalPeriods.test.ts` (API-level style with `createUserWithOrg` + `loginAgent`, and its cross-tenant block).
 - **Files:**
   - `server/src/__tests__/fxRate.test.ts` (new — pure unit, no database)
-  - `server/src/__tests__/ledger-core/fxRates.test.ts` (new — API + isolation)
+  - `server/src/__tests__/accounting/fxRates.test.ts` (new — API + isolation)
 - **Contract — these named cases, with these expected values:**
 
   `fxRate.test.ts`:
@@ -459,7 +459,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 | New constraint | `chk_ledger_lines_base_matches_rate` |
 | Service edits | `journalService.createEntryOnClient`, `reportService`, `accountLedgerService`, `db/integrity.ts` |
 | New input field | `JournalLineInput.currencyCode`, `JournalLineInput.fxRate` (both optional) |
-| Test files | `server/src/__tests__/ledger-core/fxLedgerConstraints.test.ts` (new), `server/src/__tests__/ledger-core/ledgerConstraints.test.ts` (edit) |
+| Test files | `server/src/__tests__/accounting/fxLedgerConstraints.test.ts` (new), `server/src/__tests__/accounting/ledgerConstraints.test.ts` (edit) |
 
 ---
 
@@ -519,8 +519,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** B1 applied, A2.
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/journalService.ts` lines 320–410 (`createEntryOnClient`) and 457–530 (`reverseEntryOnClient`).
-- **Files:** `server/src/services/ledger-core/journalService.ts` (edit — `JournalLineInput`, `createEntryOnClient`)
+- **Read first:** `server/src/services/accounting/journalService.ts` lines 320–410 (`createEntryOnClient`) and 457–530 (`reverseEntryOnClient`).
+- **Files:** `server/src/services/accounting/journalService.ts` (edit — `JournalLineInput`, `createEntryOnClient`)
 - **Contract:**
   ```ts
   export interface JournalLineInput {
@@ -560,10 +560,10 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** B2.
 - **Skill:** none — a targeted refactor. Same fields apply.
-- **Read first:** `server/src/services/ledger-core/dashboardService.ts` lines 50–135 — it is **already** on `base_debit_cents`/`base_credit_cents` and is the model to copy.
+- **Read first:** `server/src/services/accounting/dashboardService.ts` lines 50–135 — it is **already** on `base_debit_cents`/`base_credit_cents` and is the model to copy.
 - **Files:**
-  - `server/src/services/ledger-core/reportService.ts` (edit — the three aggregate queries and their row interfaces)
-  - `server/src/services/ledger-core/accountLedgerService.ts` (edit — the opening-balance query, the period-totals query, the running-balance window function, and the recursive-CTE rollup)
+  - `server/src/services/accounting/reportService.ts` (edit — the three aggregate queries and their row interfaces)
+  - `server/src/services/accounting/accountLedgerService.ts` (edit — the opening-balance query, the period-totals query, the running-balance window function, and the recursive-CTE rollup)
 - **Contract:** in every `SUM(...)`, `SELECT`, and window function over `ledger_lines` in these two files, replace `debit_cents` with `base_debit_cents` and `credit_cents` with `base_credit_cents`. **Alias them back to `debit_cents`/`credit_cents` in the result set** (`SUM(l.base_debit_cents) AS debit_cents`) so the row interfaces, the `parseCents` calls, and every `TrialBalanceRow`/`StatementRow`/`AccountLedgerRow` type stay exactly as they are. No type changes, no API shape changes.
   Add this comment once at the top of each changed query block:
   ```
@@ -573,7 +573,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
   ```
   **Do not touch `journalService.toEntry`'s `totalDebitCents`/`totalCreditCents`** — those are per-entry display totals shown next to the entry's own lines, and staying native is correct there.
 - **Guardrails:** #1 every predicate keeps its `org_id` · #4 no interpolation — these are all static strings
-- **Proof:** `npm test -- reports && npm test -- statements && npm test -- accountLedger && npm test -- dashboard` all pass **unchanged**, then `grep -n "SUM(l.debit_cents)\|SUM(l.credit_cents)\|SUM(debit_cents)\|SUM(credit_cents)" server/src/services/ledger-core/reportService.ts server/src/services/ledger-core/accountLedgerService.ts` returns **nothing**.
+- **Proof:** `npm test -- reports && npm test -- statements && npm test -- accountLedger && npm test -- dashboard` all pass **unchanged**, then `grep -n "SUM(l.debit_cents)\|SUM(l.credit_cents)\|SUM(debit_cents)\|SUM(credit_cents)" server/src/services/accounting/reportService.ts server/src/services/accounting/accountLedgerService.ts` returns **nothing**.
 - **If it fails:** a changed number in an existing test means you also changed a predicate or a sign — revert and change only the column names.
 - **Owes:** nothing.
 
@@ -597,8 +597,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** B1–B4.
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/ledger-core/ledgerConstraints.test.ts` — the raw-SQL, bypass-the-service suite. Your new file is its FX sibling and must follow the same shape: `pool.query` directly, `beginTransaction`, deliberate `COMMIT` so the deferred trigger fires.
-- **Files:** `server/src/__tests__/ledger-core/fxLedgerConstraints.test.ts` (new), `docs/schema.md` (edit)
+- **Read first:** `server/src/__tests__/accounting/ledgerConstraints.test.ts` — the raw-SQL, bypass-the-service suite. Your new file is its FX sibling and must follow the same shape: `pool.query` directly, `beginTransaction`, deliberate `COMMIT` so the deferred trigger fires.
+- **Files:** `server/src/__tests__/accounting/fxLedgerConstraints.test.ts` (new), `docs/schema.md` (edit)
 - **Contract — these named cases, by raw SQL, bypassing every service:**
   1. **"a mixed-currency entry that balances in base currency commits"** — insert an entry with three lines: debit `1110` 8350000 INR at rate 1; credit `1120` 100000 USD at rate `83.00000000` (base 8300000); credit `4910` 50000 INR at rate 1. `COMMIT` succeeds. Native sums (8350000 vs 150000) do **not** match, and that is the point.
   2. **"a mixed-currency entry that does not balance in base currency is rejected at COMMIT"** — the same entry with the `4910` credit at 40000. `COMMIT` throws, message contains `unbalanced in base currency`.
@@ -628,7 +628,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 | New constraints | `chk_invoices_fx_rate`, `chk_invoices_base_total`, `chk_bills_fx_rate`, `chk_bills_base_total` |
 | Service edits | `invoiceService.createInvoice/updateInvoice/issueInvoice`, `billService.createBill/updateBill/approveBill` |
 | Type edits | `Invoice`, `Bill` gain `fxRate: string`, `baseSubtotalCents`, `baseTaxCents`, `baseTotalCents` |
-| Test files | `server/src/__tests__/ledger-core/fxDocuments.test.ts` (new) |
+| Test files | `server/src/__tests__/accounting/fxDocuments.test.ts` (new) |
 
 ---
 
@@ -675,12 +675,12 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** C1 applied, A4, B2.
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/invoiceService.ts` — `createInvoice` (line ~428), `updateInvoice` (~511), `issueInvoice` (~661) — and the parallel three in `billService.ts`.
-- **Files:** `server/src/services/ledger-core/invoiceService.ts` (edit), `server/src/services/ledger-core/billService.ts` (edit), `server/src/types/ledger-core.ts` (edit — `Invoice` and `Bill` interfaces), `server/src/schemas/ledger-core/invoiceSchema.ts` (edit), `server/src/schemas/ledger-core/billSchema.ts` (edit)
+- **Read first:** `server/src/services/accounting/invoiceService.ts` — `createInvoice` (line ~428), `updateInvoice` (~511), `issueInvoice` (~661) — and the parallel three in `billService.ts`.
+- **Files:** `server/src/services/accounting/invoiceService.ts` (edit), `server/src/services/accounting/billService.ts` (edit), `server/src/types/accounting.ts` (edit — `Invoice` and `Bill` interfaces), `server/src/schemas/accounting/invoiceSchema.ts` (edit), `server/src/schemas/accounting/billSchema.ts` (edit)
 - **Contract:**
   - **Schemas:** `createInvoiceSchema`/`updateInvoiceSchema` gain
     `currencyCode: z.string().trim().toUpperCase().regex(/^[A-Z]{3}$/).optional()` — omitted means the org's base currency. Same for bills. **No `fxRate` field on the wire** — the rate is never client-supplied; it is always resolved from `fx_rates`.
-  - **Types:** `Invoice` and `Bill` each gain `fxRate: string; baseSubtotalCents: number; baseTaxCents: number; baseTotalCents: number;` and their row mappers gain `fx_rate::text AS fx_rate` plus the three `parseCents` reads. Every `SELECT` in these services that lists invoice/bill columns must add the four new ones — `grep -n "subtotal_cents" server/src/services/ledger-core/invoiceService.ts` to find every one of them.
+  - **Types:** `Invoice` and `Bill` each gain `fxRate: string; baseSubtotalCents: number; baseTaxCents: number; baseTotalCents: number;` and their row mappers gain `fx_rate::text AS fx_rate` plus the three `parseCents` reads. Every `SELECT` in these services that lists invoice/bill columns must add the four new ones — `grep -n "subtotal_cents" server/src/services/accounting/invoiceService.ts` to find every one of them.
   - **A private helper in each service**, written identically in both:
     ```ts
     async function resolveDocumentFx(
@@ -711,8 +711,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** C2.
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/ledger-core/invoices.test.ts` (fixture setup, the issue flow, how it asserts on posted GL lines).
-- **Files:** `server/src/__tests__/ledger-core/fxDocuments.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/invoices.test.ts` (fixture setup, the issue flow, how it asserts on posted GL lines).
+- **Files:** `server/src/__tests__/accounting/fxDocuments.test.ts` (new)
 - **Contract — named cases with exact expected values.** Fixture: an org with `base_currency = 'INR'`, a `USD → INR` rate of `83.00000000` on `2026-01-01`.
   1. **"an invoice in a foreign currency stores the rate and base totals"** — create a draft for $1,000.00 (`subtotalCents: 100000`, no tax) dated `2026-01-10`, `currencyCode: 'USD'` → `fxRate === '83.00000000'`, `baseSubtotalCents === 8300000`, `baseTotalCents === 8300000`.
   2. **"issuing a foreign-currency invoice posts native USD lines with base INR amounts"** — issue it, fetch the journal entry, assert: the `1120` line has `currencyCode === 'USD'`, `debitCents === 100000`, `fxRate === '83.00000000'`, `baseDebitCents === 8300000`; the revenue line mirrors it on the credit side. **This is the worked example's day 1, to the paisa.**
@@ -739,7 +739,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 ## Slice D — Realized FX on settlement
 
-**Outcome:** settling a foreign-currency invoice or bill at a rate different from the one it was posted at automatically posts the difference to `4910 Realized FX Gain` or `6810 Realized FX Loss`, and the worked example in `docs/ledger-core.md` reproduces to the paisa in a test.
+**Outcome:** settling a foreign-currency invoice or bill at a rate different from the one it was posted at automatically posts the difference to `4910 Realized FX Gain` or `6810 Realized FX Loss`, and the worked example in `docs/accounting.md` reproduces to the paisa in a test.
 
 **Names — use exactly these:**
 
@@ -751,7 +751,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 | New trigger | `assert_allocation_currency_matches()` → `trg_allocations_currency` |
 | New constraints | `chk_payments_fx_rate`, `fk_ledger_settings_realized_fx_gain_account`, `fk_ledger_settings_realized_fx_loss_account`, `fk_ledger_settings_unrealized_fx_account` |
 | Service edits | `paymentService.createPaymentOnClient`, `agingService`, `bankMatchService`, `settingsService` |
-| Test files | `server/src/__tests__/ledger-core/fxRealized.test.ts` (new), `server/src/__tests__/ledger-core/fxPaymentConstraints.test.ts` (new) |
+| Test files | `server/src/__tests__/accounting/fxRealized.test.ts` (new), `server/src/__tests__/accounting/fxPaymentConstraints.test.ts` (new) |
 
 ---
 
@@ -822,8 +822,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** D1 applied.
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/settingsService.ts` (`getSettings`, `updateSettings`, `UpdateSettingsInput`) and `server/src/schemas/ledger-core/settingsSchema.ts` — note how the three Phase 3.9 AP account columns were added, and copy that treatment exactly.
-- **Files:** `server/src/services/ledger-core/settingsService.ts` (edit), `server/src/schemas/ledger-core/settingsSchema.ts` (edit), `server/src/types/ledger-core.ts` (edit — `LedgerSettings`)
+- **Read first:** `server/src/services/accounting/settingsService.ts` (`getSettings`, `updateSettings`, `UpdateSettingsInput`) and `server/src/schemas/accounting/settingsSchema.ts` — note how the three Phase 3.9 AP account columns were added, and copy that treatment exactly.
+- **Files:** `server/src/services/accounting/settingsService.ts` (edit), `server/src/schemas/accounting/settingsSchema.ts` (edit), `server/src/types/accounting.ts` (edit — `LedgerSettings`)
 - **Contract:** `LedgerSettings` gains `realizedFxGainAccountId: string | null; realizedFxLossAccountId: string | null; unrealizedFxAccountId: string | null;`. `updateSettingsSchema` gains the three as `z.string().uuid().nullable().optional()`. `getSettings`' `SELECT` and `updateSettings`' `UPDATE` both grow by three columns, following the existing pattern for `payable_account_id` verbatim.
 - **Guardrails:** #1 the composite FK already makes a cross-tenant account unrepresentable; do not add a redundant service check that contradicts it · #4 parameterized
 - **Proof:** `npm run typecheck` exits 0; `npm test -- settings` passes.
@@ -835,8 +835,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** D1, D2, B2, C2.
 - **Skill:** `new-module` (service layer) — **this is the heart of the phase; do it in one sitting and do not start Step D4 until its proof is green.**
-- **Read first:** `server/src/services/ledger-core/paymentService.ts` lines 400–620 in full (`resolveControlAccount`, `lockAndValidateTargets`, `createPaymentOnClient`), and `docs/ledger-core.md § 3 the worked example` — the test in D5 reproduces it exactly.
-- **Files:** `server/src/services/ledger-core/paymentService.ts` (edit), `server/src/schemas/ledger-core/paymentSchema.ts` (edit)
+- **Read first:** `server/src/services/accounting/paymentService.ts` lines 400–620 in full (`resolveControlAccount`, `lockAndValidateTargets`, `createPaymentOnClient`), and `docs/accounting.md § 3 the worked example` — the test in D5 reproduces it exactly.
+- **Files:** `server/src/services/accounting/paymentService.ts` (edit), `server/src/schemas/accounting/paymentSchema.ts` (edit)
 - **Contract:**
   - `CreatePaymentInput` gains `currencyCode?: string` (omitted → base). `createPaymentSchema` gains the same 3-letter regex field as invoices.
   - Replace the unconditional `currencyCode = organizations.base_currency` read with: resolve `baseCurrency`, take `paymentCurrency = input.currencyCode ?? baseCurrency`, and resolve `paymentRate` via `fxRateService.requireRateOnClient(client, orgId, paymentCurrency, baseCurrency, input.paymentDate)` (identity → `ONE_RATE`).
@@ -888,8 +888,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** D3.
 - **Skill:** none — a targeted change in two services.
-- **Read first:** `server/src/services/ledger-core/agingService.ts` (the `outstanding_cents` expression at line ~62, the bucket sums, and the GL control-balance query at ~199) and `server/src/services/ledger-core/bankMatchService.ts` (the candidate query and `matchTransaction`).
-- **Files:** `server/src/services/ledger-core/agingService.ts` (edit), `server/src/services/ledger-core/bankMatchService.ts` (edit)
+- **Read first:** `server/src/services/accounting/agingService.ts` (the `outstanding_cents` expression at line ~62, the bucket sums, and the GL control-balance query at ~199) and `server/src/services/accounting/bankMatchService.ts` (the candidate query and `matchTransaction`).
+- **Files:** `server/src/services/accounting/agingService.ts` (edit), `server/src/services/accounting/bankMatchService.ts` (edit)
 - **Contract:**
   - **Aging:** add a second outstanding expression in base currency —
     `(d.base_total_cents - COALESCE(<sum of allocation base_amount_cents for POSTED payments>, 0)) AS base_outstanding_cents` — and use **that** for the bucket totals and for the `reconciles` comparison against the GL control account, which is already a base-currency figure. Extend `allocatedCentsSubquery(alias, column)` with a third parameter rather than writing a second near-duplicate subquery:
@@ -903,7 +903,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
     `amountColumn` is whitelisted by its union type and interpolated — that is rule 4's sanctioned identifier-whitelisting path, and the default keeps all 11 existing call sites unchanged. Add the native outstanding to each counterparty row as `outstandingCents` (unchanged) and the base figure as `baseOutstandingCents` on `AgingCounterpartyRow`; the report's totals and `reconciles` use the base figures. Document in a comment that a mixed-currency AR ledger's *total* is only meaningful in base currency.
   - **Bank matching:** in the candidate-selection query, add `AND d.currency_code = $n` bound to the org's base currency, so a foreign-currency document is never offered as a suggestion (a base-currency bank line cannot settle it). In `matchTransaction`, before creating the payment, re-read the target document's `currency_code` and, if it differs from the base currency, `throw new ApiError(422, 'A base-currency bank line cannot settle a foreign-currency document')`. Comment: multi-currency bank statements are deliberately not built (Phase 6's stated limit), so this is a guard, not a gap.
 - **Guardrails:** #1 unchanged · #4 `amountColumn` is whitelisted by its union type, never a caller-supplied string
-- **Proof:** `npm test -- aging && npm test -- bankMatching && npm test -- bankReconciliation` pass; `grep -n "amountColumn" server/src/services/ledger-core/agingService.ts` shows it used only with the two literal values.
+- **Proof:** `npm test -- aging && npm test -- bankMatching && npm test -- bankReconciliation` pass; `grep -n "amountColumn" server/src/services/accounting/agingService.ts` shows it used only with the two literal values.
 - **If it fails:** if `reconciles` goes false in an existing test, the aging query and the GL query disagree about which allocations count — both must filter `p.status = 'POSTED'`.
 - **Owes:** `docs/api.md` (Step D6).
 
@@ -913,8 +913,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** D3, D4.
 - **Skill:** `isolation-test`
-- **Read first:** `docs/ledger-core.md § 3 the worked example` and `server/src/__tests__/ledger-core/payments.test.ts`.
-- **Files:** `server/src/__tests__/ledger-core/fxRealized.test.ts` (new), `server/src/__tests__/ledger-core/fxPaymentConstraints.test.ts` (new)
+- **Read first:** `docs/accounting.md § 3 the worked example` and `server/src/__tests__/accounting/payments.test.ts`.
+- **Files:** `server/src/__tests__/accounting/fxRealized.test.ts` (new), `server/src/__tests__/accounting/fxPaymentConstraints.test.ts` (new)
 - **Contract — `fxRealized.test.ts`, named cases with exact expected values.** Fixture: org base `INR`; `USD → INR` rates `83.00000000` on `2026-01-01` and `83.50000000` on `2026-01-10`.
   1. **"the documented worked example reproduces exactly — a receivable settled high is a gain"** — issue a $1,000.00 USD invoice dated `2026-01-01`; receive a $1,000.00 USD payment dated `2026-01-10` against it. Assert the settlement entry has exactly three lines:
      | Account | debitCents | creditCents | currencyCode | fxRate | baseDebitCents | baseCreditCents |
@@ -922,7 +922,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
      | `1110` | 100000 | 0 | USD | 83.50000000 | 8350000 | 0 |
      | `1120` | 0 | 100000 | USD | 83.00000000 | 0 | 8300000 |
      | `4910` | 0 | 50000 | INR | 1.00000000 | 0 | 50000 |
-     **This is the roadmap's stated acceptance criterion for Phase 8. Name the test so it is findable: `reproduces docs/ledger-core.md's worked example to the paisa`.**
+     **This is the roadmap's stated acceptance criterion for Phase 8. Name the test so it is findable: `reproduces docs/accounting.md's worked example to the paisa`.**
   2. **"the mirror case — a payable settled high is a loss"** — the same fixture with a $1,000.00 USD bill approved at 83.00 and paid at 83.50: `2100` debit 100000 USD @ 83.00 (base 8300000), `1110` credit 100000 USD @ 83.50 (base 8350000), `6810` **debit** 50000 INR @ 1 (base 50000).
   3. **"a settlement at the same rate posts no FX line"** — pay on `2026-01-05` (still 83.00) → exactly two lines, no `4910`/`6810`.
   4. **"a base-currency payment is unchanged"** — an INR invoice settled by an INR payment → exactly two lines, `fxRate === '1.00000000'` on both.
@@ -963,12 +963,12 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 | `fx_revaluations` columns | `id, org_id, as_of_date, journal_entry_id, reversal_journal_entry_id, total_delta_cents, line_count, created_by, created_at` |
 | `fx_revaluation_lines` columns | `id, org_id, revaluation_id, invoice_id, bill_id, currency_code, outstanding_cents, document_rate, revaluation_rate, carrying_base_cents, revalued_base_cents, delta_cents, created_at` |
 | Types | `FxExposureRow`, `FxExposureReport`, `FxRevaluation`, `FxRevaluationLine` |
-| Service file / exports | `server/src/services/ledger-core/fxRevaluationService.ts` → `computeExposure`, `runRevaluation`, `listRevaluations`, `getRevaluationById` |
-| Controller | `server/src/controllers/ledger-core/fxRevaluationController.ts` → `list`, `getOne`, `run` |
-| Routes file | `server/src/routes/ledger-core/fxRevaluationRoutes.ts` |
-| Route base | `/api/v1/ledger-core/fx-revaluations` (+ `GET /reports/fx-exposure`) |
+| Service file / exports | `server/src/services/accounting/fxRevaluationService.ts` → `computeExposure`, `runRevaluation`, `listRevaluations`, `getRevaluationById` |
+| Controller | `server/src/controllers/accounting/fxRevaluationController.ts` → `list`, `getOne`, `run` |
+| Routes file | `server/src/routes/accounting/fxRevaluationRoutes.ts` |
+| Route base | `/api/v1/fx-revaluations` (+ `GET /reports/fx-exposure`) |
 | New event | `'fx.revaluation_posted'` in `OUTBOX_EVENT_TYPES` |
-| Test file | `server/src/__tests__/ledger-core/fxRevaluation.test.ts` |
+| Test file | `server/src/__tests__/accounting/fxRevaluation.test.ts` |
 
 ---
 
@@ -1014,8 +1014,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** E1 applied, A4, B2, D2.
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/agingService.ts` (how outstanding-per-document is computed and how a report reconciles to a control account) and `server/src/services/ledger-core/billService.ts`'s `approveBill` (a service that posts a GL entry inside its own transaction and emits an outbox event).
-- **Files:** `server/src/services/ledger-core/fxRevaluationService.ts` (new), `server/src/types/ledger-core.ts` (edit — append the four interfaces), `server/src/types/webhooks.ts` (edit — add `'fx.revaluation_posted'` to `OUTBOX_EVENT_TYPES`, after `'bank.large_unmatched'`)
+- **Read first:** `server/src/services/accounting/agingService.ts` (how outstanding-per-document is computed and how a report reconciles to a control account) and `server/src/services/accounting/billService.ts`'s `approveBill` (a service that posts a GL entry inside its own transaction and emits an outbox event).
+- **Files:** `server/src/services/accounting/fxRevaluationService.ts` (new), `server/src/types/accounting.ts` (edit — append the four interfaces), `server/src/types/webhooks.ts` (edit — add `'fx.revaluation_posted'` to `OUTBOX_EVENT_TYPES`, after `'bank.large_unmatched'`)
 - **Contract:**
   ```ts
   export interface FxExposureDocument {
@@ -1080,7 +1080,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
     On `23505` against `ux_fx_revaluations_org_date` → `throw new ApiError(409, 'A revaluation already exists for this date')`.
   - `getRevaluationById` returns the parent plus its lines (a second query, `WHERE org_id = $1 AND revaluation_id = $2`), `404` when absent.
 - **Guardrails:** #1 `org_id` in every statement · #2 no `req`/`res` · #3 signed integer cents; the plug is integer subtraction · #5 every query on `client`; the outbox write is on `client`, never `pool`; **no work after `COMMIT`** · #6 the posting is immutable — there is no update path, and a wrong revaluation is corrected by the next period's revaluation, which is stated in the docs · #16 `source_type = 'fx_revaluation'` follows the same GL-hook convention every document uses
-- **Proof:** `npm run typecheck` exits 0, and `grep -n "pool.query" server/src/services/ledger-core/fxRevaluationService.ts` shows no `pool.query` inside `runRevaluation`'s transaction.
+- **Proof:** `npm run typecheck` exits 0, and `grep -n "pool.query" server/src/services/accounting/fxRevaluationService.ts` shows no `pool.query` inside `runRevaluation`'s transaction.
 - **If it fails:** if `reverseEntryOnClient` throws a period-closed error, the day after `asOfDate` falls in a closed period — that is correct behaviour; surface it as the `422` it already is, do not bypass the guard.
 - **Owes:** `docs/api.md`, `docs/schema.md` (Step E5); a study note on unrealized revaluation (Step S3).
 
@@ -1090,27 +1090,27 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** E2.
 - **Skill:** `new-module` (controller + routes layers)
-- **Read first:** `server/src/controllers/ledger-core/reportController.ts` (how a report controller reads query params and shapes its envelope) and `server/src/routes/ledger-core/fiscalPeriodRoutes.ts` (role gating on a state-changing POST).
+- **Read first:** `server/src/controllers/accounting/reportController.ts` (how a report controller reads query params and shapes its envelope) and `server/src/routes/accounting/fiscalPeriodRoutes.ts` (role gating on a state-changing POST).
 - **Files:**
-  - `server/src/controllers/ledger-core/fxRevaluationController.ts` (new)
-  - `server/src/routes/ledger-core/fxRevaluationRoutes.ts` (new)
-  - `server/src/routes/ledger-core/index.ts` (edit — `router.use('/fx-revaluations', fxRevaluationRoutes);` in alphabetical position)
-  - `server/src/controllers/ledger-core/reportController.ts` (edit — add `fxExposure`)
-  - `server/src/routes/ledger-core/reportRoutes.ts` (edit — add `router.get('/fx-exposure', authenticate, reportController.fxExposure);`)
-  - `server/src/schemas/ledger-core/fxRevaluationSchema.ts` (new — `runRevaluationSchema`)
+  - `server/src/controllers/accounting/fxRevaluationController.ts` (new)
+  - `server/src/routes/accounting/fxRevaluationRoutes.ts` (new)
+  - `server/src/routes/accounting/index.ts` (edit — `router.use('/fx-revaluations', fxRevaluationRoutes);` in alphabetical position)
+  - `server/src/controllers/accounting/reportController.ts` (edit — add `fxExposure`)
+  - `server/src/routes/accounting/reportRoutes.ts` (edit — add `router.get('/fx-exposure', authenticate, reportController.fxExposure);`)
+  - `server/src/schemas/accounting/fxRevaluationSchema.ts` (new — `runRevaluationSchema`)
 - **Contract:**
 
   | Method | Path | Roles | Success | Failures |
   |---|---|---|---|---|
-  | GET | `/api/v1/ledger-core/reports/fx-exposure?asOf=YYYY-MM-DD` | any member | `200` `{ success: true, exposure }` | `400` bad `asOf`; `422` a currency has no rate on or before `asOf` |
-  | GET | `/api/v1/ledger-core/fx-revaluations` | any member | `200` `{ success: true, revaluations, count, totalCount, currentPage, totalPages }` | — |
-  | GET | `/api/v1/ledger-core/fx-revaluations/:id` | any member | `200` `{ success: true, revaluation }` (with `lines`) | `404` |
-  | POST | `/api/v1/ledger-core/fx-revaluations` | `OWNER`,`ADMIN` | `201` `{ success: true, revaluation }` | `400` body; `409` already revalued for that date; `422` nothing to revalue / no rate / closed period |
+  | GET | `/api/v1/reports/fx-exposure?asOf=YYYY-MM-DD` | any member | `200` `{ success: true, exposure }` | `400` bad `asOf`; `422` a currency has no rate on or before `asOf` |
+  | GET | `/api/v1/fx-revaluations` | any member | `200` `{ success: true, revaluations, count, totalCount, currentPage, totalPages }` | — |
+  | GET | `/api/v1/fx-revaluations/:id` | any member | `200` `{ success: true, revaluation }` (with `lines`) | `404` |
+  | POST | `/api/v1/fx-revaluations` | `OWNER`,`ADMIN` | `201` `{ success: true, revaluation }` | `400` body; `409` already revalued for that date; `422` nothing to revalue / no rate / closed period |
 
   `runRevaluationSchema = z.object({ asOfDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'asOfDate must be YYYY-MM-DD') })`.
   `fxExposure` defaults `asOf` to today's UTC date when the param is absent, matching how the other date-bounded reports default.
 - **Guardrails:** #2 zero SQL in either controller · #1 org from `requireUser(req).orgId` only
-- **Proof:** `npm run typecheck` exits 0; `npm run dev` boots; `grep -n "pool" server/src/controllers/ledger-core/fxRevaluationController.ts` returns nothing.
+- **Proof:** `npm run typecheck` exits 0; `npm run dev` boots; `grep -n "pool" server/src/controllers/accounting/fxRevaluationController.ts` returns nothing.
 - **Owes:** `docs/api.md` (Step E5).
 
 ---
@@ -1119,8 +1119,8 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** E2, E3.
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/ledger-core/statements.test.ts` (a non-trivial multi-document fixture with exact arithmetic) and `server/src/__tests__/ledger-core/outboxEmission.test.ts` (how an emitted event is asserted).
-- **Files:** `server/src/__tests__/ledger-core/fxRevaluation.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/statements.test.ts` (a non-trivial multi-document fixture with exact arithmetic) and `server/src/__tests__/accounting/outboxEmission.test.ts` (how an emitted event is asserted).
+- **Files:** `server/src/__tests__/accounting/fxRevaluation.test.ts` (new)
 - **Contract — named cases with exact expected values.** Fixture: org base `INR`; a $1,000.00 USD invoice issued `2026-01-05` at rate `83.00000000`; rates `USD→INR` `83.00000000` on `2026-01-01` and `84.00000000` on `2026-01-31`.
   1. **"exposure shows the unrealized delta without posting anything"** — `GET /reports/fx-exposure?asOf=2026-01-31` → one document, `carryingBaseCents === 8300000`, `revaluedBaseCents === 8400000`, `deltaCents === 100000`, `totalDeltaCents === 100000`, `alreadyRevalued === false`; assert the journal-entry count is unchanged by the call.
   2. **"a revaluation posts an entry and an automatic next-day reversal"** — `POST /fx-revaluations { asOfDate: '2026-01-31' }` → `201`; the entry dated `2026-01-31` debits `1120` 100000 and credits `6820` 100000; a second entry dated `2026-02-01` reverses it exactly, with `reversesEntryId` pointing at the first.
@@ -1156,7 +1156,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 | Kind | Name |
 |---|---|
-| New pages | `client/src/Pages/ledger-core/FxRatesPage.tsx`, `FxExposurePage.tsx`, `FxRevaluationsPage.tsx` |
+| New pages | `client/src/Pages/FxRatesPage.tsx`, `FxExposurePage.tsx`, `FxRevaluationsPage.tsx` |
 | Edited pages | `NewInvoicePage.tsx`, `NewBillPage.tsx`, `PaymentDialog.tsx`, `InvoiceDetailPage.tsx`, `BillDetailPage.tsx`, `LedgerCoreSidebar.tsx`, `LedgerCoreRoutes.tsx`, `ReportsPage.tsx` |
 | Routes | `/app/ledger-core/fx-rates`, `/app/ledger-core/fx-exposure`, `/app/ledger-core/fx-revaluations` |
 | Sidebar group | `Currency` |
@@ -1168,7 +1168,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 
 - **Depends on:** A5.
 - **Skill:** none — a client page.
-- **Read first:** `client/src/Pages/ledger-core/CustomersPage.tsx` (a list + inline create form with the same table styling) and `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` (how the Banking and Automation groups were added).
+- **Read first:** `client/src/Pages/CustomersPage.tsx` (a list + inline create form with the same table styling) and `client/src/Pages/LedgerCoreSidebar.tsx` (how the Banking and Automation groups were added).
 - **Files:** `FxRatesPage.tsx` (new), `LedgerCoreSidebar.tsx` (edit), `LedgerCoreRoutes.tsx` (edit)
 - **Contract:** a table of rates (From, To, Date, Rate, Source, actions) with `from`/`fromCode` filters and pagination, plus a create form posting `{ fromCode, toCode, rateDate, rate }` — `rate` sent as a **string**, taken from a text input, never a `<input type="number">` whose value would round-trip through a float. `toCode` is fixed to the org's base currency from `LedgerSettingsContext`/`OrgContext` and shown read-only, with a one-line explanation that rates are always recorded foreign → base. Delete is gated by `ConfirmDialog`. A new sidebar group **Currency** holds Rates, Exposure, Revaluations.
 - **Proof:** `cd client && npm run typecheck && npm test` — existing 144 client tests still pass.
@@ -1243,7 +1243,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 - **Skill:** `study-note`
 - **Files:**
   1. **`study/postgresql/multi-currency-and-functional-currency.md` (new)** — the big one. Why base currency is what balances; why summing native amounts across currencies is meaningless; how `assert_journal_entry_balanced` became conditional on `COUNT(DISTINCT currency_code)` without weakening anything for single-currency entries; `chk_ledger_lines_base_matches_rate` and why Postgres `round(numeric)` and `scaleCents` agree for non-negative values; why the rate is `NUMERIC(18,8)` and not a float, and why `pg` hands it back as a string; the latest-on-or-before lookup and the Saturday bug an exact-date match is waiting for. **Alternatives rejected:** a second `journal_entries.currency_code` column (an entry is not single-currency); storing an inverse rate (two ways to say the same thing is one way too many); a per-account currency (rejected — decision 16); `DECIMAL` amounts with a float rate (the precise mistake that killed the prior build). 4–8 interview questions with full written answers, including "why can't a CHECK constraint enforce that an entry balances?" and "your ledger has a USD line and an INR line in one entry — what does 'balanced' mean?"
-  2. **`study/architecture/realized-and-unrealized-fx.md` (new)** — the accounting mechanism as an engineering problem: the plug-line technique and why `imbalance = ΣbaseDebit − ΣbaseCredit` handles both directions with no sign branch; why a document freezes its rate at posting and never after; why revaluation posts a next-day reversal (so realized FX always compares against the original frozen rate); why unrealized uses one account and realized uses two; why settlement is still derived, never stored. Include the worked example from `docs/ledger-core.md` and both directions.
+  2. **`study/architecture/realized-and-unrealized-fx.md` (new)** — the accounting mechanism as an engineering problem: the plug-line technique and why `imbalance = ΣbaseDebit − ΣbaseCredit` handles both directions with no sign branch; why a document freezes its rate at posting and never after; why revaluation posts a next-day reversal (so realized FX always compares against the original frozen rate); why unrealized uses one account and realized uses two; why settlement is still derived, never stored. Include the worked example from `docs/accounting.md` and both directions.
   3. **`study/typescript/branded-types-for-money.md` (extend)** — a section on why a **rate** is deliberately *not* branded and stays a `string` end to end: it is not money, it needs more precision than a `number` can carry across a JSON boundary, and `rateNumerator` is the single chokepoint where it becomes a number.
   4. **`study/postgresql/derived-vs-stored-state.md`** — check whether this note lives in `study/architecture/` (it does: `study/architecture/derived-vs-stored-state.md`) and **extend it** with `payment_allocations.base_amount_cents`: the one place this codebase deliberately *stores* a derived figure, because recomputing a rounded conversion at read time could drift from the ledger line by a cent, and a subledger that does not tie to the GL is worse than a redundant column.
   5. **`study/README.md` (edit)** — add all new notes to the index and update the coverage tracker.
@@ -1254,7 +1254,7 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 - **Skill:** `docs-sync`
 - **Files:**
   - `docs/roadmap.md` — a new `## Phase 8, as delivered` section following the Phase 6/7 format exactly: what landed, the deliberate deviations table, **"Deliberately not built"** (multi-currency bank statements; per-account currency; an automatic rate feed — rates are entered by hand or imported, there is no external API call and no scheduled fetch; FX on bank matching; a currency other than base on a bank line; quarterly revaluation scheduling; FX translation of a subsidiary's whole trial balance, which is consolidation and not this phase), and the final test counts. Tick Phase 8 in the phase table.
-  - `docs/ledger-core.md` — tick the three boxes under "Phase 8 — FX engine"; state that the worked example's acceptance criterion passes as the named test `reproduces docs/ledger-core.md's worked example to the paisa`; update the header status line and the "Not built yet" section (Phase 9 only).
+  - `docs/accounting.md` — tick the three boxes under "Phase 8 — FX engine"; state that the worked example's acceptance criterion passes as the named test `reproduces docs/accounting.md's worked example to the paisa`; update the header status line and the "Not built yet" section (Phase 9 only).
   - `docs/schema.md` — confirm all five migrations are described (Steps A7, C4, D6, E5 did this incrementally; verify nothing was missed).
   - `docs/api.md` — confirm every new route and every changed request/response body is present.
   - `docs/guardrails.md` — add the FX-rate-arithmetic rule to rule 3's detail: a rate is `NUMERIC` as a string, converted only through `utils/fxRate.ts`.
@@ -1281,15 +1281,15 @@ Six slices. **A → B → C → D → E is a hard dependency chain — do not re
 ## 8. Definition of done
 
 - Migrations `022`–`026` applied, each replayable (`npm run migrate` twice, `npm test -- migrations` green), none of `001`–`021` edited.
-- `fx_rates` exists with the latest-on-or-before lookup, org-scoped, exposed at `/api/v1/ledger-core/fx-rates`.
+- `fx_rates` exists with the latest-on-or-before lookup, org-scoped, exposed at `/api/v1/fx-rates`.
 - A mixed-currency journal entry is possible and balances in base currency; a single-currency entry is still checked natively; `chk_ledger_lines_base_matches_rate` holds for every row.
 - The trial balance, P&L, balance sheet, account ledger, aging, and `verify:integrity` all report in base currency.
 - Invoices and bills can be raised in a foreign currency, freeze their rate at issue/approve, and post native lines with base amounts.
-- Settling a foreign-currency document at a different rate posts to `4910` or `6810` automatically, and **`docs/ledger-core.md`'s worked example reproduces to the paisa in a named test** — the roadmap's stated acceptance criterion for this phase.
+- Settling a foreign-currency document at a different rate posts to `4910` or `6810` automatically, and **`docs/accounting.md`'s worked example reproduces to the paisa in a named test** — the roadmap's stated acceptance criterion for this phase.
 - `GET /reports/fx-exposure` previews, and `POST /fx-revaluations` posts a revaluation with an automatic next-day reversal through `6820`, emitting `fx.revaluation_posted` on the same transaction.
 - A base-currency organization's behaviour is **unchanged in every respect** — proven by all 717 pre-existing server tests passing without a single assertion edit.
 - Client: rates manageable, currency selectable on invoices/bills, exposure and revaluations visible, revaluation `ConfirmDialog`-gated.
 - `npm test` green in both `server/` and `client/`; `npm run verify:integrity` exits 0; `npm run typecheck` and `npm run lint` clean.
 - `guardrail-review` reports no findings; `git diff server/package.json` is empty.
 - Study notes written and indexed in `study/README.md`.
-- `docs/roadmap.md`, `docs/ledger-core.md`, `docs/schema.md`, `docs/api.md`, `docs/guardrails.md`, and `CLAUDE.md` all updated in the same change; this plan file closed or deleted.
+- `docs/roadmap.md`, `docs/accounting.md`, `docs/schema.md`, `docs/api.md`, `docs/guardrails.md`, and `CLAUDE.md` all updated in the same change; this plan file closed or deleted.

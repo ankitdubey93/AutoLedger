@@ -183,13 +183,13 @@ Conversion lives in exactly one module, `utils/money.ts`, so the parse-from-stri
 Built in Phase 3:
 
 - `server/src/utils/money.ts` — `Cents`, and the only functions permitted to produce one: `cents()` (checked constructor), `toCents()` (major units → cents), `parseCents()` (the `pg` `BIGINT` string parser), `formatCents()`, `addCents()`, `sumCents()`, `scaleCents()` (Phase 3.8, money × a rational factor, `BigInt`-exact), and — added in Phase 6 — `parseMoneyText()` (untrusted bank-statement text → cents, no intermediate float)
-- `server/src/services/ledger-core/invoiceService.ts` — `computeLineTotals`, the only caller of `scaleCents`
-- `server/src/services/ledger-core/bankImportService.ts` — the only caller of `parseMoneyText`, once per amount (or per debit/credit pair) column cell during CSV import
+- `server/src/services/accounting/invoiceService.ts` — `computeLineTotals`, the only caller of `scaleCents`
+- `server/src/services/accounting/bankImportService.ts` — the only caller of `parseMoneyText`, once per amount (or per debit/credit pair) column cell during CSV import
 - `server/src/__tests__/money.test.ts` — unit tier, no database
 
 **One deliberate departure from the sketch above:** `toCents` takes a plain `number`, not a branded `Dollars`. At an HTTP boundary the value arrives from `JSON.parse` as a `number`, so requiring `Dollars` would force callers to write `body.amount as Dollars` — an unchecked cast at precisely the point the check matters most, which is the first gotcha below. `Dollars` remains a good illustration of the pattern and a genuinely useful type *inside* a calculation where both units are in play; it is not exported, because nothing in the codebase currently has that shape.
 
-Not yet applied: `Cents` does not appear on the `ledger_lines` DTOs in `types/ledger-core.ts`, which use plain `number`. Branding the transport types would mean re-validating on every `JSON.parse` boundary crossing for a value the database CHECK constraints already guarantee. The brand earns its keep in the calculation path — `sumCents` over an entry's lines — which is where it is used.
+Not yet applied: `Cents` does not appear on the `ledger_lines` DTOs in `types/accounting.ts`, which use plain `number`. Branding the transport types would mean re-validating on every `JSON.parse` boundary crossing for a value the database CHECK constraints already guarantee. The brand earns its keep in the calculation path — `sumCents` over an entry's lines — which is where it is used.
 
 ### Phase 8: why an exchange rate is deliberately *not* branded like `Cents`
 

@@ -10,7 +10,7 @@ A one-click, 24-month demo dataset covering all seven apps, seeded through the r
 
 **Deviations from the plan as written, all discovered by actually running the seeder against a live database rather than by re-reading the plan:**
 
-1. **A real race condition, fixed in production code.** `apFlowDocumentService.createApFlowDocument` unconditionally enqueues the real `ap-flow-extract` job. If a worker is running while seeding, it would race a genuine (and, unconfigured, failing) extraction against the seeder's canned one — two processes writing the same rows with no ordering guarantee. Fixed with a small, backward-compatible `{ skipEnqueue: true }` option, used only by the seeder.
+1. **A real race condition, fixed in production code.** `captureDocumentService.createApFlowDocument` unconditionally enqueues the real `ap-flow-extract` job. If a worker is running while seeding, it would race a genuine (and, unconfigured, failing) extraction against the seeder's canned one — two processes writing the same rows with no ordering guarantee. Fixed with a small, backward-compatible `{ skipEnqueue: true }` option, used only by the seeder.
 2. **The AP-Flow FSM does not allow `PENDING → EXTRACTED` directly** (only `PROCESSING → EXTRACTED`), so the seeder calls `markProcessing` — the same atomic guard the real handler uses — before `savePipelineResult`.
 3. **Three enum/shape mismatches** the plan's contracts got wrong, caught only by `npm run typecheck`: `PaymentDirection` is `'RECEIVE'|'PAY'`, not `'IN'|'OUT'`; `BillStatus` after approval is `'POSTED'`, not `'APPROVED'`; a `DRIVER_PERCENT` forecast line needs a **CENTS** source driver plus its own `percentBps` on the line, not a separate BPS driver.
 4. **`resolveMonth`'s `day` parameter (capped 1–28) was misused for due-date arithmetic** (`5 + paysInDays`, which overflows past 28 for any term beyond ~3 weeks). Fixed with a genuine `addDays(dateStr, days)` calendar-arithmetic helper in `sandboxManifest.ts`, used for every due date instead.
@@ -48,44 +48,44 @@ A one-click, 24-month demo dataset covering all seven apps, seeded through the r
 **Verified service contracts this plan calls** (exact, copied from source):
 
 ```ts
-// services/ledger-core/customerService.ts
+// services/accounting/customerService.ts
 createCustomer(orgId, createdBy, input: CreateCustomerInput): Promise<Customer>
   CreateCustomerInput = { name, email, phone, billingAddress, taxNumber, notes }   // all string|null except name
 
-// services/ledger-core/vendorService.ts
+// services/accounting/vendorService.ts
 createVendor(orgId, createdBy, input: CreateVendorInput): Promise<Vendor>
 
-// services/ledger-core/invoiceService.ts
+// services/accounting/invoiceService.ts
 createInvoice(orgId, createdBy, input: CreateInvoiceInput): Promise<Invoice>
   CreateInvoiceInput = { customerId, issueDate, dueDate, currencyCode?, notes, paymentTerms, lines: InvoiceLineInput[] }
   InvoiceLineInput   = { description, quantityMilli, unitPriceCents, revenueAccountId, taxRateBp }
 issueInvoice(orgId, userId, id, entryDate: string | null): Promise<Invoice>
 
-// services/ledger-core/billService.ts
+// services/accounting/billService.ts
 createBill(orgId, createdBy, input: CreateBillInput): Promise<Bill>
 submitBill(orgId, id): Promise<Bill>
 approveBill(orgId, userId, id, ...): Promise<Bill>
 
-// services/ledger-core/paymentService.ts
+// services/accounting/paymentService.ts
 createPayment(orgId, createdBy, input: CreatePaymentInput): Promise<Payment>
   CreatePaymentInput = { direction, paymentDate, amountCents, currencyCode?, cashAccountId,
                          customerId, vendorId, method, reference, notes,
                          allocations: AllocationInput[], entryDate }
   AllocationInput    = { invoiceId: string|null, billId: string|null, amountCents: number }
 
-// services/ledger-core/fxRateService.ts
+// services/accounting/fxRateService.ts
 upsertRate(...)                        // see file for exact signature before use
-// services/ledger-core/bankImportService.ts
+// services/accounting/bankImportService.ts
 importStatement(orgId, createdBy, input: ImportStatementInput): Promise<ImportStatementResult>
   ImportStatementInput = { accountId, fileName, content, dateFormat, columnMap, closingBalanceCents, closingBalanceOn }
-// services/ledger-core/fiscalPeriodService.ts
+// services/accounting/fiscalPeriodService.ts
 generatePeriods(...)   closePeriod(...)   // read the file for exact signatures
-// services/ledger-core/settingsService.ts
+// services/accounting/settingsService.ts
 completeOnboarding(orgId, input: OnboardingInput): Promise<LedgerSettings>
   OnboardingInput = { organizationName, legalName, baseCurrency, fiscalYearStartMonth,
                       fiscalYearStartDay, booksStartDate, industry, timezone, cashAccountId }
 
-// services/ap-flow/apFlowDocumentService.ts
+// services/capture/captureDocumentService.ts
 savePipelineResult(orgId, id, pages: PipelinePage[], extraction: ExtractionResult, classifications: LineItemClassification[]): Promise<void>
   PipelinePage = { pageNumber, widthPx, heightPx, redactedSha256, ocrText, redactedRegions }   // NOT exported today — Step 12 exports it
 
@@ -224,7 +224,7 @@ Outcome: fixtures exist on disk, parse under a schema, and a table records what 
 
 - **Depends on:** nothing (can run in parallel with Steps 1–2)
 - **Skill:** none — authored data files
-- **Read first:** `server/src/services/ledger-core/accountService.ts` lines 342–420 (`DEFAULT_CHART`) to get the exact account **codes** every fixture must reference: `1110` Operating Cash, `1120` AR, `1180` GST/VAT Input Credit, `2100` AP, `2140` GST/VAT Output Payable, `3400` Opening Balance Equity, `4xxx` revenue, `5xxx` cost of sales, `6xxx` opex.
+- **Read first:** `server/src/services/accounting/accountService.ts` lines 342–420 (`DEFAULT_CHART`) to get the exact account **codes** every fixture must reference: `1110` Operating Cash, `1120` AR, `1180` GST/VAT Input Credit, `2100` AP, `2140` GST/VAT Output Payable, `3400` Opening Balance Equity, `4xxx` revenue, `5xxx` cost of sales, `6xxx` opex.
 - **Files (all new):**
   ```
   sandbox/README.md
@@ -271,7 +271,7 @@ Outcome: fixtures exist on disk, parse under a schema, and a table records what 
 
 - **Depends on:** Steps 2, 3
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/schemas/ledger-core/journalSchema.ts` for the zod idiom; `server/src/utils/money.ts` for `parseMoneyText`
+- **Read first:** `server/src/schemas/accounting/journalSchema.ts` for the zod idiom; `server/src/utils/money.ts` for `parseMoneyText`
 - **Files:** `server/src/schemas/sandboxSchema.ts` (new), `server/src/services/sandbox/sandboxManifest.ts` (new)
 - **Contract — write these literally:**
   ```ts
@@ -328,21 +328,21 @@ Outcome: each app can populate itself, calling only its own services.
 | Orchestrator | `server/src/services/sandbox/sandboxService.ts` |
 | Orchestrator exports | `loadSandbox`, `unloadSandbox`, `getSandboxStatus` |
 
-**The rule that governs this entire slice (rule 16):** each `sandboxSeed.ts` imports **only** from its own app's service folder plus platform services. `services/ledger-core/sandboxSeed.ts` may import `invoiceService`; it may **not** import anything under `services/forecaster/`. The orchestrator imports the seven `seedSandbox` functions and **contains no SQL at all**.
+**The rule that governs this entire slice (rule 16):** each `sandboxSeed.ts` imports **only** from its own app's service folder plus platform services. `services/accounting/sandboxSeed.ts` may import `invoiceService`; it may **not** import anything under `services/forecaster/`. The orchestrator imports the seven `seedSandbox` functions and **contains no SQL at all**.
 
-### Step 6 — `services/ledger-core/sandboxSeed.ts` — settings, customers, vendors
+### Step 6 — `services/accounting/sandboxSeed.ts` — settings, customers, vendors
 
 - **Depends on:** Steps 2, 4
 - **Skill:** `new-module` (service layer)
-- **Read first:** `services/ledger-core/settingsService.ts` (`completeOnboarding`, `OnboardingInput`), `customerService.ts`, `vendorService.ts`
-- **Files:** `server/src/services/ledger-core/sandboxSeed.ts` (new)
+- **Read first:** `services/accounting/settingsService.ts` (`completeOnboarding`, `OnboardingInput`), `customerService.ts`, `vendorService.ts`
+- **Files:** `server/src/services/accounting/sandboxSeed.ts` (new)
 - **Contract:** export `seedSandbox(ctx)`. In order:
   1. Call `settingsService.completeOnboarding(ctx.orgId, {...})` with `baseCurrency` from the manifest, `fiscalYearStartMonth: 1`, `fiscalYearStartDay: 1`, `booksStartDate: ctx.monthDate(-23, 1)`, `timezone: 'UTC'`, `cashAccountId` resolved from account code `1110`, `industry: 'Services'`, `legalName: null`, `organizationName` unchanged from the org's current name.
   2. `createCustomer` for each row in `customers.json`; keep a `Map<fixtureKey, customerId>`.
   3. `createVendor` for each row in `vendors.json`; keep a `Map<fixtureKey, vendorId>`.
   Resolve account **ids** from account **codes** via `accountService` — fixtures reference codes, never ids, because ids are generated per org.
-- **Guardrails:** #1 `ctx.orgId` passed to every service call · #2 no SQL in this file — it calls services only · #16 imports nothing outside `services/ledger-core/` and platform
-- **Proof:** `cd server && npm run typecheck` exits 0 · `grep -c "pool.query\|client.query" server/src/services/ledger-core/sandboxSeed.ts` returns `0`
+- **Guardrails:** #1 `ctx.orgId` passed to every service call · #2 no SQL in this file — it calls services only · #16 imports nothing outside `services/accounting/` and platform
+- **Proof:** `cd server && npm run typecheck` exits 0 · `grep -c "pool.query\|client.query" server/src/services/accounting/sandboxSeed.ts` returns `0`
 - **If it fails:** if a service lacks a needed function, **stop and report** — do not add SQL to this file.
 - **Owes:** nothing
 
@@ -351,7 +351,7 @@ Outcome: each app can populate itself, calling only its own services.
 - **Depends on:** Step 6
 - **Skill:** `new-module` (service layer)
 - **Read first:** `invoiceService.ts` (`createInvoice`, `issueInvoice`), `billService.ts` (`createBill`, `submitBill`, `approveBill`)
-- **Files:** `server/src/services/ledger-core/sandboxSeed.ts` (edit — extend `seedSandbox`)
+- **Files:** `server/src/services/accounting/sandboxSeed.ts` (edit — extend `seedSandbox`)
 - **Contract:** for each invoice fixture row, `createInvoice` then `issueInvoice(orgId, userId, id, entryDate)` **except** the rows flagged `"leaveDraft": true`, which stay DRAFT so a BoardDeck close run can fail its `NO_DRAFT_INVOICES` check. For each bill row: `createBill` → `submitBill` → `approveBill`, except rows flagged `"leaveUnapproved": true`.
   `entryDate` is always the invoice's own issue date. `currencyCode` is omitted for base-currency rows and set explicitly for the 3–4 FX rows.
 - **Guardrails:** #1 org scoping · #3 every amount already integer cents from Step 4's transform · #6 no `PUT`/`DELETE` on an issued invoice anywhere in this file
@@ -364,7 +364,7 @@ Outcome: each app can populate itself, calling only its own services.
 - **Depends on:** Step 7
 - **Skill:** `new-module` (service layer)
 - **Read first:** `paymentService.ts` (`createPayment`, `CreatePaymentInput`, `AllocationInput`), `fxRateService.ts` (`upsertRate` — read the exact signature before writing)
-- **Files:** `server/src/services/ledger-core/sandboxSeed.ts` (edit)
+- **Files:** `server/src/services/accounting/sandboxSeed.ts` (edit)
 - **Contract:** seed `fx-rates.json` **before** any FX invoice is issued — `issueInvoice` resolves a rate at the invoice date and fails without one. That makes the real order: settings → customers/vendors → **fx rates** → invoices → bills → payments. Revise Step 7's placement accordingly if it was written otherwise.
   Payments: `createPayment` with `direction: 'IN'` allocated to invoices, `'OUT'` allocated to bills. Leave a deliberate subset of invoices unpaid and one partially paid so AR aging has all buckets populated.
 - **Guardrails:** #1 · #3 integer cents · #5 do not open a transaction here — each service owns its own
@@ -377,7 +377,7 @@ Outcome: each app can populate itself, calling only its own services.
 - **Depends on:** Step 8
 - **Skill:** `new-module` (service layer)
 - **Read first:** `bankImportService.ts` (`importStatement`, `ImportStatementInput`)
-- **Files:** `server/src/services/ledger-core/sandboxSeed.ts` (edit)
+- **Files:** `server/src/services/accounting/sandboxSeed.ts` (edit)
 - **Contract:** read `sandbox/ledger-core/bank-statement.csv` as a **string**, rewrite its relative-offset date column to real dates via `ctx.monthDate`, and pass it as `content`. `accountId` is the `1110` account. `dateFormat` matches the CSV. The real 40/30/30 match engine then runs and produces genuine `bank_match_suggestions` — do not fabricate scores.
 - **Guardrails:** #1 · #4 parameterized only (inside the service, not here)
 - **Proof:** `cd server && npm run typecheck` exits 0
@@ -389,7 +389,7 @@ Outcome: each app can populate itself, calling only its own services.
 - **Depends on:** Step 9
 - **Skill:** `new-module` (service layer)
 - **Read first:** `fiscalPeriodService.ts` — `generatePeriods` and `closePeriod` exact signatures; `db/migrations/016_ledger-core_period_posting_guard.sql`
-- **Files:** `server/src/services/ledger-core/sandboxSeed.ts` (edit — this must be the **last** block of `seedSandbox`)
+- **Files:** `server/src/services/accounting/sandboxSeed.ts` (edit — this must be the **last** block of `seedSandbox`)
 - **Contract:** **Order is load-bearing.** Migration 016 refuses any posting into a `CLOSED` or `LOCKED` period, and a date covered by *no* period is open. So: generate periods **after** every invoice, bill and payment above has posted, then close the oldest 20 periods, then `lock` exactly one of them. Leave the most recent 4 periods `OPEN`. The month carrying the DRAFT invoice and the unmatched bank line stays `OPEN` so its close run reports `BLOCKED`.
 - **Guardrails:** #1 · #10 status transitions go through the FSM table, never an ad-hoc status write
 - **Proof:** `cd server && npm run typecheck` exits 0
@@ -416,16 +416,16 @@ Outcome: each app can populate itself, calling only its own services.
 - **If it fails:** stop and report rather than reaching into another app.
 - **Owes:** nothing
 
-### Step 12 — `services/ap-flow/sandboxSeed.ts`
+### Step 12 — `services/capture/sandboxSeed.ts`
 
 - **Depends on:** Step 10
 - **Skill:** `new-module` (service layer)
-- **Read first:** `services/ap-flow/apFlowDocumentService.ts` (`createApFlowDocument`, `savePipelineResult`, and the **non-exported** `PipelinePage` at line 637), `services/ap-flow/postingService.ts`, `services/documentService.ts` (`uploadDocument`), `services/storageService.ts`
-- **Files:** `server/src/services/ap-flow/sandboxSeed.ts` (new), `server/src/services/ap-flow/apFlowDocumentService.ts` (edit — add `export` to `interface PipelinePage`)
+- **Read first:** `services/capture/captureDocumentService.ts` (`createApFlowDocument`, `savePipelineResult`, and the **non-exported** `PipelinePage` at line 637), `services/capture/postingService.ts`, `services/documentService.ts` (`uploadDocument`), `services/storageService.ts`
+- **Files:** `server/src/services/capture/sandboxSeed.ts` (new), `server/src/services/capture/captureDocumentService.ts` (edit — add `export` to `interface PipelinePage`)
 - **Contract:** for each sample invoice image:
   1. `documentService.uploadDocument(orgId, userId, { buffer, originalname })` — real bytes, real SHA-256, real vault row.
-  2. `apFlowDocumentService.createApFlowDocument(...)` → a `PENDING` row.
-  3. `apFlowDocumentService.savePipelineResult(orgId, id, pages, extraction, classifications)` with `pages` and `extraction` read from `sandbox/ap-flow/extractions/*.json` → the row lands genuinely `EXTRACTED`.
+  2. `captureDocumentService.createApFlowDocument(...)` → a `PENDING` row.
+  3. `captureDocumentService.savePipelineResult(orgId, id, pages, extraction, classifications)` with `pages` and `extraction` read from `sandbox/ap-flow/extractions/*.json` → the row lands genuinely `EXTRACTED`.
   **Do not enqueue `ap-flow-extract` and do not call `extractionService`.** The pipeline needs OCR, a worker and an API key; this path needs none and produces the same rows, the same FSM transition and the same audit trail.
   Then: post **exactly one** document via `postingService` so the AP-Flow → GL link is visible end to end, and leave **exactly one** in the review queue so the human-in-the-loop screen has content.
   `page.redactedSha256` must reference bytes actually written to storage, or `GET /:id/pages/:n/image` 404s — write the sample image through `storageService.put` and use the returned hash.

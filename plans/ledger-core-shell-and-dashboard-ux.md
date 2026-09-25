@@ -40,11 +40,11 @@ BrowserRouter → AuthProvider → OrgProvider
 
 - `client/src/components/layout/PlatformLayout.tsx` — `.app-header` with `<strong>AutoLedger</strong>`, org chip, `OrgSwitcher`, email link, Sign out; `<main className="app-main" key={`${organization?.id ?? 'none'}-${orgVersion}`}>`. **That `key` is load-bearing** — it remounts the app subtree on an org switch, which is what makes switching into a not-yet-onboarded org show the wizard again (`LedgerCoreRoutes.tsx:30-33`).
 - `client/src/components/layout/AppShell.tsx` — resolves `:appSlug` via `useActiveApp()`, redirects `not-found`/`planned` to `/`, renders `← All apps` + `<h1>{app.name}</h1>`.
-- `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` — flat 6-item `NAV` array, absolute `${base}/${to}` links.
-- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — `AppPages` is `grid grid-cols-1 md:grid-cols-[13rem_1fr] gap-6`; `LedgerCoreGate` gates on `onboardedAt`.
+- `client/src/Pages/LedgerCoreSidebar.tsx` — flat 6-item `NAV` array, absolute `${base}/${to}` links.
+- `client/src/Pages/LedgerCoreRoutes.tsx` — `AppPages` is `grid grid-cols-1 md:grid-cols-[13rem_1fr] gap-6`; `LedgerCoreGate` gates on `onboardedAt`.
 - `client/src/index.css` — plain CSS (unlayered, so it beats Tailwind's layered utilities; see the file's own header comment). Contains `.app-main:has(.app-shell) { max-width: 90rem }` (lines 174-179) and `.app-shell`, `.app-shell__header`, `.app-shell__title` (lines 275-289).
 
-**Dashboard today** (`client/src/Pages/ledger-core/DashboardPage.tsx`) — four flat `.card` position tiles, two flat performance `<dl>` cards, a `TrendChart` (hand-rolled SVG grouped bars, no interaction), a recent-entries table, and an integrity banner with `role="status"`.
+**Dashboard today** (`client/src/Pages/DashboardPage.tsx`) — four flat `.card` position tiles, two flat performance `<dl>` cards, a `TrendChart` (hand-rolled SVG grouped bars, no interaction), a recent-entries table, and an integrity banner with `role="status"`.
 
 **Data available with no server change** — `GET /ledger-core/reports/dashboard` returns `position{assets,liabilities,equity,currentEarnings,cash,equationHolds}`, `performance{yearToDate,currentMonth}`, `activity{entryCountYtd,recentEntries}`, `integrity`, `trend[6]`, `fiscalYear`. `GET /ledger-core/reports/trial-balance` returns per-account rows carrying `type` and `netBalanceCents`. `useOrg().organization.baseCurrency` gives the currency code.
 
@@ -252,11 +252,11 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 | Kind | Name |
 |---|---|
-| File (kept, rewritten) | `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx`, default export `LedgerCoreSidebar` |
+| File (kept, rewritten) | `client/src/Pages/LedgerCoreSidebar.tsx`, default export `LedgerCoreSidebar` |
 | Constant | `NAV_GROUPS` (replaces `NAV`) |
 | Nav labels (**unchanged — tests match on them**) | `Dashboard`, `Chart of Accounts`, `Journal Entries`, `Trial Balance`, `Reports`, `Settings` |
 | Group headings (new) | `Overview`, `Bookkeeping`, `Reporting`, `Configure` |
-| Layout owner | `AppPages` inside `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` |
+| Layout owner | `AppPages` inside `client/src/Pages/LedgerCoreRoutes.tsx` |
 
 ---
 
@@ -264,8 +264,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 4
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` in full — **keep its header comment about absolute `${base}/${to}` paths and keep that link-building rule exactly.** Relative `to` values are a known bug here (see `client/src/apps/useAppBasePath.ts`).
-- **Files:** `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` (edit)
+- **Read first:** `client/src/Pages/LedgerCoreSidebar.tsx` in full — **keep its header comment about absolute `${base}/${to}` paths and keep that link-building rule exactly.** Relative `to` values are a known bug here (see `client/src/apps/useAppBasePath.ts`).
+- **Files:** `client/src/Pages/LedgerCoreSidebar.tsx` (edit)
 - **Contract — replace `NAV` with exactly this:**
   ```tsx
   const NAV_GROUPS = [
@@ -326,8 +326,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 6
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` in full. **Do not touch `LedgerCoreGate`** — the onboarding gate, its two `<Navigate>` targets, and the `LedgerSettingsProvider` wrapper stay exactly as they are. `OnboardingPage` and the gate's loading branch use `.shell` / `.shell--narrow`, which already centre and pad themselves, so they need no wrapper now that `AppFrame`'s `<main>` has no padding.
-- **Files:** `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` (edit — `AppPages` only)
+- **Read first:** `client/src/Pages/LedgerCoreRoutes.tsx` in full. **Do not touch `LedgerCoreGate`** — the onboarding gate, its two `<Navigate>` targets, and the `LedgerSettingsProvider` wrapper stay exactly as they are. `OnboardingPage` and the gate's loading branch use `.shell` / `.shell--narrow`, which already centre and pad themselves, so they need no wrapper now that `AppFrame`'s `<main>` has no padding.
+- **Files:** `client/src/Pages/LedgerCoreRoutes.tsx` (edit — `AppPages` only)
 - **Contract — `AppPages`'s wrapper becomes exactly:**
   ```tsx
   <div className="flex flex-col md:flex-row md:gap-6 px-4 md:px-6">
@@ -353,7 +353,7 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 | Kind | Name |
 |---|---|
-| File | `client/src/Pages/ledger-core/TrialBalancePage.tsx` |
+| File | `client/src/Pages/TrialBalancePage.tsx` |
 | Query param | `type` |
 | Allowed values | `Asset`, `Liability`, `Equity`, `Revenue`, `Expense` (exactly the five — rule 12) |
 | Whitelist constant | `FILTERABLE_TYPES` in `TrialBalancePage.tsx` |
@@ -366,8 +366,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 7
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/TrialBalancePage.tsx` in full — it already has a `hideEmpty` client-side filter over `report.rows`; the type filter composes with it in the same `visible` expression.
-- **Files:** `client/src/Pages/ledger-core/TrialBalancePage.tsx` (edit)
+- **Read first:** `client/src/Pages/TrialBalancePage.tsx` in full — it already has a `hideEmpty` client-side filter over `report.rows`; the type filter composes with it in the same `visible` expression.
+- **Files:** `client/src/Pages/TrialBalancePage.tsx` (edit)
 - **Contract:**
   ```tsx
   import { useSearchParams } from 'react-router-dom';
@@ -425,11 +425,11 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 | Kind | Name |
 |---|---|
-| New component | `MetricTile` — `client/src/Pages/ledger-core/MetricTile.tsx`, default export |
-| New component | `EquationBar` — `client/src/Pages/ledger-core/EquationBar.tsx`, default export |
-| New component | `ProportionBar` — `client/src/Pages/ledger-core/ProportionBar.tsx`, default export |
-| Edited | `TrendChart` — `client/src/Pages/ledger-core/TrendChart.tsx` |
-| Edited | `DashboardPage` — `client/src/Pages/ledger-core/DashboardPage.tsx` |
+| New component | `MetricTile` — `client/src/Pages/MetricTile.tsx`, default export |
+| New component | `EquationBar` — `client/src/Pages/EquationBar.tsx`, default export |
+| New component | `ProportionBar` — `client/src/Pages/ProportionBar.tsx`, default export |
+| Edited | `TrendChart` — `client/src/Pages/TrendChart.tsx` |
+| Edited | `DashboardPage` — `client/src/Pages/DashboardPage.tsx` |
 | SVG bar marker | `data-bar` attribute on each of the 12 value bars |
 | SVG hover marker | `data-hit` attribute on each of the 6 transparent hit areas |
 
@@ -445,8 +445,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 8
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/DashboardPage.tsx:73-107` (the four tiles you are replacing) and `client/src/Pages/ledger-core/ReportsPage.tsx` (the `card app-card` link idiom this mirrors).
-- **Files:** `client/src/Pages/ledger-core/MetricTile.tsx` (new)
+- **Read first:** `client/src/Pages/DashboardPage.tsx:73-107` (the four tiles you are replacing) and `client/src/Pages/ReportsPage.tsx` (the `card app-card` link idiom this mirrors).
+- **Files:** `client/src/Pages/MetricTile.tsx` (new)
 - **Contract — write these literally:**
   ```tsx
   import type { LucideIcon } from 'lucide-react';
@@ -510,8 +510,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 9
 - **Skill:** none (client components)
-- **Read first:** `client/src/Pages/ledger-core/TrendChart.tsx` — copy its "hand-rolled, no charting library" header comment style and its `visually-hidden` table idiom for the accessible fallback.
-- **Files:** `client/src/Pages/ledger-core/ProportionBar.tsx` (new), `client/src/Pages/ledger-core/EquationBar.tsx` (new)
+- **Read first:** `client/src/Pages/TrendChart.tsx` — copy its "hand-rolled, no charting library" header comment style and its `visually-hidden` table idiom for the accessible fallback.
+- **Files:** `client/src/Pages/ProportionBar.tsx` (new), `client/src/Pages/EquationBar.tsx` (new)
 - **Contract — `ProportionBar`:**
   ```tsx
   export interface ProportionBarSegment {
@@ -583,8 +583,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 10
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/TrendChart.tsx` in full, and `client/src/__tests__/ledgerCoreDashboard.test.tsx:122-129` (the assertion this step changes).
-- **Files:** `client/src/Pages/ledger-core/TrendChart.tsx` (edit)
+- **Read first:** `client/src/Pages/TrendChart.tsx` in full, and `client/src/__tests__/ledgerCoreDashboard.test.tsx:122-129` (the assertion this step changes).
+- **Files:** `client/src/Pages/TrendChart.tsx` (edit)
 - **Contract:**
   1. Add `data-bar` to **both** `<rect>` elements inside each group (the 12 value bars keep their existing geometry and fills).
   2. Add, per group, **one** transparent full-height hit area, after the two bars:
@@ -654,8 +654,8 @@ No gate applies. This is client presentation over endpoints that already ship. N
 
 - **Depends on:** Step 12
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/DashboardPage.tsx` in full, and the three test constraints at the head of Slice D.
-- **Files:** `client/src/Pages/ledger-core/DashboardPage.tsx` (edit)
+- **Read first:** `client/src/Pages/DashboardPage.tsx` in full, and the three test constraints at the head of Slice D.
+- **Files:** `client/src/Pages/DashboardPage.tsx` (edit)
 - **Contract:**
   - Add `const currency = organization?.baseCurrency ?? '';` beside the existing `const { organization } = useOrg();`.
   - Keep the loading skeleton, the error branch, the `entryTotalCents` helper, the recent-entries table (including the `Link to={`${base}/journals`}` on the date — `ledgerCoreNavigation.test.tsx:275-280` asserts that `href`), and the integrity banner with `role="status"` **exactly as they are**.
@@ -782,7 +782,7 @@ No gate applies. This is client presentation over endpoints that already ship. N
   - **Rule 12** — `FILTERABLE_TYPES` lists exactly five account types.
   - **Rule 14** — no new package. Confirm `client/package.json` is byte-identical: `git diff --stat client/package.json` shows nothing.
   - **Rule 15** — the four new tests in Step 15.
-  - **Rule 16** — `LedgerCoreSidebar` still lives under `Pages/ledger-core/`; the platform layer (`AppFrame`, `AppTopBar`) knows only `:appSlug` and the registry, never LedgerCore's pages.
+  - **Rule 16** — `LedgerCoreSidebar` still lives under `Pages/`; the platform layer (`AppFrame`, `AppTopBar`) knows only `:appSlug` and the registry, never LedgerCore's pages.
   Then set this file's header to `**Status: DONE — <date>.**` with the final test counts, and add the "historical record, safe to delete" note the Phase 3.5 plan uses.
 - **Proof:** `git diff --stat` shows **zero** files under `server/`, and `git status --short` shows no new file outside `client/src/`, `docs/`, `study/`, `plans/`. `cd client && npm test` → 8 files, 51 tests passing. `cd client && npm run build` exits 0.
 - **If it fails:** a server file in the diff means the scope was breached — stop and report which file and why.

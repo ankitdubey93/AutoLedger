@@ -27,7 +27,7 @@ import { MODULE_TAGS } from '../../config/modules.js';
  * `6820 Unrealized FX Gain/Loss`, and immediately posts an automatic
  * next-day reversal — so a later REALIZED settlement always compares its
  * rate against the document's original frozen rate, never a revalued
- * carrying amount. See docs/ledger-core.md § 3 and
+ * carrying amount. See docs/accounting.md § 3 and
  * study/architecture/realized-and-unrealized-fx.md.
  */
 

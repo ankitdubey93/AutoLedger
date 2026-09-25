@@ -128,13 +128,13 @@ await user.click(within(dialog).getByRole('button', { name: 'Reverse entry' }));
 
 ## Where it lives in this codebase
 
-- `client/src/Pages/ledger-core/ConfirmDialog.tsx` — the component itself
-- `client/src/Pages/ledger-core/JournalsPage.tsx`, `JournalDetailPage.tsx` — confirming a reversal
-- `client/src/Pages/ledger-core/InvoiceDetailPage.tsx` — confirming issue and void, each with its own title/body/tone
+- `client/src/Pages/ConfirmDialog.tsx` — the component itself
+- `client/src/Pages/JournalsPage.tsx`, `JournalDetailPage.tsx` — confirming a reversal
+- `client/src/Pages/InvoiceDetailPage.tsx` — confirming issue and void, each with its own title/body/tone
 - `client/src/__tests__/ledgerCoreJournals.test.tsx`, `ledgerCoreInvoices.test.tsx` — the `within(dialog)` disambiguation pattern
 - `client/src/components/ui/Menu.tsx` — the shared menu-button component (Phase 31)
 - `client/src/components/layout/AppTopBar.tsx` — the app-switcher, theme-toggle, and user menus built on it
-- `client/src/Pages/ledger-core/CreateMenu.tsx` — the original hand-rolled "+ New" menu, rewritten in Phase 31 to render through `Menu` instead of duplicating its own outside-click/Escape effect
+- `client/src/Pages/CreateMenu.tsx` — the original hand-rolled "+ New" menu, rewritten in Phase 31 to render through `Menu` instead of duplicating its own outside-click/Escape effect
 - `client/src/__tests__/menu.test.tsx` — arrow-key roving, Escape-returns-focus, outside-click, and selection-closes-the-menu, asserted with `toHaveFocus()`
 
 ## Gotchas

@@ -174,14 +174,14 @@ The *applied* part of a note is handled on the document side instead: each invoi
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/agingService.ts` — `buildOpenDocsCte`, `loadBuckets`, `loadCounterpartyRows`, `resolveControlAccount`, `loadControlAccountBalance`
-- `server/src/types/ledger-core.ts` — `AGING_BUCKETS`, `AGING_BUCKET_LABELS`, `AgingReport`
-- `server/src/__tests__/ledger-core/aging.test.ts` — the bucket-boundary tests (15/51/86/far-past days overdue land in the right bucket) and the `reconciles === true` assertions for both AR and AP
-- `server/src/services/ledger-core/reportService.ts` — `trialBalance`, the sibling report this one borrows its debit-normal/credit-normal convention and its "no summary table" discipline from; `bankReconciliation` (Phase 6), the completeness-flavored sibling of this file's correctness-flavored `reconciles`
-- `server/src/services/ledger-core/partyLedgerService.ts` (Phase 25) — `buildPartyRowsCte` (attribution), `customerLedger`/`vendorLedger`, `customerOpenItems`/`vendorOpenItems`; `GET /customers/:id/ledger|open-items`, `GET /vendors/:id/ledger|open-items`
-- `server/src/services/ledger-core/journalService.ts` — `assertNotControlAccountsOnClient`, called from `createEntry` and `bankMatchService.postJournalForTransaction`, never from `createEntryOnClient`
-- `server/src/__tests__/ledger-core/partyLedger.test.ts` — `'per customer, ledger closing === open-items outstanding; their sum === ar-aging total === control balance'`; `controlAccountGuard.test.ts` — the 422s, the rollback, and that documents still post
-- `server/src/__tests__/ledger-core/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
+- `server/src/services/accounting/agingService.ts` — `buildOpenDocsCte`, `loadBuckets`, `loadCounterpartyRows`, `resolveControlAccount`, `loadControlAccountBalance`
+- `server/src/types/accounting.ts` — `AGING_BUCKETS`, `AGING_BUCKET_LABELS`, `AgingReport`
+- `server/src/__tests__/accounting/aging.test.ts` — the bucket-boundary tests (15/51/86/far-past days overdue land in the right bucket) and the `reconciles === true` assertions for both AR and AP
+- `server/src/services/accounting/reportService.ts` — `trialBalance`, the sibling report this one borrows its debit-normal/credit-normal convention and its "no summary table" discipline from; `bankReconciliation` (Phase 6), the completeness-flavored sibling of this file's correctness-flavored `reconciles`
+- `server/src/services/accounting/partyLedgerService.ts` (Phase 25) — `buildPartyRowsCte` (attribution), `customerLedger`/`vendorLedger`, `customerOpenItems`/`vendorOpenItems`; `GET /customers/:id/ledger|open-items`, `GET /vendors/:id/ledger|open-items`
+- `server/src/services/accounting/journalService.ts` — `assertNotControlAccountsOnClient`, called from `createEntry` and `bankMatchService.postJournalForTransaction`, never from `createEntryOnClient`
+- `server/src/__tests__/accounting/partyLedger.test.ts` — `'per customer, ledger closing === open-items outstanding; their sum === ar-aging total === control balance'`; `controlAccountGuard.test.ts` — the 422s, the rollback, and that documents still post
+- `server/src/__tests__/accounting/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
 
 ---
 

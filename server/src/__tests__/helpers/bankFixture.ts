@@ -2,7 +2,7 @@ import type { loginAgent } from './factories.js';
 
 /**
  * A deterministic 100-line bank statement fixture for proving the
- * confidence-matching engine has no false auto-reconciles (docs/ledger-core.md
+ * confidence-matching engine has no false auto-reconciles (docs/accounting.md
  * § C acceptance criterion). No `Math.random`, no `Date.now` — every value
  * is derived from the loop index.
  *

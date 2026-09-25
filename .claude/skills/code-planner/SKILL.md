@@ -27,13 +27,13 @@ Docs describe target state. The filesystem is the only authority on what is buil
 
 ```bash
 ls server/src/db/migrations/ server/src/services/ server/src/routes/ server/src/__tests__/
-ls server/src/config/apps.ts client/src/apps/ 2>/dev/null
+ls server/src/config/modules.ts client/src/routes/ 2>/dev/null
 ls client/src/Pages/ client/src/context/ 2>/dev/null
 ls study/*/
 git status --short
 ```
 
-Check `server/src/config/apps.ts` for the app's slug and `status` — a plan for an app still `'planned'` is a plan to flip that to `'building'` as part of its own scope, not an assumption that it already is.
+Decide which module (`accounting`, `capture`, `inventory`) or the platform owns the work; `server/src/config/modules.ts` holds the provenance tags. AutoLedger is one product since Phase 33 — there is no app registry to flip.
 
 Then **read the closest existing analogue in full** — `authService.ts` and `organizationService.ts` for a service, `routes/organizations.ts` for routes, `001_organizations_and_users.sql` for a migration. You are about to tell the executor to copy these patterns, so you must know what they actually contain.
 
@@ -74,14 +74,14 @@ The single highest-value thing you can give the executor. Fix every identifier *
 **Names — use exactly these, do not rename:**
 | Kind | Name |
 |---|---|
-| App slug | `ledger-core` (from `server/src/config/apps.ts`) |
+| Module | `accounting` (folder), tag `MODULE_TAGS.accounting` (from `server/src/config/modules.ts`) |
 | Table | `accounts` |
 | Columns | `id, org_id, code, name, type, parent_id, is_active, created_by, created_at, updated_at` |
-| Type | `Account`, `AccountType` in `server/src/types/ledger-core.ts` |
-| Service file / exports | `services/ledger-core/accountService.ts` → `listAccounts`, `createAccount`, `getAccountById` |
-| Controller exports | `controllers/ledger-core/accountController.ts` → `list`, `create`, `getOne` |
-| Route base | `/api/v1/ledger-core/accounts` |
-| Test file | `server/src/__tests__/ledger-core/accounts.test.ts` |
+| Type | `Account`, `AccountType` in `server/src/types/accounting.ts` |
+| Service file / exports | `services/accounting/accountService.ts` → `listAccounts`, `createAccount`, `getAccountById` |
+| Controller exports | `controllers/accounting/accountController.ts` → `list`, `create`, `getOne` |
+| Route base | `/api/v1/accounts` |
+| Test file | `server/src/__tests__/accounting/accounts.test.ts` |
 ```
 
 Without this, step 4's controller imports `getAccount` while step 3's service exported `getAccountById`, and the executor "fixes" it by writing a second function.
@@ -146,7 +146,7 @@ The tier is not a difficulty rating. It answers one question: **has this step's 
 
 - One new isolated file whose contract is written out literally and whose analogue file is named — a `types/` module, an FSM transition table transcribed from the plan, a controller that only validates input and calls a service, a `routes/` file, the mount edit in `app.ts`.
 - Unit tests for a function whose behaviour the plan states, with the case names and expected values already listed.
-- Docs, type definitions, schema-doc blocks, env templates, `apps.ts` registry rows — transcription of facts already decided (an `api.md` route row, a `schema.md` table block, a `roadmap.md` status line).
+- Docs, type definitions, schema-doc blocks, env templates, `nav.ts` sidebar entries — transcription of facts already decided (an `api.md` route row, a `schema.md` table block, a `roadmap.md` status line).
 - Routine boilerplate: a CRUD service whose queries appear verbatim in the plan, a client component rendering a response whose shape the plan gives.
 - Mechanical repetition across many files: a rename, adding `.js` to imports, the same small edit in N places.
 
@@ -253,7 +253,7 @@ Each is cheap to choose now and expensive to retrofit. State the decision in the
 - **Immutability** — posted documents get `POST /:id/reverse`. If the plan contains a `PUT` or `DELETE` on a posted document, it is wrong; replan that step.
 - **Roles** — the `requireRole(...)` set per route, decided deliberately. Do not plan everything as ADMIN.
 - **FKs** — `ON DELETE CASCADE` for children of the org or parent document, `RESTRICT` for audit references like `created_by`.
-- **App boundary** — confirm no step reads or writes another app's tables directly; a cross-app effect is a step that calls LedgerCore's `journalService` with `source_type`/`source_id`, never a direct query (rule #16).
+- **Module boundary** — confirm no step reads or writes another module's tables directly; a cross-module effect is a step that calls the owning module's service (accounting's `journalService`/`billService` with `source_type`/`source_id` for the GL), never a direct query (rule #16).
 - **Dependencies** — any new package, and the phase that entitles it ([docs/development.md](../../../docs/development.md)). No ORM, ever. No `ioredis`/`bullmq` before Phase 7. No LLM/embeddings SDK outside Phase 10 (AP-Flow vision) and Phase 16 (TaxGuard AI).
 
 ## 11. Output

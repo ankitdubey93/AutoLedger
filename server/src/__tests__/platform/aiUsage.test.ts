@@ -119,7 +119,7 @@ describe('aiUsageService', () => {
 
     const usage = await getUsageSummary(orgA, { from: null, to: null, module: null });
     expect(usage.byModel).toHaveLength(2);
-    expect(usage.byApp[0]?.key).toBe('ap-flow');
+    expect(usage.byModule[0]?.key).toBe('ap-flow');
     expect(usage.byPurpose.map((p) => p.key).sort()).toEqual(['CLASSIFY', 'EXTRACT']);
     expect(usage.byDay).toHaveLength(1);
   });

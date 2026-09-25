@@ -75,13 +75,13 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/007_ledger-core_invoice_settings.sql` — `next_number INTEGER NOT NULL DEFAULT 1 CHECK (next_number > 0)`
-- `server/src/services/ledger-core/invoiceSettingsService.ts` — `allocateInvoiceNumber(client, orgId)`, taking a `Queryable` restricted to the caller's transaction client, never `pool`
-- `server/src/services/ledger-core/invoiceService.ts` — `issueInvoice` calls it inside its own `BEGIN…COMMIT`, before posting the journal entry
-- `server/src/__tests__/ledger-core/invoices.test.ts` — `'allocates the next number on a second invoice'` asserts `INV-000001` then `INV-000002` in sequence
+- `server/src/services/accounting/invoiceSettingsService.ts` — `allocateInvoiceNumber(client, orgId)`, taking a `Queryable` restricted to the caller's transaction client, never `pool`
+- `server/src/services/accounting/invoiceService.ts` — `issueInvoice` calls it inside its own `BEGIN…COMMIT`, before posting the journal entry
+- `server/src/__tests__/accounting/invoices.test.ts` — `'allocates the next number on a second invoice'` asserts `INV-000001` then `INV-000002` in sequence
 - `server/src/db/migrations/065_stock_setup.sql` — `stock_code_counters (org_id, scheme_id, scope_key, next_seq)`, composite-keyed instead of one row per org
 - `server/src/utils/stockCodePattern.ts` — `renderScopeKey`, the pure function that derives a counter's scope key from a pattern and its non-sequence token values
-- `server/src/services/stock/itemService.ts` — `createItem`'s 20-attempt bounded retry around the counter allocation + insert, catching `23505` on the item-code unique constraint specifically
-- `server/src/__tests__/stock/items.test.ts` — asserts two items in different categories (different scope keys) both start at `...00001`, and that a manual code collision is skipped past rather than surfaced as a 500
+- `server/src/services/inventory/itemService.ts` — `createItem`'s 20-attempt bounded retry around the counter allocation + insert, catching `23505` on the item-code unique constraint specifically
+- `server/src/__tests__/inventory/items.test.ts` — asserts two items in different categories (different scope keys) both start at `...00001`, and that a manual code collision is skipped past rather than surfaced as a 500
 
 ## Gotchas
 

@@ -75,10 +75,10 @@ Consistent with every other report in this codebase (see [aggregating-a-ledger.m
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/partyLedgerService.ts` (Phase 25) — the same running balance over a customer's/vendor's rows, but windowed over a `party_rows` CTE that has already `GROUP BY`-collapsed several control-account lines into one row per (journal entry, document); see the gotcha below
-- `server/src/services/ledger-core/accountLedgerService.ts` — `accountLedger()`'s line-page query, the explicit `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` frame, and the `l.id ASC` tiebreaker shared between the `ORDER BY` and the window's implicit ordering
-- `server/src/__tests__/ledger-core/accountLedger.test.ts` — `'the running balance accumulates'` (the basic case) and `'the running balance continues across pages'` (the case that actually exercises why the window runs before `LIMIT`)
-- `client/src/Pages/ledger-core/AccountLedgerPage.tsx` — renders the server-computed `runningBalanceCents` per row; there is no client-side accumulation anywhere
+- `server/src/services/accounting/partyLedgerService.ts` (Phase 25) — the same running balance over a customer's/vendor's rows, but windowed over a `party_rows` CTE that has already `GROUP BY`-collapsed several control-account lines into one row per (journal entry, document); see the gotcha below
+- `server/src/services/accounting/accountLedgerService.ts` — `accountLedger()`'s line-page query, the explicit `ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` frame, and the `l.id ASC` tiebreaker shared between the `ORDER BY` and the window's implicit ordering
+- `server/src/__tests__/accounting/accountLedger.test.ts` — `'the running balance accumulates'` (the basic case) and `'the running balance continues across pages'` (the case that actually exercises why the window runs before `LIMIT`)
+- `client/src/Pages/AccountLedgerPage.tsx` — renders the server-computed `runningBalanceCents` per row; there is no client-side accumulation anywhere
 
 ---
 
@@ -129,4 +129,4 @@ A: Building LedgerCore's account ledger, which shows a running balance per line.
 
 - [aggregating-a-ledger.md](aggregating-a-ledger.md) — the sibling technique for a snapshot total (`FILTER`), versus this note's per-row running total; also the shared "why does this project have no summary tables" reasoning
 - [recursive-ctes-and-hierarchies.md](recursive-ctes-and-hierarchies.md) — the other place a single query replaces what would otherwise be per-row application-code iteration
-- `server/src/services/ledger-core/accountLedgerService.ts` — the query this note is written against
+- `server/src/services/accounting/accountLedgerService.ts` — the query this note is written against

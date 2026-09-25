@@ -102,7 +102,7 @@ export interface AiUsageDay extends AiUsageTotals {
 export interface AiUsageSummary {
   totals: AiUsageTotals;
   byModel: AiUsageGroup[];
-  byApp: AiUsageGroup[];
+  byModule: AiUsageGroup[];
   byPurpose: AiUsageGroup[];
   byDay: AiUsageDay[];
   pricingVersion: string;

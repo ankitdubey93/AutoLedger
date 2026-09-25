@@ -9,7 +9,7 @@ import type { OcrPageResult, OcrWord, RedactedRegion } from '../types/capture.js
 /**
  * The Capture capture pipeline's document-processing surface (Phase 10) —
  * shared, unprefixed infrastructure like `storageService.ts`, per
- * docs/ap-flow.md's promotion note. Touches no database — this file must
+ * docs/capture.md's promotion note. Touches no database — this file must
  * never import db/connect.js. rasterize/redactPage are pure over buffers;
  * tesseractOcr is the one real I/O boundary, and it is always reached
  * through the injectable `OcrAdapter` seam.

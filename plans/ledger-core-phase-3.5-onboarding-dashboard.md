@@ -3,7 +3,7 @@
 **Date:** 2026-09-02
 **Status: DONE — 2026-09-02.** All 26 steps executed; 230 server + 41 client tests green;
 `guardrail-review` and `docs-sync` both run clean.
-**Phase:** 3.5 (LedgerCore) · **Spec:** [docs/ledger-core.md](../docs/ledger-core.md) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
+**Phase:** 3.5 (LedgerCore) · **Spec:** [docs/accounting.md](../docs/accounting.md) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
 
 > This file is now a historical record, not a live plan. The durable account of what shipped
 > and what deliberately changed is [roadmap.md § Phase 3.5, as delivered](../docs/roadmap.md#phase-35-as-delivered).
@@ -34,14 +34,14 @@ drift that killed the previous build.
 - `accounts (id, org_id, code, name, type, parent_id, is_postable, description, is_active, created_by, created_at, updated_at)` with `ux_accounts_org_code UNIQUE (org_id, code)`. **There is no `UNIQUE (org_id, id)` — Step 1 adds it.**
 - `journal_entries`, `ledger_lines` with five triggers. Posted rows are immutable (`0A000`).
 - Shared trigger function `set_updated_at()` from `001`. **Reuse it; do not define another.**
-- `server/src/services/ledger-core/{accountService,journalService,reportService}.ts`; `services/{authService,organizationService,appService,healthService}.ts`.
+- `server/src/services/accounting/{accountService,journalService,reportService}.ts`; `services/{authService,organizationService,appService,healthService}.ts`.
 - `organizationService.ts` exports `getById(orgId)` and `listMembers(orgId)` **only** — there is no update function.
-- Routes mounted in `routes/ledger-core/index.ts`: `/accounts`, `/journals`, `/reports`. `reportRoutes.ts` has exactly one route (`GET /trial-balance`).
+- Routes mounted in `routes/accounting/index.ts`: `/accounts`, `/journals`, `/reports`. `reportRoutes.ts` has exactly one route (`GET /trial-balance`).
 - `routes/organizations.ts` has `GET /` and `GET /members`. **No `PATCH`.**
 - `utils/money.ts` (branded `Cents`, `parseCents`, `formatCents`), `utils/parseBody.ts`, `utils/requireUser.ts`, `utils/routeParam.ts`, `utils/apiError.ts`.
 - `db/connect.ts` overrides the `DATE` type parser so `DATE` comes back as a `'YYYY-MM-DD'` string, never a `Date`.
 - `config/apps.ts` — `ledger-core` is already `status: 'building'`. **No change needed there.**
-- Client: `Pages/ledger-core/{LedgerCoreRoutes,AccountsPage,JournalEntryPage,TrialBalancePage,money}.tsx|ts`. `LedgerCoreRoutes` renders a horizontal `TABS` strip. `context/{AuthContext,OrgContext}.tsx`, `components/layout/{PlatformLayout,AppShell,OrgSwitcher}.tsx`.
+- Client: `Pages/{LedgerCoreRoutes,AccountsPage,JournalEntryPage,TrialBalancePage,money}.tsx|ts`. `LedgerCoreRoutes` renders a horizontal `TABS` strip. `context/{AuthContext,OrgContext}.tsx`, `components/layout/{PlatformLayout,AppShell,OrgSwitcher}.tsx`.
 - `client/src/services/fetchServices.ts` — `apiFetch<T>(path, init, options)`, `ApiRequestError`, and typed wrappers.
 - **191 server tests, 27 client tests, all green.**
 
@@ -51,7 +51,7 @@ drift that killed the previous build.
 - No `fiscal_periods`, no period close/lock, no posting guard. **Phase 4 owns all of it.**
 - No P&L, no balance sheet. Trial balance is the only report.
 - No `PATCH /api/v1/organizations`.
-- No client sidebar, no `Pages/ledger-core/{DashboardPage,SettingsPage,ReportsPage,OnboardingPage}.tsx`.
+- No client sidebar, no `Pages/{DashboardPage,SettingsPage,ReportsPage,OnboardingPage}.tsx`.
 - No chart library. No `TodoWrite` tool in the executing session — **this file's numbered steps are the todo list.**
 
 ---
@@ -173,7 +173,7 @@ Anything this plan did not anticipate is a **stop-and-report**, not a judgment c
 
 - **Depends on:** nothing
 - **Skill:** none (config file)
-- **Read first:** `server/src/types/ledger-core.ts` lines 24–31 — copy the `as const` + narrowing-guard pattern used by `ACCOUNT_TYPES`.
+- **Read first:** `server/src/types/accounting.ts` lines 24–31 — copy the `as const` + narrowing-guard pattern used by `ACCOUNT_TYPES`.
 - **Files:** `server/src/config/currencies.ts` (new)
 - **Contract — write these literally:**
   ```ts
@@ -246,23 +246,23 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 
 | Kind | Name |
 |---|---|
-| Types | `LedgerSettings`, `OnboardingInput`, `UpdateSettingsInput` in `server/src/types/ledger-core.ts` |
-| Schemas | `server/src/schemas/ledger-core/settingsSchema.ts` → `onboardingSchema`, `updateSettingsSchema` |
+| Types | `LedgerSettings`, `OnboardingInput`, `UpdateSettingsInput` in `server/src/types/accounting.ts` |
+| Schemas | `server/src/schemas/accounting/settingsSchema.ts` → `onboardingSchema`, `updateSettingsSchema` |
 | | `server/src/schemas/organizationSchema.ts` → `updateOrganizationSchema` |
-| Service | `server/src/services/ledger-core/settingsService.ts` → `getSettings`, `completeOnboarding`, `updateSettings` |
+| Service | `server/src/services/accounting/settingsService.ts` → `getSettings`, `completeOnboarding`, `updateSettings` |
 | | `server/src/services/organizationService.ts` → **add** `updateOrganization` |
-| Controller | `server/src/controllers/ledger-core/settingsController.ts` → `get`, `onboard`, `update` |
+| Controller | `server/src/controllers/accounting/settingsController.ts` → `get`, `onboard`, `update` |
 | | `server/src/controllers/organizationController.ts` → **add** `update` |
-| Routes | `server/src/routes/ledger-core/settingsRoutes.ts` |
-| Route base | `/api/v1/ledger-core/settings` |
-| Tests | `server/src/__tests__/ledger-core/settings.test.ts` |
+| Routes | `server/src/routes/accounting/settingsRoutes.ts` |
+| Route base | `/api/v1/settings` |
+| Tests | `server/src/__tests__/accounting/settings.test.ts` |
 
 ### Step 4 — types
 
 - **Depends on:** Step 2
 - **Skill:** `new-module` (types layer)
-- **Read first:** `server/src/types/ledger-core.ts` in full — append, do not restructure.
-- **Files:** `server/src/types/ledger-core.ts` (edit — append at the end)
+- **Read first:** `server/src/types/accounting.ts` in full — append, do not restructure.
+- **Files:** `server/src/types/accounting.ts` (edit — append at the end)
 - **Contract — write these literally:**
   ```ts
   export interface FiscalYearWindow {
@@ -297,8 +297,8 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 
 - **Depends on:** Steps 2, 4
 - **Skill:** `new-module` (schema layer)
-- **Read first:** `server/src/schemas/ledger-core/accountSchema.ts` — copy its zod **v4** idioms exactly (`z.uuid()`, `z.int()`, `z.iso.date()`, **not** `z.string().uuid()`), and its `.refine` on the update schema.
-- **Files:** `server/src/schemas/ledger-core/settingsSchema.ts` (new), `server/src/schemas/organizationSchema.ts` (new)
+- **Read first:** `server/src/schemas/accounting/accountSchema.ts` — copy its zod **v4** idioms exactly (`z.uuid()`, `z.int()`, `z.iso.date()`, **not** `z.string().uuid()`), and its `.refine` on the update schema.
+- **Files:** `server/src/schemas/accounting/settingsSchema.ts` (new), `server/src/schemas/organizationSchema.ts` (new)
 - **Contract — write these literally:**
   ```ts
   // settingsSchema.ts
@@ -340,7 +340,7 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 
 - **Depends on:** Step 5
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/accountService.ts` → `updateAccount` — copy the **frozen `COLUMNS` map** dynamic-`SET` builder verbatim. `server/src/services/authService.ts` lines 31–32 for the `Queryable` type.
+- **Read first:** `server/src/services/accounting/accountService.ts` → `updateAccount` — copy the **frozen `COLUMNS` map** dynamic-`SET` builder verbatim. `server/src/services/authService.ts` lines 31–32 for the `Queryable` type.
 - **Files:** `server/src/services/organizationService.ts` (edit — add one export plus the `Queryable` type)
 - **Contract — write this literally:**
   ```ts
@@ -368,7 +368,7 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 - **Depends on:** Steps 1, 3, 4, 6
 - **Skill:** `new-module` (service layer)
 - **Read first:** `server/src/services/authService.ts` → `register` (lines 243–315) for the exact `BEGIN`/`COMMIT`/`ROLLBACK`/`release` shape and the service-to-service call on the shared client; `accountService.ts` → `getAccountById` for `ApiError` usage.
-- **Files:** `server/src/services/ledger-core/settingsService.ts` (new)
+- **Files:** `server/src/services/accounting/settingsService.ts` (new)
 - **Contract — write these signatures literally:**
   ```ts
   export async function getSettings(orgId: string): Promise<LedgerSettings>;
@@ -419,7 +419,7 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 - **Proof:**
   ```bash
   cd server && npm run typecheck                    # exits 0
-  grep -c "pool.query" src/services/ledger-core/settingsService.ts   # must be 0 inside completeOnboarding
+  grep -c "pool.query" src/services/accounting/settingsService.ts   # must be 0 inside completeOnboarding
   ```
   Behaviour is proved by Step 9.
 - **If it fails:** a `23505`/`23503` you did not expect means the fixture is wrong, not the constraint. **Never drop the `org_id` predicate to make a query return rows.**
@@ -429,19 +429,19 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 
 - **Depends on:** Steps 5, 6, 7
 - **Skill:** `new-module` (controller + route layers)
-- **Read first:** `server/src/controllers/ledger-core/accountController.ts` (the `requireUser` → `parseBody` → service → `res.json` shape) and `server/src/routes/ledger-core/accountRoutes.ts` (the `requireRole` placement).
+- **Read first:** `server/src/controllers/accounting/accountController.ts` (the `requireUser` → `parseBody` → service → `res.json` shape) and `server/src/routes/accounting/accountRoutes.ts` (the `requireRole` placement).
 - **Files:**
-  - `server/src/controllers/ledger-core/settingsController.ts` (new)
-  - `server/src/routes/ledger-core/settingsRoutes.ts` (new)
-  - `server/src/routes/ledger-core/index.ts` (edit — add `router.use('/settings', settingsRoutes)`)
+  - `server/src/controllers/accounting/settingsController.ts` (new)
+  - `server/src/routes/accounting/settingsRoutes.ts` (new)
+  - `server/src/routes/accounting/index.ts` (edit — add `router.use('/settings', settingsRoutes)`)
   - `server/src/controllers/organizationController.ts` (edit — add `update`)
   - `server/src/routes/organizations.ts` (edit — add the `PATCH /` route)
 - **Contract — the route table, literally:**
   | Method | Path | Middleware | Success | Body key |
   |---|---|---|---|---|
-  | GET | `/api/v1/ledger-core/settings` | `authenticate` | `200` | `{ success: true, settings }` |
-  | POST | `/api/v1/ledger-core/settings/onboarding` | `authenticate`, `requireRole('OWNER', 'ADMIN')` | `200` | `{ success: true, settings }` |
-  | PATCH | `/api/v1/ledger-core/settings` | `authenticate`, `requireRole('OWNER', 'ADMIN')` | `200` | `{ success: true, settings }` |
+  | GET | `/api/v1/settings` | `authenticate` | `200` | `{ success: true, settings }` |
+  | POST | `/api/v1/settings/onboarding` | `authenticate`, `requireRole('OWNER', 'ADMIN')` | `200` | `{ success: true, settings }` |
+  | PATCH | `/api/v1/settings` | `authenticate`, `requireRole('OWNER', 'ADMIN')` | `200` | `{ success: true, settings }` |
   | PATCH | `/api/v1/organizations` | `authenticate`, `requireRole('OWNER', 'ADMIN')` | `200` | `{ success: true, organization }` |
 
   Onboarding returns **200, not 201** — it is an idempotent upsert, not a creation. `OWNER`/`ADMIN` and **not** `ACCOUNTANT`: this is organization configuration, matching `/organizations/members`, not bookkeeping. `GET` is open to any member, including `VIEWER`, matching `reportRoutes.ts`.
@@ -460,17 +460,17 @@ Runs after Slice A. Steps 4–7 are strictly sequential; Steps 8–10 (tests + p
 - **Proof:**
   ```bash
   cd server && npm run typecheck   # exits 0
-  grep -rn "pool\|query(" src/controllers/ledger-core/settingsController.ts   # no matches
+  grep -rn "pool\|query(" src/controllers/accounting/settingsController.ts   # no matches
   ```
-- **If it fails:** if a route 404s, check the mount line in `routes/ledger-core/index.ts` — nothing mounts on `app.ts` directly.
+- **If it fails:** if a route 404s, check the mount line in `routes/accounting/index.ts` — nothing mounts on `app.ts` directly.
 - **Owes:** `docs/api.md` in Step 25.
 
 ### Step 9 — settings integration + isolation tests
 
 - **Depends on:** Step 8
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/ledger-core/accounts.test.ts` (fixture setup, `loginAgent`) and `server/src/__tests__/tenantIsolation.test.ts` (the forged-`orgId` assertions).
-- **Files:** `server/src/__tests__/ledger-core/settings.test.ts` (new), `server/src/__tests__/helpers/factories.ts` (edit)
+- **Read first:** `server/src/__tests__/accounting/accounts.test.ts` (fixture setup, `loginAgent`) and `server/src/__tests__/tenantIsolation.test.ts` (the forged-`orgId` assertions).
+- **Files:** `server/src/__tests__/accounting/settings.test.ts` (new), `server/src/__tests__/helpers/factories.ts` (edit)
 - **Contract — write exactly these cases with these expected values:**
 
   Factories edit: add `ledger_settings` to the `resetTables()` `TRUNCATE` list. It cascades from `organizations`, but the list is the documented contract and the next table may not cascade.
@@ -514,18 +514,18 @@ Runs after Slice B (it reads `ledger_settings`).
 
 | Kind | Name |
 |---|---|
-| Types | `DashboardSummary`, `TrendPoint` in `server/src/types/ledger-core.ts` |
-| Service | `server/src/services/ledger-core/dashboardService.ts` → `dashboardSummary` |
-| Controller export | `server/src/controllers/ledger-core/reportController.ts` → **add** `dashboard` |
-| Route | `GET /api/v1/ledger-core/reports/dashboard` |
-| Test | `server/src/__tests__/ledger-core/dashboard.test.ts` |
+| Types | `DashboardSummary`, `TrendPoint` in `server/src/types/accounting.ts` |
+| Service | `server/src/services/accounting/dashboardService.ts` → `dashboardSummary` |
+| Controller export | `server/src/controllers/accounting/reportController.ts` → **add** `dashboard` |
+| Route | `GET /api/v1/reports/dashboard` |
+| Test | `server/src/__tests__/accounting/dashboard.test.ts` |
 
 ### Step 10 — dashboard types
 
 - **Depends on:** Step 4
 - **Skill:** `new-module` (types layer)
-- **Read first:** `server/src/types/ledger-core.ts` → `TrialBalance` for the money-field naming convention.
-- **Files:** `server/src/types/ledger-core.ts` (edit — append)
+- **Read first:** `server/src/types/accounting.ts` → `TrialBalance` for the money-field naming convention.
+- **Files:** `server/src/types/accounting.ts` (edit — append)
 - **Contract — write these literally:**
   ```ts
   export interface TrendPoint {
@@ -567,8 +567,8 @@ Runs after Slice B (it reads `ledger_settings`).
 
 - **Depends on:** Steps 3, 7, 10
 - **Skill:** `new-module` (service layer)
-- **Read first:** `server/src/services/ledger-core/reportService.ts` in full — copy its `::text` + `parseCents` handling, its `base_*`-only rule, and its file-header comment about there being no summary table. `accountService.ts`'s `WITH RECURSIVE` block for the CTE shape.
-- **Files:** `server/src/services/ledger-core/dashboardService.ts` (new)
+- **Read first:** `server/src/services/accounting/reportService.ts` in full — copy its `::text` + `parseCents` handling, its `base_*`-only rule, and its file-header comment about there being no summary table. `accountService.ts`'s `WITH RECURSIVE` block for the CTE shape.
+- **Files:** `server/src/services/accounting/dashboardService.ts` (new)
 - **Contract — write this signature literally:**
   ```ts
   export async function dashboardSummary(orgId: string, asOf: string | null): Promise<DashboardSummary>;
@@ -596,7 +596,7 @@ Runs after Slice B (it reads `ledger_settings`).
   WHERE l.org_id = $1
     AND e.entry_date <= $4::date
   ```
-  Params `[orgId, fy.startDate, month.startDate, on]`. Sign convention is `isDebitBalanceType` from `types/ledger-core.ts` — debit-positive for Asset and Expense, credit-positive otherwise, exactly as `trialBalance` already does it.
+  Params `[orgId, fy.startDate, month.startDate, on]`. Sign convention is `isDebitBalanceType` from `types/accounting.ts` — debit-positive for Asset and Expense, credit-positive otherwise, exactly as `trialBalance` already does it.
 
   **(b) Cash — recursive descendant walk.** Skip entirely and return `null` when `settings.cashAccountId === null`.
   ```sql
@@ -645,7 +645,7 @@ Runs after Slice B (it reads `ledger_settings`).
 
   Every `::text` result goes through `parseCents`. Derived values: `netIncomeCents = revenueCents - expenseCents`; `currentEarningsCents = revenue_all - expense_all`; `equationHolds = assets === liabilities + equity + currentEarnings`.
 
-  **Add a file-header comment** stating that nothing here is cached and no summary table exists — `docs/schema.md`, `docs/ledger-core.md` and `reports.test.ts` each assert this independently.
+  **Add a file-header comment** stating that nothing here is cached and no summary table exists — `docs/schema.md`, `docs/accounting.md` and `reports.test.ts` each assert this independently.
 - **Guardrails:** #1 `org_id` in every statement and in both terms of the recursive CTE · #2 no SQL escapes to a controller · #3 integer cents, integer equality · #4 parameterized only · #16 reads only LedgerCore + platform tables
 - **Proof:** `cd server && npm run typecheck` exits 0. Behaviour proved by Step 13.
 - **If it fails:** if the trend returns fewer than 6 rows, an `org_id` predicate has migrated into the `WHERE`. **Do not fill the gap in JavaScript** — fix the join.
@@ -655,12 +655,12 @@ Runs after Slice B (it reads `ledger_settings`).
 
 - **Depends on:** Step 11
 - **Skill:** `new-module` (controller + route layers)
-- **Read first:** `server/src/controllers/ledger-core/reportController.ts` in full — reuse its `ISO_DATE` regex and `asOf` parsing verbatim.
-- **Files:** `server/src/controllers/ledger-core/reportController.ts` (edit — add `dashboard`), `server/src/routes/ledger-core/reportRoutes.ts` (edit — add one line)
+- **Read first:** `server/src/controllers/accounting/reportController.ts` in full — reuse its `ISO_DATE` regex and `asOf` parsing verbatim.
+- **Files:** `server/src/controllers/accounting/reportController.ts` (edit — add `dashboard`), `server/src/routes/accounting/reportRoutes.ts` (edit — add one line)
 - **Contract:**
   | Method | Path | Middleware | Success |
   |---|---|---|---|
-  | GET | `/api/v1/ledger-core/reports/dashboard?asOf=YYYY-MM-DD` | `authenticate` | `200` |
+  | GET | `/api/v1/reports/dashboard?asOf=YYYY-MM-DD` | `authenticate` | `200` |
 
   ```ts
   router.get('/dashboard', authenticate, reportController.dashboard);
@@ -679,8 +679,8 @@ Runs after Slice B (it reads `ledger_settings`).
 
 - **Depends on:** Step 12
 - **Skill:** `isolation-test`
-- **Read first:** `server/src/__tests__/ledger-core/reports.test.ts` — copy its fixture-posting helper and its assertion style.
-- **Files:** `server/src/__tests__/ledger-core/dashboard.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/reports.test.ts` — copy its fixture-posting helper and its assertion style.
+- **Files:** `server/src/__tests__/accounting/dashboard.test.ts` (new)
 - **Contract — write exactly these cases:**
   | Case | Expected |
   |---|---|
@@ -715,10 +715,10 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
 | Kind | Name |
 |---|---|
 | API wrappers | `getLedgerSettings`, `completeLedgerOnboarding`, `updateLedgerSettings`, `getLedgerDashboard`, `updateOrganization` in `client/src/services/fetchServices.ts` |
-| Context | `client/src/Pages/ledger-core/LedgerSettingsContext.tsx` → `LedgerSettingsProvider`, `useLedgerSettings` |
-| Sidebar | `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` |
-| Pages | `OnboardingPage.tsx`, `DashboardPage.tsx`, `SettingsPage.tsx`, `ReportsPage.tsx`, `TrendChart.tsx` — all in `client/src/Pages/ledger-core/` |
-| Client util | `client/src/Pages/ledger-core/fiscalYear.ts` |
+| Context | `client/src/Pages/LedgerSettingsContext.tsx` → `LedgerSettingsProvider`, `useLedgerSettings` |
+| Sidebar | `client/src/Pages/LedgerCoreSidebar.tsx` |
+| Pages | `OnboardingPage.tsx`, `DashboardPage.tsx`, `SettingsPage.tsx`, `ReportsPage.tsx`, `TrendChart.tsx` — all in `client/src/Pages/` |
+| Client util | `client/src/Pages/fiscalYear.ts` |
 | Routes | `''` → Dashboard · `accounts` · `journals` · `trial-balance` · `reports` · `settings` · `onboarding` |
 
 ### Step 14 — API client wrappers
@@ -742,7 +742,7 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
   export async function updateOrganization(input: { name?: string; baseCurrency?: string }): Promise<OrganizationSummary>;
   ```
   Paths: `/ledger-core/settings`, `/ledger-core/settings/onboarding`, `/ledger-core/reports/dashboard`, `/organizations`. `getLedgerSettings` unwraps `body.settings`; `getLedgerDashboard` returns the spread body minus `success`. **Do not** pass `NO_AUTO_REFRESH` — these are authenticated calls that must survive a token refresh.
-- **Guardrails:** none server-side; keep types in lockstep with `server/src/types/ledger-core.ts`
+- **Guardrails:** none server-side; keep types in lockstep with `server/src/types/accounting.ts`
 - **Proof:** `cd client && npm run typecheck` exits 0.
 - **If it fails:** fix the type. Do not use `any` to bridge a mismatch — a mismatch means the server contract was misread.
 - **Owes:** nothing.
@@ -752,7 +752,7 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
 - **Depends on:** Step 14
 - **Skill:** none (React context)
 - **Read first:** `client/src/context/AuthContext.tsx` — copy its discriminated-union state, its `ignore`-flag effect, and its `applySession` escape hatch. `client/src/services/fetchServices.ts` lines 79–88 explain why this project uses an `ignore` flag rather than `AbortSignal` in components.
-- **Files:** `client/src/Pages/ledger-core/LedgerSettingsContext.tsx` (new)
+- **Files:** `client/src/Pages/LedgerSettingsContext.tsx` (new)
 - **Contract — write these literally:**
   ```ts
   export type LedgerSettingsState =
@@ -777,7 +777,7 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
 - **Depends on:** nothing
 - **Skill:** none (pure util)
 - **Read first:** `server/src/utils/fiscalYear.ts` from Step 3 — port it, do not redesign it.
-- **Files:** `client/src/Pages/ledger-core/fiscalYear.ts` (new), `client/src/__tests__/ledgerCoreFiscalYear.test.ts` (new)
+- **Files:** `client/src/Pages/fiscalYear.ts` (new), `client/src/__tests__/ledgerCoreFiscalYear.test.ts` (new)
 - **Contract:** export `fiscalYearBounds(startMonth, startDay, on)` with the identical algorithm and the identical label rule. It exists so the wizard can show the derived end date live without a round trip.
 - **Test cases:** the same five rows from Step 3's table.
 - **Guardrails:** no local-time `Date` parsing of a `YYYY-MM-DD` string
@@ -789,10 +789,10 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
 
 - **Depends on:** Steps 15, 16
 - **Skill:** none (client routing)
-- **Read first:** `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` in full (the `TABS` + `NavLink` idiom you are extending) and `client/src/components/layout/AppShell.tsx` (the `.skeleton` loading treatment to match).
+- **Read first:** `client/src/Pages/LedgerCoreRoutes.tsx` in full (the `TABS` + `NavLink` idiom you are extending) and `client/src/components/layout/AppShell.tsx` (the `.skeleton` loading treatment to match).
 - **Files:**
-  - `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` (new)
-  - `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` (rewrite)
+  - `client/src/Pages/LedgerCoreSidebar.tsx` (new)
+  - `client/src/Pages/LedgerCoreRoutes.tsx` (rewrite)
   - `client/src/index.css` (edit — one rule)
 - **Contract — the route table, literally:**
   ```
@@ -830,8 +830,8 @@ Runs after Slice B. Step 14 may run in parallel with Slice C.
 
 - **Depends on:** Steps 14, 15, 16, 17
 - **Skill:** none (client page)
-- **Read first:** `client/src/Pages/ledger-core/JournalEntryPage.tsx` — reuse its `inputClass` string constant (line ~143) and its submit-button classes (line ~268) verbatim so the wizard matches the app. `client/src/Pages/auth/RegisterPage.tsx` for the controlled-form idiom.
-- **Files:** `client/src/Pages/ledger-core/OnboardingPage.tsx` (new)
+- **Read first:** `client/src/Pages/JournalEntryPage.tsx` — reuse its `inputClass` string constant (line ~143) and its submit-button classes (line ~268) verbatim so the wizard matches the app. `client/src/Pages/auth/RegisterPage.tsx` for the controlled-form idiom.
+- **Files:** `client/src/Pages/OnboardingPage.tsx` (new)
 - **Contract — three steps, local state, ONE POST at the end:**
   - **Step 1 — Workspace:** `organizationName` (required, min 2, prefilled from `useOrg().organization.name`), `legalName` (optional), `industry` (select: Software / Services / Retail / Manufacturing / Nonprofit / Other).
   - **Step 2 — Financial year:** `baseCurrency` (select from a `CURRENCIES` const mirroring `SUPPORTED_CURRENCIES`), `fiscalYearStartMonth` (select, 1–12, default 1), `fiscalYearStartDay` (number, 1–28, default 1), **the derived fiscal-year end date rendered live** via `fiscalYearBounds`, `booksStartDate` (date input, default today), `cashAccountId` (select populated by `listAccounts()`, defaulting to the account whose `code === '1110'` if present, otherwise blank).
@@ -861,8 +861,8 @@ Runs after Slices C and D.
 
 - **Depends on:** Step 14
 - **Skill:** none (client component)
-- **Read first:** `client/src/Pages/ledger-core/TrialBalancePage.tsx` for the token usage and table markup conventions.
-- **Files:** `client/src/Pages/ledger-core/TrendChart.tsx` (new)
+- **Read first:** `client/src/Pages/TrialBalancePage.tsx` for the token usage and table markup conventions.
+- **Files:** `client/src/Pages/TrendChart.tsx` (new)
 - **Contract:**
   ```ts
   export default function TrendChart({ points }: { points: TrendPoint[] }): JSX.Element;
@@ -877,8 +877,8 @@ Runs after Slices C and D.
 
 - **Depends on:** Steps 14, 15, 17, 19
 - **Skill:** none (client page)
-- **Read first:** `client/src/Pages/ledger-core/TrialBalancePage.tsx` — reuse its `role="status"` banner and its `CheckCircle2` / `XCircle` idiom for the integrity strip. `./money.ts` → `formatCents` for **every** money value on the page.
-- **Files:** `client/src/Pages/ledger-core/DashboardPage.tsx` (new)
+- **Read first:** `client/src/Pages/TrialBalancePage.tsx` — reuse its `role="status"` banner and its `CheckCircle2` / `XCircle` idiom for the integrity strip. `./money.ts` → `formatCents` for **every** money value on the page.
+- **Files:** `client/src/Pages/DashboardPage.tsx` (new)
 - **Contract — the page renders, in this order:**
   1. A header line: the org name and `fiscalYear.label`.
   2. **Position tiles** — Assets, Liabilities, Equity, Cash. Cash renders `—` when `cashCents === null`, with the caption "No cash account configured — set one in Settings." An `equationHolds === false` state shows a warning strip.
@@ -898,7 +898,7 @@ Runs after Slices C and D.
 - **Depends on:** Steps 14, 15, 17
 - **Skill:** none (client pages)
 - **Read first:** `client/src/Pages/AppChooserPage.tsx` — copy the `app-card--disabled` + `aria-disabled` idiom for the unbuilt report cards.
-- **Files:** `client/src/Pages/ledger-core/SettingsPage.tsx` (new), `client/src/Pages/ledger-core/ReportsPage.tsx` (new)
+- **Files:** `client/src/Pages/SettingsPage.tsx` (new), `client/src/Pages/ReportsPage.tsx` (new)
 - **Contract:**
 
   **SettingsPage** — a flat form over the same fields as the wizard, prefilled from `useLedgerSettings()`. Save issues **two** calls, because the fields live in two layers:
@@ -982,13 +982,13 @@ Non-negotiable. A plan without this tail is incomplete.
 - **Depends on:** Steps 22, 23
 - **Skill:** `docs-sync`
 - **Read first:** `docs/roadmap.md` § "Phase 3, as delivered" — match its structure for the new section.
-- **Files:** `docs/schema.md`, `docs/api.md`, `docs/roadmap.md`, `docs/ledger-core.md`, `docs/architecture.md`, `CLAUDE.md` (all edits)
+- **Files:** `docs/schema.md`, `docs/api.md`, `docs/roadmap.md`, `docs/accounting.md`, `docs/architecture.md`, `CLAUDE.md` (all edits)
 - **Contract:**
   - `docs/schema.md` — `ledger_settings` in the **Applied** section with its full column list, the composite FK, `ux_accounts_org_id_id`, and the `MATCH SIMPLE` note. Update the header line to "Applied: `001`–`005`."
   - `docs/api.md` — the three settings routes, `GET /reports/dashboard`, and `PATCH /organizations`, each with method, auth, and response shape.
   - `docs/roadmap.md` — a new **"Phase 3.5, as delivered"** section between Phase 3 and the renumbering entry. State plainly that it renumbers nothing, and that fiscal **periods**, close/lock, the posting guard, P&L and the balance sheet all remain Phase 4. Add a "Deliberately changed" table if anything diverged from this plan.
-  - `docs/ledger-core.md` — a Phase 3.5 ladder block with ticked boxes; leave every Phase 4 box unticked; update the "Not built yet" list.
-  - `docs/architecture.md` — the client tree gains the new `Pages/ledger-core/` files.
+  - `docs/accounting.md` — a Phase 3.5 ladder block with ticked boxes; leave every Phase 4 box unticked; update the "Not built yet" list.
+  - `docs/architecture.md` — the client tree gains the new `Pages/` files.
   - `CLAUDE.md` — the State section: Phase 3.5 landed, with the **actual** test counts from Step 22, not estimates.
 - **Guardrails:** "keeping docs honest" — claiming something works when it does not is worse than saying nothing. Make **no** compliance claim; there is still no audit trail (Phase 5).
 - **Proof:** run the `docs-sync` skill; it reports zero drift. Manually confirm `grep -n "fiscal_periods" docs/roadmap.md` still shows it as Phase 4 and unbuilt.

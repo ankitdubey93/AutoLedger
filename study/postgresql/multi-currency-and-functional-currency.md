@@ -80,7 +80,7 @@ This validates against the whole pre-existing table with **no backfill**, becaus
 |---|---|---|
 | Redefine the balance check to always sum native amounts, converting on the fly inside the trigger | The trigger would need to resolve an exchange rate itself — a network-adjacent lookup with no natural transaction-time semantics inside `COMMIT`-time trigger execution — and would duplicate `utils/fxRate.ts`'s conversion logic in PL/pgSQL | Rejected — conversion belongs in the service, where the rate was already resolved and frozen before the row was ever written |
 | A second `journal_entries.reporting_currency` column, with every line's native amount cast to it in the query | Still requires per-line rate storage to convert correctly, so it buys nothing over the `base_*` columns already on `ledger_lines`, while adding a second source of truth for "what currency is this entry in" (a mixed-currency entry has no single answer) | Rejected |
-| Per-account currency (an account itself is "a USD account") | A cash account may legitimately receive lines in several currencies over its life; forcing one currency per account would either reject valid multi-currency cash receipts or require a second account per currency, multiplying the chart of accounts | Rejected — out of scope, recorded as a deliberate limit in `docs/ledger-core.md` |
+| Per-account currency (an account itself is "a USD account") | A cash account may legitimately receive lines in several currencies over its life; forcing one currency per account would either reject valid multi-currency cash receipts or require a second account per currency, multiplying the chart of accounts | Rejected — out of scope, recorded as a deliberate limit in `docs/accounting.md` |
 | Store only the base amount, discard the native amount and rate | Makes a foreign-currency document's own presentation (an invoice shown to a USD customer) impossible to reconstruct, and destroys the information a later audit or dispute needs | Rejected — this is exactly the information Phase 3 refused to let go unrecorded |
 
 ## Where it lives in this codebase
@@ -88,8 +88,8 @@ This validates against the whole pre-existing table with **no backfill**, becaus
 - `server/src/db/migrations/004_ledger-core_journals.sql` — the original `ledger_lines` columns and `assert_journal_entry_balanced()`, at rate 1 for every row it will ever see before Phase 8
 - `server/src/db/migrations/023_ledger-core_base_currency_balance.sql` — the `CREATE OR REPLACE FUNCTION` redefinition and `chk_ledger_lines_base_matches_rate`
 - `server/src/utils/fxRate.ts` — `RATE_SCALE`, `rateNumerator`, `convertToBase`, `ONE_RATE`; the only place a rate string becomes a number
-- `server/src/services/ledger-core/journalService.ts`'s `createEntryOnClient` — resolves each line's currency/rate (defaulting to base currency at `ONE_RATE` when omitted), converts every line, and pre-checks both the conditional native sum and the unconditional base sum before the row ever reaches the database
-- `server/src/__tests__/ledger-core/fxLedgerConstraints.test.ts` — raw-SQL proof that both checks hold independently of `journalService`, bypassing the service entirely (mirroring `ledgerConstraints.test.ts`'s doctrine: "these prove that a data-fix script... cannot write an unbalanced ledger either")
+- `server/src/services/accounting/journalService.ts`'s `createEntryOnClient` — resolves each line's currency/rate (defaulting to base currency at `ONE_RATE` when omitted), converts every line, and pre-checks both the conditional native sum and the unconditional base sum before the row ever reaches the database
+- `server/src/__tests__/accounting/fxLedgerConstraints.test.ts` — raw-SQL proof that both checks hold independently of `journalService`, bypassing the service entirely (mirroring `ledgerConstraints.test.ts`'s doctrine: "these prove that a data-fix script... cannot write an unbalanced ledger either")
 
 ## Gotchas
 

@@ -284,7 +284,7 @@ useEffect(() => {
 2. **Force a remount with `key`** — the trick this same note documents elsewhere (`PlatformLayout`'s org-switch `key`) — would work if the *whole component* needed to reset in response to a prop or route change, because remounting re-runs `useState`'s initializer from scratch. It's the wrong tool here because there's only one mount of this page per visit to `journals/new`; nothing external changes the identity of what should be seeded partway through the component's life, so there's no natural "changed key" to hang a remount on.
 3. **An effect with a latch** (chosen) — correct specifically because the seed value depends on an *asynchronous* fetch that resolves after mount, and because the form needs to become independently editable the instant that fetch resolves, not stay bound to the source data for the component's whole lifetime. This is the same "fetch in an effect, guard against re-running, let local state take over afterward" shape [context-effects-and-data-fetching.md](context-effects-and-data-fetching.md) already documents for org-scoped data fetching in general — the only new piece here is that the *purpose* of the fetched value is to become a starting point for editable state, not to be rendered as-is.
 
-**Why the cents round-trip loses nothing.** The seed effect converts `line.debitCents` (an integer, e.g. `45000`) into the text the debit `<input>` shows (`"450.00"`) via `formatCents`, and the user's later edits convert back to cents via `parseCentsInput` on submit. Both functions live in `client/src/Pages/ledger-core/money.ts` and do only integer arithmetic — `formatCents` divides by `100` using `Math.trunc`/`%` (never float division), and `parseCentsInput` multiplies the parsed decimal by `100` and rounds to the nearest integer before checking `Number.isSafeInteger`. `45000 → "450.00" → 45000` is therefore exact for every value these functions accept — there is no lossy intermediate float carrying fractional cents, the way `(45000 / 100).toFixed(2)` could produce for some inputs after floating-point division. Seeding a money field through anything other than this pair of functions — say, dividing by 100 directly in the seed effect — would reintroduce exactly the class of bug guardrails rule 3 (integer cents, never floats) exists to prevent, just relocated to a copy-form feature instead of the original posting form.
+**Why the cents round-trip loses nothing.** The seed effect converts `line.debitCents` (an integer, e.g. `45000`) into the text the debit `<input>` shows (`"450.00"`) via `formatCents`, and the user's later edits convert back to cents via `parseCentsInput` on submit. Both functions live in `client/src/Pages/money.ts` and do only integer arithmetic — `formatCents` divides by `100` using `Math.trunc`/`%` (never float division), and `parseCentsInput` multiplies the parsed decimal by `100` and rounds to the nearest integer before checking `Number.isSafeInteger`. `45000 → "450.00" → 45000` is therefore exact for every value these functions accept — there is no lossy intermediate float carrying fractional cents, the way `(45000 / 100).toFixed(2)` could produce for some inputs after floating-point division. Seeding a money field through anything other than this pair of functions — say, dividing by 100 directly in the seed effect — would reintroduce exactly the class of bug guardrails rule 3 (integer cents, never floats) exists to prevent, just relocated to a copy-form feature instead of the original posting form.
 
 **Why Reverse has to mean the same thing in two places.** `JournalDetailPage` and `JournalsPage` (the register) both offer a Reverse action on the same underlying data, and both derive "is this entry correctable" from the identical two fields:
 
@@ -315,16 +315,16 @@ An entry that is itself a reversal (`reversesEntryId !== null`) shouldn't be rev
 - `client/src/apps/useEnabledApps.ts` — `useParams`/`useEnabledApps`/`resolveActiveApp`: the tenant-keyed fetch and the pure, unit-tested param-validation split (Phase 31; replaced `useActiveApp.ts`)
 - `client/src/apps/useAppBasePath.ts` — the absolute `/app/<slug>` prefix every in-app link and redirect is built from, and why: a relative `to` resolves against the deepest path-contributing match's full `pathname`, which is the whole current URL once that match is a splat
 - `client/src/components/ProtectedRoute.tsx` — the earliest layout route in the tree, from Phase 1
-- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
-- `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` — every `NavLink` built from `useAppBasePath()` rather than a bare relative suffix
-- `client/src/Pages/ledger-core/TrialBalancePage.tsx` — `useSearchParams`, `readTypeParam`'s whitelist, and the unfiltered-totals rule
-- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — the `journals` / `journals/new` / `journals/:entryId` sibling routes (Phase 3.6), added inside the same splat-mounted `<Routes>` as every other LedgerCore page
-- `client/src/Pages/ledger-core/JournalsPage.tsx`, `NewJournalEntryPage.tsx`, `JournalDetailPage.tsx` — the list/create/detail split, `useParams<{ entryId: string }>()`, and every cross-page link built from `useAppBasePath()`
-- `client/src/Pages/ledger-core/NewJournalEntryPage.tsx` — the `?copyFrom=` one-shot seed effect and its `seeded` latch (Phase 3.7)
-- `client/src/Pages/ledger-core/money.ts` — `formatCents`/`parseCentsInput`, the exact integer round-trip the seed effect relies on
-- `client/src/Pages/ledger-core/JournalsPage.tsx`, `JournalDetailPage.tsx` — the duplicated `canReverse` rule, kept identical on purpose (Phase 3.7)
-- `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` — `LedgerCoreGate`'s **soft** gate (Phase 9a): a `SKIPPED` onboarding status renders `AppPages` with a banner instead of redirecting
-- `client/src/Pages/ledger-core/OnboardingBanner.tsx` — the persistent, non-dismissible notice a soft gate shows in place of a hard redirect
+- `client/src/Pages/LedgerCoreRoutes.tsx` — the third layout depth: `LedgerCoreGate`'s data-driven `<Navigate>`, and `AppPages`'s nested sidebar + `<Routes>` (Phase 3.5)
+- `client/src/Pages/LedgerCoreSidebar.tsx` — every `NavLink` built from `useAppBasePath()` rather than a bare relative suffix
+- `client/src/Pages/TrialBalancePage.tsx` — `useSearchParams`, `readTypeParam`'s whitelist, and the unfiltered-totals rule
+- `client/src/Pages/LedgerCoreRoutes.tsx` — the `journals` / `journals/new` / `journals/:entryId` sibling routes (Phase 3.6), added inside the same splat-mounted `<Routes>` as every other LedgerCore page
+- `client/src/Pages/JournalsPage.tsx`, `NewJournalEntryPage.tsx`, `JournalDetailPage.tsx` — the list/create/detail split, `useParams<{ entryId: string }>()`, and every cross-page link built from `useAppBasePath()`
+- `client/src/Pages/NewJournalEntryPage.tsx` — the `?copyFrom=` one-shot seed effect and its `seeded` latch (Phase 3.7)
+- `client/src/Pages/money.ts` — `formatCents`/`parseCentsInput`, the exact integer round-trip the seed effect relies on
+- `client/src/Pages/JournalsPage.tsx`, `JournalDetailPage.tsx` — the duplicated `canReverse` rule, kept identical on purpose (Phase 3.7)
+- `client/src/Pages/LedgerCoreRoutes.tsx` — `LedgerCoreGate`'s **soft** gate (Phase 9a): a `SKIPPED` onboarding status renders `AppPages` with a banner instead of redirecting
+- `client/src/Pages/OnboardingBanner.tsx` — the persistent, non-dismissible notice a soft gate shows in place of a hard redirect
 
 ## Hard vs. soft route gates (Phase 9a)
 
@@ -434,4 +434,4 @@ A: The general fix is keying the fetch on what actually invalidates the data, no
 
 - [context-effects-and-data-fetching.md](context-effects-and-data-fetching.md) — the `checking` state machine `ProtectedRoute` renders against, and the `ignore`-flag fetch pattern used inside routed pages
 - [const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md) — how `AppSlug` is derived, which is what `resolveActiveApp` validates a route param against
-- `docs/architecture.md#suite-structure` — the platform-vs-app layer split this route tree implements
+- `docs/architecture.md#product-structure` — the platform-vs-app layer split this route tree implements

@@ -99,10 +99,10 @@ LedgerCore derives, and Phase 4's statements will too. When that stops being fas
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/004_ledger-core_journals.sql` — the tables, the CHECK constraints for the per-line rule, and the deferred constraint triggers for the per-entry rule
-- `server/src/services/ledger-core/journalService.ts` — `createEntry` (one transaction), `reverseEntry` (the only correction path)
-- `server/src/services/ledger-core/reportService.ts` — the trial balance, aggregated from raw lines with no summary table
-- `server/src/types/ledger-core.ts` — `ACCOUNT_TYPES`, exactly five
-- `server/src/__tests__/ledger-core/ledgerConstraints.test.ts` — the global `SUM(debits) − SUM(credits) = 0` assertion
+- `server/src/services/accounting/journalService.ts` — `createEntry` (one transaction), `reverseEntry` (the only correction path)
+- `server/src/services/accounting/reportService.ts` — the trial balance, aggregated from raw lines with no summary table
+- `server/src/types/accounting.ts` — `ACCOUNT_TYPES`, exactly five
+- `server/src/__tests__/accounting/ledgerConstraints.test.ts` — the global `SUM(debits) − SUM(credits) = 0` assertion
 
 ---
 

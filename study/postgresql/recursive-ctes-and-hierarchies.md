@@ -142,10 +142,10 @@ For a leaf, `subtree` contains only its own self-pair, so its rollup equals its 
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/accountService.ts` — `wouldCreateCycle()` (the recursive CTE), and `listAccountTree()` (the `Map`-based assembly)
+- `server/src/services/accounting/accountService.ts` — `wouldCreateCycle()` (the recursive CTE), and `listAccountTree()` (the `Map`-based assembly)
 - `server/src/db/migrations/002_ledger-core_accounts.sql` — `parent_id` self-FK with `ON DELETE RESTRICT`, `chk_account_not_own_parent`, and `idx_accounts_parent_id` so the join has an index
-- `server/src/__tests__/ledger-core/accounts.test.ts` — re-parenting an account under its own descendant returns 422; `describe('account balances')` for the rollup query
-- `server/src/services/ledger-core/accountLedgerService.ts` — `accountBalances()`, the descendant-walking `subtree` CTE and its `(id, id)` self-pair anchor
+- `server/src/__tests__/accounting/accounts.test.ts` — re-parenting an account under its own descendant returns 422; `describe('account balances')` for the rollup query
+- `server/src/services/accounting/accountLedgerService.ts` — `accountBalances()`, the descendant-walking `subtree` CTE and its `(id, id)` self-pair anchor
 
 ---
 

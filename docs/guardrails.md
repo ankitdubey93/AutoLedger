@@ -1,6 +1,6 @@
 # Engineering Guardrails
 
-Full detail for the 16 rules summarised in `CLAUDE.md` — this file uses the same numbering, so a rule cited by number means the same thing in both places. These apply to every app in the suite. The prior codebase violated 1, 2, 3, and 7, and the violations compounded until a reset was cheaper than a repair (see [Lessons](#appendix--lessons-from-the-discarded-build)).
+Full detail for the 16 rules summarised in `CLAUDE.md` — this file uses the same numbering, so a rule cited by number means the same thing in both places. These apply to every module of the product. The prior codebase violated 1, 2, 3, and 7, and the violations compounded until a reset was cheaper than a repair (see [Lessons](#appendix--lessons-from-the-discarded-build)).
 
 ## 1. Tenant scoping is mandatory on every query
 
@@ -34,7 +34,7 @@ export const createJournalEntry = async (req, res, next) => {
 };
 ```
 
-Every `pool.query` / `client.query` call lives under `src/services/`. Services take plain data arguments, return plain objects, and never touch `req`/`res`. **This includes auth and the app registry** — there is an `authService.ts` and an `appService.ts` from day one; no flow queries the DB from a controller.
+Every `pool.query` / `client.query` call lives under `src/services/`. Services take plain data arguments, return plain objects, and never touch `req`/`res`. **This includes auth and onboarding** — there is an `authService.ts` and an `appService.ts` from day one; no flow queries the DB from a controller.
 
 The previous build leaked SQL into `authController` and `aiController` and it never got cleaned up. Catch it in review, every time.
 
@@ -160,15 +160,14 @@ Do not add a package, an external service connection, or a Postgres extension sp
 
 At minimum: the invariant the module enforces, its ROLLBACK path under a mid-transaction failure, and its `org_id` authorization scoping. **A module without a cross-tenant isolation test is not done.** Full detail, including the mandatory shared-user fixture shape: [testing.md](testing.md).
 
-## 16. App boundaries are namespaces, not tenancy
+## 16. Module boundaries are code namespaces, not tenancy
 
-The app slug in `/api/v1/<app-slug>/<module>` is a routing convenience, not a security boundary. `org_id` remains the only thing that scopes data access — every rule above applies identically whether a route sits under a platform path or an app path. Concretely:
+AutoLedger is one product with three modules: accounting, capture (the bill inbox) and inventory (Phase 33; before that they were three apps with their own URL prefixes). A module is a code namespace — a folder in each layer and, for capture and inventory, an API prefix — never a security boundary. `org_id` remains the only thing that scopes data access; every rule above applies identically to platform and module code. Concretely:
 
-- An app's routes still resolve the active org from the verified access token, never from the `:appSlug` param or anything else in the URL.
-- No app queries another app's tables directly. A cross-app effect goes through LedgerCore's GL via `source_type` / `source_id` (e.g. AP-Flow posts a bill; it does not `INSERT` into LedgerCore's tables from AP-Flow's own service).
-- `config/apps.ts` is the single source of truth for which slugs exist; a request for an unknown or not-yet-built slug returns `404`, not a partial or default response.
-
-See [architecture.md](architecture.md#suite-structure).
+- Every route resolves the active org from the verified access token, never from a path segment (`/inventory/…`, `/onboarding/:module`) or anything else in the URL.
+- No module queries another module's tables directly. It calls the other module's **service**, on the same transaction client, and a financial effect lands in the GL through `source_type` / `source_id` (e.g. capture posts a bill through `billService.createCapturedBillOnClient`; it never `INSERT`s into `bills`). The seams are named in [architecture.md](architecture.md#product-structure).
+- `server/src/config/modules.ts` owns the module **provenance tags** (`ledger-core`, `ap-flow`, `stock`, plus `platform`). They are frozen: audit history is append-only and the audit triggers store them. Code reads them from `MODULE_TAGS`, never as string literals, and never shows them to a user.
+- An unknown path — including a retired app prefix like `/api/v1/ledger-core` — returns `404`, not a partial or default response.
 
 ---
 

@@ -97,7 +97,7 @@ SELECT to_char(m.month_start, 'YYYY-MM') AS month, ...
 
 ### Why there is no summary table, and what that actually costs
 
-Every report in LedgerCore — trial balance, dashboard — computes its numbers from `ledger_lines` on every single request. `docs/schema.md` and `docs/ledger-core.md` both state this as a rule, not an oversight, and the reasoning is the same one behind rejecting `DECIMAL` for money: a cached `account_balances` column is a second representation of a fact already recorded elsewhere, and it can drift from the rows it's supposed to summarize the first time an `UPDATE` to the cache is missed, ordered wrong, or partially applied. Reconciling a drifted cache against its source of truth is exactly the manual bookkeeping work this system exists to remove.
+Every report in LedgerCore — trial balance, dashboard — computes its numbers from `ledger_lines` on every single request. `docs/schema.md` and `docs/accounting.md` both state this as a rule, not an oversight, and the reasoning is the same one behind rejecting `DECIMAL` for money: a cached `account_balances` column is a second representation of a fact already recorded elsewhere, and it can drift from the rows it's supposed to summarize the first time an `UPDATE` to the cache is missed, ordered wrong, or partially applied. Reconciling a drifted cache against its source of truth is exactly the manual bookkeeping work this system exists to remove.
 
 The honest trade-off: this only stays free because the table stays small. A `SUM` with a `FILTER` over a few thousand rows, backed by the indexes on `(org_id, account_id)` and `(org_id, entry_date)`, runs in single-digit milliseconds. At real scale — millions of lines per organization — this exact query would need either a materialized view with an explicit, monitored refresh, or a rollup table maintained transactionally alongside every insert (which reintroduces the drift risk, now paid for deliberately rather than by accident). Nothing here forecloses that path; it just refuses to pay its complexity cost before the data volume that would justify it.
 
@@ -248,16 +248,16 @@ This nests two independent decisions inside one aggregate: the `CASE` picks *whi
 
 ## Where it lives in this codebase
 
-- `server/src/services/ledger-core/dashboardService.ts` — `loadPosition()` (the nine-`FILTER` scan), `loadTrend()` (the `generate_series` gap-fill), `loadCash()` (a `WITH RECURSIVE` subtree sum, see [recursive-ctes-and-hierarchies.md](recursive-ctes-and-hierarchies.md))
-- `server/src/services/ledger-core/reportService.ts` — `trialBalance()`'s `LEFT JOIN` with the `org_id` predicate correctly placed in the `ON` clause, and its own comment stating the no-summary-table rule
-- `server/src/services/ledger-core/journalService.ts` — `buildFilters()` (the shared predicate builder), `listEntries()` (the count query and the page query, both fed from it), the `EXISTS` account filter, and the `e.id DESC` pagination tiebreaker
-- `server/src/__tests__/ledger-core/dashboard.test.ts` — the trend test asserting all 6 months are present, including the 4 with no postings, and the fiscal-year-windowing test asserting `revenue_ytd` respects a non-January start
-- `server/src/__tests__/ledger-core/journals.test.ts` — `describe('register filters')`, including the `totalCount reflects the filter, not the table` case and the same-date pagination-stability case
-- `server/src/services/ledger-core/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the correlated scalar subquery shared by `invoiceService`/`billService`/`agingService`
-- `server/src/services/ledger-core/dashboardService.ts` — `loadDocumentCounts()`, the `FILTER`-over-`UNION ALL` query behind the dashboard's draft/awaiting-review tiles
-- `server/src/__tests__/ledger-core/dashboard.test.ts` — `describe('AR/AP blocks')`, including the cross-tenant case proving org B's documents never appear in org A's counts
-- `server/src/services/ledger-core/reportService.ts` — `profitAndLoss()` (the type-aware sign flip, the 5xxx-prefix COGS split, the `INNER JOIN`) and `balanceSheet()` (the same sign flip for Asset/Liability/Equity, plus the prior/current earnings `FILTER` pair)
-- `server/src/__tests__/ledger-core/statements.test.ts` — the fixture proving `Assets = Liabilities + Equity` by integer equality, the `information_schema` assertion that no summary table exists, and the cross-check that P&L net income for a fiscal year equals the balance sheet's current-period earnings at that year's end
+- `server/src/services/accounting/dashboardService.ts` — `loadPosition()` (the nine-`FILTER` scan), `loadTrend()` (the `generate_series` gap-fill), `loadCash()` (a `WITH RECURSIVE` subtree sum, see [recursive-ctes-and-hierarchies.md](recursive-ctes-and-hierarchies.md))
+- `server/src/services/accounting/reportService.ts` — `trialBalance()`'s `LEFT JOIN` with the `org_id` predicate correctly placed in the `ON` clause, and its own comment stating the no-summary-table rule
+- `server/src/services/accounting/journalService.ts` — `buildFilters()` (the shared predicate builder), `listEntries()` (the count query and the page query, both fed from it), the `EXISTS` account filter, and the `e.id DESC` pagination tiebreaker
+- `server/src/__tests__/accounting/dashboard.test.ts` — the trend test asserting all 6 months are present, including the 4 with no postings, and the fiscal-year-windowing test asserting `revenue_ytd` respects a non-January start
+- `server/src/__tests__/accounting/journals.test.ts` — `describe('register filters')`, including the `totalCount reflects the filter, not the table` case and the same-date pagination-stability case
+- `server/src/services/accounting/paymentService.ts` — `allocatedCentsSubquery(alias, column)`, the correlated scalar subquery shared by `invoiceService`/`billService`/`agingService`
+- `server/src/services/accounting/dashboardService.ts` — `loadDocumentCounts()`, the `FILTER`-over-`UNION ALL` query behind the dashboard's draft/awaiting-review tiles
+- `server/src/__tests__/accounting/dashboard.test.ts` — `describe('AR/AP blocks')`, including the cross-tenant case proving org B's documents never appear in org A's counts
+- `server/src/services/accounting/reportService.ts` — `profitAndLoss()` (the type-aware sign flip, the 5xxx-prefix COGS split, the `INNER JOIN`) and `balanceSheet()` (the same sign flip for Asset/Liability/Equity, plus the prior/current earnings `FILTER` pair)
+- `server/src/__tests__/accounting/statements.test.ts` — the fixture proving `Assets = Liabilities + Equity` by integer equality, the `information_schema` assertion that no summary table exists, and the cross-check that P&L net income for a fiscal year equals the balance sheet's current-period earnings at that year's end
 
 ---
 

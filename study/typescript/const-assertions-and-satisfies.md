@@ -125,8 +125,8 @@ The same pattern already existed in this codebase before Phase 2: `types/auth.ts
 
 - `server/src/config/apps.ts` — `APPS` (`as const satisfies readonly AppDefinition[]`), `AppSlug` (derived union), `isAppSlug` (the type predicate that narrows a runtime string back down to `AppSlug`)
 - `server/src/types/auth.ts` — `ROLES` / `Role`, the earlier instance of the `as const` → `typeof X[number]` half of the pattern (no `satisfies` there, because `ROLES` is a flat string array with nothing to validate a shape against)
-- `server/src/config/stockIndustryProfiles.ts` — `STOCK_INDUSTRY_PROFILES` (`as const satisfies readonly StockIndustryProfile[]`), the same pattern applied through several levels of nested arrays
-- `server/src/types/stock.ts` — `STOCK_SERIAL_TRANSITIONS` (a plain `Readonly<Record<StockSerialStatus, ...>>` annotation, deliberately *not* `as const satisfies` — see above), `canTransitionSerial`
+- `server/src/config/inventoryIndustryProfiles.ts` — `STOCK_INDUSTRY_PROFILES` (`as const satisfies readonly StockIndustryProfile[]`), the same pattern applied through several levels of nested arrays
+- `server/src/types/inventory.ts` — `STOCK_SERIAL_TRANSITIONS` (a plain `Readonly<Record<StockSerialStatus, ...>>` annotation, deliberately *not* `as const satisfies` — see above), `canTransitionSerial`
 
 ## Gotchas
 
@@ -175,4 +175,4 @@ A: `STOCK_SERIAL_TRANSITIONS[from]` where `from` is a valid `StockSerialStatus` 
 - [branded-types-for-money.md](branded-types-for-money.md) — a different technique (nominal-typing simulation) solving an adjacent problem (unit safety, not exhaustiveness)
 - [discriminated-unions-and-parsers.md](discriminated-unions-and-parsers.md) — a different corner of this same FSM's neighborhood: `CodeSegment`, a discriminated union rather than a transition table
 - [../architecture/document-lifecycle-fsm.md](../architecture/document-lifecycle-fsm.md) — the codebase's other FSM transition tables, and the `satisfies Partial<Record<...>>` shape `docs/guardrails.md` rule 10 documents for them
-- `docs/architecture.md#suite-structure` — why the registry is a static list rather than a database table in this phase
+- `docs/architecture.md#product-structure` — why the registry is a static list rather than a database table in this phase

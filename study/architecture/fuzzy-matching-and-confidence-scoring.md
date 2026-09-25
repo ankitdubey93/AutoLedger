@@ -65,9 +65,9 @@ The asymmetry that makes the distinction matter: `bankReconciliation()` sums eve
 
 - `server/src/utils/levenshtein.ts` — `levenshtein`, `similarity`, the rolling-array DP
 - `server/src/utils/matchScore.ts` — `scoreMatch`, `normalizeForMatching`, `AUTO_MATCH_THRESHOLD`, `SUGGESTION_MIN_SCORE`, `COUNTERPARTY_NOISE_FLOOR`
-- `server/src/services/ledger-core/bankMatchService.ts` — `generateSuggestionsOnClient`, which loads open-document candidates within a ±30-day window and calls `scoreMatch` against each; `matchTransaction`, `postJournalForTransaction` (Phase 6.1) and `setIgnored`, the three resolutions
+- `server/src/services/accounting/bankMatchService.ts` — `generateSuggestionsOnClient`, which loads open-document candidates within a ±30-day window and calls `scoreMatch` against each; `matchTransaction`, `postJournalForTransaction` (Phase 6.1) and `setIgnored`, the three resolutions
 - `server/src/__tests__/levenshtein.test.ts`, `matchScore.test.ts` — known-distance pairs, symmetry, the noise-floor case
-- `server/src/__tests__/ledger-core/bankMatching.test.ts` — the 100-line acceptance fixture proving zero false positives above the auto-match threshold
+- `server/src/__tests__/accounting/bankMatching.test.ts` — the 100-line acceptance fixture proving zero false positives above the auto-match threshold
 
 ---
 

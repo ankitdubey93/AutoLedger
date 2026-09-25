@@ -21,8 +21,8 @@ Compare against the tables in `api.md`. Report and fix:
 - Route exists in code, missing from the doc → add it.
 - Route documented, absent from code → it is **planned**, not built. Move it out of any "built" section or mark it clearly.
 - Method/path mismatch (documented `PUT`, actual `POST`) → the code wins; also check whether the `PUT` violates the immutability rule.
-- A mounted router not reachable because `routes/index.ts` never mounts it on `apiRouter` — that is a bug, not a doc issue. Report it as such. Also flag anything mounted directly on `app` in `app.ts`/`index.ts` instead of on `apiRouter` — that violates the single-router rule in [architecture.md](../../../docs/architecture.md#suite-structure).
-- A platform route (`/auth`, `/organizations`, `/apps`, `/health`) documented under an app prefix, or an app route documented without its `/api/v1/<app-slug>/` prefix, is a doc bug — cross-check the slug against `server/src/config/apps.ts`.
+- A mounted router not reachable because `routes/index.ts` never mounts it on `apiRouter` — that is a bug, not a doc issue. Report it as such. Also flag anything mounted directly on `app` in `app.ts`/`index.ts` instead of on `apiRouter` — that violates the single-router rule in [architecture.md](../../../docs/architecture.md#product-structure).
+- Paths follow the Phase 33 namespace: platform and accounting routes directly under `/api/v1`, inventory under `/api/v1/inventory`, capture under `/api/v1/capture`. A documented `/ledger-core`, `/stock`, `/ap-flow` or `/apps` path is a doc bug — those prefixes are retired and answer `404`.
 
 ## 2. Migrations vs [docs/schema.md](../../../docs/schema.md)
 
@@ -82,13 +82,14 @@ ls -R study/
 
 `study/README.md` is the index and coverage tracker required by [docs/study-notes.md](../../../docs/study-notes.md) — if notes exist without it, create it. Every note listed in the index must exist, and every note file must be listed.
 
-## 8. App registry vs roadmap and README
+## 8. Modules vs roadmap and README
 
 ```bash
-grep -n "slug:" server/src/config/apps.ts 2>/dev/null
+cat server/src/config/modules.ts
+ls server/src/services/
 ```
 
-`server/src/config/apps.ts` is the single source of truth for which apps exist and their slugs. Every app it lists must appear in [roadmap.md](../../../docs/roadmap.md)'s app map, [README.md](../../../README.md)'s app table, and `CLAUDE.md`'s app table — same name, same domain. An app whose `status` in the registry is `'building'` must have at least one real route reachable under its slug (cross-check against step 1); a `'planned'` app must not.
+AutoLedger is one product with three modules (accounting, capture, inventory), each with a folder in every server layer and a frozen provenance tag in `server/src/config/modules.ts`. The same three must appear in [roadmap.md](../../../docs/roadmap.md)'s module map, [README.md](../../../README.md), `CLAUDE.md`'s module table and [architecture.md](../../../docs/architecture.md#product-structure) — same names. Any doc that still presents LedgerCore, AP-Flow or StockLedger as a *current* app (rather than as history in a phase entry) is drift.
 
 ## Report
 

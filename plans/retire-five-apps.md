@@ -50,10 +50,10 @@ Working tree clean, branch `main`, 67 migrations applied.
 **What survives and must not break:**
 
 - `server/src/services/redactionService.ts` and `server/src/utils/pii.ts` — shared with AP-Flow, **keep**.
-- `server/src/services/ledger-core/reportService.ts` → `resolveControlAccounts` and `server/src/types/ledger-core.ts` → `ControlAccounts` — used by LedgerCore's own party-ledger and aging services (Phase 25), **keep** even though their doc comments mention FP&A.
+- `server/src/services/accounting/reportService.ts` → `resolveControlAccounts` and `server/src/types/accounting.ts` → `ControlAccounts` — used by LedgerCore's own party-ledger and aging services (Phase 25), **keep** even though their doc comments mention FP&A.
 - `walkthrough/` and `npm run walkthrough` — LedgerCore-only, untouched.
 - `server/src/db/integrity.ts` — all five checks are LedgerCore/StockLedger, untouched.
-- `GEMINI_API_KEY` and `AP_FLOW_GEMINI_MODEL` — AP-Flow's, **keep**. Only `TAXGUARD_EMBEDDING_PROVIDER` and `VOYAGE_API_KEY` go.
+- `GEMINI_API_KEY` and `CAPTURE_GEMINI_MODEL` — AP-Flow's, **keep**. Only `TAXGUARD_EMBEDDING_PROVIDER` and `VOYAGE_API_KEY` go.
 
 **Verified structural facts this plan depends on:**
 
@@ -249,10 +249,10 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
 | Job kinds kept | `'ap-flow-extract'`, `'integration-drive-sweep'`, `'integration-drive-sync'`, `'integrity-check'`, `'outbox-drain'`, `'webhook-deliver'` (verify against the file — do not invent) |
 | `reportService` exports removed | `monthlyActualsByAccount`, `customerRevenueByMonth`, `productLineSalesByMonth`, `closeReadiness`, `CloseReadiness` |
 | `reportService` exports kept | `trialBalance`, `profitAndLoss`, `balanceSheet`, `bankReconciliation`, `resolveControlAccounts` |
-| `types/ledger-core.ts` types removed | `MonthlyActualRow`, `CustomerRevenueRow`, `ProductLineSalesRow`, `ProductLineSalesResult` |
-| `types/ledger-core.ts` types kept | `ControlAccounts`, `PartyKind`, `PartyLedger*`, `PartyOpenItem*` |
+| `types/accounting.ts` types removed | `MonthlyActualRow`, `CustomerRevenueRow`, `ProductLineSalesRow`, `ProductLineSalesResult` |
+| `types/accounting.ts` types kept | `ControlAccounts`, `PartyKind`, `PartyLedger*`, `PartyOpenItem*` |
 | Env vars removed | `TAXGUARD_EMBEDDING_PROVIDER`, `VOYAGE_API_KEY` |
-| Env vars kept | `GEMINI_API_KEY`, `AP_FLOW_GEMINI_MODEL` |
+| Env vars kept | `GEMINI_API_KEY`, `CAPTURE_GEMINI_MODEL` |
 
 ### Step 3 — [Sonnet] Delete the server-side app and sandbox files
 
@@ -285,8 +285,8 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
   # The Phase 18 sandbox, in full — including the seeders that live inside
   # ledger-core/ and ap-flow/, which exist only to serve it
   rm -rf server/src/services/sandbox
-  rm -f server/src/services/ledger-core/sandboxSeed.ts
-  rm -f server/src/services/ap-flow/sandboxSeed.ts
+  rm -f server/src/services/accounting/sandboxSeed.ts
+  rm -f server/src/services/capture/sandboxSeed.ts
   rm -f server/src/routes/sandbox.ts
   rm -f server/src/controllers/sandboxController.ts
   rm -f server/src/schemas/sandboxSchema.ts
@@ -302,7 +302,7 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
   ```
   Must print `0`. It is currently `165`. Then confirm the two files that match no pattern above are gone:
   ```bash
-  ls server/src/scripts/seedDemo.ts server/src/services/ledger-core/sandboxSeed.ts 2>&1
+  ls server/src/scripts/seedDemo.ts server/src/services/accounting/sandboxSeed.ts 2>&1
   ```
   Both must report `No such file or directory`. Then confirm the survivors are intact:
   ```bash
@@ -355,13 +355,13 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
 - **Model:** [Sonnet] — money-shaped report SQL inside LedgerCore's own service, next to functions that must keep working (§5: money arithmetic, and a wrong cut silently breaks the party ledger)
 - **Depends on:** Step 4
 - **Skill:** none (surgical edit)
-- **Read first:** `server/src/services/ledger-core/reportService.ts` lines 470–766, and `server/src/types/ledger-core.ts` lines 1255–1320. These are the exact regions you are cutting around.
-- **Files:** `server/src/services/ledger-core/reportService.ts` (edit), `server/src/types/ledger-core.ts` (edit)
+- **Read first:** `server/src/services/accounting/reportService.ts` lines 470–766, and `server/src/types/accounting.ts` lines 1255–1320. These are the exact regions you are cutting around.
+- **Files:** `server/src/services/accounting/reportService.ts` (edit), `server/src/types/accounting.ts` (edit)
 - **Contract:**
 
   These functions existed **only** as the rule-16 doorway the retired apps reached through. With the apps gone they have no caller.
 
-  In `server/src/services/ledger-core/reportService.ts`, **delete the bottom block first**, then the middle block, so earlier line numbers stay valid:
+  In `server/src/services/accounting/reportService.ts`, **delete the bottom block first**, then the middle block, so earlier line numbers stay valid:
 
   1. Delete from the line `/* ---------- Phase 15 — the BoardDeck close-readiness bridge */` to **end of file**. This removes `interface CloseReadiness` and `async function closeReadiness`.
   2. Delete from the line `// ------------------------------------------------ Phase 12 — the FP&A actuals bridge` down to the closing `}` of `productLineSalesByMonth`, stopping immediately **before** the `/**` that opens `resolveControlAccounts`'s doc comment. This removes: the FP&A header comment, `interface MonthlyActualRowResult`, `monthlyActualsByAccount`, the `/* --- Phase 14 — the UnitEcon sales bridge */` header, `customerRevenueByMonth`, `productLineSalesByMonth` and any private helper declared between them.
@@ -380,7 +380,7 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
    */
   ```
 
-  In `server/src/types/ledger-core.ts`:
+  In `server/src/types/accounting.ts`:
   - Delete from `/* ------------------------------------------------ Phase 12 — the FP&A actuals bridge */` down to the line immediately **before** the `/**` that opens `ControlAccounts`'s doc comment. This removes `MonthlyActualRow`, the Phase 14 header, `CustomerRevenueRow`, `ProductLineSalesRow` and `ProductLineSalesResult`.
   - **Keep `ControlAccounts`.** Replace its doc comment with exactly:
 
@@ -399,15 +399,15 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
 - **Guardrails:** #16 what remains must still be LedgerCore's own tables only · #3 do not touch any `*_cents` arithmetic in the kept functions · #2 no controller change belongs in this step
 - **Proof:**
   ```bash
-  cd /home/ankit/Documents/AutoLedger/AutoLedger && grep -nE "^export (async function|interface|type)" server/src/services/ledger-core/reportService.ts
+  cd /home/ankit/Documents/AutoLedger/AutoLedger && grep -nE "^export (async function|interface|type)" server/src/services/accounting/reportService.ts
   ```
   Must list exactly five: `trialBalance`, `profitAndLoss`, `balanceSheet`, `bankReconciliation`, `resolveControlAccounts`. And:
   ```bash
-  grep -cE "monthlyActualsByAccount|customerRevenueByMonth|productLineSalesByMonth|closeReadiness|CloseReadiness|MonthlyActualRow|CustomerRevenueRow|ProductLineSalesR" server/src/services/ledger-core/reportService.ts server/src/types/ledger-core.ts
+  grep -cE "monthlyActualsByAccount|customerRevenueByMonth|productLineSalesByMonth|closeReadiness|CloseReadiness|MonthlyActualRow|CustomerRevenueRow|ProductLineSalesR" server/src/services/accounting/reportService.ts server/src/types/accounting.ts
   ```
   Both lines must end in `:0`. And confirm the survivor:
   ```bash
-  grep -c "export interface ControlAccounts" server/src/types/ledger-core.ts
+  grep -c "export interface ControlAccounts" server/src/types/accounting.ts
   ```
   Must print `1`.
 - **If it fails:** `resolveControlAccounts` or `ControlAccounts` missing → you cut too far; `git diff` the file and restore them. They are used by `partyLedgerService` and `agingService`, which are **kept**.
@@ -429,13 +429,13 @@ Phase 29. Nothing gates a deletion — every prerequisite is the code being dele
   In `server/src/config/env.ts`:
   - Delete the line `TAXGUARD_EMBEDDING_PROVIDER: oneOf('TAXGUARD_EMBEDDING_PROVIDER', ['voyage', 'gemini'] as const, 'voyage'),` and the comment block directly above it that begins `// Phase 16 — TaxGuard AI's embeddings provider:`.
   - Delete the line `VOYAGE_API_KEY: optional('VOYAGE_API_KEY', ''),`.
-  - **Keep** `GEMINI_API_KEY` and `AP_FLOW_GEMINI_MODEL` — AP-Flow uses both.
+  - **Keep** `GEMINI_API_KEY` and `CAPTURE_GEMINI_MODEL` — AP-Flow uses both.
   - Further down there is a comment reading `It stays a plain env var for the same reason GEMINI_API_KEY and VOYAGE_API_KEY do:`. Replace `GEMINI_API_KEY and VOYAGE_API_KEY do` with `GEMINI_API_KEY does`.
   - If `oneOf` is now unused in this file, delete its import too. If it is still used by another var, leave the import alone.
 
   In `server/.env.example`:
   - Delete the comment block beginning `# Phase 16 — TaxGuard AI's embeddings provider: voyage | gemini.` through the line `VOYAGE_API_KEY=` inclusive (the contiguous run at lines 48–59).
-  - Keep `AP_FLOW_GEMINI_MODEL=gemini-3.6-flash` above it and the `# Phase 19.3 — the Drive integration` block below it.
+  - Keep `CAPTURE_GEMINI_MODEL=gemini-3.6-flash` above it and the `# Phase 19.3 — the Drive integration` block below it.
 
 - **Guardrails:** #11 no `JWT_SECRET` is introduced; `ACCESS_TOKEN_SECRET` and `REFRESH_TOKEN_SECRET` are untouched · #14 no dependency added or removed
 - **Proof:** this is the first green typecheck of the plan.

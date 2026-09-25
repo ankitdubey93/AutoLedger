@@ -1,7 +1,9 @@
-# StockLedger — App Spec & Build Ladder
+# Inventory — Module Spec & Build Ladder
 
-**Slug:** `stock` · **Domain:** Inventory & Warehousing · **Phase:** 28
-**Status: Phase 28 done; Phase 32 (step 1) connects it to LedgerCore.** `config/apps.ts` marks it `'building'`. Every checkbox below is ticked — see [roadmap.md](roadmap.md#phase-28-as-delivered) for what was actually delivered.
+> **Phase 33 (2026-09-25):** StockLedger is now the **inventory module** of the single AutoLedger product, under Products & inventory in the sidebar; its setup is the optional last step of the one setup wizard. Its API moved to `/api/v1/inventory` (was `/api/v1/stock`), its code to `*/inventory/` folders; tables keep the `stock_*` prefix and the provenance tag stays `stock`. QR labels now encode `/inventory/scan/<kind>/<id>`; labels printed earlier (`/app/stock/scan/…`) keep working through a permanent client redirect. The spec below keeps the original name where it records history.
+
+**Provenance tag:** `stock` · **Domain:** Inventory & Warehousing · **Phase:** 28
+**Status: Phase 28 done; Phase 32 (step 1) connects it to LedgerCore.** Every checkbox below is ticked — see [roadmap.md](roadmap.md#phase-28-as-delivered) for what was actually delivered.
 
 StockLedger is perpetual inventory for retail traders, manufacturers, distributors and real-estate developers alike: an industry-chosen starting catalogue, per-organization custom item attributes, a configurable item-code grammar, QR label generation, and quantity/value tracking through an append-only movement ledger with a derived, integrity-checked balance cache. Until Phase 32 it created no journal entry; **from Phase 32 it `requires: ['ledger-core']`**: every stock item is linked to a LedgerCore product (Products & Services), bills receive stock and invoices issue it through `documentStockService`, and the movements of a linked item post journals — see [The rule-16 boundary](#the-rule-16-boundary-in-practice) and [roadmap.md § Phase 32](roadmap.md#phase-32-as-delivered).
 
@@ -13,7 +15,7 @@ StockLedger is perpetual inventory for retail traders, manufacturers, distributo
 
 ### A. Industry setup
 
-`POST /stock/setup` applies one of ten industry profiles (`config/stockIndustryProfiles.ts`) — `RETAIL`, `WHOLESALE_DISTRIBUTION`, `MANUFACTURING`, `FOOD_BEVERAGE`, `PHARMA_HEALTHCARE`, `APPAREL_FOOTWEAR`, `ELECTRONICS`, `AUTOMOTIVE`, `REAL_ESTATE`, `GENERAL` — by **copying** its units of measure, categories (with their custom-field definitions), code schemes and a default location into the organization's own tables. After that copy, the org owns and can freely edit every row; the profile file is never read again at request time except to render the list and a suggestion. `GET /stock/setup/profiles` returns the full list with each one's `industryKeywords`, used to pre-highlight a likely match against the organization's own business-category text from platform onboarding — a suggestion, never an automatic or forced choice.
+`POST /stock/setup` applies one of ten industry profiles (`config/inventoryIndustryProfiles.ts`) — `RETAIL`, `WHOLESALE_DISTRIBUTION`, `MANUFACTURING`, `FOOD_BEVERAGE`, `PHARMA_HEALTHCARE`, `APPAREL_FOOTWEAR`, `ELECTRONICS`, `AUTOMOTIVE`, `REAL_ESTATE`, `GENERAL` — by **copying** its units of measure, categories (with their custom-field definitions), code schemes and a default location into the organization's own tables. After that copy, the org owns and can freely edit every row; the profile file is never read again at request time except to render the list and a suggestion. `GET /stock/setup/profiles` returns the full list with each one's `industryKeywords`, used to pre-highlight a likely match against the organization's own business-category text from platform onboarding — a suggestion, never an automatic or forced choice.
 
 | Profile | Example categories |
 |---|---|
@@ -94,7 +96,7 @@ A `SERIAL`-tracked unit carries a status, changed either manually (a person book
 | `BOOKED` | `ISSUED` | MOVEMENT |
 | `ISSUED` | `AVAILABLE` | MOVEMENT |
 
-One exported transition table (`types/stock.ts`'s `STOCK_SERIAL_TRANSITIONS`, checked by `canTransitionSerial`), declared as a plain `Record<StockSerialStatus, ...>` annotation rather than `as const satisfies` — deliberately, since what this table needs is compiler-enforced exhaustiveness over every status, not literal-value preservation; see [study/typescript/const-assertions-and-satisfies.md](../study/typescript/const-assertions-and-satisfies.md). `ISSUED` serials structurally carry `location_id IS NULL` (`ck_stock_serials_location`), which is why the service checks a serial's status before its location on an outbound movement — checking location first would mask the specific "not in stock" message behind a generic "not at location" one.
+One exported transition table (`types/inventory.ts`'s `STOCK_SERIAL_TRANSITIONS`, checked by `canTransitionSerial`), declared as a plain `Record<StockSerialStatus, ...>` annotation rather than `as const satisfies` — deliberately, since what this table needs is compiler-enforced exhaustiveness over every status, not literal-value preservation; see [study/typescript/const-assertions-and-satisfies.md](../study/typescript/const-assertions-and-satisfies.md). `ISSUED` serials structurally carry `location_id IS NULL` (`ck_stock_serials_location`), which is why the service checks a serial's status before its location on an outbound movement — checking location first would mask the specific "not in stock" message behind a generic "not at location" one.
 
 ### H. Lookup, QR labels
 
@@ -106,18 +108,18 @@ One exported transition table (`types/stock.ts`'s `STOCK_SERIAL_TRANSITIONS`, ch
 
 Phase 28 posted nothing to the GL. **Phase 32 adds the bridge, in both directions, through public service functions only** — neither app reads the other's tables:
 
-- **StockLedger → LedgerCore** (`services/stock/stockGlService.ts`, `itemService.ts`): calls `ledger-core/itemService` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`), `settingsService.resolveInventoryPostingAccountsOnClient` and `journalService.createEntryOnClient` (`sourceType 'stock'`) on its own transaction client. It creates the linked product when an item is created and posts a journal for a linked item's manual movement.
-- **LedgerCore → StockLedger**: `invoiceService` and `billService` import exactly one module, `services/stock/documentStockService.ts` (`receiveForDocumentOnClient`, `issueForDocumentOnClient`, `reverseDocumentOnClient`, `validateDocumentLinesOnClient`). LedgerCore builds its own journal from the values it returns; StockLedger writes no journal line for a document.
+- **StockLedger → LedgerCore** (`services/inventory/stockGlService.ts`, `itemService.ts`): calls `ledger-core/itemService` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`), `settingsService.resolveInventoryPostingAccountsOnClient` and `journalService.createEntryOnClient` (`sourceType 'stock'`) on its own transaction client. It creates the linked product when an item is created and posts a journal for a linked item's manual movement.
+- **LedgerCore → StockLedger**: `invoiceService` and `billService` import exactly one module, `services/inventory/documentStockService.ts` (`receiveForDocumentOnClient`, `issueForDocumentOnClient`, `reverseDocumentOnClient`, `validateDocumentLinesOnClient`). LedgerCore builds its own journal from the values it returns; StockLedger writes no journal line for a document.
 - The link is `stock_items.ledger_item_id` (no FK — rule 16 over rule 8; unique, frozen once set). Movements carry `source_type`/`source_id`/`gl_account_id`/`reverses_movement_id`.
 
 Verify the boundary with:
 
 ```bash
-grep -rnE "FROM (items|accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|bill_lines|payments|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/
-grep -rnE "FROM stock_|JOIN stock_" server/src/services/ledger-core/
+grep -rnE "FROM (items|accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|bill_lines|payments|ap_flow_)" server/src/services/inventory/ server/src/controllers/inventory/
+grep -rnE "FROM stock_|JOIN stock_" server/src/services/accounting/
 ```
 
-Both return nothing. (`services/ledger-core/documentStockLines.ts` reads LedgerCore's own `items` table, and the stock services read only `stock_*`.)
+Both return nothing. (`services/accounting/documentStockLines.ts` reads LedgerCore's own `items` table, and the stock services read only `stock_*`.)
 
 `utils/stockCodePattern.ts`, a pure tokenizer/parser/renderer, no database import, never throws — see [study/typescript/discriminated-unions-and-parsers.md](../study/typescript/discriminated-unions-and-parsers.md)):
 
@@ -168,7 +170,7 @@ A `SERIAL`-tracked unit carries a status, changed either manually (a person book
 | `BOOKED` | `ISSUED` | MOVEMENT |
 | `ISSUED` | `AVAILABLE` | MOVEMENT |
 
-One exported transition table (`types/stock.ts`'s `STOCK_SERIAL_TRANSITIONS`, checked by `canTransitionSerial`), declared as a plain `Record<StockSerialStatus, ...>` annotation rather than `as const satisfies` — deliberately, since what this table needs is compiler-enforced exhaustiveness over every status, not literal-value preservation; see [study/typescript/const-assertions-and-satisfies.md](../study/typescript/const-assertions-and-satisfies.md). `ISSUED` serials structurally carry `location_id IS NULL` (`ck_stock_serials_location`), which is why the service checks a serial's status before its location on an outbound movement — checking location first would mask the specific "not in stock" message behind a generic "not at location" one.
+One exported transition table (`types/inventory.ts`'s `STOCK_SERIAL_TRANSITIONS`, checked by `canTransitionSerial`), declared as a plain `Record<StockSerialStatus, ...>` annotation rather than `as const satisfies` — deliberately, since what this table needs is compiler-enforced exhaustiveness over every status, not literal-value preservation; see [study/typescript/const-assertions-and-satisfies.md](../study/typescript/const-assertions-and-satisfies.md). `ISSUED` serials structurally carry `location_id IS NULL` (`ck_stock_serials_location`), which is why the service checks a serial's status before its location on an outbound movement — checking location first would mask the specific "not in stock" message behind a generic "not at location" one.
 
 ### H. Lookup, QR labels
 
@@ -178,10 +180,10 @@ One exported transition table (`types/stock.ts`'s `STOCK_SERIAL_TRANSITIONS`, ch
 
 ## The rule-16 boundary, in practice
 
-StockLedger reads and writes only its own 12 tables. It posts nothing to LedgerCore's general ledger, so there is no bridge function to name and no `source_type`/`source_id` hook in this phase — `services/stock/` and `controllers/stock/` contain no query against any other app's tables:
+StockLedger reads and writes only its own 12 tables. It posts nothing to LedgerCore's general ledger, so there is no bridge function to name and no `source_type`/`source_id` hook in this phase — `services/inventory/` and `controllers/inventory/` contain no query against any other app's tables:
 
 ```bash
-grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_|forecaster_|unitecon_|boarddeck_|taxguard_|ap_flow_)" server/src/services/stock/ server/src/controllers/stock/
+grep -rnE "FROM (accounts|ledger_lines|journal_entries|invoices|invoice_lines|customers|vendors|bills|payments|fpa_|forecaster_|unitecon_|boarddeck_|taxguard_|ap_flow_)" server/src/services/inventory/ server/src/controllers/inventory/
 ```
 
 returns nothing. Connecting a stock movement's value to a real journal entry (an inventory-asset debit on receipt, a COGS debit on issue) is the natural rule-16 bridge function this phase deliberately leaves unbuilt — see [Deliberately not built](#deliberately-not-built).
@@ -197,10 +199,10 @@ returns nothing. Connecting a stock movement's value to a real journal entry (an
 - [x] `065_stock_setup.sql` — settings, UoMs, categories, attribute definitions, code schemes + counters, locations
 - [x] `066_stock_items.sql` — the item master, JSONB attributes with a `jsonb_path_ops` GIN index
 - [x] `067_stock_movements.sql` — lots, serials, the append-only movement ledger, the derived balance cache
-- [x] `config/stockIndustryProfiles.ts` — 10 industry profiles, additive-only seeding
+- [x] `config/inventoryIndustryProfiles.ts` — 10 industry profiles, additive-only seeding
 - [x] `utils/{stockCodePattern,stockAttributes,stockValuation,gtin}.ts` — four pure calculation modules, zero database imports
-- [x] `services/stock/{setupService,catalogueService,codeSchemeService,locationService,itemService,movementService,stockQueryService,serialService,lookupService,labelService}.ts`
-- [x] `/api/v1/stock` — 36 routes across setup, UoMs, categories, code schemes, locations, items, movements, serials, lookup and labels
+- [x] `services/inventory/{setupService,catalogueService,codeSchemeService,locationService,itemService,movementService,stockQueryService,serialService,lookupService,labelService}.ts`
+- [x] `/api/v1/inventory` — 36 routes across setup, UoMs, categories, code schemes, locations, items, movements, serials, lookup and labels
 - [x] `db/integrity.ts` — `stock_balances_match_movements`, the 5th integrity check
 - [x] Client: `StockSetupPage`, `StockCatalogueSettingsPage`, `StockCodeSchemesPage`, `StockLocationsPage`, `StockItemsPage`/`StockNewItemPage`/`StockItemDetailPage`, `StockMovementPage`, `StockDashboardPage`, `StockLabelsPage`, `StockLookupPage`/`StockScanRedirect`, `AttributeFields` (schema-driven custom fields)
 - [x] `qrcode` — server-side SVG QR generation

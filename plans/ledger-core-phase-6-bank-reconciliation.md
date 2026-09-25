@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-04
 **Status: DONE — 2026-09-04.** All 8 slices executed; 645 server tests (up from 519, plan estimated ~570) + 139 client tests (up from 125); `guardrail-review` (1 finding — `unmatchTransaction` bypassed the shared FSM check with an ad-hoc status comparison — fixed) and `docs-sync` both run clean. Both roadmap acceptance criteria pass as named tests. `npm run verify:integrity` passes.
-**Phase:** 6 (LedgerCore) · **Spec:** [docs/ledger-core.md § C](../docs/ledger-core.md) · **Roadmap:** [docs/roadmap.md § Phase 6](../docs/roadmap.md#phase-6-as-delivered) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
+**Phase:** 6 (LedgerCore) · **Spec:** [docs/accounting.md § C](../docs/accounting.md) · **Roadmap:** [docs/roadmap.md § Phase 6](../docs/roadmap.md#phase-6-as-delivered) · **Schema:** [docs/schema.md](../docs/schema.md) · **API:** [docs/api.md](../docs/api.md)
 
 > This file is now a historical record, not a live plan. The durable account of what shipped is [roadmap.md § Phase 6, as delivered](../docs/roadmap.md#phase-6-as-delivered). Safe to delete. Do **not** execute it again — migration 019 is applied and checksummed.
 
@@ -21,12 +21,12 @@
 - **`db/transaction.ts`** — `beginTransaction(client)` and `withTransaction(fn)`. Every write in the codebase goes through one of these (Phase 5). A bare `client.query('BEGIN')` is a bug.
 - **`utils/money.ts`** — `Cents` brand, `cents`, `toCents`, `parseCents`, `formatCents`, `addCents`, `sumCents`, `scaleCents`. **No text→cents parser exists.**
 - **`utils/`** also has: `apiError`, `cookies`, `fiscalYear`, `jwt`, `parseBody`, `queryParam` (`optionalText`, `optionalUuid`, `optionalIsoDate`, `readPagination`), `requestContext`, `requireUser`, `routeParam` (`requireParam`), `validate`.
-- **`types/ledger-core.ts`** (700 lines) holds every FSM transition table: `INVOICE_TRANSITIONS`, `BILL_TRANSITIONS`, `PAYMENT_TRANSITIONS`, `FISCAL_PERIOD_TRANSITIONS`, each with a `canTransitionX` helper (guardrails rule 10).
-- **`routes/ledger-core/index.ts`** mounts 10 sub-routers: accounts, bills, customers, fiscal-periods, invoices, journals, payments, reports, settings, vendors.
+- **`types/accounting.ts`** (700 lines) holds every FSM transition table: `INVOICE_TRANSITIONS`, `BILL_TRANSITIONS`, `PAYMENT_TRANSITIONS`, `FISCAL_PERIOD_TRANSITIONS`, each with a `canTransitionX` helper (guardrails rule 10).
+- **`routes/accounting/index.ts`** mounts 10 sub-routers: accounts, bills, customers, fiscal-periods, invoices, journals, payments, reports, settings, vendors.
 - **`config/apps.ts`** — `ledger-core` is `status: 'building'`. **No status flip is needed by this plan.**
 - **`config/constants.ts`** — `JSON_BODY_LIMIT = '1mb'`.
 - **Tests:** 519 server (`server/src/__tests__/`, 21 files under `ledger-core/`), 125 client. `helpers/factories.ts` exports `resetTables`, `uniqueEmail`, `createUserWithOrg`, `addMember`, `loginAgent`.
-- **Client:** `client/src/Pages/ledger-core/` holds 40 pages/components incl. `LedgerCoreRoutes.tsx`, `LedgerCoreSidebar.tsx` (grouped `NAV_GROUPS`), `ConfirmDialog.tsx`, `BackLink.tsx`, `CreateMenu.tsx`, `BarChart.tsx`, `TrendChart.tsx`. `services/fetchServices.ts` (`apiFetch<T>`) is the only place the client talks to the API.
+- **Client:** `client/src/Pages/` holds 40 pages/components incl. `LedgerCoreRoutes.tsx`, `LedgerCoreSidebar.tsx` (grouped `NAV_GROUPS`), `ConfirmDialog.tsx`, `BackLink.tsx`, `CreateMenu.tsx`, `BarChart.tsx`, `TrendChart.tsx`. `services/fetchServices.ts` (`apiFetch<T>`) is the only place the client talks to the API.
 - **Dependencies:** server has `bcrypt, cookie-parser, cors, dotenv, express, express-rate-limit, jsonwebtoken, pg, zod` and nothing else. Vitest + supertest + tsx in dev.
 
 **Does NOT exist — do not assume any of it:**
@@ -90,7 +90,7 @@
 | **Scoping** | All three new tables carry `org_id NOT NULL`. Every query in every new service has an `org_id` predicate. **No exceptions in this phase.** |
 | **Money** | `bank_transactions.amount_cents BIGINT NOT NULL` — **signed**: `> 0` = money into the bank account, `< 0` = money out. `CHECK (amount_cents <> 0)`. `bank_statement_imports.closing_balance_cents BIGINT` nullable, signed. Every read goes through `parseCents`. |
 | **Transaction boundary** | One import = one transaction (import row + all lines + all suggestions, or nothing). One match = one transaction (payment + journal entry + bank-line status, or nothing). One unmatch = one transaction (reversing entry + payment VOID + bank-line status + regenerated suggestions, or nothing). Nothing after `COMMIT` (rule #5). |
-| **Lifecycle** | `BANK_TRANSACTION_TRANSITIONS` in `types/ledger-core.ts`; the migration's status `CHECK` lists exactly the same three values (rule #10). |
+| **Lifecycle** | `BANK_TRANSACTION_TRANSITIONS` in `types/accounting.ts`; the migration's status `CHECK` lists exactly the same three values (rule #10). |
 | **Immutability** | `bank_transactions` gets a `to_jsonb` row-diff carve-out trigger — only `status`, `matched_payment_id`, `matched_at`, `matched_by`, `updated_at` may change; `DELETE` always raises `0A000`. Correction of a match is `POST /:id/unmatch`, which **voids** the payment (rule #6). |
 | **Roles** | Read (`GET`) = any member. Import, match, unmatch, ignore, unignore, rescore = `OWNER`, `ADMIN`, `ACCOUNTANT` — same set `/payments` uses, because every one of them either creates or voids a payment. Nothing here is `OWNER`-only. |
 | **FKs** | `org_id` → `organizations` `ON DELETE RESTRICT` on the two record tables, `CASCADE` on `bank_match_suggestions` (derived data). Composite `(org_id, x_id)` FKs for account/import/payment/invoice/bill, all `ON DELETE RESTRICT`, except `bank_match_suggestions.bank_transaction_id` → `CASCADE` (child of its line). |
@@ -105,7 +105,7 @@
 | Slice | Outcome | Depends on |
 |---|---|---|
 | **A — Pure utilities** | CSV, flexible dates, money-from-text, Levenshtein and the 40/30/30 scorer exist as pure, unit-tested functions with no database and no HTTP. | — |
-| **B — Schema & types** | Migration 019 applies twice cleanly; the three tables, their constraints, the immutability trigger and the audit triggers exist; `types/ledger-core.ts` carries the FSM. | A (constants only) |
+| **B — Schema & types** | Migration 019 applies twice cleanly; the three tables, their constraints, the immutability trigger and the audit triggers exist; `types/accounting.ts` carries the FSM. | A (constants only) |
 | **C — `paymentService` `*OnClient` extraction** | `createPaymentOnClient` / `voidPaymentOnClient` exist and every existing payment test still passes. | B |
 | **D — Import** | `POST /bank-imports` ingests a CSV idempotently; re-importing the same file adds nothing. | A, B |
 | **E — Scoring & suggestions** | Every imported line carries up to 5 explainable suggestions with a stored `score_breakdown`. | A, B, D |
@@ -370,7 +370,7 @@
 
 - **Depends on:** A7
 - **Skill:** none (pure)
-- **Read first:** `server/src/utils/levenshtein.ts` (A7) and the scoring table in [docs/ledger-core.md § C](../docs/ledger-core.md).
+- **Read first:** `server/src/utils/levenshtein.ts` (A7) and the scoring table in [docs/accounting.md § C](../docs/accounting.md).
 - **Files:** `server/src/utils/matchScore.ts` (new)
 - **Contract — write these literally:**
   ```ts
@@ -469,9 +469,9 @@
 | Tables | `bank_statement_imports`, `bank_transactions`, `bank_match_suggestions` |
 | Trigger fns | `reject_bank_transaction_mutation()` |
 | Triggers | `trg_bank_transactions_immutable`, `trg_bank_transactions_updated_at`, `trg_bank_statement_imports_audit`, `trg_bank_transactions_audit` |
-| Types file | `server/src/types/ledger-core.ts` (edit) |
+| Types file | `server/src/types/accounting.ts` (edit) |
 | Type names | `BankTransactionStatus`, `BANK_TRANSACTION_STATUSES`, `BANK_TRANSACTION_TRANSITIONS`, `canTransitionBankTransaction`, `isBankTransactionStatus`, `BankStatementImport`, `BankTransaction`, `BankMatchSuggestion`, `BankReconciliationReport` |
-| Test file | `server/src/__tests__/ledger-core/bankConstraints.test.ts` |
+| Test file | `server/src/__tests__/accounting/bankConstraints.test.ts` |
 
 ---
 
@@ -650,12 +650,12 @@
 
 ---
 
-### Step B2 — types and the FSM in `types/ledger-core.ts`
+### Step B2 — types and the FSM in `types/accounting.ts`
 
 - **Depends on:** B1
 - **Skill:** new-module (types layer)
-- **Read first:** `server/src/types/ledger-core.ts` lines 400–440 (`PAYMENT_TRANSITIONS`) and 610–650 (`FISCAL_PERIOD_TRANSITIONS`) — copy the `as const satisfies Record<...>` idiom exactly.
-- **Files:** `server/src/types/ledger-core.ts` (edit — append a `// ---- Phase 6 — bank reconciliation` section at the end; change nothing above it)
+- **Read first:** `server/src/types/accounting.ts` lines 400–440 (`PAYMENT_TRANSITIONS`) and 610–650 (`FISCAL_PERIOD_TRANSITIONS`) — copy the `as const satisfies Record<...>` idiom exactly.
+- **Files:** `server/src/types/accounting.ts` (edit — append a `// ---- Phase 6 — bank reconciliation` section at the end; change nothing above it)
 - **Contract — write these literally:**
   ```ts
   export const BANK_TRANSACTION_STATUSES = ['UNMATCHED', 'MATCHED', 'IGNORED'] as const;
@@ -769,7 +769,7 @@
   }
   ```
 - **Guardrails:** #10 one FSM table, in `types/`, matching the migration's `CHECK` exactly · #12 account types stay five — nothing here adds one
-- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -c "BANK_TRANSACTION_TRANSITIONS" server/src/types/ledger-core.ts` is `2` (the definition and `canTransitionBankTransaction`).
+- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -c "BANK_TRANSACTION_TRANSITIONS" server/src/types/accounting.ts` is `2` (the definition and `canTransitionBankTransaction`).
 - **Owes:** extends `study/architecture/document-lifecycle-fsm.md` (Spine S3).
 
 ---
@@ -778,8 +778,8 @@
 
 - **Depends on:** B1, B2
 - **Skill:** **isolation-test**
-- **Read first:** `server/src/__tests__/ledger-core/paymentConstraints.test.ts` — copy its structure exactly: raw `pool.query` inserts, `resetTables()` in `beforeEach`, and its habit of asserting on the Postgres error **code** rather than the message.
-- **Files:** `server/src/__tests__/ledger-core/bankConstraints.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/paymentConstraints.test.ts` — copy its structure exactly: raw `pool.query` inserts, `resetTables()` in `beforeEach`, and its habit of asserting on the Postgres error **code** rather than the message.
+- **Files:** `server/src/__tests__/accounting/bankConstraints.test.ts` (new)
 - **Contract — these exact cases:**
   | Case name | Expectation |
   |---|---|
@@ -811,7 +811,7 @@
 
 | Kind | Name |
 |---|---|
-| File | `server/src/services/ledger-core/paymentService.ts` (edit) |
+| File | `server/src/services/accounting/paymentService.ts` (edit) |
 | New exports | `createPaymentOnClient`, `voidPaymentOnClient` |
 | Unchanged exports | `createPayment`, `voidPayment`, `getPaymentById`, `listPayments`, `allocatedCentsSubquery` |
 
@@ -821,8 +821,8 @@
 
 - **Depends on:** B2
 - **Skill:** none (refactor) — same fields apply
-- **Read first:** `server/src/services/ledger-core/paymentService.ts` **in full**, and `server/src/services/ledger-core/journalService.ts` lines 326–460 — `createEntryOnClient`/`createEntry` is the exact pattern to mirror: the `*OnClient` function takes a `client` and does the work; the public function owns the transaction and the post-`COMMIT` re-read.
-- **Files:** `server/src/services/ledger-core/paymentService.ts` (edit)
+- **Read first:** `server/src/services/accounting/paymentService.ts` **in full**, and `server/src/services/accounting/journalService.ts` lines 326–460 — `createEntryOnClient`/`createEntry` is the exact pattern to mirror: the `*OnClient` function takes a `client` and does the work; the public function owns the transaction and the post-`COMMIT` re-read.
+- **Files:** `server/src/services/accounting/paymentService.ts` (edit)
 - **Contract — write these signatures literally:**
   ```ts
   /** Creates a payment on the caller's transaction. Returns the new payment's id.
@@ -852,7 +852,7 @@
   3. Same split for `voidPayment` / `voidPaymentOnClient`.
   4. **Do not** change any SQL, any error message, any status code, or `allocatedCentsSubquery`.
 - **Guardrails:** #5 inside a transaction every query uses the checked-out `client` — the `*OnClient` functions must never touch `pool` · #6 no new mutation path on a posted payment
-- **Proof:** `cd server && npm test -- payments` **and** `npm test -- paymentConstraints` — both suites pass with **exactly** the same number of tests as before the edit. Also `grep -n "pool.query" server/src/services/ledger-core/paymentService.ts` must show hits only inside `getPaymentById`, `listPayments` and `loadAllocations`.
+- **Proof:** `cd server && npm test -- payments` **and** `npm test -- paymentConstraints` — both suites pass with **exactly** the same number of tests as before the edit. Also `grep -n "pool.query" server/src/services/accounting/paymentService.ts` must show hits only inside `getPaymentById`, `listPayments` and `loadAllocations`.
 - **If it fails:** a payment test that broke means the extraction changed behaviour — re-read `journalService`'s split and move less. Do not adjust the payment tests.
 - **Owes:** nothing (the pattern is already covered by `study/postgresql/transactions-isolation-pooling.md`).
 
@@ -860,27 +860,27 @@
 
 # Slice D — statement import
 
-**Outcome:** `POST /api/v1/ledger-core/bank-imports` ingests a CSV; importing the same file twice yields one set of rows.
+**Outcome:** `POST /api/v1/bank-imports` ingests a CSV; importing the same file twice yields one set of rows.
 
 **Names — use exactly these:**
 
 | Kind | Name |
 |---|---|
-| Service | `server/src/services/ledger-core/bankImportService.ts` → `importStatement`, `listImports`, `getImportById` |
-| Schema | `server/src/schemas/ledger-core/bankSchema.ts` → `importStatementSchema` |
-| Controller | `server/src/controllers/ledger-core/bankImportController.ts` → `create`, `list`, `getOne` |
-| Routes | `server/src/routes/ledger-core/bankImportRoutes.ts`, mounted at `/bank-imports` |
-| Test | `server/src/__tests__/ledger-core/bankImports.test.ts` |
+| Service | `server/src/services/accounting/bankImportService.ts` → `importStatement`, `listImports`, `getImportById` |
+| Schema | `server/src/schemas/accounting/bankSchema.ts` → `importStatementSchema` |
+| Controller | `server/src/controllers/accounting/bankImportController.ts` → `create`, `list`, `getOne` |
+| Routes | `server/src/routes/accounting/bankImportRoutes.ts`, mounted at `/bank-imports` |
+| Test | `server/src/__tests__/accounting/bankImports.test.ts` |
 | Constant | `MAX_CSV_CHARS = 900_000` in `server/src/config/constants.ts` |
 
 ---
 
-### Step D1 — `schemas/ledger-core/bankSchema.ts`
+### Step D1 — `schemas/accounting/bankSchema.ts`
 
 - **Depends on:** A3 (`DateFormat`)
 - **Skill:** new-module (validation layer)
-- **Read first:** `server/src/schemas/ledger-core/paymentSchema.ts` — copy its `zod` v4 idioms (`z.uuid()`, `z.iso.date()`, `z.int()`, `.nullable().default(null)`) and its doc comment listing what is deliberately absent.
-- **Files:** `server/src/schemas/ledger-core/bankSchema.ts` (new), `server/src/config/constants.ts` (edit — add `export const MAX_CSV_CHARS = 900_000;` with a comment that `JSON_BODY_LIMIT` is `'1mb'` and JSON escaping needs the headroom)
+- **Read first:** `server/src/schemas/accounting/paymentSchema.ts` — copy its `zod` v4 idioms (`z.uuid()`, `z.iso.date()`, `z.int()`, `.nullable().default(null)`) and its doc comment listing what is deliberately absent.
+- **Files:** `server/src/schemas/accounting/bankSchema.ts` (new), `server/src/config/constants.ts` (edit — add `export const MAX_CSV_CHARS = 900_000;` with a comment that `JSON_BODY_LIMIT` is `'1mb'` and JSON escaping needs the headroom)
 - **Contract — write these literally:**
   ```ts
   export const importStatementSchema = z.object({
@@ -931,8 +931,8 @@
 
 - **Depends on:** A1, A3, A5, B1, D1
 - **Skill:** new-module (service layer)
-- **Read first:** `server/src/services/ledger-core/paymentService.ts` (transaction shape, local `pgErrorCode`/`pgErrorMessage` helpers, `toX` row mappers) and `server/src/services/ledger-core/invoiceService.ts` (how a service validates an account is postable and of the right type). Imports carry `.js`.
-- **Files:** `server/src/services/ledger-core/bankImportService.ts` (new)
+- **Read first:** `server/src/services/accounting/paymentService.ts` (transaction shape, local `pgErrorCode`/`pgErrorMessage` helpers, `toX` row mappers) and `server/src/services/accounting/invoiceService.ts` (how a service validates an account is postable and of the right type). Imports carry `.js`.
+- **Files:** `server/src/services/accounting/bankImportService.ts` (new)
 - **Contract — write these signatures literally:**
   ```ts
   export interface ImportStatementInput {
@@ -1019,7 +1019,7 @@
   13. `COMMIT`, then `return { import: await getImportById(orgId, importId), … }`.
   Error mapping in the `catch`: `ApiError` passthrough; `P0001` → `ApiError(422, message)`; `23505` → `ApiError(409, 'That statement is already being imported')` (a concurrent duplicate import racing the `ON CONFLICT`); everything else rethrown. `ROLLBACK` in `catch`, `release` in `finally` — copy `paymentService`'s block verbatim.
 - **Guardrails:** #1 every statement carries `org_id` · #2 no `req`/`res` in this file · #3 `BIGINT` cents through `parseCents`/`parseMoneyText` only · #4 parameterized only; the column names resolved in step 4 index into a **parsed array**, never into SQL · #5 every query uses `client`
-- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -c "org_id" server/src/services/ledger-core/bankImportService.ts` is at least one per statement, and `grep -c "pool.query" …` shows hits only in `listImports`/`getImportById`.
+- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -c "org_id" server/src/services/accounting/bankImportService.ts` is at least one per statement, and `grep -c "pool.query" …` shows hits only in `listImports`/`getImportById`.
 - **If it fails:** a type error on `unnest` parameter arrays → check the cast list matches the array count. Never `as any`.
 - **Owes:** `study/postgresql/idempotent-ingestion-and-dedupe-hashes.md` and `study/node-express/parsing-untrusted-csv.md` (Spine S3).
 
@@ -1029,14 +1029,14 @@
 
 - **Depends on:** D1, D2
 - **Skill:** new-module (controller → routes → mount)
-- **Read first:** `server/src/controllers/ledger-core/paymentController.ts` and `server/src/routes/ledger-core/paymentRoutes.ts` — copy both verbatim in shape, including the doc comment that says why the role set is what it is.
-- **Files:** `server/src/controllers/ledger-core/bankImportController.ts` (new), `server/src/routes/ledger-core/bankImportRoutes.ts` (new), `server/src/routes/ledger-core/index.ts` (edit — add `import bankImportRoutes from './bankImportRoutes.js';` and `router.use('/bank-imports', bankImportRoutes);`, keeping the alphabetical order of the existing block: `accounts, bank-imports, bills, …`)
+- **Read first:** `server/src/controllers/accounting/paymentController.ts` and `server/src/routes/accounting/paymentRoutes.ts` — copy both verbatim in shape, including the doc comment that says why the role set is what it is.
+- **Files:** `server/src/controllers/accounting/bankImportController.ts` (new), `server/src/routes/accounting/bankImportRoutes.ts` (new), `server/src/routes/accounting/index.ts` (edit — add `import bankImportRoutes from './bankImportRoutes.js';` and `router.use('/bank-imports', bankImportRoutes);`, keeping the alphabetical order of the existing block: `accounts, bank-imports, bills, …`)
 - **Contract — the route table, literally:**
   | Method | Path | Auth | Roles | Success | Failure |
   |---|---|---|---|---|---|
-  | `POST` | `/api/v1/ledger-core/bank-imports` | `authenticate` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `201` `{ success: true, import, importedCount, duplicateCount, suggestedCount, autoMatchableCount }` | `400` malformed body/CSV · `422` domain (bad account, unparseable rows, no rows) · `409` concurrent duplicate |
-  | `GET` | `/api/v1/ledger-core/bank-imports` | `authenticate` | any member | `200` `{ success: true, count, totalCount, currentPage, totalPages, imports }` | — |
-  | `GET` | `/api/v1/ledger-core/bank-imports/:id` | `authenticate` | any member | `200` `{ success: true, import }` | `404` not found **or in another organization** |
+  | `POST` | `/api/v1/bank-imports` | `authenticate` | `OWNER`, `ADMIN`, `ACCOUNTANT` | `201` `{ success: true, import, importedCount, duplicateCount, suggestedCount, autoMatchableCount }` | `400` malformed body/CSV · `422` domain (bad account, unparseable rows, no rows) · `409` concurrent duplicate |
+  | `GET` | `/api/v1/bank-imports` | `authenticate` | any member | `200` `{ success: true, count, totalCount, currentPage, totalPages, imports }` | — |
+  | `GET` | `/api/v1/bank-imports/:id` | `authenticate` | any member | `200` `{ success: true, import }` | `404` not found **or in another organization** |
 
   Controller exports: `create`, `list`, `getOne`. `list` reads `readPagination(req.query)` and `optionalUuid(req, 'accountId')`. Zero SQL in this file.
 - **Guardrails:** #2 no SQL in controllers · #1 the org comes from `requireUser(req).orgId` only — never a header, param or body · `404` never `403` for another tenant's id
@@ -1049,8 +1049,8 @@
 
 - **Depends on:** D3
 - **Skill:** **isolation-test**
-- **Read first:** `server/src/__tests__/ledger-core/payments.test.ts` — copy its `beforeEach(resetTables)`, `createUserWithOrg`, `loginAgent` setup and its cross-tenant case shape.
-- **Files:** `server/src/__tests__/ledger-core/bankImports.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/payments.test.ts` — copy its `beforeEach(resetTables)`, `createUserWithOrg`, `loginAgent` setup and its cross-tenant case shape.
+- **Files:** `server/src/__tests__/accounting/bankImports.test.ts` (new)
 - **Contract — these exact cases:**
   | Case name | Expectation |
   |---|---|
@@ -1081,10 +1081,10 @@
 
 | Kind | Name |
 |---|---|
-| Service | `server/src/services/ledger-core/bankMatchService.ts` → `generateSuggestionsOnClient`, `listTransactions`, `getTransactionById`, `rescoreTransaction` |
-| Controller | `server/src/controllers/ledger-core/bankTransactionController.ts` → `list`, `getOne`, `rescore`, `match`, `unmatch`, `ignore`, `unignore` |
-| Routes | `server/src/routes/ledger-core/bankTransactionRoutes.ts`, mounted at `/bank-transactions` |
-| Test | `server/src/__tests__/ledger-core/bankMatching.test.ts` |
+| Service | `server/src/services/accounting/bankMatchService.ts` → `generateSuggestionsOnClient`, `listTransactions`, `getTransactionById`, `rescoreTransaction` |
+| Controller | `server/src/controllers/accounting/bankTransactionController.ts` → `list`, `getOne`, `rescore`, `match`, `unmatch`, `ignore`, `unignore` |
+| Routes | `server/src/routes/accounting/bankTransactionRoutes.ts`, mounted at `/bank-transactions` |
+| Test | `server/src/__tests__/accounting/bankMatching.test.ts` |
 | Fixture helper | `server/src/__tests__/helpers/bankFixture.ts` → `buildHundredLineStatement` |
 
 ---
@@ -1093,8 +1093,8 @@
 
 - **Depends on:** A9, B1, D2
 - **Skill:** new-module (service layer)
-- **Read first:** `server/src/services/ledger-core/agingService.ts` **in full** — it already knows how to select open AR/AP documents with a derived amount due; copy its use of `paymentService.allocatedCentsSubquery`. Also re-read `paymentService.allocatedCentsSubquery`'s doc comment on why its string interpolation is safe.
-- **Files:** `server/src/services/ledger-core/bankMatchService.ts` (new)
+- **Read first:** `server/src/services/accounting/agingService.ts` **in full** — it already knows how to select open AR/AP documents with a derived amount due; copy its use of `paymentService.allocatedCentsSubquery`. Also re-read `paymentService.allocatedCentsSubquery`'s doc comment on why its string interpolation is safe.
+- **Files:** `server/src/services/accounting/bankMatchService.ts` (new)
 - **Contract — write these signatures literally:**
   ```ts
   /** Candidate window: documents dated within this many days of the bank line. */
@@ -1141,7 +1141,7 @@
 - **Depends on:** D2, E1
 - **Skill:** none (one-line integration)
 - **Read first:** the `// suggestions are generated in Step E2` comment left in `bankImportService.importStatement`.
-- **Files:** `server/src/services/ledger-core/bankImportService.ts` (edit — replace the stub comment only)
+- **Files:** `server/src/services/accounting/bankImportService.ts` (edit — replace the stub comment only)
 - **Contract:** replace the comment with a call to `bankMatchService.generateSuggestionsOnClient(client, orgId, insertedIds)`, then compute `suggestedCount` and `autoMatchableCount` with a single query on the same client:
   ```sql
   SELECT count(DISTINCT bank_transaction_id) FILTER (WHERE true) AS suggested,
@@ -1160,8 +1160,8 @@
 
 - **Depends on:** E1
 - **Skill:** new-module (service layer)
-- **Read first:** `server/src/services/ledger-core/paymentService.ts`'s `buildFilters`/`listPayments`/`loadAllocations` — copy the shared-predicate builder, the `p.id DESC` pagination tiebreaker, and the one-query-for-all-children loading of suggestions.
-- **Files:** `server/src/services/ledger-core/bankMatchService.ts` (edit — append)
+- **Read first:** `server/src/services/accounting/paymentService.ts`'s `buildFilters`/`listPayments`/`loadAllocations` — copy the shared-predicate builder, the `p.id DESC` pagination tiebreaker, and the one-query-for-all-children loading of suggestions.
+- **Files:** `server/src/services/accounting/bankMatchService.ts` (edit — append)
 - **Contract — write these literally:**
   ```ts
   export interface ListBankTransactionsOptions {
@@ -1208,8 +1208,8 @@
 
 - **Depends on:** C1, E3
 - **Skill:** new-module (service layer)
-- **Read first:** `server/src/services/ledger-core/paymentService.ts`'s `createPayment` (the transaction shape and the error mapping you will mirror) and `voidPayment`. Then `server/src/types/ledger-core.ts`'s `canTransitionBankTransaction`.
-- **Files:** `server/src/services/ledger-core/bankMatchService.ts` (edit — append)
+- **Read first:** `server/src/services/accounting/paymentService.ts`'s `createPayment` (the transaction shape and the error mapping you will mirror) and `voidPayment`. Then `server/src/types/accounting.ts`'s `canTransitionBankTransaction`.
+- **Files:** `server/src/services/accounting/bankMatchService.ts` (edit — append)
 - **Contract — write these literally:**
   ```ts
   export interface MatchTargetInput {
@@ -1261,7 +1261,7 @@
 
   Error mapping: copy `paymentService`'s local `pgErrorCode`/`pgErrorMessage` helpers into this file (that is the codebase convention — `paymentService`, `billService` and `invoiceService` each carry their own copy) and map `P0001 → ApiError(422, message)`.
 - **Guardrails:** #3 `Math.abs` on integer cents, no rounding, no epsilon · #5 every query on the checked-out `client`; `createPaymentOnClient`/`voidPaymentOnClient` exist precisely so this stays one transaction · #6 no `PUT`/`DELETE` on the payment — unmatch **voids** · #10 every status change goes through `canTransitionBankTransaction` · #16 the GL is reached only through `paymentService` → `journalService`, never a direct write to `journal_entries`
-- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -n "INSERT INTO journal_entries\|INSERT INTO ledger_lines" server/src/services/ledger-core/bankMatchService.ts` returns nothing.
+- **Proof:** `cd server && npm run typecheck` exits 0, and `grep -n "INSERT INTO journal_entries\|INSERT INTO ledger_lines" server/src/services/accounting/bankMatchService.ts` returns nothing.
 - **If it fails:** if a deferred trigger fires at `COMMIT` with `P0001`, the allocation exceeds the document — fix step 6's check, do not disable the trigger.
 - **Owes:** extends `study/architecture/document-lifecycle-fsm.md` (Spine S3).
 
@@ -1271,8 +1271,8 @@
 
 - **Depends on:** E3, F1, D1 (`matchBankTransactionSchema`)
 - **Skill:** new-module (controller → routes → mount)
-- **Read first:** `server/src/controllers/ledger-core/billController.ts` (the multi-action controller with `/submit`, `/approve`, `/void`) and `server/src/routes/ledger-core/billRoutes.ts`.
-- **Files:** `server/src/controllers/ledger-core/bankTransactionController.ts` (new), `server/src/routes/ledger-core/bankTransactionRoutes.ts` (new), `server/src/routes/ledger-core/index.ts` (edit — add `router.use('/bank-transactions', bankTransactionRoutes);` after `/bank-imports`)
+- **Read first:** `server/src/controllers/accounting/billController.ts` (the multi-action controller with `/submit`, `/approve`, `/void`) and `server/src/routes/accounting/billRoutes.ts`.
+- **Files:** `server/src/controllers/accounting/bankTransactionController.ts` (new), `server/src/routes/accounting/bankTransactionRoutes.ts` (new), `server/src/routes/accounting/index.ts` (edit — add `router.use('/bank-transactions', bankTransactionRoutes);` after `/bank-imports`)
 - **Contract — the route table, literally:**
   | Method | Path | Roles | Success | Failure |
   |---|---|---|---|---|
@@ -1297,8 +1297,8 @@
 
 - **Depends on:** F2
 - **Skill:** **isolation-test**
-- **Read first:** `server/src/__tests__/ledger-core/payments.test.ts` and `server/src/__tests__/ledger-core/aging.test.ts` (how a non-trivial invoice/bill fixture is built through the API rather than by raw insert).
-- **Files:** `server/src/__tests__/helpers/bankFixture.ts` (new), `server/src/__tests__/ledger-core/bankMatching.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/payments.test.ts` and `server/src/__tests__/accounting/aging.test.ts` (how a non-trivial invoice/bill fixture is built through the API rather than by raw insert).
+- **Files:** `server/src/__tests__/helpers/bankFixture.ts` (new), `server/src/__tests__/accounting/bankMatching.test.ts` (new)
 - **Contract:**
   `bankFixture.ts` exports:
   ```ts
@@ -1346,8 +1346,8 @@
 
 - **Depends on:** B2, D2, F1
 - **Skill:** new-module (service → controller → route)
-- **Read first:** `server/src/services/ledger-core/agingService.ts` — specifically how it computes a subledger total and its GL control-account total **independently** and compares them by integer equality to produce `reconciles`. Copy that discipline exactly.
-- **Files:** `server/src/services/ledger-core/reportService.ts` (edit — append `bankReconciliation`), `server/src/controllers/ledger-core/reportController.ts` (edit — append `bankReconciliation`), `server/src/routes/ledger-core/reportRoutes.ts` (edit — add one line)
+- **Read first:** `server/src/services/accounting/agingService.ts` — specifically how it computes a subledger total and its GL control-account total **independently** and compares them by integer equality to produce `reconciles`. Copy that discipline exactly.
+- **Files:** `server/src/services/accounting/reportService.ts` (edit — append `bankReconciliation`), `server/src/controllers/accounting/reportController.ts` (edit — append `bankReconciliation`), `server/src/routes/accounting/reportRoutes.ts` (edit — add one line)
 - **Contract — write these literally:**
   ```ts
   export async function bankReconciliation(
@@ -1356,7 +1356,7 @@
     asOf: string,
   ): Promise<BankReconciliationReport>;
   ```
-  Route: `GET /api/v1/ledger-core/reports/bank-reconciliation?accountId=<uuid>&asOf=<YYYY-MM-DD>`, `authenticate` only (any member — a `VIEWER` exists to read reports, matching every other `/reports` route). `accountId` is **required**: missing → `ApiError(400, 'accountId is required')`. `asOf` defaults to today (UTC) when absent.
+  Route: `GET /api/v1/reports/bank-reconciliation?accountId=<uuid>&asOf=<YYYY-MM-DD>`, `authenticate` only (any member — a `VIEWER` exists to read reports, matching every other `/reports` route). `accountId` is **required**: missing → `ApiError(400, 'accountId is required')`. `asOf` defaults to today (UTC) when absent.
 
   Figures, each its own query, all scoped by `org_id`:
   - `glBalanceCents`: `SUM(l.debit_cents) - SUM(l.credit_cents)` over `ledger_lines l JOIN journal_entries e` for `l.account_id = $2` and `e.entry_date <= $3`.
@@ -1376,8 +1376,8 @@
 
 - **Depends on:** G1
 - **Skill:** **isolation-test**
-- **Read first:** `server/src/__tests__/ledger-core/aging.test.ts` — its `reconciles === true` fixture is the model.
-- **Files:** `server/src/__tests__/ledger-core/bankReconciliation.test.ts` (new)
+- **Read first:** `server/src/__tests__/accounting/aging.test.ts` — its `reconciles === true` fixture is the model.
+- **Files:** `server/src/__tests__/accounting/bankReconciliation.test.ts` (new)
 - **Contract — these exact cases:**
   | Case name | Expectation |
   |---|---|
@@ -1402,8 +1402,8 @@
 
 | Kind | Name |
 |---|---|
-| Pages | `client/src/Pages/ledger-core/BankImportPage.tsx`, `BankTransactionsPage.tsx`, `BankReconciliationPage.tsx` |
-| Component | `client/src/Pages/ledger-core/MatchScoreBadge.tsx` |
+| Pages | `client/src/Pages/BankImportPage.tsx`, `BankTransactionsPage.tsx`, `BankReconciliationPage.tsx` |
+| Component | `client/src/Pages/MatchScoreBadge.tsx` |
 | Routes | `bank/import`, `bank`, `bank/reconciliation` under `/app/ledger-core/` |
 | Sidebar group | `Banking` — items `Bank Lines` (`bank`), `Import Statement` (`bank/import`), `Reconciliation` (`bank/reconciliation`) |
 | Tests | `client/src/__tests__/ledgerCoreBankImport.test.tsx`, `ledgerCoreBankTransactions.test.tsx`, `ledgerCoreBankReconciliation.test.tsx` |
@@ -1414,8 +1414,8 @@
 
 - **Depends on:** D3
 - **Skill:** none (client page)
-- **Read first:** `client/src/Pages/ledger-core/NewBillPage.tsx` (form shape, `apiFetch` usage, error display) and `client/src/services/fetchServices.ts`.
-- **Files:** `client/src/Pages/ledger-core/BankImportPage.tsx` (new)
+- **Read first:** `client/src/Pages/NewBillPage.tsx` (form shape, `apiFetch` usage, error display) and `client/src/services/fetchServices.ts`.
+- **Files:** `client/src/Pages/BankImportPage.tsx` (new)
 - **Contract:** a form with — a postable Asset account `<select>` (loaded from `GET /ledger-core/accounts`, filtered to `type === 'Asset' && isPostable`), a `<input type="file" accept=".csv,text/csv">` read via `FileReader.readAsText` into state (**the file is never uploaded as multipart** — its text goes in the JSON body), a `dateFormat` `<select>` of `ISO`/`DMY`/`MDY`, an optional collapsible "Column mapping" fieldset with six text inputs, and optional closing-balance + closing-date inputs.
   Submit → `apiFetch<{ import: …; importedCount: number; duplicateCount: number; suggestedCount: number; autoMatchableCount: number }>('/ledger-core/bank-imports', { method: 'POST', body: JSON.stringify(...) })`.
   On success show a summary panel — "Imported N lines, skipped M duplicates, N suggestions, K ready for one-click accept" — and a link to `bank`. On `ApiRequestError` show `err.message` verbatim (the server's `422` already names the failing rows).
@@ -1430,8 +1430,8 @@
 
 - **Depends on:** F2, H1
 - **Skill:** none (client page)
-- **Read first:** `client/src/Pages/ledger-core/BillsPage.tsx` (the tabbed register with per-row actions) and `ConfirmDialog.tsx`.
-- **Files:** `client/src/Pages/ledger-core/MatchScoreBadge.tsx` (new), `client/src/Pages/ledger-core/BankTransactionsPage.tsx` (new)
+- **Read first:** `client/src/Pages/BillsPage.tsx` (the tabbed register with per-row actions) and `ConfirmDialog.tsx`.
+- **Files:** `client/src/Pages/MatchScoreBadge.tsx` (new), `client/src/Pages/BankTransactionsPage.tsx` (new)
 - **Contract:**
   `MatchScoreBadge` — props `{ score: number }`. Renders the number with a band: `>= 85` green ("auto"), `65–84` amber, `< 65` grey. No `any`; the thresholds are module constants mirroring the server's `AUTO_MATCH_THRESHOLD = 85`, with a comment naming `server/src/utils/matchScore.ts` as the source of truth.
   `BankTransactionsPage` — a register over `GET /ledger-core/bank-transactions` with:
@@ -1451,8 +1451,8 @@
 ### Step H3 — `BankReconciliationPage.tsx`
 
 - **Depends on:** G1
-- **Read first:** `client/src/Pages/ledger-core/BalanceSheetPage.tsx` (report layout, `EquationBar` usage) and `MetricTile.tsx`.
-- **Files:** `client/src/Pages/ledger-core/BankReconciliationPage.tsx` (new)
+- **Read first:** `client/src/Pages/BalanceSheetPage.tsx` (report layout, `EquationBar` usage) and `MetricTile.tsx`.
+- **Files:** `client/src/Pages/BankReconciliationPage.tsx` (new)
 - **Contract:** account `<select>` + `asOf` date input; four `MetricTile`s (GL balance, statement balance, difference, unmatched count); a clear `reconciles` banner — green "The bank and the books agree" / amber "Difference of X" — and, when `statedClosingBalanceCents` is non-null, a row comparing it. Render the completeness caveat from G1 as a one-line footnote under the banner, in the page itself, not only in the docs.
 - **Proof:** `cd client && npm run build` succeeds.
 - **Owes:** nothing
@@ -1462,8 +1462,8 @@
 ### Step H4 — routes and sidebar
 
 - **Depends on:** H1, H2, H3
-- **Read first:** `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` and `LedgerCoreSidebar.tsx` — note the doc comments explaining that every `to` is a **suffix** resolved against `useAppBasePath()`, never a relative path.
-- **Files:** `client/src/Pages/ledger-core/LedgerCoreRoutes.tsx` (edit), `client/src/Pages/ledger-core/LedgerCoreSidebar.tsx` (edit)
+- **Read first:** `client/src/Pages/LedgerCoreRoutes.tsx` and `LedgerCoreSidebar.tsx` — note the doc comments explaining that every `to` is a **suffix** resolved against `useAppBasePath()`, never a relative path.
+- **Files:** `client/src/Pages/LedgerCoreRoutes.tsx` (edit), `client/src/Pages/LedgerCoreSidebar.tsx` (edit)
 - **Contract:**
   Routes, added inside the existing `<Routes>`:
   ```tsx
@@ -1545,7 +1545,7 @@
   - `docs/api.md` — a `### Bank reconciliation` block under LedgerCore: the 3 `/bank-imports` routes, the 7 `/bank-transactions` routes, and `GET /reports/bank-reconciliation`, each with its role set, request shape and status codes, plus the `reconciles` completeness caveat.
   - `docs/schema.md` — the three new tables with every column, constraint, index and trigger, **and** an explicit line recording that `bank_match_suggestions` is deliberately not audited, added to the audited-table inventory 018 established.
   - `docs/roadmap.md` — tick all five Phase 6 boxes; add a `## Phase 6, as delivered` section in the established voice, recording the real test counts, the deliberate non-goals from §2 of this plan, and the honest statement that a bank line matches at most one document.
-  - `docs/ledger-core.md` — update the `**Status:**` line at the top and tick the Phase 6 ladder.
+  - `docs/accounting.md` — update the `**Status:**` line at the top and tick the Phase 6 ladder.
   - `CLAUDE.md` — update the `## State:` heading to Phase 6 and add a Phase 6 bullet to the **Built** list; move bank reconciliation out of **Not built**; leave the Phase 7/8/9 entries alone.
 - **Proof:** `docs-sync` reports no drift between `docs/` and the filesystem.
 
@@ -1577,5 +1577,5 @@
 - [ ] `npm run verify:integrity` passes — matching thousands of bank lines has not written a single unbalanced entry.
 - [ ] `guardrail-review` clean over the full diff.
 - [ ] Three new study notes plus four extensions filed; `study/README.md` index and coverage tracker updated.
-- [ ] `docs/api.md`, `docs/schema.md`, `docs/roadmap.md`, `docs/ledger-core.md` and `CLAUDE.md` all updated in the same change.
+- [ ] `docs/api.md`, `docs/schema.md`, `docs/roadmap.md`, `docs/accounting.md` and `CLAUDE.md` all updated in the same change.
 - [ ] This plan file deleted, or its `Status:` line changed to `DONE — <date>` with the deviations recorded.

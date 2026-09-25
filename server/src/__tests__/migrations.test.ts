@@ -117,6 +117,18 @@ describe('migration runner', () => {
   });
 });
 
+describe('Phase 33 schema cleanup (073)', () => {
+  it('dropped the app-selection table and the orphaned forecaster trigger functions', async () => {
+    const { rows } = await pool.query<{ table: string | null; fns: string }>(
+      `SELECT to_regclass('public.organization_apps')::text AS table,
+              (SELECT count(*) FROM pg_proc
+                WHERE proname IN ('reject_forecaster_budget_version_mutation',
+                                  'reject_forecaster_frozen_budget_line_mutation'))::text AS fns`,
+    );
+    expect(rows[0]).toEqual({ table: null, fns: '0' });
+  });
+});
+
 describe('schema constraints', () => {
   beforeEach(resetTables);
 

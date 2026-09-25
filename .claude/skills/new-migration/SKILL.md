@@ -7,13 +7,15 @@ description: Write a new PostgreSQL migration for AutoLedger — correct sequent
 
 Migrations are the hardest thing to fix after the fact — an applied migration is frozen. Do the checks before writing, not after.
 
+**Never drop a column an earlier migration reads** (a backfill `SELECT`, an index, a CHECK). `migrations.test.ts` replays every file against the live schema; the earlier file then fails, and fixing it means editing an applied migration (rule 13). Phase 33's withdrawn `074` is the worked example — see docs/schema.md § Phase 33.
+
 ## 1. Locate the next number
 
 ```bash
 ls server/src/db/migrations/
 ```
 
-Next file = highest existing prefix + 1, 3 digits, `<app-slug>`, descriptive snake_case suffix: `002_ledger-core_accounts.sql`. One shared sequence across the whole suite — no gaps, no branches, and no per-app numbering. Platform migrations (auth, organizations, the app registry) carry no app tag, e.g. `001_organizations_and_users.sql`. `server/src/db/migrations/` is the **only** migration directory — if you find SQL anywhere else, stop and report it.
+Next file = highest existing prefix + 1, 3 digits, the module's provenance tag (`ledger-core`, `ap-flow`, `stock`) or `platform`, descriptive snake_case suffix: `002_ledger-core_accounts.sql`. One shared sequence across the whole product — no gaps, no branches, and no per-app numbering. Platform migrations (auth, organizations, the app registry) carry no app tag, e.g. `001_organizations_and_users.sql`. `server/src/db/migrations/` is the **only** migration directory — if you find SQL anywhere else, stop and report it.
 
 ## 2. Decide: new file or edit?
 

@@ -10,7 +10,7 @@ import type { SeededUser } from '../helpers/factories.js';
  *
  * Fixture: org A's base currency is INR; USD -> INR rates 83.00 on
  * 2026-01-01 and 83.50 on 2026-01-10 (the worked example in
- * docs/ledger-core.md's dates).
+ * docs/accounting.md's dates).
  */
 
 const app = createApp();
@@ -134,7 +134,7 @@ beforeEach(async () => {
 afterAll(closePool);
 
 describe('realized FX on settlement', () => {
-  it('reproduces docs/ledger-core.md\'s worked example to the paisa', async () => {
+  it('reproduces docs/accounting.md\'s worked example to the paisa', async () => {
     const agent = await loginAgent(app, userA);
     await setUpFxFixture(agent);
     cashAccountId = await accountId(orgA, '1110');

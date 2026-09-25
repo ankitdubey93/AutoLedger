@@ -135,7 +135,7 @@ Utility-first is not "inline styles with extra steps" — inline styles cannot d
 
 - `client/vite.config.ts` — `tailwindcss()` in the plugins array; **there is no `tailwind.config.js`**
 - `client/src/index.css` — `@import "tailwindcss";` as the first line, followed by the pre-existing unlayered rules that still drive the older pages
-- `client/src/Pages/ledger-core/` — `AccountsPage`, `JournalEntryPage`, `TrialBalancePage`, all utility-first
+- `client/src/Pages/` — `AccountsPage`, `JournalEntryPage`, `TrialBalancePage`, all utility-first
 - Colours are referenced as `bg-[var(--panel)]` and `text-[var(--muted)]` — arbitrary-value syntax reaching the *existing* custom properties, so the new pages inherit the established dark/light palette rather than introducing a second one
 
 ---

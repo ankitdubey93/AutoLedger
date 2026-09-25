@@ -23,7 +23,7 @@ function summary(overrides: Partial<AiUsageSummary> = {}): AiUsageSummary {
       unpricedCallCount: 0,
     },
     byModel: [],
-    byApp: [],
+    byModule: [],
     byPurpose: [],
     byDay: [],
     pricingVersion: '2026-06-24',

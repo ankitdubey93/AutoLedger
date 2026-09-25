@@ -221,7 +221,7 @@ export async function getUsageSummary(orgId: string, filters: AiUsageFilters): P
       ORDER BY SUM(cost_micro_usd) DESC NULLS LAST, count(*) DESC`,
     values,
   );
-  const byApp: AiUsageGroup[] = byAppResult.rows.map((row) => ({
+  const byModule: AiUsageGroup[] = byAppResult.rows.map((row) => ({
     key: row.app_slug,
     provider: null,
     ...toTotals(row),
@@ -254,7 +254,7 @@ export async function getUsageSummary(orgId: string, filters: AiUsageFilters): P
     ...toTotals(row),
   }));
 
-  return { totals, byModel, byApp, byPurpose, byDay, pricingVersion: AI_PRICING_VERSION };
+  return { totals, byModel, byModule, byPurpose, byDay, pricingVersion: AI_PRICING_VERSION };
 }
 
 /** Every call attributed to one entity, newest first. Capped at 100 rows. */

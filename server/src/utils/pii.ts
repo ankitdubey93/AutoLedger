@@ -10,7 +10,7 @@ import type { OcrWord, PiiKind, RedactedRegion } from '../types/capture.js';
  * over-mask a capitalised line item. Combined with approximate OCR boxes,
  * this means the claim this pipeline can honestly make is "redaction
  * pipeline implemented", never "PII cannot leak" — measuring recall needs a
- * labelled corpus that does not exist yet. See docs/ap-flow.md's redaction
+ * labelled corpus that does not exist yet. See docs/capture.md's redaction
  * section.
  */
 

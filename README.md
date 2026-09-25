@@ -1,31 +1,32 @@
 # AutoLedger
 
-A suite of three portfolio applications sharing one multi-tenant platform: PostgreSQL + Express/TypeScript + React. One identity/tenancy layer, one login, an app chooser — then each app is its own accounting or engineering skill demo.
+A full-suite accounting and bookkeeping application — sales, purchases, banking, inventory and reporting in one product — built on PostgreSQL + Express/TypeScript + React. Multi-tenant from the first migration: every row belongs to an organization, and one person can work across several.
 
-| App | Domain | Core skills |
-|---|---|---|
-| LedgerCore | Core Accounting & Systems | Double-entry enforced by DB trigger, immutable ledger, multi-currency FX, bank reconciliation, credit/debit notes, staged importer |
-| AP-Flow | Operational Accounting | Multimodal OCR invoice parsing, PII pixel masking, history-driven COA mapping, human-in-the-loop review |
-| StockLedger | Inventory & Warehousing | Perpetual moving-average/specific-identification valuation, configurable item codes, QR labels, serial status FSM |
+What it covers, in the order the sidebar shows it:
 
-Double-entry accounting is the suite's system of record: LedgerCore is the General Ledger every other app posts into, rather than each app keeping its own private notion of money. All amounts are integer `BIGINT` cents; all business data is scoped to an `organization`.
+| Area | What you can do |
+|---|---|
+| **Sales** | Invoices with templates and payment terms, credit notes, customers with a subsidiary ledger, payments with settlement |
+| **Purchases** | Expenses (bills) with an approval workflow, debit notes, vendors — and a **Bill inbox**: upload or drop a bill in a Drive folder, it is OCR'd locally, personal data is masked on the pixels before any AI model sees it, and the bill is extracted, GL-coded and posted (automatically when confident, after review when not) |
+| **Products & inventory** | One product master; perpetual inventory with moving-average and specific-identification costing, industry templates, configurable item codes, QR labels. Bills receive stock and invoices post cost of goods sold. Optional — nothing to set up if you don't keep stock |
+| **Banking** | CSV statement import with configurable columns and date formats, confidence-scored matching, a reconciliation queue, direct posting for fees and interest |
+| **Accounting** | Chart of accounts, journals with reversals, fiscal periods with close/lock, multi-currency with realized and unrealized FX |
+| **Reports** | Profit & loss, balance sheet, trial balance, AR/AP aging, FX exposure |
 
-## Status — three apps built; Phase 29 retirement
+Underneath: double-entry enforced by database triggers (an unbalanced or edited posted entry cannot exist), integer-cent money everywhere, a CDC audit trail on every financial table, and `npm run verify:integrity` to prove the books balance.
 
-Auth, tenancy, the app registry, and **three portfolio apps** are built end to end — **LedgerCore** (GL core, multi-currency FX, bank reconciliation, credit/debit notes, a staged migration importer), **AP-Flow** (capture, extraction, and posting into the GL), and **StockLedger** (perpetual inventory, configurable item codes, QR labels) — plus the shared CDC audit trail, background jobs & webhooks, the platform Document Vault, and Drive folder intake. Five further apps (FP&A Engine, ForecasterPro, UnitEcon, BoardDeck Automator, TaxGuard AI) were built and then **removed in Phase 29** to focus the suite; see [docs/roadmap.md](docs/roadmap.md). **QuickBooks Online sync (Phase 17)** remains unbuilt — deferred, not dropped.
+## Status
+
+One product since Phase 33 (2026-09-25). It was built as three separately chosen apps (LedgerCore, AP-Flow, StockLedger), which are now its accounting, capture (bill inbox) and inventory modules; see [docs/roadmap.md](docs/roadmap.md#phase-33-as-delivered).
 
 | Built | Not built |
 |---|---|
-| Express + TypeScript server, strict compiler config; migrations, auth, tenancy, RBAC, org switching (Phases 0–1) | QuickBooks Online sync (Phase 17, deferred from 9) |
-| App registry + chooser: `GET /api/v1/apps`, `/`, `/app/:appSlug` (Phase 2) | |
-| **LedgerCore (Phases 3–4, 6, 8, 9, 24–26): GL core, live financial statements with fiscal period close/lock, bank reconciliation, multi-currency FX, credit/debit notes, customer & vendor subsidiary ledgers, and a staged chart/opening-balance importer — the balance invariant and immutability enforced by database triggers throughout** | |
-| Onboarding, settings, dashboard, journal register, account ledgers, sales invoicing, accounts payable with settlement (Phases 3.5–3.9) | |
-| The shared CDC audit trail (Phase 5); background jobs, the transactional outbox, and financial-event webhooks (Phase 7) | |
-| Platform onboarding state and LedgerCore's data-migration importer (Phase 9); the platform Document Vault — org-scoped, content-addressed file storage shared across apps (Phase 9.5) | |
-| **AP-Flow (Phases 10–11, 19–19.3): local OCR, PII pixel masking, Claude Vision or Gemini extraction, history-driven COA mapping, dual-model inference with confidence gating, and one-click posting into the GL** | |
-| **StockLedger (28): perpetual inventory with moving-average and specific-identification valuation, configurable item codes with grammar-driven formatting, serial status FSM, and QR label generation** | |
-| React + Vite client: every app's full page set | |
-| 1969+ server tests, 338+ client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
+| Identity, tenancy, RBAC, org switching; one setup wizard | QuickBooks Online sync (Phase 17, deferred) |
+| Accounting: GL, statements, periods, bank reconciliation, multi-currency FX, invoices, bills, payments, credit/debit notes, customer & vendor subsidiary ledgers, staged data import | Lot/serial items and fixed assets on invoice/bill lines, depreciation (Phase 32 step 2) |
+| Bill inbox: local OCR, PII pixel masking, Claude or Gemini extraction, history-first GL coding, review queue, confidence-gated auto-post, Google Drive intake | PDF/XLSX export, emailed documents |
+| Inventory: perpetual valuation posting to the GL, templates, item codes, QR labels | Statutory tax engine (GST/VAT returns) |
+| CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | Deployment (no Dockerfiles yet) |
+| 1610 server tests, 428 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
 Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
 
@@ -47,7 +48,7 @@ cp client/.env.example client/.env
 ./dev.sh                              # postgres :5432, redis :6379, migrations, server, worker, client
 ```
 
-Open http://localhost:5173 — register an organization and you land on the app chooser.
+Open http://localhost:5173 — register an organization and the setup wizard takes you to the dashboard.
 
 Setting up a machine from scratch — installing Node and Docker, generating the token secrets, restoring data? [SETUP.md](SETUP.md) walks through the whole thing.
 
@@ -67,15 +68,16 @@ npm test              # unit + integration
 npm run test:coverage
 ```
 
-Integration tests need the Postgres container running. Every module ships a cross-tenant isolation test from Phase 1 onward, one per app — see [docs/testing.md](docs/testing.md).
+Integration tests need the Postgres container running. Every module ships a cross-tenant isolation test from Phase 1 onward — see [docs/testing.md](docs/testing.md).
 
 ## Layout
 
 ```text
 server/     Express + TypeScript API — controllers / services / routes / middleware / db
-            platform code (auth, organizations, apps) is unprefixed; each app's
-            code nests under an <app-slug>/ subfolder in every layer
-client/     React + Vite frontend — same platform-vs-app split under Pages/
+            platform code (auth, organizations, onboarding) is unprefixed; each
+            module's code nests under accounting/, capture/ or inventory/ in every layer
+client/     React + Vite frontend — one shell, one route table (src/routes/),
+            pages grouped by sidebar section under Pages/
 walkthrough/ Phase 6.1's demo scenario — human-readable JSON/CSV, manually enterable;
             used to verify the real services end-to-end
 docs/       Architecture, schema, API, guardrails, roadmap
@@ -86,11 +88,12 @@ study/      Interview-prep notes generated from this project's decisions
 
 | File | Contents |
 |---|---|
-| [docs/roadmap.md](docs/roadmap.md) | Phase order, gates, per-app DB patterns |
-| [docs/ledger-core.md](docs/ledger-core.md) | LedgerCore's full spec and build ladder |
-| [docs/ap-flow.md](docs/ap-flow.md) | AP-Flow's OCR/PII pipeline spec |
+| [docs/roadmap.md](docs/roadmap.md) | Phase order, gates, per-module DB patterns |
+| [docs/accounting.md](docs/accounting.md) | Accounting module spec and build ladder |
+| [docs/capture.md](docs/capture.md) | Bill inbox: the OCR/PII capture pipeline spec |
+| [docs/inventory.md](docs/inventory.md) | Inventory module spec |
 | [docs/guardrails.md](docs/guardrails.md) | The 16 non-negotiable engineering rules |
-| [docs/architecture.md](docs/architecture.md) | Suite structure, tenancy model, RBAC, repository layout |
+| [docs/architecture.md](docs/architecture.md) | Product structure, tenancy model, RBAC, repository layout |
 | [docs/schema.md](docs/schema.md) | Table definitions and constraints |
 | [docs/api.md](docs/api.md) | Route surface and response conventions |
 | [docs/development.md](docs/development.md) | Running the stack, env vars, dependencies |

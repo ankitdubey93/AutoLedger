@@ -232,7 +232,7 @@ Built in Phase 1:
 
 Phase 3:
 
-- `server/src/services/ledger-core/journalService.ts` — the `BEGIN`/`COMMIT` block writing an entry and its lines together, every statement on the checked-out `client`
+- `server/src/services/accounting/journalService.ts` — the `BEGIN`/`COMMIT` block writing an entry and its lines together, every statement on the checked-out `client`
 - `004_ledger-core_journals.sql` — the `DEFERRABLE INITIALLY DEFERRED` constraint trigger, the clearest example in the codebase of work that happens *at* `COMMIT` rather than before it (see [deferred-constraint-triggers.md](deferred-constraint-triggers.md))
 
 Phase 7:
@@ -242,8 +242,8 @@ Phase 7:
 
 Phase 28:
 
-- `server/src/services/stock/movementService.ts` — `lockBalances` (sort → upsert-seed via `ON CONFLICT DO NOTHING` → sorted `FOR UPDATE`), `lockSerials` (the same sorted-lock discipline applied to `stock_serials` rows by id)
-- `server/src/__tests__/stock/movementConcurrency.test.ts` — two opposite-direction transfers fired concurrently, repeatedly, asserting zero `40P01` deadlocks across the run
+- `server/src/services/inventory/movementService.ts` — `lockBalances` (sort → upsert-seed via `ON CONFLICT DO NOTHING` → sorted `FOR UPDATE`), `lockSerials` (the same sorted-lock discipline applied to `stock_serials` rows by id)
+- `server/src/__tests__/inventory/movementConcurrency.test.ts` — two opposite-direction transfers fired concurrently, repeatedly, asserting zero `40P01` deadlocks across the run
 - `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements`'s `COALESCE`-guarded `FULL JOIN`
 
 ## Gotchas

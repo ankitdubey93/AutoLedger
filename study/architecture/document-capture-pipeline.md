@@ -48,9 +48,9 @@ Both `ocr` and `vision` default to the real implementations but can be swapped b
 
 - `server/src/queue/handlers/apFlowExtractHandler.ts` — the orchestration and ordering
 - `server/src/services/redactionService.ts` — steps 3–5 (`rasterize`, `tesseractOcr`, `redactPage`)
-- `server/src/services/ap-flow/extractionService.ts` — step 7 (`extractFromPages`)
-- `server/src/services/ap-flow/apFlowDocumentService.ts` — `loadForProcessing`, `markProcessing`, `savePipelineResult`, `markFailed`
-- `server/src/__tests__/ap-flow/pipeline.test.ts` — case 5 is the acceptance criterion: it captures the exact bytes the stub vision client received and asserts they equal the bytes stored at `redacted_sha256`, never the rasterized original
+- `server/src/services/capture/extractionService.ts` — step 7 (`extractFromPages`)
+- `server/src/services/capture/captureDocumentService.ts` — `loadForProcessing`, `markProcessing`, `savePipelineResult`, `markFailed`
+- `server/src/__tests__/capture/pipeline.test.ts` — case 5 is the acceptance criterion: it captures the exact bytes the stub vision client received and asserts they equal the bytes stored at `redacted_sha256`, never the rasterized original
 
 ## Gotchas
 

@@ -37,11 +37,11 @@ The reverse direction works identically: StockLedger's `createItem` calls Ledger
 
 ## Where it lives in this codebase
 
-- `server/src/services/stock/documentStockService.ts` — the only StockLedger module LedgerCore imports
-- `server/src/services/ledger-core/billService.ts` (`approveBillOnClient`, `voidBill`) and `invoiceService.ts` (`issueInvoice`, `voidInvoice`) — callers
-- `server/src/services/ledger-core/itemService.ts` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`) — StockLedger calling back the other way
-- `server/src/services/stock/movementService.ts` — the `*OnClient` cores behind thin `withTransaction` wrappers
-- `server/src/__tests__/stock/documentConcurrency.test.ts` — a last-unit race and opposite line orders, run repeatedly
+- `server/src/services/inventory/documentStockService.ts` — the only StockLedger module LedgerCore imports
+- `server/src/services/accounting/billService.ts` (`approveBillOnClient`, `voidBill`) and `invoiceService.ts` (`issueInvoice`, `voidInvoice`) — callers
+- `server/src/services/accounting/itemService.ts` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`) — StockLedger calling back the other way
+- `server/src/services/inventory/movementService.ts` — the `*OnClient` cores behind thin `withTransaction` wrappers
+- `server/src/__tests__/inventory/documentConcurrency.test.ts` — a last-unit race and opposite line orders, run repeatedly
 
 ## Gotchas
 
