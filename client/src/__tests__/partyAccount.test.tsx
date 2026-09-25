@@ -9,7 +9,7 @@ import type { Customer, PartyLedger, PartyOpenItems } from '../services/fetchSer
  * Customer and vendor accounts (Phase 25). The page reads the base currency
  * from OrgContext and everything else from fetchServices, so OrgContext is
  * mocked to a fixed organization rather than standing up the auth/org
- * provider tree — the same fetch-stub approach every other LedgerCore page
+ * provider tree — the same fetch-stub approach every other Accounting page
  * test uses for the data.
  */
 
@@ -120,11 +120,11 @@ function renderParty(kind: 'CUSTOMER' | 'VENDOR', path: string) {
 describe('PartyAccountPage', () => {
   it('renders the balance and overdue tiles from open items', async () => {
     mockRoutes({
-      '/ledger-core/customers/cust-1/ledger': {
+      '/api/v1/customers/cust-1/ledger': {
         status: 200,
         body: { success: true, count: 2, currentPage: 1, totalPages: 1, ...customerLedger() },
       },
-      '/ledger-core/customers/cust-1/open-items': { status: 200, body: { success: true, ...customerOpenItems() } },
+      '/api/v1/customers/cust-1/open-items': { status: 200, body: { success: true, ...customerOpenItems() } },
     });
 
     renderParty('CUSTOMER', '/customers/cust-1');
@@ -137,11 +137,11 @@ describe('PartyAccountPage', () => {
 
   it('a payment row shows "applied to INV-0001" linking to the invoice', async () => {
     mockRoutes({
-      '/ledger-core/customers/cust-1/ledger': {
+      '/api/v1/customers/cust-1/ledger': {
         status: 200,
         body: { success: true, count: 2, currentPage: 1, totalPages: 1, ...customerLedger() },
       },
-      '/ledger-core/customers/cust-1/open-items': { status: 200, body: { success: true, ...customerOpenItems() } },
+      '/api/v1/customers/cust-1/open-items': { status: 200, body: { success: true, ...customerOpenItems() } },
     });
 
     renderParty('CUSTOMER', '/customers/cust-1');
@@ -153,7 +153,7 @@ describe('PartyAccountPage', () => {
 
   it('a vendor bill row is labelled "Expense" and links to the expense page', async () => {
     mockRoutes({
-      '/ledger-core/vendors/ven-1/ledger': {
+      '/api/v1/vendors/ven-1/ledger': {
         status: 200,
         body: {
           success: true,
@@ -180,7 +180,7 @@ describe('PartyAccountPage', () => {
           }),
         },
       },
-      '/ledger-core/vendors/ven-1/open-items': {
+      '/api/v1/vendors/ven-1/open-items': {
         status: 200,
         body: {
           success: true,
@@ -202,8 +202,8 @@ describe('PartyAccountPage', () => {
 
   it('a 404 renders "Customer not found"', async () => {
     mockRoutes({
-      '/ledger-core/customers/missing/ledger': { status: 404, body: { success: false, error: 'Customer not found' } },
-      '/ledger-core/customers/missing/open-items': {
+      '/api/v1/customers/missing/ledger': { status: 404, body: { success: false, error: 'Customer not found' } },
+      '/api/v1/customers/missing/open-items': {
         status: 404,
         body: { success: false, error: 'Customer not found' },
       },
@@ -241,7 +241,7 @@ function renderCustomersPage() {
 describe('CustomersPage — party account links and balances', () => {
   it('the name links to the customer account and shows the balance from AR aging', async () => {
     mockRoutes({
-      '/ledger-core/reports/ar-aging': {
+      '/api/v1/reports/ar-aging': {
         status: 200,
         body: {
           success: true,
@@ -266,7 +266,7 @@ describe('CustomersPage — party account links and balances', () => {
           ],
         },
       },
-      '/ledger-core/customers': { status: 200, body: { success: true, count: 1, customers: [customer1] } },
+      '/api/v1/customers': { status: 200, body: { success: true, count: 1, customers: [customer1] } },
     });
 
     renderCustomersPage();
@@ -278,8 +278,8 @@ describe('CustomersPage — party account links and balances', () => {
 
   it('an aging failure still renders the list, with "—" for the balance', async () => {
     mockRoutes({
-      '/ledger-core/reports/ar-aging': { status: 500, body: { success: false, error: 'boom' } },
-      '/ledger-core/customers': { status: 200, body: { success: true, count: 1, customers: [customer1] } },
+      '/api/v1/reports/ar-aging': { status: 500, body: { success: false, error: 'boom' } },
+      '/api/v1/customers': { status: 200, body: { success: true, count: 1, customers: [customer1] } },
     });
 
     renderCustomersPage();

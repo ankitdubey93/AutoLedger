@@ -18,8 +18,8 @@ import { inputClass, primaryButtonClass } from '../../components/ui/formClasses'
 
 /**
  * Phase 30 — the Financial tab: fiscal year, books start date and the default
- * posting accounts. Every field here is LedgerCore's own, so the whole tab is
- * one `PATCH /ledger-core/settings`.
+ * posting accounts. Every field here is Accounting's own, so the whole tab is
+ * one `PATCH /settings`.
  *
  * The financial year END is never stored. `fiscalYearBounds` derives it from
  * the start month/day, which is the single source of truth — the read-only

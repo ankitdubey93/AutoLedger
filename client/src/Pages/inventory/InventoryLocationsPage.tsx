@@ -17,7 +17,7 @@ const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2
 const NESTED_KINDS: readonly StockLocationKind[] = ['ZONE', 'BIN'];
 
 /**
- * StockLedger's location hierarchy: warehouse/store/site at the top, zone
+ * Inventory's location hierarchy: warehouse/store/site at the top, zone
  * and bin nested inside. The kind select is limited to what the server
  * would accept for the chosen parent (guardrails rule 16's client-side
  * counterpart of `locationService.createLocation`'s own check).

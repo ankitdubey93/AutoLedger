@@ -60,7 +60,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockAccountsRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/accounts/balances')) {
+    if (url.includes('/api/v1/accounts/balances')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -74,7 +74,7 @@ function mockAccountsRoutes() {
         }),
       );
     }
-    if (url.includes('/ledger-core/accounts?tree=true')) {
+    if (url.includes('/api/v1/accounts?tree=true')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 3, accounts: [headerNode] }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -93,10 +93,10 @@ afterEach(() => {
 function mockEmptyAccountsRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/accounts/balances')) {
+    if (url.includes('/api/v1/accounts/balances')) {
       return Promise.resolve(jsonResponse(200, { success: true, asOf: null, count: 0, balances: [] }));
     }
-    if (url.includes('/ledger-core/accounts?tree=true')) {
+    if (url.includes('/api/v1/accounts?tree=true')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, accounts: [] }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -121,10 +121,10 @@ function mockAccountsRoutesWithCreate(create: { status: number; body: unknown })
   let treeCallCount = 0;
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/accounts')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(create.status, create.body));
     }
-    if (url.includes('/ledger-core/accounts/balances')) {
+    if (url.includes('/api/v1/accounts/balances')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -138,7 +138,7 @@ function mockAccountsRoutesWithCreate(create: { status: number; body: unknown })
         }),
       );
     }
-    if (url.includes('/ledger-core/accounts?tree=true')) {
+    if (url.includes('/api/v1/accounts?tree=true')) {
       treeCallCount += 1;
       if (treeCallCount === 1) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 3, accounts: [headerNode] }));
@@ -230,7 +230,7 @@ describe('AccountsPage', () => {
     const createCall = fetchMock.mock.calls.find((call) => {
       const [input, init] = call as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/ledger-core/accounts');
+      return init?.method === 'POST' && url.includes('/api/v1/accounts');
     });
     expect(createCall).toBeDefined();
     const body = JSON.parse((createCall as [RequestInfo | URL, RequestInit])[1].body as string) as unknown;

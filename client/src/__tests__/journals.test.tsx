@@ -89,7 +89,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockRegisterRoutes(entries: JournalEntry[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/journals')) {
+    if (url.includes('/api/v1/journals')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -101,7 +101,7 @@ function mockRegisterRoutes(entries: JournalEntry[]) {
         }),
       );
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
       );
@@ -116,7 +116,7 @@ function mockRegisterWithReverse(entries: JournalEntry[], reversalEntry: Journal
     if (init?.method === 'POST' && url.includes('/reverse')) {
       return Promise.resolve(jsonResponse(200, { success: true, entry: reversalEntry }));
     }
-    if (url.includes('/ledger-core/journals')) {
+    if (url.includes('/api/v1/journals')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -128,7 +128,7 @@ function mockRegisterWithReverse(entries: JournalEntry[], reversalEntry: Journal
         }),
       );
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
       );
@@ -140,7 +140,7 @@ function mockRegisterWithReverse(entries: JournalEntry[], reversalEntry: Journal
 function mockDetailRoute(entry: JournalEntry) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.endsWith(`/ledger-core/journals/${entry.id}`)) {
+    if (url.endsWith(`/api/v1/journals/${entry.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, entry }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -354,10 +354,10 @@ describe('JournalsPage', () => {
 function mockNewEntryRoutes(copiedEntry: JournalEntry) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.endsWith(`/ledger-core/journals/${copiedEntry.id}`)) {
+    if (url.endsWith(`/api/v1/journals/${copiedEntry.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, entry: copiedEntry }));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
       );

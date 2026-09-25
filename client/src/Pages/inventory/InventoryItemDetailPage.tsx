@@ -28,7 +28,7 @@ import {
  * One item, in full: its custom fields (editable), where it's on hand,
  * its lots or serials depending on tracking mode, and its movement
  * history. Serial rows expose only the FSM transitions actually available
- * from their current status (`types/stock.ts`'s `canTransitionSerial` on
+ * from their current status (`types/inventory.ts`'s `canTransitionSerial` on
  * the server; this mirrors it for which buttons to show, not to enforce —
  * the server is still the one source of truth).
  */

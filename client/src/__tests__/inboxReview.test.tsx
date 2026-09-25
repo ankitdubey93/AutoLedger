@@ -6,12 +6,12 @@ import InboxReviewPage from '../Pages/inbox/InboxReviewPage';
 import InboxDocumentPage from '../Pages/inbox/InboxDocumentPage';
 import type {
   Account,
-  ApFlowDocumentDetail,
-  ApFlowReviewQueueEntry,
+  CaptureDocumentDetail,
+  CaptureReviewQueueEntry,
 } from '../services/fetchServices';
 
 /**
- * AP-Flow's Phase 11 review queue and side-by-side review: the queue's
+ * Capture's Phase 11 review queue and side-by-side review: the queue's
  * ordering signals, per-line account override, and the gated post button.
  */
 
@@ -19,7 +19,7 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function reviewEntry(overrides: Partial<ApFlowReviewQueueEntry> = {}): ApFlowReviewQueueEntry {
+function reviewEntry(overrides: Partial<CaptureReviewQueueEntry> = {}): CaptureReviewQueueEntry {
   return {
     id: 'ap-doc-1',
     documentId: 'ap-doc-1',
@@ -55,7 +55,7 @@ function account(overrides: Partial<Account> = {}): Account {
   };
 }
 
-function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDetail {
+function detail(overrides: Partial<CaptureDocumentDetail> = {}): CaptureDocumentDetail {
   return {
     id: 'ap-doc-1',
     documentId: 'vault-doc-1',
@@ -125,10 +125,10 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockReviewQueueRoutes(entries: ApFlowReviewQueueEntry[]) {
+function mockReviewQueueRoutes(entries: CaptureReviewQueueEntry[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ap-flow/review-queue')) {
+    if (url.includes('/api/v1/capture/review-queue')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -191,7 +191,7 @@ describe('InboxReviewPage', () => {
 });
 
 function mockDetailRoutes(
-  document: ApFlowDocumentDetail,
+  document: CaptureDocumentDetail,
   options: { accounts?: Account[]; postStatus?: number; patchStatus?: number } = {},
 ) {
   const accounts = options.accounts ?? [account()];
@@ -221,10 +221,10 @@ function mockDetailRoutes(
       };
       return Promise.resolve(jsonResponse(status, { success: true, document: currentDocument }));
     }
-    if (method === 'GET' && url.includes('/ledger-core/accounts')) {
+    if (method === 'GET' && url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: accounts.length, accounts }));
     }
-    if (method === 'GET' && /\/ap-flow\/documents\/[^/]+$/.test(url)) {
+    if (method === 'GET' && /\/capture\/documents\/[^/]+$/.test(url)) {
       return Promise.resolve(jsonResponse(200, { success: true, document: currentDocument }));
     }
     if (method === 'GET' && url.includes('/pages/')) {
@@ -252,7 +252,7 @@ describe('InboxDocumentPage — Phase 11 review', () => {
     await screen.findByText('Redacted preview — this is the image sent to the model');
   });
 
-  it("calling the account select fires updateApFlowLineItem", async () => {
+  it("calling the account select fires updateCaptureLineItem", async () => {
     mockDetailRoutes(detail());
     const user = userEvent.setup();
     renderDetail('ap-doc-1');

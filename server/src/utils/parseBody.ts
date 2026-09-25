@@ -5,7 +5,7 @@ import { ApiError } from './apiError.js';
  * The bridge between zod and this codebase's one client-visible error type.
  *
  * Phase 1's routes take flat objects of five scalars, which the hand-rolled
- * `utils/validate.ts` covers clearly. LedgerCore's journal entries take a nested
+ * `utils/validate.ts` covers clearly. Accounting's journal entries take a nested
  * `lines[]` array with cross-field rules ("exactly one of debit or credit"),
  * which is the revisit trigger recorded in docs/development.md. Both coexist
  * deliberately: this is an addition, not a rewrite of the auth routes.

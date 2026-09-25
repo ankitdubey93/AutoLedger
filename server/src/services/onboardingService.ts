@@ -2,11 +2,11 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
 import { withTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
-import { APPS } from '../config/apps.js';
 import {
   canTransitionOnboarding,
   isOnboardingStatus,
   type OnboardingChecklistItem,
+  ONBOARDING_TASKS,
   type OnboardingSlug,
   type OnboardingState,
   type OnboardingStatus,
@@ -18,7 +18,7 @@ import {
  * Every function takes `orgId` first and every statement carries an
  * `org_id` predicate (guardrails rule 1). `orgId` always originates from the
  * verified access token, never from a route param, header or body — the
- * `:appSlug` segment is a routing target, not a tenancy boundary (rule 16).
+ * `:module` segment is a routing target, not a tenancy boundary (rule 16).
  *
  * Every write is an upsert (`ON CONFLICT (org_id, app_slug) DO UPDATE`), so a
  * double submit from a flaky client is harmless — there is never a 409 for
@@ -43,7 +43,7 @@ function toState(row: StateRow): OnboardingState {
     throw new Error(`Unknown onboarding status "${row.status}" for app ${row.app_slug}`);
   }
   return {
-    appSlug: row.app_slug as OnboardingSlug,
+    module: row.app_slug as OnboardingSlug,
     status: row.status,
     currentStep: row.current_step,
     draft: row.draft,
@@ -54,9 +54,9 @@ function toState(row: StateRow): OnboardingState {
 }
 
 /** The state of an app that has never had a row written — never a 404. */
-function notStarted(appSlug: OnboardingSlug): OnboardingState {
+function notStarted(module: OnboardingSlug): OnboardingState {
   return {
-    appSlug,
+    module,
     status: 'NOT_STARTED',
     currentStep: null,
     draft: {},
@@ -69,41 +69,33 @@ function notStarted(appSlug: OnboardingSlug): OnboardingState {
 const STATE_SELECT =
   'SELECT app_slug, status, current_step, draft, completed_at, skipped_at, updated_at FROM onboarding_states';
 
-/** One item per app in APPS, plus 'platform'. A missing row reads as NOT_STARTED. */
+/** One item per setup task, in ONBOARDING_TASKS order. A missing row reads as NOT_STARTED. */
 export async function getChecklist(orgId: string): Promise<OnboardingChecklistItem[]> {
   const { rows } = await pool.query<StateRow>(`${STATE_SELECT} WHERE org_id = $1`, [orgId]);
-  const byslug = new Map(rows.map((row) => [row.app_slug, toState(row)]));
+  const byModule = new Map(rows.map((row) => [row.app_slug, row]));
 
-  // 'platform' is the suite-level wizard: since Phase 27 that is the app
-  // picker at /welcome (organizationAppService.setOrganizationApps completes
-  // this row). SetupChecklist lists only enabled apps, so the 'platform'
-  // item never renders as an "/app/platform/onboarding" link.
-  const slugs: { slug: OnboardingSlug; name: string; status: 'building' | 'planned' }[] = [
-    ...APPS.map((app) => ({ slug: app.slug, name: app.name, status: app.status })),
-    { slug: 'platform', name: 'AutoLedger', status: 'building' },
-  ];
-
-  return slugs.map(({ slug, name, status }) => {
-    const state = byslug.get(slug) ?? notStarted(slug);
-    return { ...state, appName: name, appStatus: status };
+  return ONBOARDING_TASKS.map((task) => {
+    const row = byModule.get(task.module);
+    const state = row === undefined ? notStarted(task.module) : toState(row);
+    return { ...state, label: task.label, optional: task.optional };
   });
 }
 
 /** A missing row reads as a NOT_STARTED state with an empty draft — never a 404. */
-export async function getState(orgId: string, appSlug: OnboardingSlug): Promise<OnboardingState> {
+export async function getState(orgId: string, module: OnboardingSlug): Promise<OnboardingState> {
   const { rows } = await pool.query<StateRow>(`${STATE_SELECT} WHERE org_id = $1 AND app_slug = $2`, [
     orgId,
-    appSlug,
+    module,
   ]);
   const row = rows[0];
-  return row === undefined ? notStarted(appSlug) : toState(row);
+  return row === undefined ? notStarted(module) : toState(row);
 }
 
 /** Reads the current status for one org/app, defaulting to NOT_STARTED when no row exists. */
-async function currentStatus(q: Queryable, orgId: string, appSlug: OnboardingSlug): Promise<OnboardingStatus> {
+async function currentStatus(q: Queryable, orgId: string, module: OnboardingSlug): Promise<OnboardingStatus> {
   const { rows } = await q.query<{ status: string }>(
     'SELECT status FROM onboarding_states WHERE org_id = $1 AND app_slug = $2',
-    [orgId, appSlug],
+    [orgId, module],
   );
   const status = rows[0]?.status;
   if (status === undefined) return 'NOT_STARTED';
@@ -126,11 +118,11 @@ function assertTransition(from: OnboardingStatus, to: OnboardingStatus): void {
 /** Upsert. Moves NOT_STARTED/SKIPPED/COMPLETED -> IN_PROGRESS and stores the step + draft. */
 export async function saveDraft(
   orgId: string,
-  appSlug: OnboardingSlug,
+  module: OnboardingSlug,
   input: { currentStep: string | null; draft: Record<string, unknown> },
 ): Promise<OnboardingState> {
   return withTransaction(async (client) => {
-    const from = await currentStatus(client, orgId, appSlug);
+    const from = await currentStatus(client, orgId, module);
     assertTransition(from, 'IN_PROGRESS');
 
     const { rows } = await client.query<StateRow>(
@@ -141,7 +133,7 @@ export async function saveDraft(
          current_step = EXCLUDED.current_step,
          draft = EXCLUDED.draft
        RETURNING app_slug, status, current_step, draft, completed_at, skipped_at, updated_at`,
-      [orgId, appSlug, input.currentStep, JSON.stringify(input.draft)],
+      [orgId, module, input.currentStep, JSON.stringify(input.draft)],
     );
     const row = rows[0];
     if (row === undefined) throw new Error('no onboarding row after upsert');
@@ -150,9 +142,9 @@ export async function saveDraft(
 }
 
 /** Upsert to SKIPPED, stamping skipped_at = now(). The draft is preserved, never cleared. */
-export async function skip(orgId: string, appSlug: OnboardingSlug): Promise<OnboardingState> {
+export async function skip(orgId: string, module: OnboardingSlug): Promise<OnboardingState> {
   return withTransaction(async (client) => {
-    const from = await currentStatus(client, orgId, appSlug);
+    const from = await currentStatus(client, orgId, module);
     assertTransition(from, 'SKIPPED');
 
     const { rows } = await client.query<StateRow>(
@@ -162,7 +154,7 @@ export async function skip(orgId: string, appSlug: OnboardingSlug): Promise<Onbo
          status = 'SKIPPED',
          skipped_at = now()
        RETURNING app_slug, status, current_step, draft, completed_at, skipped_at, updated_at`,
-      [orgId, appSlug],
+      [orgId, module],
     );
     const row = rows[0];
     if (row === undefined) throw new Error('no onboarding row after upsert');
@@ -171,9 +163,9 @@ export async function skip(orgId: string, appSlug: OnboardingSlug): Promise<Onbo
 }
 
 /** Upsert to IN_PROGRESS, clearing skipped_at. Legal from SKIPPED and from COMPLETED. */
-export async function resume(orgId: string, appSlug: OnboardingSlug): Promise<OnboardingState> {
+export async function resume(orgId: string, module: OnboardingSlug): Promise<OnboardingState> {
   return withTransaction(async (client) => {
-    const from = await currentStatus(client, orgId, appSlug);
+    const from = await currentStatus(client, orgId, module);
     assertTransition(from, 'IN_PROGRESS');
 
     const { rows } = await client.query<StateRow>(
@@ -183,7 +175,7 @@ export async function resume(orgId: string, appSlug: OnboardingSlug): Promise<On
          status = 'IN_PROGRESS',
          skipped_at = NULL
        RETURNING app_slug, status, current_step, draft, completed_at, skipped_at, updated_at`,
-      [orgId, appSlug],
+      [orgId, module],
     );
     const row = rows[0];
     if (row === undefined) throw new Error('no onboarding row after upsert');
@@ -194,7 +186,7 @@ export async function resume(orgId: string, appSlug: OnboardingSlug): Promise<On
 /**
  * Marks one app's row COMPLETED on a caller-supplied, already-open transaction
  * client. Runs no BEGIN/COMMIT/ROLLBACK — the caller owns the transaction, so
- * LedgerCore's wizard completion and this row commit together (rule 5).
+ * Accounting's wizard completion and this row commit together (rule 5).
  *
  * No transition check: completion is always legal from every state (an app
  * may be re-onboarded any number of times).
@@ -202,7 +194,7 @@ export async function resume(orgId: string, appSlug: OnboardingSlug): Promise<On
 export async function markCompletedOnClient(
   client: PoolClient,
   orgId: string,
-  appSlug: OnboardingSlug,
+  module: OnboardingSlug,
 ): Promise<void> {
   await client.query(
     `INSERT INTO onboarding_states (org_id, app_slug, status, completed_at, skipped_at)
@@ -211,6 +203,6 @@ export async function markCompletedOnClient(
        status = 'COMPLETED',
        completed_at = now(),
        skipped_at = NULL`,
-    [orgId, appSlug],
+    [orgId, module],
   );
 }

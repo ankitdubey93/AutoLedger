@@ -37,7 +37,7 @@ function docWithLinks(overrides: Partial<VaultDocument> = {}, linkId = 'link-1')
       {
         id: linkId,
         documentId: document.id,
-        appSlug: APP_SLUG,
+        module: APP_SLUG,
         entityType: ENTITY_TYPE,
         entityId: ENTITY_ID,
         createdBy: 'user-1',
@@ -100,7 +100,7 @@ function mockRoutes(options: {
           link: {
             id: 'link-1',
             documentId: 'doc-1',
-            appSlug: APP_SLUG,
+            module: APP_SLUG,
             entityType: ENTITY_TYPE,
             entityId: ENTITY_ID,
             createdBy: 'user-1',
@@ -123,7 +123,7 @@ function makePdfFile(): File {
 
 function renderPanel(readOnly = false) {
   return render(
-    <AttachmentsPanel appSlug={APP_SLUG} entityType={ENTITY_TYPE} entityId={ENTITY_ID} readOnly={readOnly} />,
+    <AttachmentsPanel module={APP_SLUG} entityType={ENTITY_TYPE} entityId={ENTITY_ID} readOnly={readOnly} />,
   );
 }
 

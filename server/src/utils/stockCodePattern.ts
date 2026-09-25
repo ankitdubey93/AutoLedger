@@ -1,5 +1,5 @@
 /**
- * StockLedger (Phase 28) — the item-code pattern engine. A pure function of
+ * Inventory (Phase 28) — the item-code pattern engine. A pure function of
  * its arguments: no database import, no `ApiError`, no I/O. It returns
  * results and never throws, mirroring `utils/uniteconPvm.ts` and
  * `utils/forecasterBuild.ts`.

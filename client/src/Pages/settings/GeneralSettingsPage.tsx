@@ -14,8 +14,8 @@ import { inputClass, primaryButtonClass } from '../../components/ui/formClasses'
  * collects. The fiscal-year controls moved to the Financial tab in Phase 30.
  *
  * Two calls on save, not one: organization name and base currency are
- * platform fields (`PATCH /organizations`), while the rest are LedgerCore's
- * own (`PATCH /ledger-core/settings`) — see docs/architecture.md's
+ * platform fields (`PATCH /organizations`), while the rest are Accounting's
+ * own (`PATCH /settings`) — see docs/architecture.md's
  * platform/app split.
  *
  * `AuthContext` has no setter for "just the organization" — only
@@ -23,7 +23,7 @@ import { inputClass, primaryButtonClass } from '../../components/ui/formClasses'
  * `refreshNow()` re-issues the session through the existing
  * `POST /auth/refresh` round trip, which rebuilds it from the database and
  * therefore picks up the renamed organization. `applySettings` updates the
- * LedgerCore-owned fields in place, no round trip needed.
+ * Accounting-owned fields in place, no round trip needed.
  */
 
 const CURRENCIES = [

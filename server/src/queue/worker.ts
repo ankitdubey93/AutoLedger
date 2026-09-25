@@ -4,7 +4,7 @@ import { enqueue, closeQueues, queues } from './queues.js';
 import { handleIntegrityCheck } from './handlers/integrityCheckHandler.js';
 import { handleOutboxDrain } from './handlers/outboxDrainHandler.js';
 import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
-import { handleApFlowExtract } from './handlers/apFlowExtractHandler.js';
+import { handleCaptureExtract } from './handlers/captureExtractHandler.js';
 import { handleIntegrationDriveSweep } from './handlers/integrationDriveSweepHandler.js';
 import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
@@ -27,7 +27,7 @@ const HANDLERS: {
   'integrity-check': handleIntegrityCheck,
   'outbox-drain': handleOutboxDrain,
   'webhook-deliver': handleWebhookDeliver,
-  'ap-flow-extract': handleApFlowExtract,
+  'capture-extract': handleCaptureExtract,
   'integration-drive-sweep': handleIntegrationDriveSweep,
   'integration-drive-sync': handleIntegrationDriveSync,
 };
@@ -116,7 +116,7 @@ export async function startWorkers(): Promise<void> {
   );
 
   // Phase 19.3 — 19.2's scheduler lives in Redis independently of this code,
-  // under the queue name Drive intake used before it moved off AP-Flow. A
+  // under the queue name Drive intake used before it moved off Capture. A
   // rename of QUEUE_NAMES does not touch what is already sitting in Redis:
   // without this, 'ap-flow-drive-sweep-tick' would keep firing forever
   // against a queue no worker consumes. Removing it by id is idempotent — a

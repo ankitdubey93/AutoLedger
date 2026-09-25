@@ -213,59 +213,10 @@ export function listMembers(signal?: AbortSignal): Promise<{
   return apiFetch('/organizations/members', { signal: signal ?? null });
 }
 
-/* --------------------------------------------------------------------- apps */
-
-/** Mirrors server/src/types/apps.ts. */
-export type AppStatus = 'building' | 'planned';
-
-export interface AppSummary {
-  slug: string;
-  name: string;
-  domain: string;
-  tagline: string;
-  skills: string[];
-  status: AppStatus;
-  /** Slugs of apps this one needs — choosing it requires choosing those. */
-  requires: string[];
-}
-
-/** GET /apps — the suite's app registry, shown on the chooser. */
-export function listApps(signal?: AbortSignal): Promise<{
-  success: boolean;
-  count: number;
-  apps: AppSummary[];
-}> {
-  return apiFetch('/apps', { signal: signal ?? null });
-}
-
-/** Mirrors server/src/types/apps.ts's OrganizationAppEntry. */
-export interface OrganizationAppEntry extends AppSummary {
-  enabled: boolean;
-  enabledAt: string | null;
-}
-
-export interface OrganizationAppsResponse {
-  success: boolean;
-  /** null = this organization has never chosen its apps (send it to /welcome). */
-  selectionCompletedAt: string | null;
-  count: number;
-  apps: OrganizationAppEntry[];
-}
-
-/** GET /organizations/apps — any member. */
-export function getOrganizationApps(signal?: AbortSignal): Promise<OrganizationAppsResponse> {
-  return apiFetch('/organizations/apps', { signal: signal ?? null });
-}
-
-/** PUT /organizations/apps — OWNER/ADMIN; replaces the whole set. */
-export function setOrganizationApps(appSlugs: string[]): Promise<OrganizationAppsResponse> {
-  return apiFetch('/organizations/apps', { method: 'PUT', body: JSON.stringify({ appSlugs }) });
-}
-
-/* -------------------------------------------------------------- ledger-core */
+/* -------------------------------------------------------------- accounting */
 
 /**
- * Mirrors server/src/types/ledger-core.ts, hand-written rather than imported.
+ * Mirrors server/src/types/accounting.ts, hand-written rather than imported.
  * The two packages build independently, so the server's types are not reachable
  * from here — the same reason `AppSummary` above is mirrored.
  *
@@ -332,25 +283,25 @@ export interface TrialBalanceRow {
   netBalanceCents: number;
 }
 
-/** GET /ledger-core/accounts — the flat chart, ordered by code. */
+/** GET /accounts — the flat chart, ordered by code. */
 export function listAccounts(signal?: AbortSignal): Promise<{
   success: boolean;
   count: number;
   accounts: Account[];
 }> {
-  return apiFetch('/ledger-core/accounts', { signal: signal ?? null });
+  return apiFetch('/accounts', { signal: signal ?? null });
 }
 
-/** GET /ledger-core/accounts?tree=true — the same chart, nested by parentId. */
+/** GET /accounts?tree=true — the same chart, nested by parentId. */
 export function listAccountTree(signal?: AbortSignal): Promise<{
   success: boolean;
   count: number;
   accounts: AccountNode[];
 }> {
-  return apiFetch('/ledger-core/accounts?tree=true', { signal: signal ?? null });
+  return apiFetch('/accounts?tree=true', { signal: signal ?? null });
 }
 
-/** Mirrors server/src/schemas/ledger-core/accountSchema.ts's createAccountSchema. */
+/** Mirrors server/src/schemas/accounting/accountSchema.ts's createAccountSchema. */
 export interface CreateAccountInput {
   code: string;
   name: string;
@@ -361,7 +312,7 @@ export interface CreateAccountInput {
 }
 
 /**
- * POST /ledger-core/accounts — OWNER, ADMIN or ACCOUNTANT.
+ * POST /accounts — OWNER, ADMIN or ACCOUNTANT.
  *
  * Documented failure paths (docs/api.md): 409 Account code already exists ·
  * 422 Parent account not found · 422 Parent account must have the same type.
@@ -369,11 +320,11 @@ export interface CreateAccountInput {
 export function createAccount(
   input: CreateAccountInput,
 ): Promise<{ success: boolean; account: Account }> {
-  return apiFetch('/ledger-core/accounts', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/accounts', { method: 'POST', body: JSON.stringify(input) });
 }
 
 /**
- * Mirrors server/src/schemas/ledger-core/accountSchema.ts's updateAccountSchema.
+ * Mirrors server/src/schemas/accounting/accountSchema.ts's updateAccountSchema.
  * `code` and `type` are deliberately absent — the server's zod schema forbids
  * both, since re-typing a posted account would restate history. Retire an
  * account with `isActive: false` and create a replacement instead.
@@ -385,15 +336,15 @@ export interface UpdateAccountInput {
   parentId?: string | null;
 }
 
-/** PATCH /ledger-core/accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
+/** PATCH /accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
 export function updateAccount(
   id: string,
   input: UpdateAccountInput,
 ): Promise<{ success: boolean; account: Account }> {
-  return apiFetch(`/ledger-core/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/accounts/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AccountLedgerRow. */
+/** Mirrors server/src/types/accounting.ts's AccountLedgerRow. */
 export interface AccountLedgerRow {
   lineId: string;
   entryId: string;
@@ -409,7 +360,7 @@ export interface AccountLedgerRow {
   counterparts: string[];
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AccountLedger. */
+/** Mirrors server/src/types/accounting.ts's AccountLedger. */
 export interface AccountLedger {
   account: { id: string; code: string; name: string; type: AccountType };
   from: string | null;
@@ -422,7 +373,7 @@ export interface AccountLedger {
   totalCount: number;
 }
 
-/** GET /ledger-core/accounts/:id/ledger — running balances computed server-side. */
+/** GET /accounts/:id/ledger — running balances computed server-side. */
 export function getAccountLedger(
   accountId: string,
   params: { from?: string; to?: string; page?: number; limit?: number } = {},
@@ -437,23 +388,23 @@ export function getAccountLedger(
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/accounts/${accountId}/ledger${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/accounts/${accountId}/ledger${suffix}`, { signal: signal ?? null });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AccountBalance. */
+/** Mirrors server/src/types/accounting.ts's AccountBalance. */
 export interface AccountBalance {
   accountId: string;
   ownBalanceCents: number;
   rollupBalanceCents: number;
 }
 
-/** GET /ledger-core/accounts/balances — own and subtree-rollup balance per account. */
+/** GET /accounts/balances — own and subtree-rollup balance per account. */
 export function getAccountBalances(
   asOf?: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; asOf: string | null; count: number; balances: AccountBalance[] }> {
   const suffix = asOf === undefined || asOf === '' ? '' : `?asOf=${encodeURIComponent(asOf)}`;
-  return apiFetch(`/ledger-core/accounts/balances${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/accounts/balances${suffix}`, { signal: signal ?? null });
 }
 
 export interface JournalFilters {
@@ -466,7 +417,7 @@ export interface JournalFilters {
   q?: string;
 }
 
-/** GET /ledger-core/journals — paginated, filterable, lines nested. */
+/** GET /journals — paginated, filterable, lines nested. */
 export function listJournals(
   params: JournalFilters = {},
   signal?: AbortSignal,
@@ -489,15 +440,15 @@ export function listJournals(
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/journals${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/journals${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/journals/:id — one entry with its lines and full detail. */
+/** GET /journals/:id — one entry with its lines and full detail. */
 export function getJournal(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; entry: JournalEntry }> {
-  return apiFetch(`/ledger-core/journals/${id}`, { signal: signal ?? null });
+  return apiFetch(`/journals/${id}`, { signal: signal ?? null });
 }
 
 export interface JournalLineInput {
@@ -506,30 +457,30 @@ export interface JournalLineInput {
   creditCents: number;
 }
 
-/** POST /ledger-core/journals — debits must equal credits, in integer cents. */
+/** POST /journals — debits must equal credits, in integer cents. */
 export function createJournal(body: {
   entryDate: string;
   description: string | null;
   lines: JournalLineInput[];
 }): Promise<{ success: boolean; entry: JournalEntry }> {
-  return apiFetch('/ledger-core/journals', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/journals', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /**
- * POST /ledger-core/journals/:id/reverse — the only correction path.
+ * POST /journals/:id/reverse — the only correction path.
  * There is no update and no delete, by design (guardrails rule 6).
  */
 export function reverseJournal(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; entry: JournalEntry }> {
-  return apiFetch(`/ledger-core/journals/${id}/reverse`, {
+  return apiFetch(`/journals/${id}/reverse`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
 }
 
-/** GET /ledger-core/reports/trial-balance — aggregated from raw lines each call. */
+/** GET /reports/trial-balance — aggregated from raw lines each call. */
 export function getTrialBalance(
   asOf: string | null = null,
   signal?: AbortSignal,
@@ -543,19 +494,19 @@ export function getTrialBalance(
   rows: TrialBalanceRow[];
 }> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
-  return apiFetch(`/ledger-core/reports/trial-balance${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/reports/trial-balance${suffix}`, { signal: signal ?? null });
 }
 
-/* ------------------------------------------------- ledger-core: settings & dashboard */
+/* ------------------------------------------------- accounting: settings & dashboard */
 
-/** Mirrors server/src/types/ledger-core.ts's FiscalYearWindow. */
+/** Mirrors server/src/types/accounting.ts's FiscalYearWindow. */
 export interface FiscalYearWindow {
   startDate: string;
   endDate: string;
   label: string;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's LedgerSettings. */
+/** Mirrors server/src/types/accounting.ts's LedgerSettings. */
 export interface LedgerSettings {
   organizationName: string;
   legalName: string | null;
@@ -577,7 +528,7 @@ export interface LedgerSettings {
   unrealizedFxAccountId: string | null;
 }
 
-/** Mirrors server/src/services/ledger-core/settingsService.ts's OnboardingInput. */
+/** Mirrors server/src/services/accounting/settingsService.ts's OnboardingInput. */
 export interface OnboardingInput {
   organizationName: string;
   legalName: string | null;
@@ -591,9 +542,9 @@ export interface OnboardingInput {
 }
 
 /**
- * The body PATCH /ledger-core/settings accepts: every onboarding field, plus the
+ * The body PATCH /settings accepts: every onboarding field, plus the
  * three Phase 8 FX posting accounts the wizard never collects
- * (server/src/schemas/ledger-core/settingsSchema.ts).
+ * (server/src/schemas/accounting/settingsSchema.ts).
  */
 export type LedgerSettingsPatch = Partial<OnboardingInput> & {
   realizedFxGainAccountId?: string | null;
@@ -601,40 +552,40 @@ export type LedgerSettingsPatch = Partial<OnboardingInput> & {
   unrealizedFxAccountId?: string | null;
 };
 
-/** GET /ledger-core/settings — a missing settings row means "not yet onboarded", not a 404. */
+/** GET /settings — a missing settings row means "not yet onboarded", not a 404. */
 export async function getLedgerSettings(signal?: AbortSignal): Promise<LedgerSettings> {
-  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings', {
     signal: signal ?? null,
   });
   return body.settings;
 }
 
-/** POST /ledger-core/settings/onboarding — idempotent; re-submitting overwrites, never 409s. */
+/** POST /settings/onboarding — idempotent; re-submitting overwrites, never 409s. */
 export async function completeLedgerOnboarding(input: OnboardingInput): Promise<LedgerSettings> {
   const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>(
-    '/ledger-core/settings/onboarding',
+    '/settings/onboarding',
     { method: 'POST', body: JSON.stringify(input) },
   );
   return body.settings;
 }
 
-/** PATCH /ledger-core/settings — refused with 409 until onboarding has completed once. */
+/** PATCH /settings — refused with 409 until onboarding has completed once. */
 export async function updateLedgerSettings(input: LedgerSettingsPatch): Promise<LedgerSettings> {
-  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/ledger-core/settings', {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
   return body.settings;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's TrendPoint. */
+/** Mirrors server/src/types/accounting.ts's TrendPoint. */
 export interface TrendPoint {
   month: string;
   revenueCents: number;
   expenseCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AgingBucket/AGING_BUCKET_LABELS. */
+/** Mirrors server/src/types/accounting.ts's AgingBucket/AGING_BUCKET_LABELS. */
 export type AgingBucket = 'CURRENT' | 'D1_30' | 'D31_60' | 'D61_90' | 'D90_PLUS';
 
 export interface AgingBucketAmount {
@@ -644,7 +595,7 @@ export interface AgingBucketAmount {
   documentCount: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's DashboardSummary. */
+/** Mirrors server/src/types/accounting.ts's DashboardSummary. */
 export interface DashboardSummary {
   asOf: string;
   fiscalYear: FiscalYearWindow;
@@ -681,14 +632,14 @@ export interface DashboardSummary {
   };
 }
 
-/** GET /ledger-core/reports/dashboard — aggregated from raw lines each call, never cached. */
+/** GET /reports/dashboard — aggregated from raw lines each call, never cached. */
 export async function getLedgerDashboard(
   asOf: string | null = null,
   signal?: AbortSignal,
 ): Promise<DashboardSummary> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
   const body = await apiFetch<{ success: boolean } & DashboardSummary>(
-    `/ledger-core/reports/dashboard${suffix}`,
+    `/reports/dashboard${suffix}`,
     { signal: signal ?? null },
   );
   const { success, ...summary } = body;
@@ -757,9 +708,9 @@ export async function updateOrganizationProfile(
   return body.profile;
 }
 
-/* ------------------------------------------------------ ledger-core: invoicing */
+/* ------------------------------------------------------ accounting: invoicing */
 
-/** Mirrors server/src/types/ledger-core.ts's Customer. */
+/** Mirrors server/src/types/accounting.ts's Customer. */
 export interface Customer {
   id: string;
   name: string;
@@ -773,7 +724,7 @@ export interface Customer {
   updatedAt: string;
 }
 
-/** GET /ledger-core/customers */
+/** GET /customers */
 export function listCustomers(
   params: { q?: string; includeInactive?: boolean } = {},
   signal?: AbortSignal,
@@ -782,10 +733,10 @@ export function listCustomers(
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   if (params.includeInactive === true) query.set('includeInactive', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/customers${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/customers${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/customers */
+/** POST /customers */
 export function createCustomer(body: {
   name: string;
   email: string | null;
@@ -794,10 +745,10 @@ export function createCustomer(body: {
   taxNumber: string | null;
   notes: string | null;
 }): Promise<{ success: boolean; customer: Customer }> {
-  return apiFetch('/ledger-core/customers', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/customers/:id */
+/** PATCH /customers/:id */
 export function updateCustomer(
   id: string,
   body: Partial<{
@@ -810,10 +761,10 @@ export function updateCustomer(
     isActive: boolean;
   }>,
 ): Promise<{ success: boolean; customer: Customer }> {
-  return apiFetch(`/ledger-core/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's PaymentTerm. */
+/** Mirrors server/src/types/accounting.ts's PaymentTerm. */
 export interface PaymentTerm {
   id: string;
   code: string;
@@ -825,7 +776,7 @@ export interface PaymentTerm {
   updatedAt: string;
 }
 
-/** GET /ledger-core/payment-terms */
+/** GET /payment-terms */
 export function listPaymentTerms(
   params: { includeInactive?: boolean } = {},
   signal?: AbortSignal,
@@ -833,34 +784,34 @@ export function listPaymentTerms(
   const query = new URLSearchParams();
   if (params.includeInactive === true) query.set('includeInactive', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/payment-terms${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/payment-terms${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/payment-terms */
+/** POST /payment-terms */
 export function createPaymentTerm(body: {
   code: string;
   name: string;
   netDays: number;
 }): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
-  return apiFetch('/ledger-core/payment-terms', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/payment-terms', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/payment-terms/:id */
+/** PATCH /payment-terms/:id */
 export function updatePaymentTerm(
   id: string,
   body: Partial<{ name: string; netDays: number; isActive: boolean }>,
 ): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
-  return apiFetch(`/ledger-core/payment-terms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/payment-terms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's ItemKind. */
+/** Mirrors server/src/types/accounting.ts's ItemKind. */
 export type ItemKind = 'SERVICE' | 'GOODS';
 
-/** Phase 32. Mirrors server/src/types/ledger-core.ts's ItemType. */
+/** Phase 32. Mirrors server/src/types/accounting.ts's ItemType. */
 export const ITEM_TYPES = ['SERVICE', 'NON_INVENTORY', 'INVENTORY', 'FIXED_ASSET'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
-/** Mirrors server/src/types/ledger-core.ts's Item. */
+/** Mirrors server/src/types/accounting.ts's Item. */
 export interface Item {
   id: string;
   code: string;
@@ -868,7 +819,7 @@ export interface Item {
   description: string | null;
   kind: ItemKind;
   itemType: ItemType;
-  /** true for INVENTORY / FIXED_ASSET — name and status are managed in StockLedger. */
+  /** true for INVENTORY / FIXED_ASSET — name and status are managed in inventory. */
   stockManaged: boolean;
   salePriceCents: number | null;
   purchasePriceCents: number | null;
@@ -883,7 +834,7 @@ export interface Item {
   updatedAt: string;
 }
 
-/** GET /ledger-core/items */
+/** GET /items */
 export function listItems(
   params: { q?: string; kind?: ItemKind; itemType?: ItemType; includeInactive?: boolean } = {},
   signal?: AbortSignal,
@@ -894,15 +845,15 @@ export function listItems(
   if (params.itemType !== undefined) query.set('itemType', params.itemType);
   if (params.includeInactive === true) query.set('includeInactive', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/items${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/items${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/items */
+/** POST /items */
 export function createItem(body: {
   code: string;
   name: string;
   description: string | null;
-  /** Phase 32: SERVICE or NON_INVENTORY — inventory/asset items are created in StockLedger. */
+  /** Phase 32: SERVICE or NON_INVENTORY — inventory/asset items are created in inventory. */
   itemType: 'SERVICE' | 'NON_INVENTORY';
   salePriceCents: number | null;
   purchasePriceCents: number | null;
@@ -911,10 +862,10 @@ export function createItem(body: {
   saleTaxRateBp: number;
   purchaseTaxRateBp: number;
 }): Promise<{ success: boolean; item: Item }> {
-  return apiFetch('/ledger-core/items', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/items', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/items/:id */
+/** PATCH /items/:id */
 export function updateItem(
   id: string,
   body: Partial<{
@@ -929,10 +880,10 @@ export function updateItem(
     isActive: boolean;
   }>,
 ): Promise<{ success: boolean; item: Item }> {
-  return apiFetch(`/ledger-core/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/items/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's InvoiceLine. */
+/** Mirrors server/src/types/accounting.ts's InvoiceLine. */
 export interface InvoiceLine {
   id: string;
   lineNumber: number;
@@ -953,10 +904,10 @@ export interface InvoiceLine {
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
 
-/** Mirrors server/src/types/ledger-core.ts's SettlementStatus. Derived, never stored. */
+/** Mirrors server/src/types/accounting.ts's SettlementStatus. Derived, never stored. */
 export type SettlementStatus = 'NOT_APPLICABLE' | 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE';
 
-/** Mirrors server/src/types/ledger-core.ts's Invoice. */
+/** Mirrors server/src/types/accounting.ts's Invoice. */
 export interface Invoice {
   id: string;
   invoiceNumber: string | null;
@@ -1009,7 +960,7 @@ export interface InvoiceFilters {
   settlement?: SettlementFilter | '';
 }
 
-/** GET /ledger-core/invoices — paginated, filterable, lines nested. */
+/** GET /invoices — paginated, filterable, lines nested. */
 export function listInvoices(
   params: InvoiceFilters = {},
   signal?: AbortSignal,
@@ -1032,15 +983,15 @@ export function listInvoices(
   if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/invoices${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/invoices${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/invoices/:id */
+/** GET /invoices/:id */
 export function getInvoice(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; invoice: Invoice }> {
-  return apiFetch(`/ledger-core/invoices/${id}`, { signal: signal ?? null });
+  return apiFetch(`/invoices/${id}`, { signal: signal ?? null });
 }
 
 export interface InvoiceLineInput {
@@ -1068,44 +1019,44 @@ export interface InvoiceInput {
   lines: InvoiceLineInput[];
 }
 
-/** POST /ledger-core/invoices — always drafted, never posted directly. */
+/** POST /invoices — always drafted, never posted directly. */
 export function createInvoice(body: InvoiceInput): Promise<{ success: boolean; invoice: Invoice }> {
-  return apiFetch('/ledger-core/invoices', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/invoices', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/invoices/:id — a draft only. */
+/** PATCH /invoices/:id — a draft only. */
 export function updateInvoice(
   id: string,
   body: InvoiceInput,
 ): Promise<{ success: boolean; invoice: Invoice }> {
-  return apiFetch(`/ledger-core/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/invoices/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** DELETE /ledger-core/invoices/:id — a draft only. */
+/** DELETE /invoices/:id — a draft only. */
 export async function deleteInvoice(id: string): Promise<void> {
-  await apiFetch(`/ledger-core/invoices/${id}`, { method: 'DELETE' });
+  await apiFetch(`/invoices/${id}`, { method: 'DELETE' });
 }
 
-/** POST /ledger-core/invoices/:id/issue — allocates a number and posts a balanced journal entry. */
+/** POST /invoices/:id/issue — allocates a number and posts a balanced journal entry. */
 export function issueInvoice(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; invoice: Invoice }> {
-  return apiFetch(`/ledger-core/invoices/${id}/issue`, {
+  return apiFetch(`/invoices/${id}/issue`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
 }
 
 /**
- * POST /ledger-core/invoices/:id/void — the only correction path once issued.
+ * POST /invoices/:id/void — the only correction path once issued.
  * Posts a reversing journal entry; a draft is voided with no GL posting.
  */
 export function voidInvoice(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; invoice: Invoice }> {
-  return apiFetch(`/ledger-core/invoices/${id}/void`, {
+  return apiFetch(`/invoices/${id}/void`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
@@ -1120,7 +1071,7 @@ export type InvoiceTemplateId = (typeof INVOICE_TEMPLATE_IDS)[number];
 export type InvoiceFontFamily = (typeof INVOICE_FONT_FAMILIES)[number];
 export type InvoiceDensity = (typeof INVOICE_DENSITIES)[number];
 
-/** Mirrors server/src/types/ledger-core.ts's InvoiceSettings. */
+/** Mirrors server/src/types/accounting.ts's InvoiceSettings. */
 export interface InvoiceSettings {
   numberPrefix: string;
   numberPadding: number;
@@ -1150,29 +1101,29 @@ export interface InvoiceSettings {
   configured: boolean;
 }
 
-/** GET /ledger-core/settings/invoicing — defaults returned even before the org has ever saved one. */
+/** GET /settings/invoicing — defaults returned even before the org has ever saved one. */
 export async function getInvoiceSettings(signal?: AbortSignal): Promise<InvoiceSettings> {
   const body = await apiFetch<{ success: boolean; invoiceSettings: InvoiceSettings }>(
-    '/ledger-core/settings/invoicing',
+    '/settings/invoicing',
     { signal: signal ?? null },
   );
   return body.invoiceSettings;
 }
 
-/** PATCH /ledger-core/settings/invoicing — OWNER/ADMIN only. */
+/** PATCH /settings/invoicing — OWNER/ADMIN only. */
 export async function updateInvoiceSettings(
   input: Partial<InvoiceSettings>,
 ): Promise<InvoiceSettings> {
   const body = await apiFetch<{ success: boolean; invoiceSettings: InvoiceSettings }>(
-    '/ledger-core/settings/invoicing',
+    '/settings/invoicing',
     { method: 'PATCH', body: JSON.stringify(input) },
   );
   return body.invoiceSettings;
 }
 
-/* ------------------------------------------------------ ledger-core: accounts payable */
+/* ------------------------------------------------------ accounting: accounts payable */
 
-/** Mirrors server/src/types/ledger-core.ts's Vendor. */
+/** Mirrors server/src/types/accounting.ts's Vendor. */
 export interface Vendor {
   id: string;
   name: string;
@@ -1187,7 +1138,7 @@ export interface Vendor {
   updatedAt: string;
 }
 
-/** GET /ledger-core/vendors */
+/** GET /vendors */
 export function listVendors(
   params: { q?: string; includeInactive?: boolean } = {},
   signal?: AbortSignal,
@@ -1196,10 +1147,10 @@ export function listVendors(
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   if (params.includeInactive === true) query.set('includeInactive', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/vendors${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/vendors${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/vendors */
+/** POST /vendors */
 export function createVendor(body: {
   name: string;
   email: string | null;
@@ -1209,10 +1160,10 @@ export function createVendor(body: {
   paymentTerms: string | null;
   notes: string | null;
 }): Promise<{ success: boolean; vendor: Vendor }> {
-  return apiFetch('/ledger-core/vendors', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/vendors', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/vendors/:id */
+/** PATCH /vendors/:id */
 export function updateVendor(
   id: string,
   body: Partial<{
@@ -1226,15 +1177,15 @@ export function updateVendor(
     isActive: boolean;
   }>,
 ): Promise<{ success: boolean; vendor: Vendor }> {
-  return apiFetch(`/ledger-core/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/* --------------------------------------- ledger-core: party accounts (Phase 25) */
+/* --------------------------------------- accounting: party accounts (Phase 25) */
 
-/** Mirrors server/src/types/ledger-core.ts's PartyKind. */
+/** Mirrors server/src/types/accounting.ts's PartyKind. */
 export type PartyKind = 'CUSTOMER' | 'VENDOR';
 
-/** Mirrors server/src/types/ledger-core.ts's PartyLedgerEntryKind. */
+/** Mirrors server/src/types/accounting.ts's PartyLedgerEntryKind. */
 export type PartyLedgerEntryKind =
   | 'INVOICE'
   | 'INVOICE_VOID'
@@ -1247,14 +1198,14 @@ export type PartyLedgerEntryKind =
   | 'DEBIT_NOTE'
   | 'DEBIT_NOTE_VOID';
 
-/** Mirrors server/src/types/ledger-core.ts's PartyLedgerAllocation. */
+/** Mirrors server/src/types/accounting.ts's PartyLedgerAllocation. */
 export interface PartyLedgerAllocation {
   documentId: string;
   documentNumber: string | null;
   baseAmountCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's PartyLedgerRow. */
+/** Mirrors server/src/types/accounting.ts's PartyLedgerRow. */
 export interface PartyLedgerRow {
   journalEntryId: string;
   entryDate: string;
@@ -1267,7 +1218,7 @@ export interface PartyLedgerRow {
   allocations: PartyLedgerAllocation[];
 }
 
-/** Mirrors server/src/types/ledger-core.ts's PartyLedger. */
+/** Mirrors server/src/types/accounting.ts's PartyLedger. */
 export interface PartyLedger {
   party: { kind: PartyKind; id: string; name: string };
   controlAccount: { id: string; code: string; name: string } | null;
@@ -1281,7 +1232,7 @@ export interface PartyLedger {
   rows: PartyLedgerRow[];
 }
 
-/** Mirrors server/src/types/ledger-core.ts's PartyOpenItem. */
+/** Mirrors server/src/types/accounting.ts's PartyOpenItem. */
 export interface PartyOpenItem {
   /** Phase 26 — an unapplied credit/debit note is an open item with a negative outstanding. */
   documentKind: 'INVOICE' | 'BILL' | 'CREDIT_NOTE' | 'DEBIT_NOTE';
@@ -1297,7 +1248,7 @@ export interface PartyOpenItem {
   bucket: AgingBucket;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's PartyOpenItems. */
+/** Mirrors server/src/types/accounting.ts's PartyOpenItems. */
 export interface PartyOpenItems {
   party: { kind: PartyKind; id: string; name: string };
   asOf: string;
@@ -1325,7 +1276,7 @@ function partyLedger(
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/${base}/${id}/ledger${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/${base}/${id}/ledger${suffix}`, { signal: signal ?? null });
 }
 
 function partyOpenItems(
@@ -1335,10 +1286,10 @@ function partyOpenItems(
   signal: AbortSignal | undefined,
 ): Promise<{ success: boolean } & PartyOpenItems> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
-  return apiFetch(`/ledger-core/${base}/${id}/open-items${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/${base}/${id}/open-items${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/customers/:id/ledger — the customer's account under AR, running balance server-side. */
+/** GET /customers/:id/ledger — the customer's account under AR, running balance server-side. */
 export function getCustomerLedger(
   id: string,
   params: { from?: string; to?: string; page?: number; limit?: number } = {},
@@ -1347,7 +1298,7 @@ export function getCustomerLedger(
   return partyLedger('customers', id, params, signal);
 }
 
-/** GET /ledger-core/vendors/:id/ledger */
+/** GET /vendors/:id/ledger */
 export function getVendorLedger(
   id: string,
   params: { from?: string; to?: string; page?: number; limit?: number } = {},
@@ -1356,7 +1307,7 @@ export function getVendorLedger(
   return partyLedger('vendors', id, params, signal);
 }
 
-/** GET /ledger-core/customers/:id/open-items */
+/** GET /customers/:id/open-items */
 export function getCustomerOpenItems(
   id: string,
   asOf: string | null = null,
@@ -1365,7 +1316,7 @@ export function getCustomerOpenItems(
   return partyOpenItems('customers', id, asOf, signal);
 }
 
-/** GET /ledger-core/vendors/:id/open-items */
+/** GET /vendors/:id/open-items */
 export function getVendorOpenItems(
   id: string,
   asOf: string | null = null,
@@ -1374,7 +1325,7 @@ export function getVendorOpenItems(
   return partyOpenItems('vendors', id, asOf, signal);
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AgingReport. */
+/** Mirrors server/src/types/accounting.ts's AgingReport. */
 export interface AgingReport {
   asOf: string;
   kind: 'AR' | 'AP';
@@ -1395,16 +1346,16 @@ export interface AgingReport {
   }[];
 }
 
-/** GET /ledger-core/reports/ar-aging | ap-aging — per-party outstanding balances. */
+/** GET /reports/ar-aging | ap-aging — per-party outstanding balances. */
 export function getAgingReport(
   kind: 'AR' | 'AP',
   signal?: AbortSignal,
 ): Promise<{ success: boolean } & AgingReport> {
   const path = kind === 'AR' ? 'ar-aging' : 'ap-aging';
-  return apiFetch(`/ledger-core/reports/${path}`, { signal: signal ?? null });
+  return apiFetch(`/reports/${path}`, { signal: signal ?? null });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's BillLine. */
+/** Mirrors server/src/types/accounting.ts's BillLine. */
 export interface BillLine {
   id: string;
   lineNumber: number;
@@ -1425,7 +1376,7 @@ export interface BillLine {
 
 export type BillStatus = 'DRAFT' | 'AWAITING_APPROVAL' | 'POSTED' | 'VOID';
 
-/** Mirrors server/src/types/ledger-core.ts's Bill. */
+/** Mirrors server/src/types/accounting.ts's Bill. */
 export interface Bill {
   id: string;
   vendorReference: string;
@@ -1479,7 +1430,7 @@ export interface BillFilters {
   settlement?: SettlementFilter | '';
 }
 
-/** GET /ledger-core/bills — paginated, filterable, lines nested. */
+/** GET /bills — paginated, filterable, lines nested. */
 export function listBills(
   params: BillFilters = {},
   signal?: AbortSignal,
@@ -1502,12 +1453,12 @@ export function listBills(
   if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/bills${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/bills${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/bills/:id */
+/** GET /bills/:id */
 export function getBill(id: string, signal?: AbortSignal): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch(`/ledger-core/bills/${id}`, { signal: signal ?? null });
+  return apiFetch(`/bills/${id}`, { signal: signal ?? null });
 }
 
 export interface BillLineInput {
@@ -1536,57 +1487,57 @@ export interface BillInput {
   lines: BillLineInput[];
 }
 
-/** POST /ledger-core/bills — always drafted, never posted directly. */
+/** POST /bills — always drafted, never posted directly. */
 export function createBill(body: BillInput): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch('/ledger-core/bills', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/bills', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/bills/:id — draft or in-review only. */
+/** PATCH /bills/:id — draft or in-review only. */
 export function updateBill(id: string, body: BillInput): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch(`/ledger-core/bills/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/bills/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** DELETE /ledger-core/bills/:id — draft or in-review only. */
+/** DELETE /bills/:id — draft or in-review only. */
 export async function deleteBill(id: string): Promise<void> {
-  await apiFetch(`/ledger-core/bills/${id}`, { method: 'DELETE' });
+  await apiFetch(`/bills/${id}`, { method: 'DELETE' });
 }
 
-/** POST /ledger-core/bills/:id/submit — sends a draft for approval. */
+/** POST /bills/:id/submit — sends a draft for approval. */
 export function submitBill(id: string): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch(`/ledger-core/bills/${id}/submit`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/bills/${id}/submit`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** POST /ledger-core/bills/:id/approve — OWNER/ADMIN only; posts a balanced journal entry. */
+/** POST /bills/:id/approve — OWNER/ADMIN only; posts a balanced journal entry. */
 export function approveBill(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch(`/ledger-core/bills/${id}/approve`, {
+  return apiFetch(`/bills/${id}/approve`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
 }
 
 /**
- * POST /ledger-core/bills/:id/void — the only correction path once posted.
+ * POST /bills/:id/void — the only correction path once posted.
  * Posts a reversing journal entry; a draft/in-review bill is voided with no GL posting.
  */
 export function voidBill(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; bill: Bill }> {
-  return apiFetch(`/ledger-core/bills/${id}/void`, {
+  return apiFetch(`/bills/${id}/void`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
 }
 
-/* ---------------------------------------------------------- ledger-core: payments */
+/* ---------------------------------------------------------- accounting: payments */
 
 export type PaymentDirection = 'RECEIVE' | 'PAY';
 export type PaymentStatus = 'POSTED' | 'VOID';
 
-/** Mirrors server/src/types/ledger-core.ts's PaymentAllocation. */
+/** Mirrors server/src/types/accounting.ts's PaymentAllocation. */
 export interface PaymentAllocation {
   id: string;
   invoiceId: string | null;
@@ -1598,7 +1549,7 @@ export interface PaymentAllocation {
   baseAmountCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's Payment. */
+/** Mirrors server/src/types/accounting.ts's Payment. */
 export interface Payment {
   id: string;
   direction: PaymentDirection;
@@ -1639,7 +1590,7 @@ export interface PaymentFilters {
   to?: string;
 }
 
-/** GET /ledger-core/payments */
+/** GET /payments */
 export function listPayments(
   params: PaymentFilters = {},
   signal?: AbortSignal,
@@ -1662,15 +1613,15 @@ export function listPayments(
   if (params.to !== undefined && params.to !== '') query.set('to', params.to);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/payments${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/payments${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/payments/:id */
+/** GET /payments/:id */
 export function getPayment(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; payment: Payment }> {
-  return apiFetch(`/ledger-core/payments/${id}`, { signal: signal ?? null });
+  return apiFetch(`/payments/${id}`, { signal: signal ?? null });
 }
 
 export interface PaymentAllocationInput {
@@ -1695,23 +1646,23 @@ export interface PaymentInput {
   entryDate: string | null;
 }
 
-/** POST /ledger-core/payments — born posted; posts a balanced journal entry in the same transaction. */
+/** POST /payments — born posted; posts a balanced journal entry in the same transaction. */
 export function createPayment(body: PaymentInput): Promise<{ success: boolean; payment: Payment }> {
-  return apiFetch('/ledger-core/payments', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/payments', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** POST /ledger-core/payments/:id/void — the only correction path; posts a reversing journal entry. */
+/** POST /payments/:id/void — the only correction path; posts a reversing journal entry. */
 export function voidPayment(
   id: string,
   entryDate: string | null = null,
 ): Promise<{ success: boolean; payment: Payment }> {
-  return apiFetch(`/ledger-core/payments/${id}/void`, {
+  return apiFetch(`/payments/${id}/void`, {
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
 }
 
-/* ------------------------------------------------------- ledger-core: AR/AP aging */
+/* ------------------------------------------------------- accounting: AR/AP aging */
 
 export interface AgingCounterpartyRow {
   counterpartyId: string;
@@ -1724,7 +1675,7 @@ export interface AgingCounterpartyRow {
   totalCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's AgingReport. */
+/** Mirrors server/src/types/accounting.ts's AgingReport. */
 export interface AgingReport {
   asOf: string;
   kind: 'AR' | 'AP';
@@ -1736,29 +1687,29 @@ export interface AgingReport {
   rows: AgingCounterpartyRow[];
 }
 
-/** GET /ledger-core/reports/ar-aging?asOf=YYYY-MM-DD */
+/** GET /reports/ar-aging?asOf=YYYY-MM-DD */
 export async function getArAging(asOf: string | null = null, signal?: AbortSignal): Promise<AgingReport> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
   const body = await apiFetch<{ success: boolean } & AgingReport>(
-    `/ledger-core/reports/ar-aging${suffix}`,
+    `/reports/ar-aging${suffix}`,
     { signal: signal ?? null },
   );
   const { success, ...report } = body;
   return report;
 }
 
-/** GET /ledger-core/reports/ap-aging?asOf=YYYY-MM-DD */
+/** GET /reports/ap-aging?asOf=YYYY-MM-DD */
 export async function getApAging(asOf: string | null = null, signal?: AbortSignal): Promise<AgingReport> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
   const body = await apiFetch<{ success: boolean } & AgingReport>(
-    `/ledger-core/reports/ap-aging${suffix}`,
+    `/reports/ap-aging${suffix}`,
     { signal: signal ?? null },
   );
   const { success, ...report } = body;
   return report;
 }
 
-/* ---------------------------------------------------- ledger-core: Phase 4 statements */
+/* ---------------------------------------------------- accounting: Phase 4 statements */
 
 export interface StatementRow {
   accountId: string;
@@ -1783,7 +1734,7 @@ export interface ProfitAndLoss {
   netIncomeCents: number;
 }
 
-/** GET /ledger-core/reports/profit-and-loss?from=YYYY-MM-DD&to=YYYY-MM-DD */
+/** GET /reports/profit-and-loss?from=YYYY-MM-DD&to=YYYY-MM-DD */
 export async function getProfitAndLoss(
   from: string | null = null,
   to: string | null = null,
@@ -1794,7 +1745,7 @@ export async function getProfitAndLoss(
   if (to !== null) params.set('to', to);
   const suffix = params.size === 0 ? '' : `?${params.toString()}`;
   const body = await apiFetch<{ success: boolean } & ProfitAndLoss>(
-    `/ledger-core/reports/profit-and-loss${suffix}`,
+    `/reports/profit-and-loss${suffix}`,
     { signal: signal ?? null },
   );
   const { success, ...report } = body;
@@ -1816,14 +1767,14 @@ export interface BalanceSheet {
   balances: boolean;
 }
 
-/** GET /ledger-core/reports/balance-sheet?asOf=YYYY-MM-DD */
+/** GET /reports/balance-sheet?asOf=YYYY-MM-DD */
 export async function getBalanceSheet(
   asOf: string | null = null,
   signal?: AbortSignal,
 ): Promise<BalanceSheet> {
   const suffix = asOf === null ? '' : `?asOf=${encodeURIComponent(asOf)}`;
   const body = await apiFetch<{ success: boolean } & BalanceSheet>(
-    `/ledger-core/reports/balance-sheet${suffix}`,
+    `/reports/balance-sheet${suffix}`,
     { signal: signal ?? null },
   );
   const { success, ...report } = body;
@@ -1850,16 +1801,16 @@ export interface FiscalPeriod {
   createdAt: string;
 }
 
-/** GET /ledger-core/fiscal-periods?fiscalYear=&status= */
+/** GET /fiscal-periods?fiscalYear=&status= */
 export function getFiscalPeriods(
   status?: FiscalPeriodStatus,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; periods: FiscalPeriod[] }> {
   const suffix = status === undefined ? '' : `?status=${encodeURIComponent(status)}`;
-  return apiFetch(`/ledger-core/fiscal-periods${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/fiscal-periods${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/fiscal-periods/generate */
+/** POST /fiscal-periods/generate */
 export function generateFiscalPeriods(containingDate: string): Promise<{
   success: boolean;
   fiscalYearLabel: string;
@@ -1867,25 +1818,25 @@ export function generateFiscalPeriods(containingDate: string): Promise<{
   count: number;
   periods: FiscalPeriod[];
 }> {
-  return apiFetch('/ledger-core/fiscal-periods/generate', {
+  return apiFetch('/fiscal-periods/generate', {
     method: 'POST',
     body: JSON.stringify({ containingDate }),
   });
 }
 
-/** POST /ledger-core/fiscal-periods/:id/close */
+/** POST /fiscal-periods/:id/close */
 export function closeFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
-  return apiFetch(`/ledger-core/fiscal-periods/${id}/close`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/fiscal-periods/${id}/close`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** POST /ledger-core/fiscal-periods/:id/reopen */
+/** POST /fiscal-periods/:id/reopen */
 export function reopenFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
-  return apiFetch(`/ledger-core/fiscal-periods/${id}/reopen`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/fiscal-periods/${id}/reopen`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** POST /ledger-core/fiscal-periods/:id/lock — OWNER only; irreversible. */
+/** POST /fiscal-periods/:id/lock — OWNER only; irreversible. */
 export function lockFiscalPeriod(id: string): Promise<{ success: boolean; period: FiscalPeriod }> {
-  return apiFetch(`/ledger-core/fiscal-periods/${id}/lock`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/fiscal-periods/${id}/lock`, { method: 'POST', body: JSON.stringify({}) });
 }
 
 /* --------------------------------------------------------- audit trail (Phase 5) */
@@ -1896,7 +1847,7 @@ export type AuditOperation = 'INSERT' | 'UPDATE' | 'DELETE';
 export interface AuditLogEntry {
   id: string;
   txid: string;
-  appSlug: string;
+  module: string;
   tableName: string;
   rowId: string | null;
   operation: AuditOperation;
@@ -1917,13 +1868,13 @@ export interface AuditLogDetail extends AuditLogEntry {
 export interface AuditLogFilters {
   page?: number;
   limit?: number;
-  appSlug?: string;
+  module?: string;
   tableName?: string;
   operation?: AuditOperation;
 }
 
 /**
- * GET /audit-logs — platform-level, not under /ledger-core: the trail spans
+ * GET /audit-logs — platform-level, not part of the accounting module: the trail spans
  * every app (guardrails rule 16). OWNER/ADMIN only; a 403 is expected from
  * every other role and is handled by the page, not hidden by this function.
  */
@@ -1939,10 +1890,10 @@ export function getAuditLogs(
   logs: AuditLogEntry[];
 }> {
   const query = new URLSearchParams();
-  // An empty filter box must send no parameter at all, not `?appSlug=`.
+  // An empty filter box must send no parameter at all, not `?module=`.
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
-  if (params.appSlug !== undefined && params.appSlug !== '') query.set('appSlug', params.appSlug);
+  if (params.module !== undefined && params.module !== '') query.set('module', params.module);
   if (params.tableName !== undefined && params.tableName !== '') query.set('tableName', params.tableName);
   if (params.operation !== undefined) query.set('operation', params.operation);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
@@ -1963,7 +1914,7 @@ export function getAuditLogDetail(
 export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
 export type DateFormat = 'ISO' | 'DMY' | 'MDY';
 
-/** Mirrors server/src/types/ledger-core.ts's BankStatementImport. */
+/** Mirrors server/src/types/accounting.ts's BankStatementImport. */
 export interface BankStatementImport {
   id: string;
   accountId: string;
@@ -1997,7 +1948,7 @@ export interface ScoreBreakdown {
   total: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's BankMatchSuggestion. */
+/** Mirrors server/src/types/accounting.ts's BankMatchSuggestion. */
 export interface BankMatchSuggestion {
   id: string;
   targetType: 'invoice' | 'bill';
@@ -2013,7 +1964,7 @@ export interface BankMatchSuggestion {
   autoMatchable: boolean;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's BankTransaction. */
+/** Mirrors server/src/types/accounting.ts's BankTransaction. */
 export interface BankTransaction {
   id: string;
   importId: string;
@@ -2076,7 +2027,7 @@ export interface ImportStatementInput {
   closingBalanceOn: string | null;
 }
 
-/** POST /ledger-core/bank-imports — the CSV text goes in the JSON body, never a multipart upload. */
+/** POST /bank-imports — the CSV text goes in the JSON body, never a multipart upload. */
 export function importBankStatement(body: ImportStatementInput): Promise<{
   success: boolean;
   import: BankStatementImport;
@@ -2085,10 +2036,10 @@ export function importBankStatement(body: ImportStatementInput): Promise<{
   suggestedCount: number;
   autoMatchableCount: number;
 }> {
-  return apiFetch('/ledger-core/bank-imports', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/bank-imports', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** GET /ledger-core/bank-imports */
+/** GET /bank-imports */
 export function listBankImports(
   params: { page?: number; limit?: number; accountId?: string } = {},
   signal?: AbortSignal,
@@ -2106,7 +2057,7 @@ export function listBankImports(
   if (params.accountId !== undefined && params.accountId !== '') query.set('accountId', params.accountId);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/bank-imports${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/bank-imports${suffix}`, { signal: signal ?? null });
 }
 
 export interface BankTransactionFilters {
@@ -2121,7 +2072,7 @@ export interface BankTransactionFilters {
   minScore?: number;
 }
 
-/** GET /ledger-core/bank-transactions */
+/** GET /bank-transactions */
 export function listBankTransactions(
   params: BankTransactionFilters = {},
   signal?: AbortSignal,
@@ -2145,20 +2096,20 @@ export function listBankTransactions(
   if (params.minScore !== undefined) query.set('minScore', String(params.minScore));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ledger-core/bank-transactions${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/bank-transactions${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/bank-transactions/:id */
+/** GET /bank-transactions/:id */
 export function getBankTransaction(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}`, { signal: signal ?? null });
+  return apiFetch(`/bank-transactions/${id}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/bank-transactions/:id/rescore */
+/** POST /bank-transactions/:id/rescore */
 export function rescoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/rescore`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/bank-transactions/${id}/rescore`, { method: 'POST', body: JSON.stringify({}) });
 }
 
 export interface MatchBankTransactionInput {
@@ -2167,12 +2118,12 @@ export interface MatchBankTransactionInput {
   billId: string | null;
 }
 
-/** POST /ledger-core/bank-transactions/:id/match */
+/** POST /bank-transactions/:id/match */
 export function matchBankTransaction(
   id: string,
   body: MatchBankTransactionInput,
 ): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/match`, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch(`/bank-transactions/${id}/match`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export interface PostBankLineJournalInput {
@@ -2180,34 +2131,34 @@ export interface PostBankLineJournalInput {
   description: string | null;
 }
 
-/** POST /ledger-core/bank-transactions/:id/post-journal — posts a GL entry for a line with no counterpart document. */
+/** POST /bank-transactions/:id/post-journal — posts a GL entry for a line with no counterpart document. */
 export function postBankLineJournal(
   id: string,
   body: PostBankLineJournalInput,
 ): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/post-journal`, {
+  return apiFetch(`/bank-transactions/${id}/post-journal`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
 }
 
-/** POST /ledger-core/bank-transactions/:id/unmatch — voids the payment the match created. */
+/** POST /bank-transactions/:id/unmatch — voids the payment the match created. */
 export function unmatchBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/unmatch`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/bank-transactions/${id}/unmatch`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** POST /ledger-core/bank-transactions/:id/ignore */
+/** POST /bank-transactions/:id/ignore */
 export function ignoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/ignore`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/bank-transactions/${id}/ignore`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** POST /ledger-core/bank-transactions/:id/unignore */
+/** POST /bank-transactions/:id/unignore */
 export function unignoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
-  return apiFetch(`/ledger-core/bank-transactions/${id}/unignore`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/bank-transactions/${id}/unignore`, { method: 'POST', body: JSON.stringify({}) });
 }
 
 /**
- * GET /ledger-core/reports/bank-reconciliation — `reconciles` is a
+ * GET /reports/bank-reconciliation — `reconciles` is a
  * completeness claim (every GL cash movement also arrived as an imported
  * bank line, and vice versa), not a correctness one.
  */
@@ -2218,7 +2169,7 @@ export function getBankReconciliation(
 ): Promise<{ success: boolean } & BankReconciliationReport> {
   const query = new URLSearchParams({ accountId });
   if (asOf !== null) query.set('asOf', asOf);
-  return apiFetch(`/ledger-core/reports/bank-reconciliation?${query.toString()}`, { signal: signal ?? null });
+  return apiFetch(`/reports/bank-reconciliation?${query.toString()}`, { signal: signal ?? null });
 }
 
 /* ------------------------------------------ webhooks & background jobs (Phase 7) */
@@ -2253,7 +2204,7 @@ export interface WebhookEndpointWithSecret extends WebhookEndpoint {
   secret: string;
 }
 
-/** GET /webhooks — platform-level: not under /ledger-core (guardrails rule 16). */
+/** GET /webhooks — platform-level, not part of the accounting module (guardrails rule 16). */
 export function getWebhookEndpoints(
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; endpoints: WebhookEndpoint[] }> {
@@ -2377,9 +2328,9 @@ export function retryWebhookDelivery(
   return apiFetch(`/webhook-deliveries/${id}/retry`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/* ------------------------------------------------------------- ledger-core: FX */
+/* ------------------------------------------------------------- accounting: FX */
 
-/** Mirrors server/src/types/ledger-core.ts's FxRate. */
+/** Mirrors server/src/types/accounting.ts's FxRate. */
 export interface FxRate {
   id: string;
   fromCode: string;
@@ -2393,7 +2344,7 @@ export interface FxRate {
   updatedAt: string;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's ResolvedRate. */
+/** Mirrors server/src/types/accounting.ts's ResolvedRate. */
 export interface ResolvedRate {
   fromCode: string;
   toCode: string;
@@ -2410,7 +2361,7 @@ export interface FxRateFilters {
   to?: string;
 }
 
-/** GET /ledger-core/fx-rates */
+/** GET /fx-rates */
 export function listFxRates(
   params: FxRateFilters = {},
   signal?: AbortSignal,
@@ -2429,10 +2380,10 @@ export function listFxRates(
   if (params.from !== undefined && params.from !== '') query.set('from', params.from);
   if (params.to !== undefined && params.to !== '') query.set('to', params.to);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/fx-rates${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/fx-rates${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/fx-rates/latest?from=<currency>&on=YYYY-MM-DD */
+/** GET /fx-rates/latest?from=<currency>&on=YYYY-MM-DD */
 export function getLatestFxRate(
   fromCode: string,
   on?: string,
@@ -2440,25 +2391,25 @@ export function getLatestFxRate(
 ): Promise<{ success: boolean; rate: ResolvedRate }> {
   const query = new URLSearchParams({ from: fromCode });
   if (on !== undefined) query.set('on', on);
-  return apiFetch(`/ledger-core/fx-rates/latest?${query.toString()}`, { signal: signal ?? null });
+  return apiFetch(`/fx-rates/latest?${query.toString()}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/fx-rates — re-posting the same (fromCode, toCode, rateDate) overwrites. */
+/** POST /fx-rates — re-posting the same (fromCode, toCode, rateDate) overwrites. */
 export function upsertFxRate(body: {
   fromCode: string;
   toCode: string;
   rateDate: string;
   rate: string;
 }): Promise<{ success: boolean; rate: FxRate }> {
-  return apiFetch('/ledger-core/fx-rates', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/fx-rates', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** DELETE /ledger-core/fx-rates/:id */
+/** DELETE /fx-rates/:id */
 export function deleteFxRate(id: string): Promise<void> {
-  return apiFetch(`/ledger-core/fx-rates/${id}`, { method: 'DELETE' });
+  return apiFetch(`/fx-rates/${id}`, { method: 'DELETE' });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's FxExposureDocument. */
+/** Mirrors server/src/types/accounting.ts's FxExposureDocument. */
 export interface FxExposureDocument {
   documentType: 'INVOICE' | 'BILL';
   documentId: string;
@@ -2473,7 +2424,7 @@ export interface FxExposureDocument {
   deltaCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's FxExposureReport. */
+/** Mirrors server/src/types/accounting.ts's FxExposureReport. */
 export interface FxExposureReport {
   asOfDate: string;
   baseCurrency: string;
@@ -2489,16 +2440,16 @@ export interface FxExposureReport {
   alreadyRevalued: boolean;
 }
 
-/** GET /ledger-core/reports/fx-exposure?asOf=YYYY-MM-DD — read-only preview, posts nothing. */
+/** GET /reports/fx-exposure?asOf=YYYY-MM-DD — read-only preview, posts nothing. */
 export function getFxExposure(
   asOf?: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; exposure: FxExposureReport }> {
   const query = asOf !== undefined ? `?asOf=${asOf}` : '';
-  return apiFetch(`/ledger-core/reports/fx-exposure${query}`, { signal: signal ?? null });
+  return apiFetch(`/reports/fx-exposure${query}`, { signal: signal ?? null });
 }
 
-/** Mirrors server/src/types/ledger-core.ts's FxRevaluationLine. */
+/** Mirrors server/src/types/accounting.ts's FxRevaluationLine. */
 export interface FxRevaluationLine {
   id: string;
   documentType: 'INVOICE' | 'BILL';
@@ -2515,7 +2466,7 @@ export interface FxRevaluationLine {
   deltaCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's FxRevaluation. */
+/** Mirrors server/src/types/accounting.ts's FxRevaluation. */
 export interface FxRevaluation {
   id: string;
   asOfDate: string;
@@ -2528,7 +2479,7 @@ export interface FxRevaluation {
   lines: FxRevaluationLine[];
 }
 
-/** GET /ledger-core/fx-revaluations */
+/** GET /fx-revaluations */
 export function listFxRevaluations(
   params: { page?: number; limit?: number } = {},
   signal?: AbortSignal,
@@ -2544,20 +2495,20 @@ export function listFxRevaluations(
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/fx-revaluations${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/fx-revaluations${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/fx-revaluations/:id */
+/** GET /fx-revaluations/:id */
 export function getFxRevaluation(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; revaluation: FxRevaluation }> {
-  return apiFetch(`/ledger-core/fx-revaluations/${id}`, { signal: signal ?? null });
+  return apiFetch(`/fx-revaluations/${id}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/fx-revaluations — OWNER/ADMIN only; posts a GL entry plus an automatic next-day reversal. */
+/** POST /fx-revaluations — OWNER/ADMIN only; posts a GL entry plus an automatic next-day reversal. */
 export function runFxRevaluation(asOfDate: string): Promise<{ success: boolean; revaluation: FxRevaluation }> {
-  return apiFetch('/ledger-core/fx-revaluations', { method: 'POST', body: JSON.stringify({ asOfDate }) });
+  return apiFetch('/fx-revaluations', { method: 'POST', body: JSON.stringify({ asOfDate }) });
 }
 
 /* -------------------------------------------------------- platform: onboarding (Phase 9a) */
@@ -2567,7 +2518,7 @@ export type OnboardingStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'SKIPPED' | 'COMP
 
 /** Mirrors server/src/types/onboarding.ts's OnboardingState. */
 export interface OnboardingState {
-  appSlug: string;
+  module: string;
   status: OnboardingStatus;
   currentStep: string | null;
   draft: Record<string, unknown>;
@@ -2578,11 +2529,13 @@ export interface OnboardingState {
 
 /** Mirrors server/src/types/onboarding.ts's OnboardingChecklistItem. */
 export interface OnboardingChecklistItem extends OnboardingState {
-  appName: string;
-  appStatus: AppStatus;
+  /** Human-readable name of the setup task, e.g. "Accounting setup". */
+  label: string;
+  /** Inventory is optional; accounting setup is not. */
+  optional: boolean;
 }
 
-/** GET /onboarding — platform-level; every app plus 'platform', a missing row reads as NOT_STARTED. */
+/** GET /onboarding — one item per setup task (accounting, inventory); a missing row reads as NOT_STARTED. */
 export function getOnboardingChecklist(signal?: AbortSignal): Promise<{
   success: boolean;
   count: number;
@@ -2591,52 +2544,52 @@ export function getOnboardingChecklist(signal?: AbortSignal): Promise<{
   return apiFetch('/onboarding', { signal: signal ?? null });
 }
 
-/** GET /onboarding/:appSlug */
-export async function getOnboardingState(appSlug: string, signal?: AbortSignal): Promise<OnboardingState> {
+/** GET /onboarding/:module */
+export async function getOnboardingState(module: string, signal?: AbortSignal): Promise<OnboardingState> {
   const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
-    `/onboarding/${appSlug}`,
+    `/onboarding/${module}`,
     { signal: signal ?? null },
   );
   return body.onboarding;
 }
 
-/** PUT /onboarding/:appSlug/draft — OWNER/ADMIN only. */
+/** PUT /onboarding/:module/draft — OWNER/ADMIN only. */
 export async function saveOnboardingDraft(
-  appSlug: string,
+  module: string,
   input: { currentStep: string | null; draft: Record<string, unknown> },
 ): Promise<OnboardingState> {
   const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
-    `/onboarding/${appSlug}/draft`,
+    `/onboarding/${module}/draft`,
     { method: 'PUT', body: JSON.stringify(input) },
   );
   return body.onboarding;
 }
 
-/** POST /onboarding/:appSlug/skip — OWNER/ADMIN only; the draft is preserved. */
-export async function skipOnboarding(appSlug: string): Promise<OnboardingState> {
+/** POST /onboarding/:module/skip — OWNER/ADMIN only; the draft is preserved. */
+export async function skipOnboarding(module: string): Promise<OnboardingState> {
   const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
-    `/onboarding/${appSlug}/skip`,
+    `/onboarding/${module}/skip`,
     { method: 'POST', body: JSON.stringify({}) },
   );
   return body.onboarding;
 }
 
-/** POST /onboarding/:appSlug/resume — OWNER/ADMIN only; legal from SKIPPED or COMPLETED. */
-export async function resumeOnboarding(appSlug: string): Promise<OnboardingState> {
+/** POST /onboarding/:module/resume — OWNER/ADMIN only; legal from SKIPPED or COMPLETED. */
+export async function resumeOnboarding(module: string): Promise<OnboardingState> {
   const body = await apiFetch<{ success: boolean; onboarding: OnboardingState }>(
-    `/onboarding/${appSlug}/resume`,
+    `/onboarding/${module}/resume`,
     { method: 'POST', body: JSON.stringify({}) },
   );
   return body.onboarding;
 }
 
-/* ---------------------------------------------- ledger-core: migration imports (9b) */
+/* ---------------------------------------------- accounting: migration imports (9b) */
 
 export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS';
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
 
-/** Mirrors server/src/types/ledger-core.ts's MigrationImport. */
+/** Mirrors server/src/types/accounting.ts's MigrationImport. */
 export interface MigrationImport {
   id: string;
   kind: MigrationImportKind;
@@ -2654,7 +2607,7 @@ export interface MigrationImport {
   createdAt: string;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's MigrationImportRow. */
+/** Mirrors server/src/types/accounting.ts's MigrationImportRow. */
 export interface MigrationImportRow {
   id: string;
   rowNumber: number;
@@ -2678,7 +2631,7 @@ export interface MigrationImportRow {
   status: MigrationRowStatus;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's MigrationCommitPreview. */
+/** Mirrors server/src/types/accounting.ts's MigrationCommitPreview. */
 export interface MigrationCommitPreview {
   kind: MigrationImportKind;
   canCommit: boolean;
@@ -2701,16 +2654,16 @@ export type MigrationCommitResult =
   | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
   | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
 
-/** POST /ledger-core/migration-imports — OWNER, ADMIN or ACCOUNTANT. */
+/** POST /migration-imports — OWNER, ADMIN or ACCOUNTANT. */
 export function createMigrationImport(body: {
   kind: MigrationImportKind;
   fileName: string;
   content: string;
 }): Promise<{ success: boolean; import: MigrationImport; rows: MigrationImportRow[] }> {
-  return apiFetch('/ledger-core/migration-imports', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/migration-imports', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** GET /ledger-core/migration-imports */
+/** GET /migration-imports */
 export function listMigrationImports(
   params: { page?: number; limit?: number; kind?: MigrationImportKind } = {},
   signal?: AbortSignal,
@@ -2727,18 +2680,18 @@ export function listMigrationImports(
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.kind !== undefined) query.set('kind', params.kind);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/migration-imports${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/migration-imports${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/migration-imports/:id */
+/** GET /migration-imports/:id */
 export function getMigrationImport(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; import: MigrationImport }> {
-  return apiFetch(`/ledger-core/migration-imports/${id}`, { signal: signal ?? null });
+  return apiFetch(`/migration-imports/${id}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/migration-imports/:id/rows */
+/** GET /migration-imports/:id/rows */
 export function getMigrationImportRows(
   id: string,
   params: { page?: number; limit?: number; status?: MigrationRowStatus } = {},
@@ -2756,10 +2709,10 @@ export function getMigrationImportRows(
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.status !== undefined) query.set('status', params.status);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/ledger-core/migration-imports/${id}/rows${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/migration-imports/${id}/rows${suffix}`, { signal: signal ?? null });
 }
 
-/** PATCH /ledger-core/migration-imports/:id/rows/:rowId — OWNER, ADMIN or ACCOUNTANT. */
+/** PATCH /migration-imports/:id/rows/:rowId — OWNER, ADMIN or ACCOUNTANT. */
 export function patchMigrationImportRow(
   id: string,
   rowId: string,
@@ -2781,35 +2734,35 @@ export function patchMigrationImportRow(
     status: 'VALID' | 'EXCLUDED';
   }>,
 ): Promise<{ success: boolean; import: MigrationImport; row: MigrationImportRow }> {
-  return apiFetch(`/ledger-core/migration-imports/${id}/rows/${rowId}`, {
+  return apiFetch(`/migration-imports/${id}/rows/${rowId}`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   });
 }
 
-/** POST /ledger-core/migration-imports/:id/validate — OWNER, ADMIN or ACCOUNTANT. */
+/** POST /migration-imports/:id/validate — OWNER, ADMIN or ACCOUNTANT. */
 export function validateMigrationImport(id: string): Promise<{ success: boolean; import: MigrationImport }> {
-  return apiFetch(`/ledger-core/migration-imports/${id}/validate`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/migration-imports/${id}/validate`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** GET /ledger-core/migration-imports/:id/preview — OWNER, ADMIN or ACCOUNTANT. */
+/** GET /migration-imports/:id/preview — OWNER, ADMIN or ACCOUNTANT. */
 export function previewMigrationImport(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; preview: MigrationCommitPreview }> {
-  return apiFetch(`/ledger-core/migration-imports/${id}/preview`, { signal: signal ?? null });
+  return apiFetch(`/migration-imports/${id}/preview`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/migration-imports/:id/commit — OWNER/ADMIN only; irreversible. */
+/** POST /migration-imports/:id/commit — OWNER/ADMIN only; irreversible. */
 export function commitMigrationImport(
   id: string,
 ): Promise<{ success: boolean; import: MigrationImport; result: MigrationCommitResult }> {
-  return apiFetch(`/ledger-core/migration-imports/${id}/commit`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/migration-imports/${id}/commit`, { method: 'POST', body: JSON.stringify({}) });
 }
 
-/** DELETE /ledger-core/migration-imports/:id — refused once COMMITTED. */
+/** DELETE /migration-imports/:id — refused once COMMITTED. */
 export async function deleteMigrationImport(id: string): Promise<void> {
-  await apiFetch(`/ledger-core/migration-imports/${id}`, { method: 'DELETE' });
+  await apiFetch(`/migration-imports/${id}`, { method: 'DELETE' });
 }
 
 /* --------------------------------------------------- document vault (9.5) */
@@ -2831,7 +2784,7 @@ export interface VaultDocument {
 export interface VaultDocumentLink {
   id: string;
   documentId: string;
-  appSlug: string;
+  module: string;
   entityType: string;
   entityId: string;
   createdBy: string;
@@ -2845,12 +2798,12 @@ export interface VaultDocumentWithLinks extends VaultDocument {
 export interface DocumentFilters {
   page?: number;
   limit?: number;
-  appSlug?: string;
+  module?: string;
   entityType?: string;
   entityId?: string;
 }
 
-/** GET /documents — platform-level, not under /ledger-core (guardrails rule 16). */
+/** GET /documents — platform-level, not part of the accounting module (guardrails rule 16). */
 export function listDocuments(
   params: DocumentFilters = {},
   signal?: AbortSignal,
@@ -2865,7 +2818,7 @@ export function listDocuments(
   const query = new URLSearchParams();
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
-  if (params.appSlug !== undefined && params.appSlug !== '') query.set('appSlug', params.appSlug);
+  if (params.module !== undefined && params.module !== '') query.set('module', params.module);
   if (params.entityType !== undefined && params.entityType !== '') query.set('entityType', params.entityType);
   if (params.entityId !== undefined && params.entityId !== '') query.set('entityId', params.entityId);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
@@ -2908,7 +2861,7 @@ export async function deleteDocument(id: string): Promise<void> {
 /** POST /documents/:id/links */
 export function attachDocument(
   documentId: string,
-  body: { appSlug: string; entityType: string; entityId: string },
+  body: { module: string; entityType: string; entityId: string },
 ): Promise<{ success: boolean; link: VaultDocumentLink }> {
   return apiFetch(`/documents/${documentId}/links`, { method: 'POST', body: JSON.stringify(body) });
 }
@@ -3002,17 +2955,17 @@ export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filen
   return { blob: await response.blob(), filename };
 }
 
-// ---------------------------------------------------------- ap-flow (10)
+// ---------------------------------------------------------- capture (Phase 10)
 
-/** Mirrors server/src/types/ap-flow.ts's ApFlowDocumentStatus. */
-export type ApFlowDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'POSTED' | 'DUPLICATE';
+/** Mirrors server/src/types/capture.ts's CaptureDocumentStatus. */
+export type CaptureDocumentStatus = 'PENDING' | 'PROCESSING' | 'EXTRACTED' | 'FAILED' | 'POSTED' | 'DUPLICATE';
 
-export interface ApFlowLineItem {
+export interface CaptureLineItem {
   description: string;
   amountCents: number;
 }
 
-export interface ApFlowExtraction {
+export interface CaptureExtraction {
   id: string;
   vendorName: string | null;
   invoiceNumber: string | null;
@@ -3023,7 +2976,7 @@ export interface ApFlowExtraction {
   subtotalCents: number | null;
   taxCents: number | null;
   totalCents: number | null;
-  lineItems: ApFlowLineItem[];
+  lineItems: CaptureLineItem[];
   fieldConfidence: Record<string, number>;
   arithmeticOk: boolean;
   validationErrors: string[];
@@ -3031,7 +2984,7 @@ export interface ApFlowExtraction {
   createdAt: string;
 }
 
-export interface ApFlowPage {
+export interface CapturePage {
   id: string;
   pageNumber: number;
   widthPx: number;
@@ -3040,13 +2993,13 @@ export interface ApFlowPage {
   redactedRegions: { kind: string; box: { x0: number; y0: number; x1: number; y1: number } }[];
 }
 
-export interface ApFlowDocument {
+export interface CaptureDocument {
   id: string;
   documentId: string;
   originalFilename: string;
   mimeType: string;
   sha256: string;
-  status: ApFlowDocumentStatus;
+  status: CaptureDocumentStatus;
   pageCount: number | null;
   failureReason: string | null;
   processedAt: string | null;
@@ -3057,33 +3010,33 @@ export interface ApFlowDocument {
   journalEntryId: string | null;
   postedSha256: string | null;
   postedAt: string | null;
-  /** Phase 19. The LedgerCore bill this document posted as. */
+  /** Phase 19. The bill this document posted as. */
   billId: string | null;
   autoPosted: boolean;
-  autoPostBlockers: ApFlowAutoPostBlocker[];
+  autoPostBlockers: CaptureAutoPostBlocker[];
   /** Non-null only when status is DUPLICATE — the earlier document this capture's bytes match. */
   duplicateOfId: string | null;
   /** The matched document's own original filename. Null unless duplicateOfId is set. */
   duplicateOfFilename: string | null;
 }
 
-/** Mirrors server/src/types/ap-flow.ts's ApFlowAutoPostBlockerCode. */
-export interface ApFlowAutoPostBlocker {
+/** Mirrors server/src/types/capture.ts's CaptureAutoPostBlockerCode. */
+export interface CaptureAutoPostBlocker {
   code: string;
   message: string;
 }
 
-export interface ApFlowSettings {
+export interface CaptureSettings {
   autoPostEnabled: boolean;
   autoPostMinConfidence: number;
   autoPostMaxTotalCents: number | null;
   updatedAt: string | null;
 }
 
-/** Mirrors server/src/types/ap-flow.ts's ApFlowMappingSource. */
-export type ApFlowMappingSource = 'HISTORY' | 'CHART' | 'MODEL' | 'MANUAL' | 'NONE';
+/** Mirrors server/src/types/capture.ts's CaptureMappingSource. */
+export type CaptureMappingSource = 'HISTORY' | 'CHART' | 'MODEL' | 'MANUAL' | 'NONE';
 
-export interface ApFlowLineItemRecord {
+export interface CaptureLineItemRecord {
   id: string;
   lineIndex: number;
   description: string;
@@ -3092,11 +3045,11 @@ export interface ApFlowLineItemRecord {
   accountCode: string | null;
   accountName: string | null;
   suggestedAccountId: string | null;
-  mappingSource: ApFlowMappingSource;
+  mappingSource: CaptureMappingSource;
   mappingConfidence: number | null;
 }
 
-export interface ApFlowReviewQueueEntry {
+export interface CaptureReviewQueueEntry {
   id: string;
   documentId: string;
   originalFilename: string;
@@ -3110,42 +3063,42 @@ export interface ApFlowReviewQueueEntry {
   unmappedLineCount: number;
   lowestConfidence: number | null;
   createdAt: string;
-  autoPostBlockers: ApFlowAutoPostBlocker[];
+  autoPostBlockers: CaptureAutoPostBlocker[];
 }
 
-export interface ApFlowDocumentDetail extends ApFlowDocument {
-  pages: ApFlowPage[];
-  extraction: ApFlowExtraction | null;
-  lineItems: ApFlowLineItemRecord[];
+export interface CaptureDocumentDetail extends CaptureDocument {
+  pages: CapturePage[];
+  extraction: CaptureExtraction | null;
+  lineItems: CaptureLineItemRecord[];
   /** Phase 19.1. Every metered model call this document caused, newest first. */
   modelCalls: AiModelCall[];
 }
 
-export interface ApFlowDocumentFilters {
-  status?: ApFlowDocumentStatus;
+export interface CaptureDocumentFilters {
+  status?: CaptureDocumentStatus;
   page?: number;
   limit?: number;
 }
 
-/** POST /ap-flow/documents — registers an already-vaulted document. */
-export function createApFlowDocument(documentId: string): Promise<{ success: boolean; document: ApFlowDocument }> {
-  return apiFetch('/ap-flow/documents', { method: 'POST', body: JSON.stringify({ documentId }) });
+/** POST /capture/documents — registers an already-vaulted document. */
+export function createCaptureDocument(documentId: string): Promise<{ success: boolean; document: CaptureDocument }> {
+  return apiFetch('/capture/documents', { method: 'POST', body: JSON.stringify({ documentId }) });
 }
 
-/** POST /ap-flow/documents/upload — multipart, field "file". Vaults and registers in one call. */
-export function uploadApFlowDocument(
+/** POST /capture/documents/upload — multipart, field "file". Vaults and registers in one call. */
+export function uploadCaptureDocument(
   file: File,
-): Promise<{ success: boolean; document: ApFlowDocument; created: boolean }> {
-  return apiUpload('/ap-flow/documents/upload', () => {
+): Promise<{ success: boolean; document: CaptureDocument; created: boolean }> {
+  return apiUpload('/capture/documents/upload', () => {
     const body = new FormData();
     body.append('file', file);
     return body;
   });
 }
 
-/** GET /ap-flow/documents */
-export function listApFlowDocuments(
-  params: ApFlowDocumentFilters = {},
+/** GET /capture/documents */
+export function listCaptureDocuments(
+  params: CaptureDocumentFilters = {},
   signal?: AbortSignal,
 ): Promise<{
   success: boolean;
@@ -3153,7 +3106,7 @@ export function listApFlowDocuments(
   totalCount: number;
   currentPage: number;
   totalPages: number;
-  documents: ApFlowDocument[];
+  documents: CaptureDocument[];
 }> {
   const query = new URLSearchParams();
   if (params.status !== undefined) query.set('status', params.status);
@@ -3161,31 +3114,31 @@ export function listApFlowDocuments(
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ap-flow/documents${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/capture/documents${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /ap-flow/documents/:id */
-export function getApFlowDocument(
+/** GET /capture/documents/:id */
+export function getCaptureDocument(
   id: string,
   signal?: AbortSignal,
-): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
-  return apiFetch(`/ap-flow/documents/${id}`, { signal: signal ?? null });
+): Promise<{ success: boolean; document: CaptureDocumentDetail }> {
+  return apiFetch(`/capture/documents/${id}`, { signal: signal ?? null });
 }
 
-/** GET /ap-flow/documents/:id/pages/:pageNumber/image — the redacted preview, as a Blob. */
-export function getApFlowPageImage(id: string, pageNumber: number): Promise<{ blob: Blob; filename: string }> {
-  return apiDownloadBlob(`/ap-flow/documents/${id}/pages/${String(pageNumber)}/image`);
+/** GET /capture/documents/:id/pages/:pageNumber/image — the redacted preview, as a Blob. */
+export function getCapturePageImage(id: string, pageNumber: number): Promise<{ blob: Blob; filename: string }> {
+  return apiDownloadBlob(`/capture/documents/${id}/pages/${String(pageNumber)}/image`);
 }
 
-/** POST /ap-flow/documents/:id/reextract */
-export function reextractApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocument }> {
-  return apiFetch(`/ap-flow/documents/${id}/reextract`, { method: 'POST' });
+/** POST /capture/documents/:id/reextract */
+export function reextractCaptureDocument(id: string): Promise<{ success: boolean; document: CaptureDocument }> {
+  return apiFetch(`/capture/documents/${id}/reextract`, { method: 'POST' });
 }
 
-// ---------------------------------------------------------- ap-flow (11)
+// ---------------------------------------------------------- capture (Phase 11)
 
-/** GET /ap-flow/review-queue — documents awaiting human review, lowest confidence first. */
-export function listApFlowReviewQueue(
+/** GET /capture/review-queue — documents awaiting human review, lowest confidence first. */
+export function listCaptureReviewQueue(
   params: { page?: number; limit?: number } = {},
   signal?: AbortSignal,
 ): Promise<{
@@ -3194,47 +3147,47 @@ export function listApFlowReviewQueue(
   totalCount: number;
   currentPage: number;
   totalPages: number;
-  entries: ApFlowReviewQueueEntry[];
+  entries: CaptureReviewQueueEntry[];
 }> {
   const query = new URLSearchParams();
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
-  return apiFetch(`/ap-flow/review-queue${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/capture/review-queue${suffix}`, { signal: signal ?? null });
 }
 
-/** PATCH /ap-flow/documents/:id/line-items/:lineId — a reviewer's account override. */
-export function updateApFlowLineItem(
+/** PATCH /capture/documents/:id/line-items/:lineId — a reviewer's account override. */
+export function updateCaptureLineItem(
   documentId: string,
   lineItemId: string,
   accountId: string,
-): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
-  return apiFetch(`/ap-flow/documents/${documentId}/line-items/${lineItemId}`, {
+): Promise<{ success: boolean; document: CaptureDocumentDetail }> {
+  return apiFetch(`/capture/documents/${documentId}/line-items/${lineItemId}`, {
     method: 'PATCH',
     body: JSON.stringify({ accountId }),
   });
 }
 
-/** POST /ap-flow/documents/:id/post — one-click approve & post into LedgerCore. No request body. */
-export function postApFlowDocument(id: string): Promise<{ success: boolean; document: ApFlowDocumentDetail }> {
-  return apiFetch(`/ap-flow/documents/${id}/post`, { method: 'POST' });
+/** POST /capture/documents/:id/post — one-click approve & post into the books. No request body. */
+export function postCaptureDocument(id: string): Promise<{ success: boolean; document: CaptureDocumentDetail }> {
+  return apiFetch(`/capture/documents/${id}/post`, { method: 'POST' });
 }
 
-// ---------------------------------------------------------- ap-flow (19)
+// ---------------------------------------------------------- capture (Phase 19)
 
-/** GET /ap-flow/settings */
-export function getApFlowSettings(): Promise<{ success: boolean; settings: ApFlowSettings }> {
-  return apiFetch('/ap-flow/settings');
+/** GET /capture/settings */
+export function getCaptureSettings(): Promise<{ success: boolean; settings: CaptureSettings }> {
+  return apiFetch('/capture/settings');
 }
 
-/** PUT /ap-flow/settings */
-export function updateApFlowSettings(body: {
+/** PUT /capture/settings */
+export function updateCaptureSettings(body: {
   autoPostEnabled: boolean;
   autoPostMinConfidence: number;
   autoPostMaxTotalCents: number | null;
-}): Promise<{ success: boolean; settings: ApFlowSettings }> {
-  return apiFetch('/ap-flow/settings', { method: 'PUT', body: JSON.stringify(body) });
+}): Promise<{ success: boolean; settings: CaptureSettings }> {
+  return apiFetch('/capture/settings', { method: 'PUT', body: JSON.stringify(body) });
 }
 
 // -------------------------------------------------- integrations drive (19.3)
@@ -3357,7 +3310,7 @@ export type AiCallStatus = 'OK' | 'ERROR';
 
 export interface AiModelCall {
   id: string;
-  appSlug: string;
+  module: string;
   purpose: AiCallPurpose;
   provider: string;
   model: string;
@@ -3407,13 +3360,13 @@ export interface AiUsageSummary {
 
 /** GET /ai-usage */
 export function getAiUsage(
-  params: { from?: string; to?: string; appSlug?: string } = {},
+  params: { from?: string; to?: string; module?: string } = {},
   signal?: AbortSignal,
 ): Promise<{ success: boolean; usage: AiUsageSummary }> {
   const query = new URLSearchParams();
   if (params.from !== undefined) query.set('from', params.from);
   if (params.to !== undefined) query.set('to', params.to);
-  if (params.appSlug !== undefined) query.set('appSlug', params.appSlug);
+  if (params.module !== undefined) query.set('module', params.module);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/ai-usage${suffix}`, { signal: signal ?? null });
@@ -3425,7 +3378,7 @@ export type NoteStatus = 'DRAFT' | 'ISSUED' | 'VOID';
 export type NoteReasonCode = 'RETURN' | 'PRICE_ADJUSTMENT' | 'DISCOUNT' | 'DAMAGED' | 'OTHER';
 export const NOTE_REASON_CODES: readonly NoteReasonCode[] = ['RETURN', 'PRICE_ADJUSTMENT', 'DISCOUNT', 'DAMAGED', 'OTHER'];
 
-/** Mirrors server/src/types/ledger-core.ts's CreditNoteLine. */
+/** Mirrors server/src/types/accounting.ts's CreditNoteLine. */
 export interface CreditNoteLine {
   id: string;
   lineNumber: number;
@@ -3440,7 +3393,7 @@ export interface CreditNoteLine {
   taxCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's CreditNoteAllocation. */
+/** Mirrors server/src/types/accounting.ts's CreditNoteAllocation. */
 export interface CreditNoteAllocation {
   id: string;
   invoiceId: string;
@@ -3451,7 +3404,7 @@ export interface CreditNoteAllocation {
   createdAt: string;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's CreditNote. */
+/** Mirrors server/src/types/accounting.ts's CreditNote. */
 export interface CreditNote {
   id: string;
   creditNoteNumber: string | null;
@@ -3489,7 +3442,7 @@ export interface CreditNote {
   unappliedCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's DebitNoteLine. */
+/** Mirrors server/src/types/accounting.ts's DebitNoteLine. */
 export interface DebitNoteLine {
   id: string;
   lineNumber: number;
@@ -3504,7 +3457,7 @@ export interface DebitNoteLine {
   taxCents: number;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's DebitNoteAllocation. */
+/** Mirrors server/src/types/accounting.ts's DebitNoteAllocation. */
 export interface DebitNoteAllocation {
   id: string;
   billId: string;
@@ -3515,7 +3468,7 @@ export interface DebitNoteAllocation {
   createdAt: string;
 }
 
-/** Mirrors server/src/types/ledger-core.ts's DebitNote. */
+/** Mirrors server/src/types/accounting.ts's DebitNote. */
 export interface DebitNote {
   id: string;
   debitNoteNumber: string | null;
@@ -3601,99 +3554,99 @@ export interface DebitNoteInput {
   lines: { description: string; quantityMilli: number; unitPriceCents: number; expenseAccountId: string; taxRateBp: number }[];
 }
 
-/** GET /ledger-core/credit-notes */
+/** GET /credit-notes */
 export function listCreditNotes(
   params: NoteListFilters = {},
   signal?: AbortSignal,
 ): Promise<NoteListResponse & { creditNotes: CreditNote[] }> {
-  return apiFetch(`/ledger-core/credit-notes${noteQuery(params, 'customerId', 'invoiceId')}`, { signal: signal ?? null });
+  return apiFetch(`/credit-notes${noteQuery(params, 'customerId', 'invoiceId')}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/credit-notes/:id */
+/** GET /credit-notes/:id */
 export function getCreditNote(id: string, signal?: AbortSignal): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch(`/ledger-core/credit-notes/${id}`, { signal: signal ?? null });
+  return apiFetch(`/credit-notes/${id}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/credit-notes — always a DRAFT against an issued invoice. */
+/** POST /credit-notes — always a DRAFT against an issued invoice. */
 export function createCreditNote(body: CreditNoteInput): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch('/ledger-core/credit-notes', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/credit-notes', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/credit-notes/:id — a draft only. */
+/** PATCH /credit-notes/:id — a draft only. */
 export function updateCreditNote(id: string, body: CreditNoteInput): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch(`/ledger-core/credit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/credit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** DELETE /ledger-core/credit-notes/:id — a draft only. */
+/** DELETE /credit-notes/:id — a draft only. */
 export async function deleteCreditNote(id: string): Promise<void> {
-  await apiFetch(`/ledger-core/credit-notes/${id}`, { method: 'DELETE' });
+  await apiFetch(`/credit-notes/${id}`, { method: 'DELETE' });
 }
 
-/** POST /ledger-core/credit-notes/:id/issue — numbers it, posts DR revenue/tax · CR AR, auto-applies to its invoice. */
+/** POST /credit-notes/:id/issue — numbers it, posts DR revenue/tax · CR AR, auto-applies to its invoice. */
 export function issueCreditNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch(`/ledger-core/credit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+  return apiFetch(`/credit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
 }
 
-/** POST /ledger-core/credit-notes/:id/void — posts a reversal; its allocations stop counting. */
+/** POST /credit-notes/:id/void — posts a reversal; its allocations stop counting. */
 export function voidCreditNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch(`/ledger-core/credit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+  return apiFetch(`/credit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
 }
 
-/** POST /ledger-core/credit-notes/:id/allocations — apply unapplied credit to an open invoice (no journal entry). */
+/** POST /credit-notes/:id/allocations — apply unapplied credit to an open invoice (no journal entry). */
 export function applyCreditNote(
   id: string,
   body: { invoiceId: string; amountCents: number; allocationDate: string },
 ): Promise<{ success: boolean; creditNote: CreditNote }> {
-  return apiFetch(`/ledger-core/credit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch(`/credit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** GET /ledger-core/debit-notes */
+/** GET /debit-notes */
 export function listDebitNotes(
   params: NoteListFilters = {},
   signal?: AbortSignal,
 ): Promise<NoteListResponse & { debitNotes: DebitNote[] }> {
-  return apiFetch(`/ledger-core/debit-notes${noteQuery(params, 'vendorId', 'billId')}`, { signal: signal ?? null });
+  return apiFetch(`/debit-notes${noteQuery(params, 'vendorId', 'billId')}`, { signal: signal ?? null });
 }
 
-/** GET /ledger-core/debit-notes/:id */
+/** GET /debit-notes/:id */
 export function getDebitNote(id: string, signal?: AbortSignal): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch(`/ledger-core/debit-notes/${id}`, { signal: signal ?? null });
+  return apiFetch(`/debit-notes/${id}`, { signal: signal ?? null });
 }
 
-/** POST /ledger-core/debit-notes — always a DRAFT against an approved bill. */
+/** POST /debit-notes — always a DRAFT against an approved bill. */
 export function createDebitNote(body: DebitNoteInput): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch('/ledger-core/debit-notes', { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch('/debit-notes', { method: 'POST', body: JSON.stringify(body) });
 }
 
-/** PATCH /ledger-core/debit-notes/:id — a draft only. */
+/** PATCH /debit-notes/:id — a draft only. */
 export function updateDebitNote(id: string, body: DebitNoteInput): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch(`/ledger-core/debit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+  return apiFetch(`/debit-notes/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
-/** DELETE /ledger-core/debit-notes/:id — a draft only. */
+/** DELETE /debit-notes/:id — a draft only. */
 export async function deleteDebitNote(id: string): Promise<void> {
-  await apiFetch(`/ledger-core/debit-notes/${id}`, { method: 'DELETE' });
+  await apiFetch(`/debit-notes/${id}`, { method: 'DELETE' });
 }
 
-/** POST /ledger-core/debit-notes/:id/issue — numbers it, posts DR AP · CR expense/tax, auto-applies to its bill. */
+/** POST /debit-notes/:id/issue — numbers it, posts DR AP · CR expense/tax, auto-applies to its bill. */
 export function issueDebitNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch(`/ledger-core/debit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+  return apiFetch(`/debit-notes/${id}/issue`, { method: 'POST', body: JSON.stringify({ entryDate }) });
 }
 
-/** POST /ledger-core/debit-notes/:id/void — posts a reversal; its allocations stop counting. */
+/** POST /debit-notes/:id/void — posts a reversal; its allocations stop counting. */
 export function voidDebitNote(id: string, entryDate: string | null = null): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch(`/ledger-core/debit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
+  return apiFetch(`/debit-notes/${id}/void`, { method: 'POST', body: JSON.stringify({ entryDate }) });
 }
 
-/** POST /ledger-core/debit-notes/:id/allocations — apply unapplied credit to an open bill (no journal entry). */
+/** POST /debit-notes/:id/allocations — apply unapplied credit to an open bill (no journal entry). */
 export function applyDebitNote(
   id: string,
   body: { billId: string; amountCents: number; allocationDate: string },
 ): Promise<{ success: boolean; debitNote: DebitNote }> {
-  return apiFetch(`/ledger-core/debit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
+  return apiFetch(`/debit-notes/${id}/allocations`, { method: 'POST', body: JSON.stringify(body) });
 }
 
-// --- StockLedger (Phase 28) ---
+// --- inventory (Phase 28) ---
 
 export const STOCK_INDUSTRY_KEYS = [
   'GENERAL',
@@ -3840,7 +3793,7 @@ export interface StockItem {
   reorderPointMilli: number | null;
   onHandQuantityMilli: number;
   onHandValueCents: number;
-  /** Phase 32 — the LedgerCore product this item is linked to; null = unlinked (posts no GL). */
+  /** Phase 32 — the product this item is linked to; null = unlinked (posts no GL). */
   ledgerItemId: string | null;
   isActive: boolean;
   createdAt: string;
@@ -3960,71 +3913,71 @@ export interface StockMovementResult {
   movements: StockMovement[];
 }
 
-/** GET /stock/settings */
+/** GET /inventory/settings */
 export function fetchStockSettings(signal?: AbortSignal): Promise<{ success: boolean; settings: StockSettings }> {
-  return apiFetch('/stock/settings', { signal: signal ?? null });
+  return apiFetch('/inventory/settings', { signal: signal ?? null });
 }
 
-/** GET /stock/setup/profiles */
+/** GET /inventory/setup/profiles */
 export function fetchStockProfiles(
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; profiles: StockIndustryProfileSummary[] }> {
-  return apiFetch('/stock/setup/profiles', { signal: signal ?? null });
+  return apiFetch('/inventory/setup/profiles', { signal: signal ?? null });
 }
 
-/** POST /stock/setup */
+/** POST /inventory/setup */
 export function applyStockProfile(industryProfile: StockIndustryKey): Promise<{
   success: boolean;
   settings: StockSettings;
   created: { uoms: number; categories: number; attributes: number; codeSchemes: number; locations: number };
 }> {
-  return apiFetch('/stock/setup', { method: 'POST', body: JSON.stringify({ industryProfile }) });
+  return apiFetch('/inventory/setup', { method: 'POST', body: JSON.stringify({ industryProfile }) });
 }
 
-/** GET /stock/uoms */
+/** GET /inventory/uoms */
 export function fetchStockUoms(
   includeInactive?: boolean,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; uoms: StockUom[] }> {
   const suffix = includeInactive === true ? '?includeInactive=true' : '';
-  return apiFetch(`/stock/uoms${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/uoms${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /stock/uoms */
+/** POST /inventory/uoms */
 export function createStockUom(input: {
   code: string;
   name: string;
   decimalPlaces: number;
 }): Promise<{ success: boolean; uom: StockUom }> {
-  return apiFetch('/stock/uoms', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/uoms', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/uoms/:id */
+/** PATCH /inventory/uoms/:id */
 export function updateStockUom(
   id: string,
   input: Partial<{ name: string; isActive: boolean }>,
 ): Promise<{ success: boolean; uom: StockUom }> {
-  return apiFetch(`/stock/uoms/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/uoms/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** GET /stock/categories */
+/** GET /inventory/categories */
 export function fetchStockCategories(
   includeInactive?: boolean,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; categories: StockCategory[] }> {
   const suffix = includeInactive === true ? '?includeInactive=true' : '';
-  return apiFetch(`/stock/categories${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/categories${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/categories/:id */
+/** GET /inventory/categories/:id */
 export function fetchStockCategory(
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; category: StockCategory; attributes: StockAttributeDefinition[] }> {
-  return apiFetch(`/stock/categories/${id}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/categories/${id}`, { signal: signal ?? null });
 }
 
-/** POST /stock/categories */
+/** POST /inventory/categories */
 export function createStockCategory(input: {
   code: string;
   name: string;
@@ -4033,18 +3986,18 @@ export function createStockCategory(input: {
   defaultUomId: string | null;
   parentId: string | null;
 }): Promise<{ success: boolean; category: StockCategory }> {
-  return apiFetch('/stock/categories', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/categories', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/categories/:id */
+/** PATCH /inventory/categories/:id */
 export function updateStockCategory(
   id: string,
   input: Partial<{ name: string; defaultUomId: string | null; isActive: boolean }>,
 ): Promise<{ success: boolean; category: StockCategory }> {
-  return apiFetch(`/stock/categories/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/categories/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** POST /stock/categories/:id/attributes */
+/** POST /inventory/categories/:id/attributes */
 export function createStockAttribute(
   categoryId: string,
   input: {
@@ -4058,91 +4011,91 @@ export function createStockAttribute(
     sortOrder: number;
   },
 ): Promise<{ success: boolean; attribute: StockAttributeDefinition }> {
-  return apiFetch(`/stock/categories/${categoryId}/attributes`, { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/categories/${categoryId}/attributes`, { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/categories/:id/attributes/:attributeId */
+/** PATCH /inventory/categories/:id/attributes/:attributeId */
 export function updateStockAttribute(
   categoryId: string,
   attributeId: string,
   input: Partial<{ label: string; options: string[]; isRequired: boolean; sortOrder: number; isActive: boolean }>,
 ): Promise<{ success: boolean; attribute: StockAttributeDefinition }> {
-  return apiFetch(`/stock/categories/${categoryId}/attributes/${attributeId}`, {
+  return apiFetch(`/inventory/categories/${categoryId}/attributes/${attributeId}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   });
 }
 
-/** GET /stock/code-schemes */
+/** GET /inventory/code-schemes */
 export function fetchStockCodeSchemes(
   includeInactive?: boolean,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; codeSchemes: StockCodeScheme[] }> {
   const suffix = includeInactive === true ? '?includeInactive=true' : '';
-  return apiFetch(`/stock/code-schemes${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/code-schemes${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/code-schemes/presets */
+/** GET /inventory/code-schemes/presets */
 export function fetchStockCodePresets(
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; presets: StockCodeSchemePreset[] }> {
-  return apiFetch('/stock/code-schemes/presets', { signal: signal ?? null });
+  return apiFetch('/inventory/code-schemes/presets', { signal: signal ?? null });
 }
 
-/** POST /stock/code-schemes/preview */
+/** POST /inventory/code-schemes/preview */
 export function previewStockCodePattern(input: {
   pattern: string;
   categoryId: string | null;
   attributes: Record<string, string | boolean>;
 }): Promise<{ success: boolean; valid: boolean; example?: string; scopeKey?: string; error?: string }> {
-  return apiFetch('/stock/code-schemes/preview', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/code-schemes/preview', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** POST /stock/code-schemes */
+/** POST /inventory/code-schemes */
 export function createStockCodeScheme(input: {
   name: string;
   pattern: string;
   isDefault: boolean;
 }): Promise<{ success: boolean; codeScheme: StockCodeScheme }> {
-  return apiFetch('/stock/code-schemes', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/code-schemes', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/code-schemes/:id */
+/** PATCH /inventory/code-schemes/:id */
 export function updateStockCodeScheme(
   id: string,
   input: Partial<{ name: string; isDefault: true; isActive: boolean }>,
 ): Promise<{ success: boolean; codeScheme: StockCodeScheme }> {
-  return apiFetch(`/stock/code-schemes/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/code-schemes/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** GET /stock/locations */
+/** GET /inventory/locations */
 export function fetchStockLocations(
   includeInactive?: boolean,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; locations: StockLocation[] }> {
   const suffix = includeInactive === true ? '?includeInactive=true' : '';
-  return apiFetch(`/stock/locations${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/locations${suffix}`, { signal: signal ?? null });
 }
 
-/** POST /stock/locations */
+/** POST /inventory/locations */
 export function createStockLocation(input: {
   code: string;
   name: string;
   kind: StockLocationKind;
   parentId: string | null;
 }): Promise<{ success: boolean; location: StockLocation }> {
-  return apiFetch('/stock/locations', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/locations', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/locations/:id */
+/** PATCH /inventory/locations/:id */
 export function updateStockLocation(
   id: string,
   input: Partial<{ name: string; isActive: boolean }>,
 ): Promise<{ success: boolean; location: StockLocation }> {
-  return apiFetch(`/stock/locations/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/locations/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** GET /stock/items */
+/** GET /inventory/items */
 export function fetchStockItems(
   params: {
     q?: string | undefined;
@@ -4173,10 +4126,10 @@ export function fetchStockItems(
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/stock/items${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/items${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/items/:id */
+/** GET /inventory/items/:id */
 export function fetchStockItem(
   id: string,
   signal?: AbortSignal,
@@ -4186,10 +4139,10 @@ export function fetchStockItem(
   attributes: StockAttributeDefinition[];
   serialAttributes: StockAttributeDefinition[];
 }> {
-  return apiFetch(`/stock/items/${id}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/items/${id}`, { signal: signal ?? null });
 }
 
-/** Phase 32 — the accounting side of the LedgerCore product a stock item is linked to. */
+/** Phase 32 — the accounting side of the product a stock item is linked to. */
 export interface StockItemProductInput {
   salePriceCents: number | null;
   purchasePriceCents: number | null;
@@ -4200,7 +4153,7 @@ export interface StockItemProductInput {
   purchaseTaxRateBp: number;
 }
 
-/** GET /stock/product-balances — on-hand per LedgerCore product id. */
+/** GET /inventory/product-balances — on-hand per product id. */
 export interface StockProductBalance {
   ledgerItemId: string;
   stockItemId: string;
@@ -4213,25 +4166,25 @@ export interface StockProductBalance {
 export function fetchStockProductBalances(
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; balances: StockProductBalance[] }> {
-  return apiFetch('/stock/product-balances', { signal: signal ?? null });
+  return apiFetch('/inventory/product-balances', { signal: signal ?? null });
 }
 
-/** POST /stock/items/:id/link-product */
+/** POST /inventory/items/:id/link-product */
 export function linkStockItemProduct(
   id: string,
   product: StockItemProductInput,
 ): Promise<{ success: boolean; item: StockItem }> {
-  return apiFetch(`/stock/items/${id}/link-product`, { method: 'POST', body: JSON.stringify(product) });
+  return apiFetch(`/inventory/items/${id}/link-product`, { method: 'POST', body: JSON.stringify(product) });
 }
 
-/** PATCH /stock/settings */
+/** PATCH /inventory/settings */
 export function updateStockSettings(input: {
   defaultLocationId: string | null;
 }): Promise<{ success: boolean; settings: StockSettings }> {
-  return apiFetch('/stock/settings', { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch('/inventory/settings', { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** POST /stock/items */
+/** POST /inventory/items */
 export function createStockItem(input: {
   name: string;
   description: string | null;
@@ -4246,10 +4199,10 @@ export function createStockItem(input: {
   /** Phase 32 — prices/accounts of the linked product; omitted = defaults. */
   product?: StockItemProductInput;
 }): Promise<{ success: boolean; item: StockItem }> {
-  return apiFetch('/stock/items', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/items', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/items/:id */
+/** PATCH /inventory/items/:id */
 export function updateStockItem(
   id: string,
   input: Partial<{
@@ -4261,7 +4214,7 @@ export function updateStockItem(
     isActive: boolean;
   }>,
 ): Promise<{ success: boolean; item: StockItem }> {
-  return apiFetch(`/stock/items/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/items/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
 }
 
 export interface StockReceiptLineInput {
@@ -4285,27 +4238,27 @@ export interface StockAdjustmentLineInput {
   unitCostCents: number | null;
 }
 
-/** POST /stock/receipts */
+/** POST /inventory/receipts */
 export function postStockReceipt(input: {
   occurredOn: string;
   reference: string | null;
   locationId: string;
   lines: StockReceiptLineInput[];
 }): Promise<{ success: boolean } & StockMovementResult> {
-  return apiFetch('/stock/receipts', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/receipts', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** POST /stock/issues */
+/** POST /inventory/issues */
 export function postStockIssue(input: {
   occurredOn: string;
   reference: string | null;
   locationId: string;
   lines: StockOutboundLineInput[];
 }): Promise<{ success: boolean } & StockMovementResult> {
-  return apiFetch('/stock/issues', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/issues', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** POST /stock/transfers */
+/** POST /inventory/transfers */
 export function postStockTransfer(input: {
   occurredOn: string;
   reference: string | null;
@@ -4313,20 +4266,20 @@ export function postStockTransfer(input: {
   toLocationId: string;
   lines: StockOutboundLineInput[];
 }): Promise<{ success: boolean } & StockMovementResult> {
-  return apiFetch('/stock/transfers', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/transfers', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** POST /stock/adjustments */
+/** POST /inventory/adjustments */
 export function postStockAdjustment(input: {
   occurredOn: string;
   reason: string;
   locationId: string;
   lines: StockAdjustmentLineInput[];
 }): Promise<{ success: boolean } & StockMovementResult> {
-  return apiFetch('/stock/adjustments', { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch('/inventory/adjustments', { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** GET /stock/balances */
+/** GET /inventory/balances */
 export function fetchStockBalances(
   params: { itemId?: string | undefined; locationId?: string | undefined; includeZero?: boolean | undefined } = {},
   signal?: AbortSignal,
@@ -4336,10 +4289,10 @@ export function fetchStockBalances(
   if (params.locationId !== undefined) query.set('locationId', params.locationId);
   if (params.includeZero === true) query.set('includeZero', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/stock/balances${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/balances${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/movements */
+/** GET /inventory/movements */
 export function fetchStockMovements(
   params: {
     itemId?: string | undefined;
@@ -4370,70 +4323,70 @@ export function fetchStockMovements(
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
-  return apiFetch(`/stock/movements${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/movements${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/items/:id/lots */
+/** GET /inventory/items/:id/lots */
 export function fetchStockItemLots(
   itemId: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; lots: StockLot[] }> {
-  return apiFetch(`/stock/items/${itemId}/lots`, { signal: signal ?? null });
+  return apiFetch(`/inventory/items/${itemId}/lots`, { signal: signal ?? null });
 }
 
-/** GET /stock/items/:id/serials */
+/** GET /inventory/items/:id/serials */
 export function fetchStockItemSerials(
   itemId: string,
   status?: StockSerialStatus,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; serials: StockSerial[] }> {
   const suffix = status !== undefined ? `?status=${status}` : '';
-  return apiFetch(`/stock/items/${itemId}/serials${suffix}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/items/${itemId}/serials${suffix}`, { signal: signal ?? null });
 }
 
-/** GET /stock/summary */
+/** GET /inventory/summary */
 export function fetchStockSummary(signal?: AbortSignal): Promise<{ success: boolean; summary: StockSummary }> {
-  return apiFetch('/stock/summary', { signal: signal ?? null });
+  return apiFetch('/inventory/summary', { signal: signal ?? null });
 }
 
-/** POST /stock/serials/:id/status */
+/** POST /inventory/serials/:id/status */
 export function changeStockSerialStatus(
   id: string,
   input: { status: 'AVAILABLE' | 'ON_HOLD' | 'BOOKED'; note: string | null },
 ): Promise<{ success: boolean; serial: StockSerial }> {
-  return apiFetch(`/stock/serials/${id}/status`, { method: 'POST', body: JSON.stringify(input) });
+  return apiFetch(`/inventory/serials/${id}/status`, { method: 'POST', body: JSON.stringify(input) });
 }
 
-/** PATCH /stock/serials/:id */
+/** PATCH /inventory/serials/:id */
 export function updateStockSerialAttributes(
   id: string,
   attributes: Record<string, unknown>,
 ): Promise<{ success: boolean; serial: StockSerial }> {
-  return apiFetch(`/stock/serials/${id}`, { method: 'PATCH', body: JSON.stringify({ attributes }) });
+  return apiFetch(`/inventory/serials/${id}`, { method: 'PATCH', body: JSON.stringify({ attributes }) });
 }
 
-/** GET /stock/lookup?q= */
+/** GET /inventory/lookup?q= */
 export function lookupStock(
   q: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; count: number; matches: StockLookupMatch[] }> {
   const query = new URLSearchParams({ q });
-  return apiFetch(`/stock/lookup?${query.toString()}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/lookup?${query.toString()}`, { signal: signal ?? null });
 }
 
-/** GET /stock/lookup?kind=lot|serial&id= */
+/** GET /inventory/lookup?kind=lot|serial&id= */
 export function lookupStockById(
   kind: 'lot' | 'serial',
   id: string,
   signal?: AbortSignal,
 ): Promise<{ success: boolean; match: StockLookupMatch }> {
   const query = new URLSearchParams({ kind, id });
-  return apiFetch(`/stock/lookup?${query.toString()}`, { signal: signal ?? null });
+  return apiFetch(`/inventory/lookup?${query.toString()}`, { signal: signal ?? null });
 }
 
-/** POST /stock/labels */
+/** POST /inventory/labels */
 export function buildStockLabels(
   targets: { kind: StockLabelKind; id: string; copies: number }[],
 ): Promise<{ success: boolean; count: number; labels: StockLabel[] }> {
-  return apiFetch('/stock/labels', { method: 'POST', body: JSON.stringify({ targets }) });
+  return apiFetch('/inventory/labels', { method: 'POST', body: JSON.stringify({ targets }) });
 }

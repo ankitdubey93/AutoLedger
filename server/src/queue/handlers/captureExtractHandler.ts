@@ -1,0 +1,138 @@
+import * as captureDocumentService from '../../services/capture/captureDocumentService.js';
+import * as autoPostService from '../../services/capture/autoPostService.js';
+import * as aiUsageService from '../../services/aiUsageService.js';
+import * as storageService from '../../services/storageService.js';
+import { rasterize, redactPage, tesseractOcr } from '../../services/redactionService.js';
+import type { OcrAdapter } from '../../services/redactionService.js';
+import { extractFromPages } from '../../services/capture/extractionService.js';
+import type { OnModelCall, VisionClient } from '../../services/capture/extractionService.js';
+import * as mappingService from '../../services/capture/mappingService.js';
+import type { ClassificationClient } from '../../services/capture/mappingService.js';
+import type { StructuredModelClient } from '../../services/capture/modelClient.js';
+import type { JobPayloads } from '../../types/jobs.js';
+import type { RedactedRegion } from '../../types/capture.js';
+
+/**
+ * The Capture capture pipeline's job handler (Phase 10). Runs in the
+ * worker process, so the AsyncLocalStorage-published audit actor
+ * (utils/requestContext.ts) does not cross the process boundary — rows this
+ * handler causes to be audited (via savePipelineResult's writes) carry a
+ * null actor, the same accepted behaviour the outbox drain already has.
+ */
+
+async function collectStream(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
+export async function handleCaptureExtract(
+  payload: JobPayloads['capture-extract'],
+  deps?: {
+    ocr?: OcrAdapter;
+    vision?: VisionClient;
+    classifier?: ClassificationClient;
+    modelClient?: StructuredModelClient;
+  },
+): Promise<void> {
+  const { orgId, captureDocumentId } = payload;
+  const ocr = deps?.ocr ?? tesseractOcr;
+
+  const doc = await captureDocumentService.loadForProcessing(orgId, captureDocumentId);
+  if (doc === null) {
+    // The document was deleted; retrying is pointless.
+    console.warn(`[worker] capture-extract: document ${captureDocumentId} no longer exists`);
+    return;
+  }
+
+  const started = await captureDocumentService.markProcessing(orgId, captureDocumentId);
+  if (!started) {
+    // Duplicate job under at-least-once delivery, or the document has
+    // already moved past PENDING/PROCESSING — a no-op, not an error.
+    return;
+  }
+
+  try {
+    const original = await collectStream(storageService.get(orgId, doc.sha256));
+    const rasterPages = await rasterize(original, doc.mimeType as 'application/pdf' | 'image/png' | 'image/jpeg');
+
+    const pipelinePages: {
+      pageNumber: number;
+      widthPx: number;
+      heightPx: number;
+      redactedSha256: string;
+      ocrText: string;
+      redactedRegions: RedactedRegion[];
+    }[] = [];
+    const redactedBuffers: Buffer[] = [];
+
+    for (const page of rasterPages) {
+      const ocrResult = await ocr(page.png);
+      const { png: redactedPng, regions } = await redactPage(page.png, ocrResult.words);
+      const { sha256: redactedSha256 } = await storageService.put(orgId, redactedPng);
+
+      redactedBuffers.push(redactedPng);
+      pipelinePages.push({
+        pageNumber: page.pageNumber,
+        widthPx: page.width,
+        heightPx: page.height,
+        redactedSha256,
+        ocrText: ocrResult.text,
+        redactedRegions: regions,
+      });
+    }
+
+    // Phase 19.1 — reports every metered call this pipeline run causes,
+    // attributed to this document and its uploader. `recordCall` never
+    // throws and is deliberately not awaited — metering is observability,
+    // and a metering failure must never mark a document FAILED. `createdBy`
+    // is the document's uploader: the worker runs outside the request, so
+    // the AsyncLocalStorage audit actor does not cross the process boundary
+    // (the same accepted behaviour this file's own header already
+    // documents).
+    const onModelCall: OnModelCall = (record) => {
+      void aiUsageService.recordCall(orgId, {
+        ...record,
+        entityType: 'ap_flow_document',
+        entityId: captureDocumentId,
+        createdBy: doc.createdBy,
+      });
+    };
+
+    // Only now — redacted buffers ONLY. Passing page.png (the unredacted
+    // raster) here is the one bug that would make this app's central claim
+    // false: that PII is masked before any image leaves the machine.
+    const extraction = await extractFromPages(redactedBuffers, deps?.vision, deps?.modelClient, onModelCall);
+
+    const classifications = await mappingService.classifyLineItems(
+      orgId,
+      { vendorName: extraction.vendorName, lineItems: extraction.lineItems },
+      {
+        ...(deps?.classifier === undefined ? {} : { classifier: deps.classifier }),
+        ...(deps?.modelClient === undefined ? {} : { modelClient: deps.modelClient }),
+        onModelCall,
+        captureDocumentId,
+      },
+    );
+
+    await captureDocumentService.savePipelineResult(
+      orgId,
+      captureDocumentId,
+      pipelinePages,
+      extraction,
+      classifications,
+    );
+
+    // Never throws — an auto-post refusal must never mark an extracted
+    // document FAILED (see autoPostService.attemptAutoPost's own comment).
+    await autoPostService.attemptAutoPost(orgId, captureDocumentId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error';
+    await captureDocumentService.markFailed(orgId, captureDocumentId, message);
+    // Re-thrown so BullMQ retries, and a terminal failure still reaches the
+    // dead-letter queue via the worker's existing 'failed' listener.
+    throw err instanceof Error ? err : new Error(message);
+  }
+}

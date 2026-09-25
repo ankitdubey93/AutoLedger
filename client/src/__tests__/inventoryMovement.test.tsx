@@ -7,7 +7,7 @@ import InventoryMovementsPage from '../Pages/inventory/InventoryMovementsPage';
 import type { StockItem, StockLocation, StockLot } from '../services/fetchServices';
 
 /**
- * StockLedger (Phase 28) — the movement entry form. Renders under
+ * Inventory (Phase 28) — the movement entry form. Renders under
  * AuthProvider (role gates the whole page), mirroring UniteconSettingsPage's
  * tests.
  */
@@ -91,15 +91,15 @@ function mockRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor('OWNER')));
-    if (url.includes('/stock/locations')) return Promise.resolve(jsonResponse(200, { success: true, count: locations.length, locations }));
-    if (url.includes('/stock/items?q=')) return Promise.resolve(jsonResponse(200, { success: true, count: searchResults.length, totalCount: searchResults.length, currentPage: 1, totalPages: 1, items: searchResults }));
+    if (url.includes('/api/v1/inventory/locations')) return Promise.resolve(jsonResponse(200, { success: true, count: locations.length, locations }));
+    if (url.includes('/api/v1/inventory/items?q=')) return Promise.resolve(jsonResponse(200, { success: true, count: searchResults.length, totalCount: searchResults.length, currentPage: 1, totalPages: 1, items: searchResults }));
     if (url.includes('/item-3/lots')) return Promise.resolve(jsonResponse(200, { success: true, count: lots.length, lots }));
-    if (url.includes('/stock/categories/')) return Promise.resolve(jsonResponse(200, { success: true, category: { id: 'cat-1' }, attributes: [] }));
-    if (url.includes('/stock/receipts')) {
+    if (url.includes('/api/v1/inventory/categories/')) return Promise.resolve(jsonResponse(200, { success: true, category: { id: 'cat-1' }, attributes: [] }));
+    if (url.includes('/api/v1/inventory/receipts')) {
       receiptBody = init?.body !== undefined ? (JSON.parse(init.body as string) as Record<string, unknown>) : null;
       return Promise.resolve(jsonResponse(201, { success: true, movementGroupId: 'grp-1', movements: [{ id: 'mv-1' }] }));
     }
-    if (url.includes('/stock/issues')) {
+    if (url.includes('/api/v1/inventory/issues')) {
       if (issueStatus !== 201) {
         return Promise.resolve(jsonResponse(issueStatus, { success: false, error: issueError }));
       }

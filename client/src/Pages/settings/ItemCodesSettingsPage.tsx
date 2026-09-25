@@ -25,7 +25,7 @@ interface PreviewResult {
 }
 
 /**
- * StockLedger's item-code schemes: a builder that inserts pattern tokens
+ * Inventory's item-code schemes: a builder that inserts pattern tokens
  * (`{CAT}`, `{YYYY}`, `{YY}`, `{ATTR:key:n}`, `{SEQ:n}`), a debounced live
  * preview against the real parser/renderer, ready-made presets, and the
  * list of saved schemes with a default-swap action per row.

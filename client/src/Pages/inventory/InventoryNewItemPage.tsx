@@ -24,7 +24,7 @@ const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
 /**
- * StockLedger's new-item form. Choosing a category loads its ITEM custom
+ * Inventory's new-item form. Choosing a category loads its ITEM custom
  * fields and pre-fills the unit and tracking mode from the category's own
  * defaults (both stay editable — a category default is a starting point,
  * not a lock). Code is either generated live from a chosen scheme or typed
@@ -59,7 +59,7 @@ export default function InventoryNewItemPage() {
   const [barcode, setBarcode] = useState('');
   const [reorderPointText, setReorderPointText] = useState('');
 
-  // Phase 32 — the accounting side of the LedgerCore product this item creates.
+  // Phase 32 — the accounting side of the Accounting product this item creates.
   // Blank accounts fall back to the org's inventory settings, then the default chart.
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [salePriceText, setSalePriceText] = useState('');

@@ -1,7 +1,6 @@
 import { Router } from 'express';
 import * as organizationController from '../controllers/organizationController.js';
 import * as organizationProfileController from '../controllers/organizationProfileController.js';
-import * as organizationAppController from '../controllers/organizationAppController.js';
 import { authenticate } from '../middleware/auth.js';
 import { requireRole } from '../middleware/rbac.js';
 
@@ -28,13 +27,6 @@ router.get(
 // Editing the organization's name or base currency is administrative, same
 // tier as the member list.
 router.patch('/', authenticate, requireRole('OWNER', 'ADMIN'), organizationController.update);
-
-// Phase 27 — which apps the organization uses. Any member may read it: every
-// member's app chooser needs to know which apps to show.
-router.get('/apps', authenticate, organizationAppController.list);
-
-// Changing the set is organization configuration, same tier as PATCH above.
-router.put('/apps', authenticate, requireRole('OWNER', 'ADMIN'), organizationAppController.replace);
 
 // Phase 30 — the organization's postal identity. Any member may read it: the
 // invoice document renders it, and a VIEWER can open an invoice.

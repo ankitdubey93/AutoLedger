@@ -20,7 +20,7 @@ import type { WalkthroughMonth } from './walkthroughDates.js';
  *
  * Every document is tax-exempt (no `taxRateBp` field — the schema's default
  * is 0) so the arithmetic in `07-expected-results.md` stays checkable by
- * hand; the tax split is AP-Flow's showcase, not this one.
+ * hand; the tax split is Capture's showcase, not this one.
  */
 
 export type Tier =

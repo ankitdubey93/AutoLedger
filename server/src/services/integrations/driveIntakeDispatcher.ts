@@ -1,8 +1,9 @@
 import { ApiError } from '../../utils/apiError.js';
 import { MAX_CSV_CHARS } from '../../config/constants.js';
-import * as apFlowDocumentService from '../ap-flow/apFlowDocumentService.js';
-import * as bankImportService from '../ledger-core/bankImportService.js';
+import * as captureDocumentService from '../capture/captureDocumentService.js';
+import * as bankImportService from '../accounting/bankImportService.js';
 import type { DriveColumnMap, DriveDateFormat, DriveFolderPurpose } from '../../types/integrations.js';
+import { MODULE_TAGS } from '../../config/modules.js';
 
 /**
  * The guardrails rule 16 seam for Drive folder intake: hands one downloaded
@@ -10,8 +11,8 @@ import type { DriveColumnMap, DriveDateFormat, DriveFolderPurpose } from '../../
  * public service function. This file imports two app SERVICES and reads or
  * writes ZERO app tables — no SQL of any kind lives here.
  *
- * VENDOR_BILL -> apFlowDocumentService.captureFile. The identical path
- * POST /ap-flow/documents/upload already uses, so extraction, PII masking,
+ * VENDOR_BILL -> captureDocumentService.captureFile. The identical path
+ * POST /capture/documents/upload already uses, so extraction, PII masking,
  * AI usage metering (Phase 19.1) and confidence-gated auto-post all keep
  * working with no additional wiring.
  *
@@ -37,7 +38,7 @@ export interface DriveIntakeTarget {
 }
 
 export type DriveIntakeOutcome =
-  | { status: 'IMPORTED'; resultApp: 'ap-flow' | 'ledger-core'; resultEntityId: string }
+  | { status: 'IMPORTED'; resultApp: typeof MODULE_TAGS.capture | typeof MODULE_TAGS.accounting; resultEntityId: string }
   | { status: 'SKIPPED'; reason: string };
 
 /** The `skip_reason` / `last_sync_error` column bound (`integration_drive_files.skip_reason`, migration 053). */
@@ -84,8 +85,8 @@ function decodeCsv(buffer: Buffer): { content: string } | { skipped: DriveIntake
 }
 
 async function dispatchVendorBill(target: DriveIntakeTarget): Promise<DriveIntakeOutcome> {
-  const { document } = await apFlowDocumentService.captureFile(target.orgId, target.createdBy, target.file);
-  return { status: 'IMPORTED', resultApp: 'ap-flow', resultEntityId: document.id };
+  const { document } = await captureDocumentService.captureFile(target.orgId, target.createdBy, target.file);
+  return { status: 'IMPORTED', resultApp: MODULE_TAGS.capture, resultEntityId: document.id };
 }
 
 async function dispatchBankStatement(target: DriveIntakeTarget): Promise<DriveIntakeOutcome> {
@@ -105,7 +106,7 @@ async function dispatchBankStatement(target: DriveIntakeTarget): Promise<DriveIn
     closingBalanceOn: null,
   });
 
-  return { status: 'IMPORTED', resultApp: 'ledger-core', resultEntityId: result.import.id };
+  return { status: 'IMPORTED', resultApp: MODULE_TAGS.accounting, resultEntityId: result.import.id };
 }
 
 /**

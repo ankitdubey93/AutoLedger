@@ -8,7 +8,7 @@ Read `00-the-business.md` first if you have not already — it is one page and t
 
 ## Step 0 — set up the organization
 
-Follow `01-setup.md`: register a fresh org (base currency USD), choose at least LedgerCore on the app picker that follows, then create one account by hand, `4300 Interest Income`. Registration already seeds the other 45 accounts, so this is the only one you create yourself.
+Follow `01-setup.md`: register a fresh org (base currency USD), complete the setup wizard (skip the optional inventory step), then create one account by hand, `4300 Interest Income`. Registration already seeds the other 47 accounts, so this is the only one you create yourself.
 
 > **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" will have no account to offer for it — come back here and add it.
 

@@ -100,11 +100,11 @@ beforeEach(() => {
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && (url.includes('/ledger-core/invoices') || url.includes('/ledger-core/bills'))) {
+    if (init?.method === 'POST' && (url.includes('/api/v1/invoices') || url.includes('/api/v1/bills'))) {
       posted = { url, body: JSON.parse(init.body as string) as Record<string, unknown> };
       return Promise.resolve(jsonResponse(201, { success: true, invoice: { id: 'inv-new' }, bill: { id: 'bill-new' } }));
     }
-    if (init?.method === 'POST' && url.endsWith('/ledger-core/items')) {
+    if (init?.method === 'POST' && url.endsWith('/api/v1/items')) {
       const body = JSON.parse(init.body as string) as Record<string, unknown>;
       itemPosts.push(body);
       const status = itemPostStatuses.shift() ?? 201;
@@ -126,15 +126,15 @@ beforeEach(() => {
         }),
       );
     }
-    if (url.includes('/ledger-core/customers')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer] }));
-    if (url.includes('/ledger-core/vendors')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, vendors: [vendor] }));
-    if (url.includes('/ledger-core/settings/invoicing')) return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
-    if (url.includes('/ledger-core/accounts')) return Promise.resolve(jsonResponse(200, { success: true, count: accounts.length, accounts }));
-    if (url.includes('/ledger-core/items')) return Promise.resolve(jsonResponse(200, { success: true, count: items.length, items }));
-    if (url.includes('/ledger-core/payment-terms')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, paymentTerms: [netTerm] }));
-    if (url.includes('/stock/product-balances')) return Promise.resolve(jsonResponse(200, { success: true, count: balances.length, balances }));
-    if (url.includes('/stock/locations')) return Promise.resolve(jsonResponse(200, { success: true, count: 2, locations: [mainLocation, backroom] }));
-    if (url.includes('/stock/settings')) {
+    if (url.includes('/api/v1/customers')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer] }));
+    if (url.includes('/api/v1/vendors')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, vendors: [vendor] }));
+    if (url.includes('/api/v1/settings/invoicing')) return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
+    if (url.includes('/api/v1/accounts')) return Promise.resolve(jsonResponse(200, { success: true, count: accounts.length, accounts }));
+    if (url.includes('/api/v1/items')) return Promise.resolve(jsonResponse(200, { success: true, count: items.length, items }));
+    if (url.includes('/api/v1/payment-terms')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, paymentTerms: [netTerm] }));
+    if (url.includes('/api/v1/inventory/product-balances')) return Promise.resolve(jsonResponse(200, { success: true, count: balances.length, balances }));
+    if (url.includes('/api/v1/inventory/locations')) return Promise.resolve(jsonResponse(200, { success: true, count: 2, locations: [mainLocation, backroom] }));
+    if (url.includes('/api/v1/inventory/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: { configured: true, defaultLocationId: 'loc-main', industryProfile: 'GENERAL', suggestedProfile: 'GENERAL', updatedAt: now } }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

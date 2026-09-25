@@ -7,7 +7,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 /**
  * The payment register — every receipt and every vendor payment, across both
  * directions. Void is gated by a confirmation dialog, matching every other
- * one-way action in LedgerCore (issue, void, approve).
+ * one-way action in Accounting (issue, void, approve).
  */
 
 const PAGE_LIMIT = 50;

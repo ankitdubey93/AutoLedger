@@ -31,7 +31,7 @@ export const AI_MODEL_PRICES: Record<string, ModelPrice> = {
 };
 
 /**
- * There is no separate cached-input rate here. AP-Flow sends no
+ * There is no separate cached-input rate here. Capture sends no
  * `cache_control`, so `cached_input_tokens` is always 0 today; the caller
  * (aiUsageService) prices cached input at the plain input rate, which is a
  * deliberate over-estimate. Before prompt caching is ever introduced, a

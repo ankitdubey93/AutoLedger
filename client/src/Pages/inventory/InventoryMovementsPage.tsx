@@ -75,7 +75,7 @@ function emptyLine(): LineState {
 }
 
 /**
- * StockLedger's movement entry: receive, issue, transfer, adjust — one
+ * Inventory's movement entry: receive, issue, transfer, adjust — one
  * form, four tabs, because every tab shares the item picker and the
  * per-tracking-mode line inputs (QUANTITY/LOT/SERIAL). Quantity and money
  * are parsed with the same string-math parsers the rest of the client

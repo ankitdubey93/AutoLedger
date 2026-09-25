@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom';
 
 /**
- * Shown above LedgerCore's pages when the wizard was skipped rather than
+ * Shown above Accounting's pages when the wizard was skipped rather than
  * completed (Phase 9a). Persistent — no dismiss — because a skipped setup is
  * a standing condition, not a one-time notice; it goes away only once
  * onboarding actually completes.

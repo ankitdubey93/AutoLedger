@@ -95,7 +95,7 @@ async function accountId(orgId: string, code: string): Promise<string> {
 }
 
 async function postSale(agent: Awaited<ReturnType<typeof loginAgent>>, orgId: string) {
-  const res = await agent.post('/api/v1/ledger-core/journals').send({
+  const res = await agent.post('/api/v1/journals').send({
     entryDate: '2026-06-01',
     description: 'Fixture sale',
     lines: [

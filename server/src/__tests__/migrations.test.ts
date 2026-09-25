@@ -44,7 +44,7 @@ describe('migration filename contract', () => {
   });
 
   it('accepts an app-tagged filename with a hyphenated slug', () => {
-    // Every app slug in config/apps.ts may contain a hyphen. Rejecting these
+    // Every app slug in config/modules.ts may contain a hyphen. Rejecting these
     // would make the NNN_<app-slug>_<subject>.sql convention in docs/schema.md
     // unusable for ledger-core, ap-flow and stock alike.
     expect(MIGRATION_FILENAME.test('002_ledger-core_accounts.sql')).toBe(true);
@@ -53,7 +53,7 @@ describe('migration filename contract', () => {
 
   it('still rejects uppercase, spaces and a missing prefix', () => {
     expect(MIGRATION_FILENAME.test('002_Ledger Core.sql')).toBe(false);
-    expect(MIGRATION_FILENAME.test('002_LedgerCore_accounts.sql')).toBe(false);
+    expect(MIGRATION_FILENAME.test('002_Accounting_accounts.sql')).toBe(false);
     expect(MIGRATION_FILENAME.test('2_ledger-core_accounts.sql')).toBe(false);
     expect(MIGRATION_FILENAME.test('002_ledger-core_accounts.txt')).toBe(false);
   });

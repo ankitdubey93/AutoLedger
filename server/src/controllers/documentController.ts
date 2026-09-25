@@ -34,7 +34,7 @@ export const list: RequestHandler = async (req, res) => {
   const { documents, totalCount, currentPage, totalPages } = await documentService.listDocuments(
     user.orgId,
     {
-      appSlug: optionalText(req, 'appSlug', 40),
+      module: optionalText(req, 'module', 40),
       entityType: optionalText(req, 'entityType', 40),
       entityId: optionalUuid(req, 'entityId'),
       page,

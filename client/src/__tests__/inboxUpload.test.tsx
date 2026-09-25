@@ -4,10 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InboxUploadPanel from '../Pages/inbox/InboxUploadPanel';
 import InboxPage from '../Pages/inbox/InboxPage';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
-import type { ApFlowDocument } from '../services/fetchServices';
+import type { CaptureDocument } from '../services/fetchServices';
 
 /**
- * Phase 19 — direct upload into AP-Flow's own page. Every case here mocks
+ * Phase 19 — direct upload into Capture's own page. Every case here mocks
  * `fetch` directly (this codebase's established client-test convention),
  * never the service module.
  */
@@ -16,7 +16,7 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function apFlowDoc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
+function captureDoc(overrides: Partial<CaptureDocument> = {}): CaptureDocument {
   return {
     id: 'ap-doc-1',
     documentId: 'vault-doc-1',
@@ -62,15 +62,15 @@ describe('InboxUploadPanel', () => {
     let call = 0;
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/ap-flow/documents/upload')) {
+      if (url.includes('/api/v1/capture/documents/upload')) {
         call += 1;
         if (call === 1) {
           return Promise.resolve(
-            jsonResponse(201, { success: true, created: true, document: apFlowDoc({ id: 'doc-1' }) }),
+            jsonResponse(201, { success: true, created: true, document: captureDoc({ id: 'doc-1' }) }),
           );
         }
         return Promise.resolve(
-          jsonResponse(200, { success: true, created: false, document: apFlowDoc({ id: 'doc-1' }) }),
+          jsonResponse(200, { success: true, created: false, document: captureDoc({ id: 'doc-1' }) }),
         );
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
@@ -94,8 +94,8 @@ describe('InboxUploadPanel', () => {
   it('an upload error is shown against that file', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/ap-flow/documents/upload')) {
-        return Promise.resolve(jsonResponse(422, { success: false, error: 'AP-Flow can only process PDF, PNG and JPEG documents' }));
+      if (url.includes('/api/v1/capture/documents/upload')) {
+        return Promise.resolve(jsonResponse(422, { success: false, error: 'The bill inbox can only process PDF, PNG and JPEG documents' }));
       }
       return Promise.reject(new Error(`unexpected fetch: ${url}`));
     });
@@ -106,7 +106,7 @@ describe('InboxUploadPanel', () => {
     await user.upload(input, [makeFile('a.png')]);
 
     await waitFor(() => {
-      expect(screen.getByText('AP-Flow can only process PDF, PNG and JPEG documents')).toBeInTheDocument();
+      expect(screen.getByText('The bill inbox can only process PDF, PNG and JPEG documents')).toBeInTheDocument();
     });
   });
 });
@@ -115,8 +115,8 @@ describe('InboxPage status pill', () => {
   it('a POSTED document renders a Posted pill, not Failed', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/api/v1/ap-flow/documents')) {
-        const documents = [apFlowDoc({ id: 'doc-1', status: 'POSTED', autoPosted: true })];
+      if (url.includes('/api/v1/capture/documents')) {
+        const documents = [captureDoc({ id: 'doc-1', status: 'POSTED', autoPosted: true })];
         return Promise.resolve(
           jsonResponse(200, {
             success: true,

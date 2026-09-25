@@ -7,9 +7,9 @@ import InventoryLookupPage from '../Pages/inventory/InventoryLookupPage';
 import InventoryScanRedirect from '../Pages/inventory/InventoryScanRedirect';
 
 /**
- * StockLedger (Phase 28) — QR label generation, scan-and-lookup, and the
+ * Inventory (Phase 28) — QR label generation, scan-and-lookup, and the
  * scan-URL resolver. None of these three pages read `useAuth()`, so they
- * render without `AuthProvider`, unlike most other StockLedger page tests.
+ * render without `AuthProvider`, unlike most other Inventory page tests.
  */
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -45,7 +45,7 @@ describe('InventoryLabelsPage', () => {
   function mockLabelsRoute() {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/stock/labels')) {
+      if (url.includes('/api/v1/inventory/labels')) {
         return Promise.resolve(
           jsonResponse(200, {
             success: true,
@@ -129,7 +129,7 @@ describe('InventoryLookupPage', () => {
   it('lookup navigates straight to a single match', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/stock/lookup')) {
+      if (url.includes('/api/v1/inventory/lookup')) {
         return Promise.resolve(
           jsonResponse(200, {
             success: true,
@@ -179,7 +179,7 @@ describe('InventoryScanRedirect', () => {
   it('scanning a serial label resolves to its item page', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/stock/lookup') && url.includes('kind=serial')) {
+      if (url.includes('/api/v1/inventory/lookup') && url.includes('kind=serial')) {
         return Promise.resolve(
           jsonResponse(200, {
             success: true,

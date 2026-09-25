@@ -11,7 +11,7 @@ import BackLink from '../../components/BackLink';
  * trial balance and P&L.
  *
  * Retained earnings and current-period earnings are DERIVED, not read from
- * account 3200 — LedgerCore posts no year-end closing entry. Both are shown
+ * account 3200 — Accounting posts no year-end closing entry. Both are shown
  * as explicit equity rows carrying a `derived` marker so a reader never
  * mistakes them for posted account balances.
  */

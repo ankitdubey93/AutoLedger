@@ -18,7 +18,7 @@ const BASE = '/api/v1/ai-usage';
 
 function callRecord(overrides: Partial<ModelCallRecord> = {}): ModelCallRecord {
   return {
-    appSlug: 'ap-flow',
+    module: 'ap-flow',
     purpose: 'EXTRACT',
     provider: 'anthropic',
     model: 'claude-sonnet-5',
@@ -107,7 +107,7 @@ describe('aiUsageService', () => {
     await recordCall(orgA, callRecord());
     await recordCall(orgA, callRecord({ provider: 'gemini', model: 'gemini-3.6-flash' }));
 
-    const usage = await getUsageSummary(orgA, { from: null, to: null, appSlug: null });
+    const usage = await getUsageSummary(orgA, { from: null, to: null, module: null });
     expect(usage.totals.callCount).toBe(2);
     expect(usage.totals.costMicroUsd).toBe(6000);
     expect(usage.totals.unpricedCallCount).toBe(1);
@@ -117,7 +117,7 @@ describe('aiUsageService', () => {
     await recordCall(orgA, callRecord({ purpose: 'EXTRACT', model: 'claude-sonnet-5' }));
     await recordCall(orgA, callRecord({ purpose: 'CLASSIFY', provider: 'gemini', model: 'gemini-3.6-flash' }));
 
-    const usage = await getUsageSummary(orgA, { from: null, to: null, appSlug: null });
+    const usage = await getUsageSummary(orgA, { from: null, to: null, module: null });
     expect(usage.byModel).toHaveLength(2);
     expect(usage.byApp[0]?.key).toBe('ap-flow');
     expect(usage.byPurpose.map((p) => p.key).sort()).toEqual(['CLASSIFY', 'EXTRACT']);
@@ -128,22 +128,22 @@ describe('aiUsageService', () => {
     await recordCall(orgA, callRecord());
     const today = new Date().toISOString().slice(0, 10);
 
-    const usage = await getUsageSummary(orgA, { from: null, to: today, appSlug: null });
+    const usage = await getUsageSummary(orgA, { from: null, to: today, module: null });
     expect(usage.totals.callCount).toBe(1);
   });
 
-  it('getUsageSummary filters by appSlug', async () => {
-    await recordCall(orgA, callRecord({ appSlug: 'ap-flow' }));
-    await recordCall(orgA, callRecord({ appSlug: 'stock' }));
+  it('getUsageSummary filters by module', async () => {
+    await recordCall(orgA, callRecord({ module: 'ap-flow' }));
+    await recordCall(orgA, callRecord({ module: 'stock' }));
 
-    const usage = await getUsageSummary(orgA, { from: null, to: null, appSlug: 'ap-flow' });
+    const usage = await getUsageSummary(orgA, { from: null, to: null, module: 'ap-flow' });
     expect(usage.totals.callCount).toBe(1);
   });
 
   it('an ERROR call is counted but contributes no tokens', async () => {
     await recordCall(orgA, callRecord({ status: 'ERROR', errorCode: '502', usage: null }));
 
-    const usage = await getUsageSummary(orgA, { from: null, to: null, appSlug: null });
+    const usage = await getUsageSummary(orgA, { from: null, to: null, module: null });
     expect(usage.totals.errorCount).toBe(1);
     expect(usage.totals.totalTokens).toBe(0);
   });
@@ -188,7 +188,7 @@ describe('aiUsageService', () => {
     await recordCall(orgA, callRecord());
     await recordCall(orgA, callRecord());
 
-    const orgBSummary = await getUsageSummary(orgB, { from: null, to: null, appSlug: null });
+    const orgBSummary = await getUsageSummary(orgB, { from: null, to: null, module: null });
     expect(orgBSummary.totals.callCount).toBe(0);
     expect(orgBSummary.byModel).toHaveLength(0);
   });

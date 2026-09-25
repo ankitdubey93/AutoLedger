@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
-import * as journalService from '../../services/ledger-core/journalService.js';
+import * as journalService from '../../services/accounting/journalService.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
 
@@ -16,9 +16,9 @@ import type { SeededUser } from '../helpers/factories.js';
  */
 
 const app = createApp();
-const JOURNALS = '/api/v1/ledger-core/journals';
-const CUSTOMERS = '/api/v1/ledger-core/customers';
-const INVOICES = '/api/v1/ledger-core/invoices';
+const JOURNALS = '/api/v1/journals';
+const CUSTOMERS = '/api/v1/customers';
+const INVOICES = '/api/v1/invoices';
 
 let userA: SeededUser;
 let userB: SeededUser;

@@ -10,7 +10,7 @@ import { requireRole } from '../../middleware/rbac.js';
  * removing a folder, and disconnecting need OWNER/ADMIN — this grants a
  * third party read access to files in the organization's own Drive, a
  * decision above ACCOUNTANT tier. Manual sync accepts ACCOUNTANT too,
- * matching every other AP-Flow write that only moves documents rather than
+ * matching every other Capture write that only moves documents rather than
  * authorizing a new integration.
  *
  * The OAuth callback carries no `authenticate` — Google's redirect has no

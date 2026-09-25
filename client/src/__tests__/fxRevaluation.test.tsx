@@ -41,7 +41,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockExposureRoutes(exposure: FxExposureReport) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/fx-revaluations')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/fx-revaluations')) {
       return Promise.resolve(
         jsonResponse(201, {
           success: true,
@@ -59,7 +59,7 @@ function mockExposureRoutes(exposure: FxExposureReport) {
         }),
       );
     }
-    if (url.includes('/ledger-core/reports/fx-exposure')) {
+    if (url.includes('/api/v1/reports/fx-exposure')) {
       return Promise.resolve(jsonResponse(200, { success: true, exposure }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -110,7 +110,7 @@ describe('FxExposurePage', () => {
         fetchMock.mock.calls.some((c) => {
           const [input, init] = c as [RequestInfo | URL, RequestInit?];
           const url = typeof input === 'string' ? input : input.toString();
-          return init?.method === 'POST' && url.includes('/ledger-core/fx-revaluations');
+          return init?.method === 'POST' && url.includes('/api/v1/fx-revaluations');
         }),
       ).toBe(true);
     });

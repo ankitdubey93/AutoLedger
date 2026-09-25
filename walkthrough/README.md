@@ -1,6 +1,6 @@
 # Walkthrough: Harbor Point Fabrication
 
-A complete, four-month accounting scenario for LedgerCore — a vendor and a customer CSV to import, source documents to enter by hand, four bank statements to import, credit and debit notes in the fourth month, and a computed answer key to check your work against.
+A complete, four-month accounting scenario for AutoLedger — a vendor and a customer CSV to import, source documents to enter by hand, four bank statements to import, credit and debit notes in the fourth month, and a computed answer key to check your work against.
 
 **Start with `TUTORIAL.md`** — it walks the whole thing start to finish with hints. The files below are its reference material, useful to come back to on their own:
 

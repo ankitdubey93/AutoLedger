@@ -90,7 +90,7 @@ function nodeEnv(): NodeEnv {
 
 /**
  * Like `optional`, but the value must be one of a fixed set of literals.
- * Phase 19 — AP-Flow's provider switch is the first user of this.
+ * Phase 19 — Capture's provider switch is the first user of this.
  */
 function oneOf<T extends string>(name: string, allowed: readonly T[], fallback: T): T {
   const value = read(name);
@@ -125,19 +125,19 @@ const parsed = {
   // root, because every npm script runs with cwd = server/.
   STORAGE_ROOT: path.resolve(process.cwd(), optional('STORAGE_ROOT', 'storage')),
 
-  // Phase 10 — AP-Flow's vision extraction. Optional by design: the server
+  // Phase 10 — Capture's vision extraction. Optional by design: the server
   // and the worker must both boot without it. extractionService throws 503
   // when a real extraction is attempted with no key, rather than failing at
   // import.
   ANTHROPIC_API_KEY: optional('ANTHROPIC_API_KEY', ''),
 
-  // Phase 19 — which vision/classification provider AP-Flow uses. Optional;
+  // Phase 19 — which vision/classification provider Capture uses. Optional;
   // defaults to anthropic. Only the selected provider's key needs to be set.
-  AP_FLOW_AI_PROVIDER: oneOf('AP_FLOW_AI_PROVIDER', ['anthropic', 'gemini'] as const, 'anthropic'),
+  CAPTURE_AI_PROVIDER: oneOf('CAPTURE_AI_PROVIDER', ['anthropic', 'gemini'] as const, 'anthropic'),
   // Google AI Studio / Gemini API key, called over fetch — no SDK (rule 14).
   // Optional by design, exactly as ANTHROPIC_API_KEY.
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
-  AP_FLOW_GEMINI_MODEL: optional('AP_FLOW_GEMINI_MODEL', 'gemini-3.6-flash'),
+  CAPTURE_GEMINI_MODEL: optional('CAPTURE_GEMINI_MODEL', 'gemini-3.6-flash'),
 
   // Phase 19.3 — the Drive integration's service account, the recommended way
   // to connect. The tenant shares a folder with GOOGLE_SERVICE_ACCOUNT_EMAIL
@@ -173,8 +173,8 @@ const parsed = {
   GOOGLE_OAUTH_CLIENT_ID: optional('GOOGLE_OAUTH_CLIENT_ID', ''),
   GOOGLE_OAUTH_CLIENT_SECRET: optional('GOOGLE_OAUTH_CLIENT_SECRET', ''),
   // CHANGED IN 19.3: the callback moved with the integration, from
-  // /api/v1/ap-flow/drive to /api/v1/integrations/drive. A .env still naming
-  // the old path keeps working — routes/ap-flow/driveRoutes.ts retains that one
+  // /api/v1/capture/drive to /api/v1/integrations/drive. A .env still naming
+  // the old path keeps working — routes/capture/driveRoutes.ts retains that one
   // route as a legacy alias, because the redirect URI is also registered in an
   // operator's Google Cloud Console, outside this repo.
   GOOGLE_OAUTH_REDIRECT_URI: optional(

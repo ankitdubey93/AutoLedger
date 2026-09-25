@@ -187,47 +187,47 @@ export const ALLOWED_UPLOAD_MIME_TYPES = [
 
 export type AllowedUploadMimeType = (typeof ALLOWED_UPLOAD_MIME_TYPES)[number];
 
-// ------------------------------------------------------------- ap-flow (10)
+// ------------------------------------------------------------- capture (Phase 10)
 
 /** Rasterization DPI. 200 is the floor at which tesseract reads a thermal receipt reliably. */
-export const AP_FLOW_RASTER_DPI = 200;
+export const CAPTURE_RASTER_DPI = 200;
 
 /** Hard cap on pages per document — a 400-page PDF is a denial of service, not an invoice. */
-export const AP_FLOW_MAX_PAGES = 20;
+export const CAPTURE_MAX_PAGES = 20;
 
 /** Outward padding on every mask box. OCR boxes are tight; an unpadded box leaves readable edges. */
-export const AP_FLOW_REDACTION_PAD_PX = 3;
+export const CAPTURE_REDACTION_PAD_PX = 3;
 
 /** Where tesseract caches its language data. Never inside storage/, which is tenant data. */
 export const TESSERACT_CACHE_DIR = '.tesseract';
 
-/** The vision model AP-Flow extracts with. One place, so a change is one line. */
-export const AP_FLOW_VISION_MODEL = 'claude-sonnet-5';
+/** The vision model Capture extracts with. One place, so a change is one line. */
+export const CAPTURE_VISION_MODEL = 'claude-sonnet-5';
 
 /** Ceiling on one extraction response. */
-export const AP_FLOW_VISION_MAX_TOKENS = 4096;
+export const CAPTURE_VISION_MAX_TOKENS = 4096;
 
 /** A vision call that has not answered in 90s is not going to. */
-export const AP_FLOW_VISION_TIMEOUT_MS = 90_000;
+export const CAPTURE_VISION_TIMEOUT_MS = 90_000;
 
-// ------------------------------------------------ ap-flow mapping (11)
+// ------------------------------------------------ capture mapping (Phase 11)
 
 /** Classification is a text call, not a vision call — the same model, far fewer tokens. */
-export const AP_FLOW_CLASSIFY_MODEL = 'claude-sonnet-5';
+export const CAPTURE_CLASSIFY_MODEL = 'claude-sonnet-5';
 
 /** Ceiling on one classification response — a short list of (line_index, account_code, confidence) triples. */
-export const AP_FLOW_CLASSIFY_MAX_TOKENS = 2048;
+export const CAPTURE_CLASSIFY_MAX_TOKENS = 2048;
 
 /** Shorter than the vision timeout — no images in this call, so a slow answer is a service problem, not a large payload. */
-export const AP_FLOW_CLASSIFY_TIMEOUT_MS = 30_000;
+export const CAPTURE_CLASSIFY_TIMEOUT_MS = 30_000;
 
-// ------------------------------------------------- ap-flow multi-provider (19)
+// ------------------------------------------------- capture multi-provider (Phase 19)
 
 /** Gemini's REST base — no SDK, called over fetch (rule 14). */
-export const AP_FLOW_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
+export const CAPTURE_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 
-/** Fallback due date when AP-Flow extracted none: invoice date plus this many days. */
-export const AP_FLOW_DEFAULT_DUE_DAYS = 30;
+/** Fallback due date when Capture extracted none: invoice date plus this many days. */
+export const CAPTURE_DEFAULT_DUE_DAYS = 30;
 
 // ------------------------------------------------- drive folder intake (19.3)
 
@@ -291,7 +291,7 @@ export const GOOGLE_HTTP_TIMEOUT_MS = 30_000;
 
 // -------------------------------------------------- invoice templates (30)
 
-/** Template choices for LedgerCore invoices — code-defined layouts, not user markup. */
+/** Template choices for Accounting invoices — code-defined layouts, not user markup. */
 export const INVOICE_TEMPLATE_IDS = ['classic', 'modern', 'compact'] as const;
 
 /** Font families for invoice rendering. */

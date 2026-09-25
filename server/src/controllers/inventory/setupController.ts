@@ -1,0 +1,36 @@
+import type { RequestHandler } from 'express';
+import * as setupService from '../../services/inventory/setupService.js';
+import { applyProfileSchema, updateStockSettingsSchema } from '../../schemas/inventory/setupSchema.js';
+import { parseBody } from '../../utils/parseBody.js';
+import { requireUser } from '../../utils/requireUser.js';
+
+/** Thin adapters over setupService. Zero SQL (guardrails rule 2). */
+
+/** GET /inventory/settings */
+export const getSettings: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const settings = await setupService.getStockSettings(user.orgId);
+  res.json({ success: true, settings });
+};
+
+/** GET /inventory/setup/profiles */
+export const listProfiles: RequestHandler = (_req, res) => {
+  const profiles = setupService.listProfiles();
+  res.json({ success: true, count: profiles.length, profiles });
+};
+
+/** POST /inventory/setup */
+export const apply: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(applyProfileSchema, req.body);
+  const result = await setupService.applyIndustryProfile(user.orgId, user.id, input.industryProfile);
+  res.json({ success: true, settings: result.settings, created: result.created });
+};
+
+/** PATCH /inventory/settings */
+export const updateSettings: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(updateStockSettingsSchema, req.body);
+  const settings = await setupService.updateStockSettings(user.orgId, input);
+  res.json({ success: true, settings });
+};

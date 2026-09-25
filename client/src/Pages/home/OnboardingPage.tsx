@@ -14,12 +14,12 @@ import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
 
 /**
- * LedgerCore's first-run wizard. Collected once per organization and never
- * shown again — `LedgerCoreRoutes`'s gate redirects here only while
+ * Accounting's first-run wizard. Collected once per organization and never
+ * shown again — `AccountingRoutes`'s gate redirects here only while
  * `settings.onboardedAt` is `null`, and away again the instant it isn't.
  *
  * Renders full-width, without the sidebar: this is a suite-level moment, not
- * one more LedgerCore page.
+ * one more Accounting page.
  */
 
 const CURRENCIES = [

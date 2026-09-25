@@ -1,5 +1,5 @@
 import type { PoolClient } from 'pg';
-import type { AppSlug } from '../config/apps.js';
+import type { ModuleTag } from '../config/modules.js';
 import type { ClaimedOutboxEvent, OutboxEventType } from '../types/webhooks.js';
 
 /**
@@ -16,14 +16,14 @@ import type { ClaimedOutboxEvent, OutboxEventType } from '../types/webhooks.js';
 export async function emitEvent(
   client: PoolClient,
   orgId: string,
-  appSlug: AppSlug,
+  module: ModuleTag,
   eventType: OutboxEventType,
   payload: Record<string, unknown>,
 ): Promise<void> {
   await client.query(
     `INSERT INTO outbox_events (org_id, app_slug, event_type, payload)
      VALUES ($1, $2, $3, $4::jsonb)`,
-    [orgId, appSlug, eventType, JSON.stringify(payload)],
+    [orgId, module, eventType, JSON.stringify(payload)],
   );
 }
 
@@ -69,7 +69,7 @@ export async function claimUnpublishedEvents(
   return rows.map((row) => ({
     id: row.id,
     orgId: row.org_id,
-    appSlug: row.app_slug,
+    module: row.app_slug,
     eventType: row.event_type,
     payload: row.payload,
     createdAt: row.created_at.toISOString(),

@@ -41,10 +41,10 @@ afterEach(() => {
 function mockRoutes(accounts: Account[], importResponse: { status: number; body: unknown }) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: accounts.length, accounts }));
     }
-    if (init?.method === 'POST' && url.includes('/ledger-core/bank-imports')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/bank-imports')) {
       return Promise.resolve(jsonResponse(importResponse.status, importResponse.body));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -105,7 +105,7 @@ describe('BankImportPage', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input, init] = c as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.includes('/ledger-core/bank-imports');
+        return init?.method === 'POST' && url.includes('/api/v1/bank-imports');
       });
       expect(call).toBeDefined();
       const [, init] = call as [RequestInfo | URL, RequestInit];

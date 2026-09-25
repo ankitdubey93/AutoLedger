@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Inbox } from 'lucide-react';
-import { listApFlowReviewQueue } from '../../services/fetchServices';
+import { listCaptureReviewQueue } from '../../services/fetchServices';
 
 /**
  * The bill inbox on the dashboard: how many captured bills are waiting for a
@@ -14,7 +14,7 @@ export default function InboxSummaryCard() {
 
   useEffect(() => {
     const controller = new AbortController();
-    listApFlowReviewQueue({ limit: 1 }, controller.signal)
+    listCaptureReviewQueue({ limit: 1 }, controller.signal)
       .then((res) => {
         if (typeof res.totalCount === 'number') setWaiting(res.totalCount);
       })

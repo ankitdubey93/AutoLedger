@@ -18,7 +18,7 @@ function entry(overrides: Partial<AuditLogEntry> = {}): AuditLogEntry {
   return {
     id: '1',
     txid: '1000',
-    appSlug: 'ledger-core',
+    module: 'ledger-core',
     tableName: 'customers',
     rowId: 'row-1',
     operation: 'INSERT',

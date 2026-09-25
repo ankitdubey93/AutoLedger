@@ -1,6 +1,6 @@
 /**
  * Phase 19.1's AI token/cost metering types. Platform-scoped, like
- * `audit.ts` — every app that calls a model records here, not just AP-Flow
+ * `audit.ts` — every app that calls a model records here, not just Capture
  * (guardrails rule 16).
  */
 
@@ -42,7 +42,7 @@ export interface ModelUsage {
 
 /** One call, as reported by a service to `aiUsageService.recordCall`. */
 export interface ModelCallRecord {
-  appSlug: string;
+  module: string;
   purpose: AiCallPurpose;
   provider: AiCallProvider;
   model: string;
@@ -57,7 +57,7 @@ export interface ModelCallRecord {
 
 export interface AiModelCall {
   id: string;
-  appSlug: string;
+  module: string;
   purpose: AiCallPurpose;
   provider: AiCallProvider;
   model: string;
@@ -111,5 +111,5 @@ export interface AiUsageSummary {
 export interface AiUsageFilters {
   from: string | null; // YYYY-MM-DD, inclusive
   to: string | null; // YYYY-MM-DD, inclusive
-  appSlug: string | null;
+  module: string | null;
 }

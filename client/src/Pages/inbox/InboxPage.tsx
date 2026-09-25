@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Gauge, Inbox, ListChecks, SlidersHorizontal } from 'lucide-react';
 import {
-  createApFlowDocument,
-  listApFlowDocuments,
+  createCaptureDocument,
+  listCaptureDocuments,
   listDocuments,
-  type ApFlowDocument,
-  type ApFlowDocumentStatus,
+  type CaptureDocument,
+  type CaptureDocumentStatus,
   type VaultDocument,
 } from '../../services/fetchServices';
 import { INBOX_BASE } from '../../routes/paths';
@@ -15,19 +15,19 @@ import PageHeader from '../../components/ui/PageHeader';
 import EmptyState from '../../components/ui/EmptyState';
 
 /**
- * AP-Flow's capture register (Phase 10; direct upload and auto-post status
+ * Capture's capture register (Phase 10; direct upload and auto-post status
  * added in Phase 19). The review queue with side-by-side confidence
  * colouring and per-line account override is Phase 11.
  */
 
-const STATUS_OPTIONS: ApFlowDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED', 'DUPLICATE'];
+const STATUS_OPTIONS: CaptureDocumentStatus[] = ['PENDING', 'PROCESSING', 'EXTRACTED', 'FAILED', 'POSTED', 'DUPLICATE'];
 const SCANNABLE_MIME_TYPES = new Set(['application/pdf', 'image/png', 'image/jpeg']);
-const IN_FLIGHT_STATUSES = new Set<ApFlowDocumentStatus>(['PENDING', 'PROCESSING']);
+const IN_FLIGHT_STATUSES = new Set<CaptureDocumentStatus>(['PENDING', 'PROCESSING']);
 const POLL_INTERVAL_MS = 5000;
 
 const PILL_CLASS = 'text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ring-1 ring-inset';
 
-function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
+function StatusPill({ status }: { status: CaptureDocumentStatus }) {
   if (status === 'PENDING') {
     return <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Pending</span>;
   }
@@ -84,11 +84,11 @@ function StatusPill({ status }: { status: ApFlowDocumentStatus }) {
 export default function InboxPage() {
   const base = INBOX_BASE;
 
-  const [documents, setDocuments] = useState<ApFlowDocument[] | null>(null);
+  const [documents, setDocuments] = useState<CaptureDocument[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [statusFilter, setStatusFilter] = useState<ApFlowDocumentStatus | ''>('');
+  const [statusFilter, setStatusFilter] = useState<CaptureDocumentStatus | ''>('');
   const [error, setError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -100,7 +100,7 @@ export default function InboxPage() {
     let ignore = false;
     const filters = statusFilter === '' ? {} : { status: statusFilter };
 
-    listApFlowDocuments({ ...filters, page: currentPage })
+    listCaptureDocuments({ ...filters, page: currentPage })
       .then((res) => {
         if (ignore) return;
         setDocuments(res.documents);
@@ -146,7 +146,7 @@ export default function InboxPage() {
     setError(null);
     setCapturing(true);
     try {
-      await createApFlowDocument(captureSelection);
+      await createCaptureDocument(captureSelection);
       setCaptureSelection('');
       setReloadToken((t) => t + 1);
     } catch (err: unknown) {
@@ -186,7 +186,7 @@ export default function InboxPage() {
           <select
             value={statusFilter}
             onChange={(e) => {
-              setStatusFilter(e.target.value as ApFlowDocumentStatus | '');
+              setStatusFilter(e.target.value as CaptureDocumentStatus | '');
               setCurrentPage(1);
             }}
             className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]"

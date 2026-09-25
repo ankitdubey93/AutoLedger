@@ -126,7 +126,7 @@ afterEach(() => {
 function mockBillsListRoutes(bills: Bill[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/bills')) {
+    if (url.includes('/api/v1/bills')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -208,15 +208,15 @@ function mockDetailRoutes(bill: Bill) {
       );
     }
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
-    if (url.endsWith(`/ledger-core/bills/${bill.id}`)) {
+    if (url.endsWith(`/api/v1/bills/${bill.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, bill }));
     }
-    if (url.includes('/ledger-core/payments')) {
+    if (url.includes('/api/v1/payments')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
       );
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

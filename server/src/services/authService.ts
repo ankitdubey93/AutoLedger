@@ -4,8 +4,8 @@ import { pool } from '../db/connect.js';
 import { beginTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { slugify } from '../utils/validate.js';
-import { seedDefaultChart } from './ledger-core/accountService.js';
-import { seedStandardPaymentTerms } from './ledger-core/paymentTermService.js';
+import { seedDefaultChart } from './accounting/accountService.js';
+import { seedStandardPaymentTerms } from './accounting/paymentTermService.js';
 import {
   accessTokenExpiry,
   hashRefreshToken,
@@ -245,9 +245,9 @@ export interface RegisterInput {
  *
  * Registration does not log you in; the client calls /login next. Issuing
  * tokens here would drag session state into the identity transaction for no
- * benefit. It also does not collect LedgerCore's onboarding details (fiscal
+ * benefit. It also does not collect Accounting's onboarding details (fiscal
  * year, base currency, cash account) — that is `POST
- * /ledger-core/settings/onboarding`, completed once the user picks LedgerCore
+ * /ledger-core/settings/onboarding`, completed once the user picks Accounting
  * for the first time (Phase 3.5).
  */
 export async function register(input: RegisterInput): Promise<PublicUser> {

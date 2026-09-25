@@ -93,7 +93,7 @@ function mockIntegration(options: {
       const res = options.createResponse ?? { status: 201, body: { success: true, folder: folder() } };
       return Promise.resolve(jsonResponse(res.status, res.body));
     }
-    if (method === 'GET' && url.includes('/api/v1/ledger-core/accounts')) {
+    if (method === 'GET' && url.includes('/api/v1/accounts')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,

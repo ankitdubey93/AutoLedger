@@ -6,10 +6,10 @@ import { formatCents, parseCentsInput } from '../../utils/money';
 /**
  * "Quick add" from an invoice or bill line (Phase 32): create a SERVICE or
  * NON_INVENTORY product without leaving the document you are drafting. It is a
- * help tool, not a second catalogue — it calls the same `POST /ledger-core/items`
+ * help tool, not a second catalogue — it calls the same `POST /items`
  * as Products & Services, and the new item is then picked on the line like any
  * other. Inventory items are deliberately not offered: stock needs a unit,
- * tracking and a location, which StockLedger owns.
+ * tracking and a location, which Inventory owns.
  *
  * The code is derived from the name (`Web design` → `WEB-DESIGN`) so the common
  * case is two fields; if the derived code is taken it retries with `-2`, `-3`

@@ -3,7 +3,7 @@ import { pool } from '../db/connect.js';
 import { withTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { sniffMimeType } from '../utils/mimeSniff.js';
-import { isAppSlug } from '../config/apps.js';
+import { isModuleTag } from '../config/modules.js';
 import * as storageService from './storageService.js';
 import type { AllowedUploadMimeType } from '../config/constants.js';
 import { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '../config/constants.js';
@@ -86,7 +86,7 @@ function toLink(row: LinkRow): DocumentLink {
   return {
     id: row.id,
     documentId: row.document_id,
-    appSlug: row.app_slug,
+    module: row.app_slug,
     entityType: row.entity_type,
     entityId: row.entity_id,
     createdBy: row.created_by,
@@ -168,10 +168,10 @@ function buildFilters(
   const clauses = ['d.org_id = $1'];
   const values: unknown[] = [orgId];
 
-  if (filters.appSlug !== null || filters.entityType !== null || filters.entityId !== null) {
+  if (filters.module !== null || filters.entityType !== null || filters.entityId !== null) {
     const linkClauses = ['l.org_id = d.org_id', 'l.document_id = d.id'];
-    if (filters.appSlug !== null) {
-      values.push(filters.appSlug);
+    if (filters.module !== null) {
+      values.push(filters.module);
       linkClauses.push(`l.app_slug = $${String(values.length)}`);
     }
     if (filters.entityType !== null) {
@@ -274,13 +274,13 @@ export async function attachDocument(
   createdBy: string,
   input: AttachDocumentInput,
 ): Promise<DocumentLink> {
-  if (!isAppSlug(input.appSlug)) {
-    throw new ApiError(422, `Unknown app slug: ${input.appSlug}`);
+  if (!isModuleTag(input.module)) {
+    throw new ApiError(422, `Unknown app slug: ${input.module}`);
   }
-  if (!isDocumentEntityType(input.appSlug, input.entityType)) {
+  if (!isDocumentEntityType(input.module, input.entityType)) {
     throw new ApiError(
       422,
-      `${input.appSlug} documents cannot be attached to "${input.entityType}"`,
+      `${input.module} documents cannot be attached to "${input.entityType}"`,
     );
   }
 
@@ -304,7 +304,7 @@ export async function attachDocument(
         `INSERT INTO document_links (org_id, document_id, app_slug, entity_type, entity_id, created_by)
          VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id, document_id, app_slug, entity_type, entity_id, created_by, created_at`,
-        [orgId, documentId, input.appSlug, input.entityType, input.entityId, createdBy],
+        [orgId, documentId, input.module, input.entityType, input.entityId, createdBy],
       );
       const row = rows[0];
       if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');

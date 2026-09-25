@@ -23,7 +23,7 @@ import { MIGRATIONS_ADVISORY_LOCK_KEY } from '../config/constants.js';
  *
  * The hyphen in the character class is deliberate and load-bearing: from Phase 3
  * a migration is tagged with the app that owns it, `NNN_<app-slug>_<subject>.sql`
- * (docs/schema.md), and every app slug in `config/apps.ts` may contain a hyphen —
+ * (docs/schema.md), and every app slug in `config/modules.ts` may contain a hyphen —
  * `002_ledger-core_accounts.sql`. Without it the runner rejects the naming
  * convention the schema doc mandates. Platform migrations carry no app tag.
  *

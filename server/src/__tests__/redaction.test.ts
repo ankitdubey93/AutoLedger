@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import sharp from 'sharp';
 import { rasterize, redactPage, tesseractOcr } from '../services/redactionService.js';
 import type { OcrAdapter } from '../services/redactionService.js';
-import type { OcrWord } from '../types/ap-flow.js';
+import type { OcrWord } from '../types/capture.js';
 
 /**
  * The phase's acceptance test: proves masking with a raw-pixel comparison,
@@ -214,10 +214,10 @@ describe('redactionService', () => {
   });
 
   // Exercises the real tesseractOcr adapter deliberately, never in normal CI
-  // — set AP_FLOW_OCR_E2E=1 to run it. This is the sanctioned way to prove
+  // — set CAPTURE_OCR_E2E=1 to run it. This is the sanctioned way to prove
   // the real adapter works without making every CI run download a language
   // pack.
-  describe.skipIf(process.env.AP_FLOW_OCR_E2E !== '1')('real tesseractOcr (opt-in E2E)', () => {
+  describe.skipIf(process.env.CAPTURE_OCR_E2E !== '1')('real tesseractOcr (opt-in E2E)', () => {
     it('recognizes text on the fixture image', async () => {
       const fixture = await buildFixture();
       const adapter: OcrAdapter = tesseractOcr;

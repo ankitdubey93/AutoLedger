@@ -9,7 +9,7 @@ Months 1–3 only ever *added* documents. Real businesses also have to *correct*
 | **Credit note** | us (the seller) | a customer | Reduces what the customer owes us (AR ↓) | QuickBooks "credit memo", Xero "sales credit note", Zoho "credit note" |
 | **Debit note** | us (the buyer) | a vendor | Reduces what we owe the vendor (AP ↓) | QuickBooks "vendor credit", Xero "purchase credit note", Zoho "vendor credit" |
 
-The names describe what the document does to the *other party's* account in your books: a credit note **credits** the customer's (receivable) account; a debit note **debits** the vendor's (payable) account. When you send a vendor a debit note, they usually answer with their own credit note — LedgerCore lets you record its number as the *vendor's credit note no.*
+The names describe what the document does to the *other party's* account in your books: a credit note **credits** the customer's (receivable) account; a debit note **debits** the vendor's (payable) account. When you send a vendor a debit note, they usually answer with their own credit note — AutoLedger lets you record its number as the *vendor's credit note no.*
 
 ## When you need one
 
@@ -20,14 +20,14 @@ The names describe what the document does to the *other party's* account in your
 **When you don't:**
 
 - The whole invoice was wrong and nothing has been paid on it → **void** the invoice and re-issue it.
-- The customer will simply never pay → that is a bad-debt write-off, a different document (not built in LedgerCore yet).
-- The customer owes you **more** than you invoiced → issue another invoice. (Some tax regimes call a seller's document that *increases* an invoice a "debit note" too — e.g. India's GST. LedgerCore does not build that variant; a supplementary invoice does the same job in the books.)
+- The customer will simply never pay → that is a bad-debt write-off, a different document (not built in AutoLedger yet).
+- The customer owes you **more** than you invoiced → issue another invoice. (Some tax regimes call a seller's document that *increases* an invoice a "debit note" too — e.g. India's GST. AutoLedger does not build that variant; a supplementary invoice does the same job in the books.)
 
 > For background (verify for your jurisdiction): returns and allowances reduce revenue under IFRS 15 / ASC 606; India's CGST Act s.34 and the EU VAT Directive (art. 219) treat a document that amends an invoice as part of the invoice record, which is why it references the original and carries its own number series.
 
 ## Why a separate document instead of editing or voiding the original
 
-- **The original stays intact.** An issued invoice is immutable in LedgerCore (and in any audited set of books); tax records and the customer both hold a copy of it.
+- **The original stays intact.** An issued invoice is immutable in AutoLedger (and in any audited set of books); tax records and the customer both hold a copy of it.
 - **Partial corrections.** Returning 3 kits out of 20 is not a reason to cancel the other 17.
 - **Closed periods stay closed.** The note is dated when the return happens, so last month's reports never change.
 - **Its own number series** (`CN-000001`, `DN-000001`), so auditors can see every correction in order.
@@ -63,7 +63,7 @@ With sales tax (not part of this dataset, for illustration): returning goods wor
 
 4800 Sales Returns & Allowances is a *Revenue* account with a debit balance — a "contra-revenue" account. On the P&L it shows as a negative line under Revenue, so gross sales and returns stay visible separately. The debit note, by contrast, credits the original expense account (5100) directly: the steel you sent back simply never became a cost.
 
-## Rules LedgerCore enforces
+## Rules AutoLedger enforces
 
 - A note must reference its original invoice (credit note) or approved bill (debit note), and takes that document's customer/vendor, currency and exchange rate — you never pick them.
 - All notes against one document together can never exceed that document's total.

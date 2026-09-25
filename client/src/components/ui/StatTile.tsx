@@ -21,8 +21,8 @@ const TONE_CLASS: Record<NonNullable<StatTileProps['tone']>, string> = {
 
 /**
  * A generic dashboard tile: a tone-tinted icon chip, a label, a value and an
- * optional hint. `MetricTile` (LedgerCore's money-formatting tile) and
- * StockLedger's dashboard tiles both wrap this rather than each styling
+ * optional hint. `MetricTile` (Accounting's money-formatting tile) and
+ * Inventory's dashboard tiles both wrap this rather than each styling
  * their own card.
  */
 export default function StatTile({ label, icon: Icon, tone = 'neutral', value, hint, to }: StatTileProps) {

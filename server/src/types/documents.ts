@@ -1,32 +1,33 @@
+import { MODULE_TAGS } from '../config/modules.js';
 import type { AllowedUploadMimeType } from '../config/constants.js';
 
 /**
  * The Document Vault (Phase 9.5) — platform-layer, unprefixed, mirroring
- * `types/onboarding.ts`: the vault spans every app, not just LedgerCore
- * (guardrails rule 16).
+ * `types/onboarding.ts`: the vault spans every module (guardrails rule 16).
  */
 
 /**
- * Which entity kinds each app may attach a document to.
+ * Which entity kinds each module may attach a document to, keyed by the
+ * module's provenance tag (config/modules.ts).
  *
  * The platform knowing this map is not a rule-16 violation: it is a
- * registry, exactly like config/apps.ts, and nothing here reads an app's
- * tables. Without it, entity_type fills with typos and the vault stops
- * being queryable. An app adding an attachable entity adds a string here.
+ * registry, and nothing here reads a module's tables. Without it,
+ * entity_type fills with typos and the vault stops being queryable. A module
+ * adding an attachable entity adds a string here.
  */
-export const DOCUMENT_ENTITY_TYPES_BY_APP = {
-  'ledger-core': ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
-  'ap-flow': ['ap_flow_document'],
+export const DOCUMENT_ENTITY_TYPES_BY_MODULE = {
+  [MODULE_TAGS.accounting]: ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
+  [MODULE_TAGS.capture]: ['ap_flow_document'],
 } as const satisfies Record<string, readonly string[]>;
 
-export type DocumentEntityApp = keyof typeof DOCUMENT_ENTITY_TYPES_BY_APP;
+export type DocumentEntityModule = keyof typeof DOCUMENT_ENTITY_TYPES_BY_MODULE;
 export type DocumentEntityType =
-  (typeof DOCUMENT_ENTITY_TYPES_BY_APP)[DocumentEntityApp][number];
+  (typeof DOCUMENT_ENTITY_TYPES_BY_MODULE)[DocumentEntityModule][number];
 
 /** True when this app declares this entity type as attachable. */
-export function isDocumentEntityType(appSlug: string, entityType: string): boolean {
-  if (!(appSlug in DOCUMENT_ENTITY_TYPES_BY_APP)) return false;
-  const entityTypes = DOCUMENT_ENTITY_TYPES_BY_APP[appSlug as DocumentEntityApp] as readonly string[];
+export function isDocumentEntityType(module: string, entityType: string): boolean {
+  if (!(module in DOCUMENT_ENTITY_TYPES_BY_MODULE)) return false;
+  const entityTypes = DOCUMENT_ENTITY_TYPES_BY_MODULE[module as DocumentEntityModule] as readonly string[];
   return entityTypes.includes(entityType);
 }
 
@@ -49,7 +50,7 @@ export interface DocumentRecord {
 export interface DocumentLink {
   id: string;
   documentId: string;
-  appSlug: string;
+  module: string;
   entityType: string;
   entityId: string;
   createdBy: string;
@@ -61,7 +62,7 @@ export interface DocumentWithLinks extends DocumentRecord {
 }
 
 export interface AttachDocumentInput {
-  appSlug: string;
+  module: string;
   entityType: string;
   entityId: string;
 }
@@ -73,7 +74,7 @@ export interface AttachDocumentInput {
  * is reserved for JSON request bodies here.
  */
 export interface DocumentListFilters {
-  appSlug: string | null;
+  module: string | null;
   entityType: string | null;
   entityId: string | null;
   page: number;

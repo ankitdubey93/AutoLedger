@@ -24,7 +24,7 @@ import MatchScoreBadge from './MatchScoreBadge';
  *
  * Accepting a suggestion at or above the auto-match threshold acts
  * immediately; below it, or matching by hand, is gated by ConfirmDialog,
- * matching every other one-way action in LedgerCore. Unmatch is the one
+ * matching every other one-way action in Accounting. Unmatch is the one
  * action that undoes a GL posting (it voids the payment the match
  * created), so it is always gated.
  */

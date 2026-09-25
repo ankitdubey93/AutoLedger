@@ -104,7 +104,7 @@ export interface ListDeliveriesOptions {
 export interface ClaimedOutboxEvent {
   id: string;
   orgId: string;
-  appSlug: string;
+  module: string;
   eventType: string;
   payload: Record<string, unknown>;
   createdAt: string;

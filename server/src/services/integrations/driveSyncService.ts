@@ -13,6 +13,7 @@ import { getAccessToken, getConnection } from './driveConnectionService.js';
 import type { DriveServiceDeps } from './driveConnectionService.js';
 import { dispatchDriveFile } from './driveIntakeDispatcher.js';
 import type { DriveColumnMap, DriveDateFormat, DriveFolderPurpose } from '../../types/integrations.js';
+import { MODULE_TAGS } from '../../config/modules.js';
 
 /**
  * The Drive sweep's actual work — one org's one folder per call. Three fixes
@@ -119,7 +120,7 @@ async function recordFile(
   file: DriveFile,
   name: string,
   outcome:
-    | { status: 'IMPORTED'; resultApp: 'ap-flow' | 'ledger-core'; resultEntityId: string }
+    | { status: 'IMPORTED'; resultApp: typeof MODULE_TAGS.capture | typeof MODULE_TAGS.accounting; resultEntityId: string }
     | { status: 'SKIPPED'; reason: string },
 ): Promise<void> {
   await pool.query(

@@ -193,10 +193,10 @@ describe('NewCreditNotePage', () => {
   it('pre-fills lines from the invoice and defaults the account to 4800', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/ledger-core/accounts')) {
+      if (url.includes('/api/v1/accounts')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 2, accounts: [account4100, account4800] }));
       }
-      if (url.endsWith('/ledger-core/invoices/inv-15')) {
+      if (url.endsWith('/api/v1/invoices/inv-15')) {
         return Promise.resolve(jsonResponse(200, { success: true, invoice: invoice() }));
       }
       return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -219,10 +219,10 @@ describe('NewCreditNotePage', () => {
   it('refuses to draft against an invoice that is not issued', async () => {
     fetchMock.mockImplementation((input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/ledger-core/accounts')) {
+      if (url.includes('/api/v1/accounts')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4800] }));
       }
-      if (url.endsWith('/ledger-core/invoices/inv-15')) {
+      if (url.endsWith('/api/v1/invoices/inv-15')) {
         return Promise.resolve(jsonResponse(200, { success: true, invoice: invoice({ status: 'DRAFT', invoiceNumber: null }) }));
       }
       return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -299,7 +299,7 @@ describe('CreditNoteDetailPage', () => {
           jsonResponse(201, { success: true, creditNote: { ...issued, appliedCents: 50000, unappliedCents: 0 } }),
         );
       }
-      if (url.includes('/ledger-core/invoices?')) {
+      if (url.includes('/api/v1/invoices?')) {
         return Promise.resolve(
           jsonResponse(200, { success: true, count: 1, totalCount: 1, currentPage: 1, totalPages: 1, invoices: [target] }),
         );

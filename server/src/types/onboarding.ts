@@ -1,10 +1,11 @@
-import { APPS, isAppSlug, type AppSlug } from '../config/apps.js';
+import { MODULE_TAGS } from '../config/modules.js';
 
 /**
  * Platform onboarding state — Phase 9a.
  *
- * Platform-layer, unprefixed, mirroring `types/auth.ts` and `types/apps.ts`:
- * onboarding spans every app, not just LedgerCore (guardrails rule 16).
+ * Platform-layer, unprefixed, mirroring `types/auth.ts`: onboarding spans
+ * modules, and each row is keyed by the module's provenance tag
+ * (config/modules.ts).
  */
 
 export const ONBOARDING_STATUSES = ['NOT_STARTED', 'IN_PROGRESS', 'SKIPPED', 'COMPLETED'] as const;
@@ -33,21 +34,26 @@ export function canTransitionOnboarding(from: OnboardingStatus, to: OnboardingSt
   return (ONBOARDING_TRANSITIONS[from] as readonly OnboardingStatus[]).includes(to);
 }
 
-/** `'platform'` is the suite-level wizard; every other value is a real app slug. */
-export type OnboardingSlug = AppSlug | 'platform';
+/**
+ * The modules that have a setup step, keyed by provenance tag. Capture has
+ * none: a bill inbox needs no configuration to start. Phase 33 removed the
+ * `'platform'` key, which recorded the retired app picker.
+ */
+export const ONBOARDING_TASKS = [
+  { module: MODULE_TAGS.accounting, label: 'Accounting setup', optional: false },
+  { module: MODULE_TAGS.inventory, label: 'Inventory', optional: true },
+] as const;
 
-/** The full set of valid onboarding slugs — every app in APPS, plus 'platform'. */
-export const ONBOARDING_SLUGS: readonly OnboardingSlug[] = [
-  ...APPS.map((app) => app.slug),
-  'platform',
-];
+export type OnboardingSlug = (typeof ONBOARDING_TASKS)[number]['module'];
+
+export const ONBOARDING_SLUGS: readonly OnboardingSlug[] = ONBOARDING_TASKS.map((task) => task.module);
 
 export function isOnboardingSlug(value: string): value is OnboardingSlug {
-  return value === 'platform' || isAppSlug(value);
+  return (ONBOARDING_SLUGS as readonly string[]).includes(value);
 }
 
 export interface OnboardingState {
-  appSlug: OnboardingSlug;
+  module: OnboardingSlug;
   status: OnboardingStatus;
   currentStep: string | null;
   draft: Record<string, unknown>;
@@ -57,6 +63,6 @@ export interface OnboardingState {
 }
 
 export interface OnboardingChecklistItem extends OnboardingState {
-  appName: string;
-  appStatus: 'building' | 'planned';
+  label: string;
+  optional: boolean;
 }

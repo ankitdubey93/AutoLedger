@@ -33,12 +33,12 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockVendorRoutes(vendors: Vendor[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/vendors')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/vendors')) {
       return Promise.resolve(
         jsonResponse(201, { success: true, vendor: { ...vendor1, id: 'vend-new', name: 'Contoso Supply' } }),
       );
     }
-    if (url.includes('/ledger-core/vendors')) {
+    if (url.includes('/api/v1/vendors')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: vendors.length, vendors }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -80,7 +80,7 @@ describe('VendorsPage', () => {
       const createCall = fetchMock.mock.calls.find((call) => {
         const [input, init] = call as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.includes('/ledger-core/vendors');
+        return init?.method === 'POST' && url.includes('/api/v1/vendors');
       });
       expect(createCall).toBeDefined();
     });
@@ -88,7 +88,7 @@ describe('VendorsPage', () => {
     const createCall = fetchMock.mock.calls.find((call) => {
       const [input, init] = call as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/ledger-core/vendors');
+      return init?.method === 'POST' && url.includes('/api/v1/vendors');
     });
     const body = JSON.parse((createCall as [RequestInfo | URL, RequestInit])[1].body as string) as {
       name: string;

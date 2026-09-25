@@ -62,7 +62,7 @@ afterEach(() => {
 function mockDialogRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/payments')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/payments')) {
       return Promise.resolve(
         jsonResponse(201, {
           success: true,
@@ -70,10 +70,10 @@ function mockDialogRoutes() {
         }),
       );
     }
-    if (url.includes('/ledger-core/settings') && !url.includes('invoicing')) {
+    if (url.includes('/api/v1/settings') && !url.includes('invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, accounts: [cashAccount] }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -140,7 +140,7 @@ describe('PaymentDialog', () => {
     const createCall = fetchMock.mock.calls.find((c) => {
       const [input, init] = c as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/ledger-core/payments');
+      return init?.method === 'POST' && url.includes('/api/v1/payments');
     });
     expect(createCall).toBeDefined();
     const body = JSON.parse((createCall as [RequestInfo | URL, RequestInit])[1].body as string) as {
@@ -191,7 +191,7 @@ function mockPaymentsListRoutes(payments: Payment[]) {
         jsonResponse(200, { success: true, payment: { ...payments[0], status: 'VOID' } }),
       );
     }
-    if (url.includes('/ledger-core/payments')) {
+    if (url.includes('/api/v1/payments')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,

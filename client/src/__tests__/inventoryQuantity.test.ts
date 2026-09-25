@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { formatQuantityMilli, parseQuantityToMilli } from '../utils/quantity';
 
-/** StockLedger (Phase 28) — the quantity formatter/parser. Pure unit tier. */
+/** Inventory (Phase 28) — the quantity formatter/parser. Pure unit tier. */
 
 describe('formatQuantityMilli', () => {
   it('formats 2500 as 2.5', () => {

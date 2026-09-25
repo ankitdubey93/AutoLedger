@@ -12,7 +12,7 @@ export const summary: RequestHandler = async (req, res) => {
   const usage = await aiUsageService.getUsageSummary(user.orgId, {
     from: optionalIsoDate(req, 'from'),
     to: optionalIsoDate(req, 'to'),
-    appSlug: optionalText(req, 'appSlug', 50),
+    module: optionalText(req, 'module', 50),
   });
 
   res.json({ success: true, usage });

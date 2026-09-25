@@ -29,7 +29,7 @@ const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
 /**
- * StockLedger's own catalogue: units of measure, categories (nested up to
+ * Inventory's own catalogue: units of measure, categories (nested up to
  * 3 levels) and, for the selected category, its ITEM and SERIAL custom
  * fields. Writing is catalogue configuration, so every form here is OWNER
  * or ADMIN only, matching the server's own role gate on these routes.

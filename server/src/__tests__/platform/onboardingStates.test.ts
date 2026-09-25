@@ -38,12 +38,16 @@ beforeEach(async () => {
 
 afterAll(closePool);
 
-it('GET /onboarding returns one item per app plus platform, all NOT_STARTED for a fresh org', async () => {
+it('GET /onboarding returns one item per setup task (accounting, then optional inventory), all NOT_STARTED for a fresh org', async () => {
   const agent = await loginAgent(app, userA);
   const res = await agent.get(BASE);
 
   expect(res.status).toBe(200);
-  expect(res.body.items).toHaveLength(4);
+  const items = res.body.items as { module: string; label: string; optional: boolean }[];
+  expect(items.map((i) => [i.module, i.label, i.optional])).toEqual([
+    ['ledger-core', 'Accounting setup', false],
+    ['stock', 'Inventory', true],
+  ]);
   for (const item of res.body.items as { status: string; draft: Record<string, unknown> }[]) {
     expect(item.status).toBe('NOT_STARTED');
     expect(item.draft).toEqual({});
@@ -102,9 +106,9 @@ it('POST /onboarding/ledger-core/resume returns a SKIPPED row to IN_PROGRESS and
   expect(res.body.onboarding.skippedAt).toBeNull();
 });
 
-it('completing LedgerCore onboarding marks its row COMPLETED in the same transaction', async () => {
+it('completing Accounting onboarding marks its row COMPLETED in the same transaction', async () => {
   const agent = await loginAgent(app, userA);
-  const onboardRes = await agent.post('/api/v1/ledger-core/settings/onboarding').send({
+  const onboardRes = await agent.post('/api/v1/settings/onboarding').send({
     organizationName: 'Acme Books',
     baseCurrency: 'USD',
     fiscalYearStartMonth: 1,
@@ -120,7 +124,7 @@ it('completing LedgerCore onboarding marks its row COMPLETED in the same transac
 
 it('COMPLETED is not terminal — resume moves it back to IN_PROGRESS', async () => {
   const agent = await loginAgent(app, userA);
-  await agent.post('/api/v1/ledger-core/settings/onboarding').send({
+  await agent.post('/api/v1/settings/onboarding').send({
     organizationName: 'Acme Books',
     baseCurrency: 'USD',
     fiscalYearStartMonth: 1,
@@ -180,4 +184,10 @@ it('a draft containing SQL-shaped keys is stored and returned verbatim', async (
     "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'onboarding_states') AS exists",
   );
   expect(rows[0]?.exists).toBe(true);
+});
+
+it('the retired app-picker key and the capture module have no setup state (404)', async () => {
+  const agent = await loginAgent(app, userA);
+  expect((await agent.get(`${BASE}/platform`)).status).toBe(404);
+  expect((await agent.get(`${BASE}/ap-flow`)).status).toBe(404);
 });

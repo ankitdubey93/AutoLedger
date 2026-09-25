@@ -1,6 +1,6 @@
 /**
  * Phase 5's audit trail types. Platform-scoped, like `auth.ts` — the trail
- * spans every app, not just LedgerCore (guardrails rule 16).
+ * spans every app, not just Accounting (guardrails rule 16).
  */
 
 export const AUDIT_OPERATIONS = ['INSERT', 'UPDATE', 'DELETE'] as const;
@@ -20,7 +20,7 @@ export interface AuditLogEntry {
   /** `audit_logs.id` is a BIGINT identity — kept a string, exactly as `pg` hands it back. */
   id: string;
   txid: string;
-  appSlug: string;
+  module: string;
   tableName: string;
   rowId: string | null;
   operation: AuditOperation;
@@ -42,7 +42,7 @@ export interface AuditLogDetail extends AuditLogEntry {
 export interface ListAuditLogsOptions {
   page: number;
   limit: number;
-  appSlug: string | null;
+  module: string | null;
   tableName: string | null;
   rowId: string | null;
   operation: AuditOperation | null;

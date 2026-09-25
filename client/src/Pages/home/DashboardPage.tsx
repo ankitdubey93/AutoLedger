@@ -33,7 +33,7 @@ import BarChart from './BarChart';
 import PageHeader from '../../components/ui/PageHeader';
 
 /**
- * LedgerCore's home page. Every figure is aggregated from raw `ledger_lines`
+ * Accounting's home page. Every figure is aggregated from raw `ledger_lines`
  * on each request — the same "no summary table" rule `TrialBalancePage`
  * states for its own report.
  *

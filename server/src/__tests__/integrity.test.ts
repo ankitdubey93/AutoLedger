@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closePool, pool } from '../db/connect.js';
 import { runIntegrityChecks } from '../db/integrity.js';
-import * as journalService from '../services/ledger-core/journalService.js';
+import * as journalService from '../services/accounting/journalService.js';
 import { createUserWithOrg, resetTables } from './helpers/factories.js';
 import type { SeededUser } from './helpers/factories.js';
 

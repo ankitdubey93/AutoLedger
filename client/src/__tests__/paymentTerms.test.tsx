@@ -52,7 +52,7 @@ afterEach(() => {
 function mockSettingsRoutes(terms: PaymentTerm[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/payment-terms')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/payment-terms')) {
       const body = JSON.parse(init.body as string) as { code: string; name: string; netDays: number };
       return Promise.resolve(
         jsonResponse(201, {
@@ -70,12 +70,12 @@ function mockSettingsRoutes(terms: PaymentTerm[]) {
         }),
       );
     }
-    if (init?.method === 'PATCH' && url.includes('/ledger-core/payment-terms/')) {
+    if (init?.method === 'PATCH' && url.includes('/api/v1/payment-terms/')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, paymentTerm: { ...standardTerm, isActive: false } }),
       );
     }
-    if (url.includes('/ledger-core/payment-terms')) {
+    if (url.includes('/api/v1/payment-terms')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: terms.length, paymentTerms: terms }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -119,7 +119,7 @@ describe('PaymentTermsSettingsPage', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input, init] = c as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.includes('/ledger-core/payment-terms');
+        return init?.method === 'POST' && url.includes('/api/v1/payment-terms');
       });
       expect(call).toBeDefined();
     });
@@ -127,7 +127,7 @@ describe('PaymentTermsSettingsPage', () => {
     const call = fetchMock.mock.calls.find((c) => {
       const [input, init] = c as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/ledger-core/payment-terms');
+      return init?.method === 'POST' && url.includes('/api/v1/payment-terms');
     });
     const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
       code: string;
@@ -149,7 +149,7 @@ describe('PaymentTermsSettingsPage', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input, init] = c as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'PATCH' && url.includes('/ledger-core/payment-terms/');
+        return init?.method === 'PATCH' && url.includes('/api/v1/payment-terms/');
       });
       expect(call).toBeDefined();
     });
@@ -157,7 +157,7 @@ describe('PaymentTermsSettingsPage', () => {
     const call = fetchMock.mock.calls.find((c) => {
       const [input, init] = c as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'PATCH' && url.includes('/ledger-core/payment-terms/');
+      return init?.method === 'PATCH' && url.includes('/api/v1/payment-terms/');
     });
     const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
       isActive: boolean;
@@ -226,22 +226,22 @@ const invoiceSettings: InvoiceSettings = {
 function mockNewInvoiceRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/invoices')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/invoices')) {
       return Promise.resolve(jsonResponse(201, { success: true, invoice: { id: 'inv-new' } }));
     }
-    if (url.includes('/ledger-core/customers')) {
+    if (url.includes('/api/v1/customers')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer1] }));
     }
-    if (url.includes('/ledger-core/settings/invoicing')) {
+    if (url.includes('/api/v1/settings/invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
     }
-    if (url.includes('/ledger-core/items')) {
+    if (url.includes('/api/v1/items')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
     }
-    if (url.includes('/ledger-core/payment-terms')) {
+    if (url.includes('/api/v1/payment-terms')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, paymentTerms: [standardTerm] }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -318,7 +318,7 @@ describe('payment terms on the invoice draft form', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input, init] = c as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.endsWith('/ledger-core/invoices');
+        return init?.method === 'POST' && url.endsWith('/api/v1/invoices');
       });
       expect(call).toBeDefined();
     });
@@ -326,7 +326,7 @@ describe('payment terms on the invoice draft form', () => {
     const call = fetchMock.mock.calls.find((c) => {
       const [input, init] = c as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.endsWith('/ledger-core/invoices');
+      return init?.method === 'POST' && url.endsWith('/api/v1/invoices');
     });
     const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
       paymentTermsCode: string | null;

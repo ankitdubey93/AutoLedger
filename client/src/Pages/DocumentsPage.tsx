@@ -8,20 +8,22 @@ import {
   type VaultDocument,
 } from '../services/fetchServices';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { moduleLabel } from '../utils/moduleLabels';
 
 /**
  * The suite-level Document Vault — every file uploaded to the platform, not
- * scoped to any one app's record. A vault upload here attaches to nothing;
- * attaching happens from an app's own detail page via AttachmentsPanel.
+ * scoped to any one record. A vault upload here attaches to nothing;
+ * attaching happens from a record's own detail page via AttachmentsPanel.
  *
  * Filter options are hard-coded from server/src/types/documents.ts's
- * DOCUMENT_ENTITY_TYPES_BY_APP — the source of truth for which entity types
+ * DOCUMENT_ENTITY_TYPES_BY_MODULE — the source of truth for which entity types
  * exist — since the vault has no endpoint that enumerates it.
  */
 
-const APP_SLUGS = ['ledger-core'] as const;
-const ENTITY_TYPES_BY_APP: Record<string, readonly string[]> = {
+const MODULE_TAGS = ['ledger-core', 'ap-flow'] as const;
+const ENTITY_TYPES_BY_MODULE: Record<string, readonly string[]> = {
   'ledger-core': ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
+  'ap-flow': ['ap_flow_document'],
 };
 
 function formatBytes(bytes: number): string {
@@ -37,7 +39,7 @@ export default function DocumentsPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const [appSlug, setAppSlug] = useState('');
+  const [module, setModule] = useState('');
   const [entityType, setEntityType] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,7 +50,7 @@ export default function DocumentsPage() {
     let ignore = false;
 
     const filters: DocumentFilters = { page: currentPage };
-    if (appSlug !== '') filters.appSlug = appSlug;
+    if (module !== '') filters.module = module;
     if (entityType !== '') filters.entityType = entityType;
 
     listDocuments(filters)
@@ -65,7 +67,7 @@ export default function DocumentsPage() {
     return () => {
       ignore = true;
     };
-  }, [appSlug, entityType, currentPage, reloadToken]);
+  }, [module, entityType, currentPage, reloadToken]);
 
   async function handleUpload(file: File) {
     setError(null);
@@ -113,7 +115,7 @@ export default function DocumentsPage() {
     }
   }
 
-  const entityTypeOptions = appSlug === '' ? [] : (ENTITY_TYPES_BY_APP[appSlug] ?? []);
+  const entityTypeOptions = module === '' ? [] : (ENTITY_TYPES_BY_MODULE[module] ?? []);
 
   return (
     <section className="flex flex-col gap-4">
@@ -126,20 +128,20 @@ export default function DocumentsPage() {
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">App</span>
+          <span className="text-[var(--muted)]">Area</span>
           <select
-            value={appSlug}
+            value={module}
             onChange={(e) => {
-              setAppSlug(e.target.value);
+              setModule(e.target.value);
               setEntityType('');
               setCurrentPage(1);
             }}
             className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]"
           >
-            <option value="">All apps</option>
-            {APP_SLUGS.map((slug) => (
-              <option key={slug} value={slug}>
-                {slug}
+            <option value="">All areas</option>
+            {MODULE_TAGS.map((tag) => (
+              <option key={tag} value={tag}>
+                {moduleLabel(tag)}
               </option>
             ))}
           </select>
@@ -149,7 +151,7 @@ export default function DocumentsPage() {
           <span className="text-[var(--muted)]">Record type</span>
           <select
             value={entityType}
-            disabled={appSlug === ''}
+            disabled={module === ''}
             onChange={(e) => {
               setEntityType(e.target.value);
               setCurrentPage(1);

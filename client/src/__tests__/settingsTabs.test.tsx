@@ -9,7 +9,7 @@ import { LedgerSettingsProvider } from '../context/LedgerSettingsContext';
 import type { Account, AccountType, InvoiceSettings, LedgerSettings } from '../services/fetchServices';
 
 /**
- * Phase 30 Step 23 — the three new LedgerCore settings tabs
+ * Phase 30 Step 23 — the three new Accounting settings tabs
  * (`FinancialSettingsPage`, `ChartSettingsPage`, `ConversionBalancesPage`).
  * None of these three pages has been tested before this file.
  */
@@ -143,18 +143,18 @@ describe('FinancialSettingsPage', () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       const method = requestMethod(init);
-      if (url.endsWith('/ledger-core/settings') && method === 'PATCH') {
+      if (url.endsWith('/api/v1/settings') && method === 'PATCH') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         if (options.onPatch !== undefined) return Promise.resolve(options.onPatch(body));
         return Promise.resolve(jsonResponse(200, { success: true, settings: { ...settings, ...body } }));
       }
-      if (url.endsWith('/ledger-core/settings')) {
+      if (url.endsWith('/api/v1/settings')) {
         return Promise.resolve(jsonResponse(200, { success: true, settings }));
       }
-      if (url.includes('/ledger-core/fiscal-periods')) {
+      if (url.includes('/api/v1/fiscal-periods')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 0, periods: [] }));
       }
-      if (url.endsWith('/ledger-core/accounts')) {
+      if (url.endsWith('/api/v1/accounts')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 0, accounts: [] }));
       }
       return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -185,7 +185,7 @@ describe('FinancialSettingsPage', () => {
     expect(await screen.findByText('31 March 2027')).toBeInTheDocument();
   });
 
-  it('changing the month and saving fires PATCH /ledger-core/settings carrying fiscalYearStartMonth', async () => {
+  it('changing the month and saving fires PATCH /settings carrying fiscalYearStartMonth', async () => {
     mockRoutes();
     const user = userEvent.setup();
     renderPage();
@@ -195,16 +195,16 @@ describe('FinancialSettingsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() =>
-      expect(callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/ledger-core/settings'))).toHaveLength(1),
+      expect(callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/api/v1/settings'))).toHaveLength(1),
     );
-    const [call] = callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/ledger-core/settings'));
+    const [call] = callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/api/v1/settings'));
     expect(bodyOf(call)).toMatchObject({ fiscalYearStartMonth: 7 });
   });
 
   it('shows the onboarding message and a link to the wizard on a 409', async () => {
     mockRoutes({
       onPatch: () =>
-        jsonResponse(409, { success: false, error: 'Complete LedgerCore onboarding before changing settings' }),
+        jsonResponse(409, { success: false, error: 'Complete setup before changing settings' }),
     });
     const user = userEvent.setup();
     renderPage();
@@ -212,7 +212,7 @@ describe('FinancialSettingsPage', () => {
     await screen.findByText('31 March 2027');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    expect(await screen.findByText('Complete LedgerCore onboarding before changing settings')).toBeInTheDocument();
+    expect(await screen.findByText('Complete setup before changing settings')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open the setup wizard' })).toBeInTheDocument();
   });
 });
@@ -224,10 +224,10 @@ describe('ChartSettingsPage', () => {
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = requestUrl(input);
       const method = requestMethod(init);
-      if (url.includes('/ledger-core/accounts?tree=true')) {
+      if (url.includes('/api/v1/accounts?tree=true')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 0, accounts: [] }));
       }
-      if (url.endsWith('/ledger-core/accounts') && method === 'POST') {
+      if (url.endsWith('/api/v1/accounts') && method === 'POST') {
         if (options.createResponse !== undefined) return Promise.resolve(options.createResponse);
         return Promise.resolve(jsonResponse(201, { success: true, account: makeAccount({ id: 'acc-new', code: '9000', name: 'New', type: 'Asset' }) }));
       }
@@ -322,21 +322,21 @@ describe('ConversionBalancesPage', () => {
       const url = requestUrl(input);
       const method = requestMethod(init);
 
-      if (url.endsWith('/ledger-core/settings') && method === 'PATCH') {
+      if (url.endsWith('/api/v1/settings') && method === 'PATCH') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         if (options.onSaveDate !== undefined) return Promise.resolve(options.onSaveDate(body));
         return Promise.resolve(jsonResponse(200, { success: true, settings: { ...settings, ...body } }));
       }
-      if (url.endsWith('/ledger-core/settings')) {
+      if (url.endsWith('/api/v1/settings')) {
         return Promise.resolve(jsonResponse(200, { success: true, settings }));
       }
-      if (url.endsWith('/ledger-core/settings/invoicing')) {
+      if (url.endsWith('/api/v1/settings/invoicing')) {
         return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
       }
-      if (url.endsWith('/ledger-core/accounts')) {
+      if (url.endsWith('/api/v1/accounts')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: accountsFixture().length, accounts: accountsFixture() }));
       }
-      if (url.endsWith('/ledger-core/migration-imports') && method === 'POST') {
+      if (url.endsWith('/api/v1/migration-imports') && method === 'POST') {
         const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
         if (options.onCreateImport !== undefined) return Promise.resolve(options.onCreateImport(body));
         return Promise.resolve(
@@ -518,9 +518,9 @@ describe('ConversionBalancesPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save and review' }));
 
     await waitFor(() =>
-      expect(callsTo(fetchMock, 'POST', (url) => url.endsWith('/ledger-core/migration-imports'))).toHaveLength(1),
+      expect(callsTo(fetchMock, 'POST', (url) => url.endsWith('/api/v1/migration-imports'))).toHaveLength(1),
     );
-    const [call] = callsTo(fetchMock, 'POST', (url) => url.endsWith('/ledger-core/migration-imports'));
+    const [call] = callsTo(fetchMock, 'POST', (url) => url.endsWith('/api/v1/migration-imports'));
     const body = bodyOf(call);
     expect(body.kind).toBe('OPENING_BALANCES');
     const content = body.content as string;
@@ -553,15 +553,15 @@ describe('ConversionBalancesPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save and review' }));
 
     await waitFor(() =>
-      expect(callsTo(fetchMock, 'POST', (url) => url.endsWith('/ledger-core/migration-imports'))).toHaveLength(1),
+      expect(callsTo(fetchMock, 'POST', (url) => url.endsWith('/api/v1/migration-imports'))).toHaveLength(1),
     );
-    const [call] = callsTo(fetchMock, 'POST', (url) => url.endsWith('/ledger-core/migration-imports'));
+    const [call] = callsTo(fetchMock, 'POST', (url) => url.endsWith('/api/v1/migration-imports'));
     const content = bodyOf(call).content as string;
     expect(content).not.toContain('6100');
     expect(content.split('\n').filter((line) => line !== '')).toHaveLength(3); // header + 2 rows
   });
 
-  it('Save date fires one PATCH /ledger-core/settings carrying booksStartDate', async () => {
+  it('Save date fires one PATCH /settings carrying booksStartDate', async () => {
     mockRoutes();
     renderPage();
 
@@ -573,9 +573,9 @@ describe('ConversionBalancesPage', () => {
     await user.click(screen.getByRole('button', { name: 'Save date' }));
 
     await waitFor(() =>
-      expect(callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/ledger-core/settings'))).toHaveLength(1),
+      expect(callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/api/v1/settings'))).toHaveLength(1),
     );
-    const [call] = callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/ledger-core/settings'));
+    const [call] = callsTo(fetchMock, 'PATCH', (url) => url.endsWith('/api/v1/settings'));
     expect(bodyOf(call)).toMatchObject({ booksStartDate: '2026-03-01' });
   });
 });

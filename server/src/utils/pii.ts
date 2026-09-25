@@ -1,8 +1,8 @@
 import { luhn, verhoeff } from './checksum.js';
-import type { OcrWord, PiiKind, RedactedRegion } from '../types/ap-flow.js';
+import type { OcrWord, PiiKind, RedactedRegion } from '../types/capture.js';
 
 /**
- * PII detection over OCR'd text (Phase 10 — AP-Flow). Pure, zero
+ * PII detection over OCR'd text (Phase 10 — Capture). Pure, zero
  * dependencies — hand-written like `utils/matchScore.ts`.
  *
  * **The honest limitation:** name detection is a label-anchored heuristic,

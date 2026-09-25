@@ -1,6 +1,6 @@
 # Invoices to raise
 
-Raise each of these against the customer named, in the order shown, then **Issue** it — the matcher only considers an invoice once it is `ISSUED`. LedgerCore assigns the invoice number itself from the numbering settings; there is no "their invoice number" field to fill in.
+Raise each of these against the customer named, in the order shown, then **Issue** it — the matcher only considers an invoice once it is `ISSUED`. AutoLedger assigns the invoice number itself from the numbering settings; there is no "their invoice number" field to fill in.
 
 ## Month 1 — June 2026
 

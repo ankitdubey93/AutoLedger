@@ -13,8 +13,8 @@ import type { SeededUser } from '../helpers/factories.js';
 
 const app = createApp();
 const PROFILE = '/api/v1/organizations/profile';
-const LC_SETTINGS = '/api/v1/ledger-core/settings';
-const ONBOARDING = '/api/v1/ledger-core/settings/onboarding';
+const LC_SETTINGS = '/api/v1/settings';
+const ONBOARDING = '/api/v1/settings/onboarding';
 
 let userA: SeededUser;
 let userC: SeededUser;
@@ -192,7 +192,7 @@ describe('organization profile — cross-tenant isolation', () => {
 });
 
 describe('legalName and industry live on the profile (Step 5)', () => {
-  it('a profile legalName is read back by GET /ledger-core/settings', async () => {
+  it('a profile legalName is read back by GET /settings', async () => {
     const agent = await loginAgent(app, userA);
     const patch = await agent.patch(PROFILE).send({ legalName: 'Harbor Point Fabrication Pty Ltd' });
     expect(patch.status).toBe(200);
@@ -225,19 +225,19 @@ describe('legalName and industry live on the profile (Step 5)', () => {
     expect(profile.body.profile.configured).toBe(true);
   });
 
-  it('a profile-only PATCH /ledger-core/settings before onboarding is 409 and writes nothing', async () => {
+  it('a profile-only PATCH /settings before onboarding is 409 and writes nothing', async () => {
     const agent = await loginAgent(app, userA);
     const res = await agent.patch(LC_SETTINGS).send({ legalName: 'X' });
 
     expect(res.status).toBe(409);
-    expect(res.body.error).toBe('Complete LedgerCore onboarding before changing settings');
+    expect(res.body.error).toBe('Complete setup before changing settings');
 
     const profile = await agent.get(PROFILE);
     expect(profile.body.profile.configured).toBe(false);
     expect(profile.body.profile.legalName).toBeNull();
   });
 
-  it('a mixed PATCH /ledger-core/settings before onboarding is 409 and rolls back the profile write', async () => {
+  it('a mixed PATCH /settings before onboarding is 409 and rolls back the profile write', async () => {
     const agent = await loginAgent(app, userA);
     const res = await agent.patch(LC_SETTINGS).send({ legalName: 'X', timezone: 'UTC' });
 

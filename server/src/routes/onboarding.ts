@@ -14,23 +14,23 @@ import { requireRole } from '../middleware/rbac.js';
  * Reading is open to any member — a VIEWER seeing "setup incomplete" is
  * harmless and useful, matching /reports. Writing (draft, skip, resume) is
  * organization configuration, so it takes OWNER or ADMIN, the same tier as
- * PATCH /organizations and POST /ledger-core/settings/onboarding.
+ * PATCH /organizations and POST /settings/onboarding.
  * ACCOUNTANT gets no write here, deliberately: skipping a setup wizard is
  * not a bookkeeping action.
  */
 const router = Router();
 
 router.get('/', authenticate, onboardingController.checklist);
-router.get('/:appSlug', authenticate, onboardingController.getOne);
+router.get('/:module', authenticate, onboardingController.getOne);
 
 router.put(
-  '/:appSlug/draft',
+  '/:module/draft',
   authenticate,
   requireRole('OWNER', 'ADMIN'),
   onboardingController.saveDraft,
 );
 
-router.post('/:appSlug/skip', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.skip);
-router.post('/:appSlug/resume', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.resume);
+router.post('/:module/skip', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.skip);
+router.post('/:module/resume', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.resume);
 
 export default router;

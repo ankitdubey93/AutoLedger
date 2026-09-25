@@ -21,9 +21,9 @@ import TabBar from '../../components/ui/TabBar';
  *
  * Four item types. SERVICE and NON_INVENTORY (office supplies, anything bought
  * or sold that is not quantity-tracked) are created here. INVENTORY and
- * FIXED_ASSET items are created in StockLedger, which creates the linked
+ * FIXED_ASSET items are created in Inventory, which creates the linked
  * product automatically; here they show their on-hand quantity and an "Open in
- * StockLedger" link, and their name/status are read-only.
+ * Inventory" link, and their name/status are read-only.
  *
  * `?new=1` opens the create form on mount, the same idiom CreateMenu and
  * CustomersPage use to jump straight into "add one" from anywhere in the app.

@@ -7,7 +7,7 @@ import { OrgProvider } from '../context/OrgContext';
 import ProductRoutes from '../routes/ProductRoutes';
 
 /**
- * Characterisation of LedgerCore's Organization settings page (`/settings`).
+ * Characterisation of Accounting's Organization settings page (`/settings`).
  *
  * Phase 30 Step 20 moves the fiscal-year controls to the Financial tab. No test
  * rendered this page before, so nothing would have noticed a bad move — this
@@ -81,13 +81,13 @@ function mockRoutes() {
     if (url.endsWith('/organizations') && method === 'PATCH') {
       return Promise.resolve(jsonResponse(200, { success: true, organization }));
     }
-    if (url.endsWith('/ledger-core/settings')) {
+    if (url.endsWith('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings }));
     }
-    if (url.includes('/ledger-core/fiscal-periods')) {
+    if (url.includes('/api/v1/fiscal-periods')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, periods: [] }));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, accounts: [] }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -158,7 +158,7 @@ describe('GeneralSettingsPage (Organization tab)', () => {
     expect(bodyOf(callsTo('PATCH', '/organizations')[0])).toMatchObject({ name: 'Acme Renamed' });
   });
 
-  it('saving after editing Legal name fires PATCH /ledger-core/settings carrying legalName', async () => {
+  it('saving after editing Legal name fires PATCH /settings carrying legalName', async () => {
     renderSettingsPage();
     const user = userEvent.setup();
 
@@ -168,8 +168,8 @@ describe('GeneralSettingsPage (Organization tab)', () => {
     await user.type(legalInput, 'Acme Legal Pty');
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(callsTo('PATCH', '/ledger-core/settings')).toHaveLength(1));
-    expect(bodyOf(callsTo('PATCH', '/ledger-core/settings')[0])).toMatchObject({ legalName: 'Acme Legal Pty' });
+    await waitFor(() => expect(callsTo('PATCH', '/api/v1/settings')).toHaveLength(1));
+    expect(bodyOf(callsTo('PATCH', '/api/v1/settings')[0])).toMatchObject({ legalName: 'Acme Legal Pty' });
   });
 
   it('no longer shows the fiscal-year controls (they moved to the Financial tab)', async () => {
@@ -182,7 +182,7 @@ describe('GeneralSettingsPage (Organization tab)', () => {
     expect(screen.queryByText(/this fiscal year runs/i)).not.toBeInTheDocument();
   });
 
-  it('a save sends none of the four moved keys to PATCH /ledger-core/settings', async () => {
+  it('a save sends none of the four moved keys to PATCH /settings', async () => {
     renderSettingsPage();
     const user = userEvent.setup();
 
@@ -190,8 +190,8 @@ describe('GeneralSettingsPage (Organization tab)', () => {
     await waitFor(() => expect(legalName).toHaveValue('Acme Holdings Ltd'));
     await user.click(screen.getByRole('button', { name: 'Save' }));
 
-    await waitFor(() => expect(callsTo('PATCH', '/ledger-core/settings')).toHaveLength(1));
-    const body = bodyOf(callsTo('PATCH', '/ledger-core/settings')[0]);
+    await waitFor(() => expect(callsTo('PATCH', '/api/v1/settings')).toHaveLength(1));
+    const body = bodyOf(callsTo('PATCH', '/api/v1/settings')[0]);
     expect(body).toHaveProperty('legalName');
     expect(body).toHaveProperty('industry');
     for (const moved of ['fiscalYearStartMonth', 'fiscalYearStartDay', 'cashAccountId', 'timezone']) {

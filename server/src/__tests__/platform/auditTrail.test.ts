@@ -12,9 +12,9 @@ import type { SeededUser } from '../helpers/factories.js';
  */
 
 const app = createApp();
-const JOURNALS = '/api/v1/ledger-core/journals';
-const CUSTOMERS = '/api/v1/ledger-core/customers';
-const INVOICES = '/api/v1/ledger-core/invoices';
+const JOURNALS = '/api/v1/journals';
+const CUSTOMERS = '/api/v1/customers';
+const INVOICES = '/api/v1/invoices';
 
 let userA: SeededUser;
 let userC: SeededUser;

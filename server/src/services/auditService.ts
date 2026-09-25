@@ -39,7 +39,7 @@ function toEntry(row: LogRow): AuditLogEntry {
   return {
     id: row.id,
     txid: row.txid,
-    appSlug: row.app_slug,
+    module: row.app_slug,
     tableName: row.table_name,
     rowId: row.row_id,
     operation: row.operation as AuditOperation,
@@ -82,7 +82,7 @@ const LOG_SELECT = `SELECT a.id, a.txid, a.app_slug, a.table_name, a.row_id, a.o
 function buildFilters(orgId: string, options: ListAuditLogsOptions): { where: string; values: unknown[] } {
   const values: unknown[] = [
     orgId,
-    options.appSlug,
+    options.module,
     options.tableName,
     options.rowId,
     options.operation,

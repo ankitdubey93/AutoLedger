@@ -47,10 +47,10 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockFxRateRoutes(rates: FxRate[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
-    if (init?.method === 'POST' && url.includes('/ledger-core/fx-rates')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/fx-rates')) {
       const body = JSON.parse(init.body as string) as { fromCode: string; toCode: string; rateDate: string; rate: string };
       return Promise.resolve(
         jsonResponse(201, {
@@ -59,7 +59,7 @@ function mockFxRateRoutes(rates: FxRate[]) {
         }),
       );
     }
-    if (url.includes('/ledger-core/fx-rates')) {
+    if (url.includes('/api/v1/fx-rates')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: rates.length, totalCount: rates.length, currentPage: 1, totalPages: 1, rates }),
       );
@@ -105,7 +105,7 @@ describe('FxRatesPage', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input, init] = c as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.includes('/ledger-core/fx-rates');
+        return init?.method === 'POST' && url.includes('/api/v1/fx-rates');
       });
       expect(call).toBeDefined();
     });
@@ -113,7 +113,7 @@ describe('FxRatesPage', () => {
     const call = fetchMock.mock.calls.find((c) => {
       const [input, init] = c as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/ledger-core/fx-rates');
+      return init?.method === 'POST' && url.includes('/api/v1/fx-rates');
     });
     const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
       rate: unknown;

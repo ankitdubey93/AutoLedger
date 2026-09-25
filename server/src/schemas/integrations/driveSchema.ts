@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { columnMapSchema } from '../ledger-core/bankSchema.js';
+import { columnMapSchema } from '../accounting/bankSchema.js';
 
 /**
  * Request schemas for the platform Drive integration. `columnMapSchema` is

@@ -7,7 +7,7 @@ import InventorySetupPage from '../Pages/inventory/InventorySetupPage';
 import type { StockIndustryProfileSummary, StockSettings } from '../services/fetchServices';
 
 /**
- * StockLedger (Phase 28) — the setup wizard. Reads `useAuth()` to gate the
+ * Inventory (Phase 28) — the setup wizard. Reads `useAuth()` to gate the
  * apply button on role, so it renders under AuthProvider, mirroring
  * UniteconSettingsPage's tests.
  */
@@ -81,10 +81,10 @@ function mockSetupRoutes(role: 'OWNER' | 'VIEWER') {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor(role)));
-    if (url.includes('/stock/setup/profiles')) {
+    if (url.includes('/api/v1/inventory/setup/profiles')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: profiles.length, profiles }));
     }
-    if (url.includes('/stock/setup')) {
+    if (url.includes('/api/v1/inventory/setup')) {
       if (init?.method === 'POST') {
         applyBody = init.body !== undefined ? JSON.parse(init.body as string) : null;
         return Promise.resolve(
@@ -96,7 +96,7 @@ function mockSetupRoutes(role: 'OWNER' | 'VIEWER') {
         );
       }
     }
-    if (url.includes('/stock/settings')) {
+    if (url.includes('/api/v1/inventory/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: unconfiguredSettings }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

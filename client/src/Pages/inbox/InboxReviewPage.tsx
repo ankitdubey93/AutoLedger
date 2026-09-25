@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listApFlowReviewQueue, type ApFlowReviewQueueEntry } from '../../services/fetchServices';
+import { listCaptureReviewQueue, type CaptureReviewQueueEntry } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { INBOX_BASE } from '../../routes/paths';
 
@@ -18,7 +18,7 @@ function confidenceClass(value: number | null): string {
   return 'text-[var(--text)]';
 }
 
-function ReviewFlags({ entry }: { entry: ApFlowReviewQueueEntry }) {
+function ReviewFlags({ entry }: { entry: CaptureReviewQueueEntry }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {!entry.arithmeticOk && (
@@ -38,7 +38,7 @@ function ReviewFlags({ entry }: { entry: ApFlowReviewQueueEntry }) {
 export default function InboxReviewPage() {
   const base = INBOX_BASE;
 
-  const [entries, setEntries] = useState<ApFlowReviewQueueEntry[] | null>(null);
+  const [entries, setEntries] = useState<CaptureReviewQueueEntry[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -47,7 +47,7 @@ export default function InboxReviewPage() {
   useEffect(() => {
     let ignore = false;
 
-    listApFlowReviewQueue({ page: currentPage })
+    listCaptureReviewQueue({ page: currentPage })
       .then((res) => {
         if (ignore) return;
         setEntries(res.entries);

@@ -18,7 +18,7 @@ import {
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 const PAGE_SIZE = 20;
 
-/** StockLedger's item list: search, filter, paginate, select items for a QR label sheet. */
+/** Inventory's item list: search, filter, paginate, select items for a QR label sheet. */
 export default function InventoryItemsPage() {
   const auth = useAuth();
   const role = auth.status === 'authenticated' ? auth.role : null;

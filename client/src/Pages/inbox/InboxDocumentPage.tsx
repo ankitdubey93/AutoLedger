@@ -2,16 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
   ApiRequestError,
-  getApFlowDocument,
-  getApFlowPageImage,
+  getCaptureDocument,
+  getCapturePageImage,
   listAccounts,
-  postApFlowDocument,
-  reextractApFlowDocument,
-  updateApFlowLineItem,
+  postCaptureDocument,
+  reextractCaptureDocument,
+  updateCaptureLineItem,
   type Account,
-  type ApFlowDocumentDetail,
-  type ApFlowDocumentStatus,
-  type ApFlowMappingSource,
+  type CaptureDocumentDetail,
+  type CaptureDocumentStatus,
+  type CaptureMappingSource,
 } from '../../services/fetchServices';
 import { formatCents, formatMicroUsd } from '../../utils/money';
 import { INBOX_BASE } from '../../routes/paths';
@@ -23,10 +23,10 @@ import ConfirmDialog from '../../components/ConfirmDialog';
  * the pipeline's central claim (the caption says so explicitly), the
  * extracted fields with their confidence, and — from Phase 11 — the
  * side-by-side review: per-line account override and one-click posting
- * into LedgerCore.
+ * into Accounting.
  */
 
-function statusLabel(status: ApFlowDocumentStatus): string {
+function statusLabel(status: CaptureDocumentStatus): string {
   if (status === 'PENDING') return 'Pending';
   if (status === 'PROCESSING') return 'Processing';
   if (status === 'EXTRACTED') return 'Extracted';
@@ -40,7 +40,7 @@ function confidencePercent(fieldConfidence: Record<string, number>, field: strin
   return value === undefined ? null : `${String(Math.round(value * 100))}%`;
 }
 
-function mappingSourceLabel(source: ApFlowMappingSource): string {
+function mappingSourceLabel(source: CaptureMappingSource): string {
   if (source === 'HISTORY') return 'History';
   if (source === 'CHART') return 'Chart';
   if (source === 'MODEL') return 'AI';
@@ -48,7 +48,7 @@ function mappingSourceLabel(source: ApFlowMappingSource): string {
   return 'Unmapped';
 }
 
-function mappingSourceClass(source: ApFlowMappingSource): string {
+function mappingSourceClass(source: CaptureMappingSource): string {
   if (source === 'NONE') {
     return 'bg-red-500/10 text-red-400 ring-1 ring-inset ring-red-500/20';
   }
@@ -59,7 +59,7 @@ export default function InboxDocumentPage() {
   const { id } = useParams<{ id: string }>();
   const base = INBOX_BASE;
 
-  const [document, setDocument] = useState<ApFlowDocumentDetail | null>(null);
+  const [document, setDocument] = useState<CaptureDocumentDetail | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +74,7 @@ export default function InboxDocumentPage() {
     if (id === undefined) return;
     let ignore = false;
 
-    getApFlowDocument(id)
+    getCaptureDocument(id)
       .then((res) => {
         if (!ignore) setDocument(res.document);
       })
@@ -111,7 +111,7 @@ export default function InboxDocumentPage() {
     let ignore = false;
     let objectUrl: string | null = null;
 
-    getApFlowPageImage(id, activePage)
+    getCapturePageImage(id, activePage)
       .then(({ blob }) => {
         if (ignore) return;
         objectUrl = URL.createObjectURL(blob);
@@ -132,7 +132,7 @@ export default function InboxDocumentPage() {
     setError(null);
     setBusy(true);
     try {
-      await reextractApFlowDocument(id);
+      await reextractCaptureDocument(id);
       setConfirmingReextract(false);
       setActivePage(1);
       setReloadToken((t) => t + 1);
@@ -147,7 +147,7 @@ export default function InboxDocumentPage() {
     if (id === undefined || accountId === '') return;
     setError(null);
     try {
-      const res = await updateApFlowLineItem(id, lineItemId, accountId);
+      const res = await updateCaptureLineItem(id, lineItemId, accountId);
       setDocument(res.document);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not update this line item');
@@ -159,7 +159,7 @@ export default function InboxDocumentPage() {
     setError(null);
     setBusy(true);
     try {
-      const res = await postApFlowDocument(id);
+      const res = await postCaptureDocument(id);
       setDocument(res.document);
       setConfirmingPost(false);
     } catch (err: unknown) {

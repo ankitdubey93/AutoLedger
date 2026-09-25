@@ -12,8 +12,8 @@ import { handleIntegrationDriveSweep } from '../../queue/handlers/integrationDri
 import { decryptSecret } from '../../utils/secretBox.js';
 import { sha256Hex } from '../../utils/pkce.js';
 import { listCallsForEntity } from '../../services/aiUsageService.js';
-import { handleApFlowExtract } from '../../queue/handlers/apFlowExtractHandler.js';
-import type { VisionClient } from '../../services/ap-flow/extractionService.js';
+import { handleCaptureExtract } from '../../queue/handlers/captureExtractHandler.js';
+import type { VisionClient } from '../../services/capture/extractionService.js';
 import { QUEUE_NAMES } from '../../types/jobs.js';
 import { INTEGRATION_DRIVE_POLL_INTERVAL_MS } from '../../config/constants.js';
 import type { DriveServiceDeps } from '../../services/integrations/driveConnectionService.js';
@@ -583,7 +583,7 @@ describe('Google Drive folder intake', () => {
     expect(afterB[0]?.n).toBe(beforeB[0]?.n);
   });
 
-  it('two folders route by purpose: VENDOR_BILL to AP-Flow, BANK_STATEMENT to LedgerCore', async () => {
+  it('two folders route by purpose: VENDOR_BILL to Capture, BANK_STATEMENT to Accounting', async () => {
     const pdf = buildTestPdf(['Invoice']);
     const csvBytes = Buffer.from(['Date,Description,Amount', '2026-06-01,Payment,100.00', '2026-06-02,Fee,-5.00'].join('\n'));
     const billFiles: FakeDriveFile[] = [
@@ -681,14 +681,13 @@ describe('Google Drive folder intake', () => {
     const { default: supertest } = await import('supertest');
     const res = await supertest(app).get(`${BASE}/oauth/callback`).query({ state: 'bogus', code: 'x' });
     expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('/integrations?drive=error');
+    expect(res.headers.location).toContain('/settings/connections?drive=error');
   });
 
-  it('the legacy /api/v1/ap-flow/drive/oauth/callback alias still answers', async () => {
+  it('the retired /api/v1/ap-flow/drive/oauth/callback alias is gone (Phase 33)', async () => {
     const { default: supertest } = await import('supertest');
     const res = await supertest(app).get('/api/v1/ap-flow/drive/oauth/callback').query({ state: 'bogus', code: 'x' });
-    expect(res.status).toBe(302);
-    expect(res.headers.location).toContain('/integrations?drive=error');
+    expect(res.status).toBe(404);
   });
 
   it('the sweep enqueues one sync per due folder and dedupes within an interval', async () => {
@@ -724,7 +723,7 @@ describe('Google Drive folder intake', () => {
     await driveSyncService.syncFolder(orgA, folder.id, syncDeps);
 
     const { rows: docRows } = await pool.query<{ id: string }>('SELECT id FROM ap_flow_documents WHERE org_id = $1', [orgA]);
-    const apFlowDocId = docRows[0]?.id as string;
+    const captureDocId = docRows[0]?.id as string;
 
     const stubVision: VisionClient = {
       messages: {
@@ -734,9 +733,9 @@ describe('Google Drive folder intake', () => {
           }),
       },
     };
-    await handleApFlowExtract({ orgId: orgA, apFlowDocumentId: apFlowDocId }, { vision: stubVision });
+    await handleCaptureExtract({ orgId: orgA, captureDocumentId: captureDocId }, { vision: stubVision });
 
-    const calls = await listCallsForEntity(orgA, 'ap_flow_document', apFlowDocId);
+    const calls = await listCallsForEntity(orgA, 'ap_flow_document', captureDocId);
     expect(calls.length).toBeGreaterThan(0);
   });
 });

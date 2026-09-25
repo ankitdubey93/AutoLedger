@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { detectPii, redactText, regionsForWords } from '../utils/pii.js';
-import type { OcrWord } from '../types/ap-flow.js';
+import type { OcrWord } from '../types/capture.js';
 
 function word(text: string, x0: number, x1: number, y0 = 0, y1 = 10): OcrWord {
   return { text, box: { x0, y0, x1, y1 }, confidence: 0.9 };

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AiUsagePage from '../Pages/settings/AiUsagePage';
 import type { AiUsageSummary } from '../services/fetchServices';
 
-/** AP-Flow's AI usage report (Phase 19.1). */
+/** Capture's AI usage report (Phase 19.1). */
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

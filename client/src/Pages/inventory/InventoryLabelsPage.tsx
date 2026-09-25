@@ -19,7 +19,7 @@ interface TargetEntry {
 }
 
 /**
- * StockLedger's QR label sheet. Targets arrive from router state (a "Print
+ * Inventory's QR label sheet. Targets arrive from router state (a "Print
  * label(s)" action elsewhere in the app) or are added here by searching.
  * The QR renders as `<img src="data:image/svg+xml...">`, never
  * `dangerouslySetInnerHTML` — an `<img>` cannot execute script even if the

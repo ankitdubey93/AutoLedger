@@ -7,7 +7,7 @@ export const QUEUE_NAMES = [
   'outbox-drain',
   'webhook-deliver',
   'integrity-check',
-  'ap-flow-extract',
+  'capture-extract',
   'integration-drive-sweep',
   'integration-drive-sync',
   'dead-letter',
@@ -30,7 +30,7 @@ export interface JobPayloads {
   'outbox-drain': Record<string, never>;
   'webhook-deliver': { deliveryId: string };
   'integrity-check': Record<string, never>;
-  'ap-flow-extract': { orgId: string; apFlowDocumentId: string };
+  'capture-extract': { orgId: string; captureDocumentId: string };
   'integration-drive-sweep': Record<string, never>;
   'integration-drive-sync': { orgId: string; folderId: string };
   'dead-letter': {

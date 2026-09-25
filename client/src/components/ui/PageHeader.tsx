@@ -13,7 +13,7 @@ export interface PageHeaderProps {
 /**
  * A shared page-header layout: an optional icon chip, a title, a subtitle
  * and a right-aligned actions slot. It does not own heading level (`as`
- * defaults to 'h1' but every LedgerCore list/detail page currently uses
+ * defaults to 'h1' but every Accounting list/detail page currently uses
  * `h2`), so adopting it never changes a page's outline for assistive tech.
  */
 export default function PageHeader({ icon: Icon, title, subtitle, actions, as = 'h1' }: PageHeaderProps) {

@@ -7,7 +7,7 @@ import ItemCodesSettingsPage from '../Pages/settings/ItemCodesSettingsPage';
 import type { StockCategory, StockCodeSchemePreset } from '../services/fetchServices';
 
 /**
- * StockLedger (Phase 28) — the item-code scheme builder. Reads `useAuth()`
+ * Inventory (Phase 28) — the item-code scheme builder. Reads `useAuth()`
  * to gate the builder and save form on role, so it renders under
  * AuthProvider, mirroring UniteconSettingsPage's tests.
  */
@@ -66,13 +66,13 @@ function mockRoutes(role: 'OWNER' | 'ACCOUNTANT') {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor(role)));
-    if (url.includes('/stock/code-schemes/presets')) {
+    if (url.includes('/api/v1/inventory/code-schemes/presets')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: presets.length, presets }));
     }
-    if (url.includes('/stock/code-schemes/preview')) {
+    if (url.includes('/api/v1/inventory/code-schemes/preview')) {
       return Promise.resolve(jsonResponse(200, previewResponse));
     }
-    if (url.includes('/stock/code-schemes')) {
+    if (url.includes('/api/v1/inventory/code-schemes')) {
       if (init?.method === 'POST') {
         return Promise.resolve(
           jsonResponse(201, {
@@ -92,7 +92,7 @@ function mockRoutes(role: 'OWNER' | 'ACCOUNTANT') {
       }
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, codeSchemes: [] }));
     }
-    if (url.includes('/stock/categories')) {
+    if (url.includes('/api/v1/inventory/categories')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: categories.length, categories }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

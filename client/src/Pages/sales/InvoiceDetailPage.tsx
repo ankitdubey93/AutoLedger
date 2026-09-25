@@ -156,7 +156,7 @@ export default function InvoiceDetailPage() {
   const settings = invoiceSettings;
   const legalName =
     ledgerSettings.status === 'ready' ? ledgerSettings.settings.legalName : null;
-  // Until LedgerCore settings resolve there is no base currency to compare against, so
+  // Until Accounting settings resolve there is no base currency to compare against, so
   // the "≈ base" row stays hidden — as it always has. Using the invoice's own currency
   // makes InvoiceDocument's `currencyCode !== baseCurrency` test false.
   const baseCurrency =
@@ -327,7 +327,7 @@ export default function InvoiceDetailPage() {
       )}
 
       <div className="no-print">
-        <AttachmentsPanel appSlug="ledger-core" entityType="invoice" entityId={invoice.id} />
+        <AttachmentsPanel module="ledger-core" entityType="invoice" entityId={invoice.id} />
       </div>
 
       {confirmAction === 'issue' && (

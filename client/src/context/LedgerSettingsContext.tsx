@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { getLedgerSettings, type LedgerSettings } from '../services/fetchServices';
 
 /**
- * LedgerCore's own settings state, scoped to this app's subtree rather than
+ * Accounting's own settings state, scoped to this app's subtree rather than
  * the whole platform (mirrors context/AuthContext.tsx's discriminated-union
  * shape, one layer down).
  *

@@ -52,7 +52,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockLedgerRoute(response: { status: number; body: unknown }) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes(`/ledger-core/accounts/${accountId}/ledger`)) {
+    if (url.includes(`/api/v1/accounts/${accountId}/ledger`)) {
       return Promise.resolve(jsonResponse(response.status, response.body));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

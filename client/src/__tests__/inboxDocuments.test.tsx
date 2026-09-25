@@ -4,15 +4,15 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InboxPage from '../Pages/inbox/InboxPage';
 import InboxDocumentPage from '../Pages/inbox/InboxDocumentPage';
-import type { ApFlowDocument, ApFlowDocumentDetail } from '../services/fetchServices';
+import type { CaptureDocument, CaptureDocumentDetail } from '../services/fetchServices';
 
-/** AP-Flow's client pages (Phase 10) — deliberately thin, no review queue. */
+/** Capture's client pages (Phase 10) — deliberately thin, no review queue. */
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-function doc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
+function doc(overrides: Partial<CaptureDocument> = {}): CaptureDocument {
   return {
     id: 'ap-doc-1',
     documentId: 'vault-doc-1',
@@ -38,7 +38,7 @@ function doc(overrides: Partial<ApFlowDocument> = {}): ApFlowDocument {
   };
 }
 
-function detail(overrides: Partial<ApFlowDocumentDetail> = {}): ApFlowDocumentDetail {
+function detail(overrides: Partial<CaptureDocumentDetail> = {}): CaptureDocumentDetail {
   return {
     ...doc(),
     pages: [],
@@ -60,12 +60,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockListRoutes(documents: ApFlowDocument[]) {
+function mockListRoutes(documents: CaptureDocument[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
 
-    if (method === 'GET' && url.includes('/api/v1/ap-flow/documents')) {
+    if (method === 'GET' && url.includes('/api/v1/capture/documents')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -126,14 +126,14 @@ describe('InboxPage', () => {
       const call = fetchMock.mock.calls.find((c) => {
         const [input] = c as [RequestInfo | URL];
         const url = typeof input === 'string' ? input : input.toString();
-        return url.includes('/ap-flow/documents') && url.includes('status=FAILED');
+        return url.includes('/api/v1/capture/documents') && url.includes('status=FAILED');
       });
       expect(call).toBeDefined();
     });
   });
 });
 
-function mockDetailRoutes(document: ApFlowDocumentDetail, options: { reextractStatus?: number } = {}) {
+function mockDetailRoutes(document: CaptureDocumentDetail, options: { reextractStatus?: number } = {}) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
@@ -144,7 +144,7 @@ function mockDetailRoutes(document: ApFlowDocumentDetail, options: { reextractSt
         jsonResponse(status, { success: true, document: { ...document, status: 'PENDING' } }),
       );
     }
-    if (method === 'GET' && /\/ap-flow\/documents\/[^/]+$/.test(url)) {
+    if (method === 'GET' && /\/capture\/documents\/[^/]+$/.test(url)) {
       return Promise.resolve(jsonResponse(200, { success: true, document }));
     }
     if (method === 'GET' && url.includes('/pages/')) {

@@ -7,7 +7,7 @@ import DashboardPage from '../Pages/home/DashboardPage';
 import type { DashboardSummary } from '../services/fetchServices';
 
 /**
- * The LedgerCore dashboard. `DashboardPage` only depends on `OrgContext` (for
+ * The Accounting dashboard. `DashboardPage` only depends on `OrgContext` (for
  * the organization name) and `fetchServices` directly — not
  * `LedgerSettingsContext` — so it renders under a lighter provider tree than
  * the onboarding gate needs. It does need a `MemoryRouter`, though: its
@@ -97,7 +97,7 @@ function mockRoutes(dashboard: DashboardSummary, extra: (url: string) => Respons
     const handled = extra(url);
     if (handled !== undefined) return Promise.resolve(handled);
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
-    if (url.includes('/ledger-core/reports/dashboard')) {
+    if (url.includes('/api/v1/reports/dashboard')) {
       return Promise.resolve(jsonResponse(200, { success: true, ...dashboard }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -226,7 +226,7 @@ describe('DashboardPage — one home for the whole product', () => {
 
   it('invites setting up inventory when it is not configured, and counts bills waiting for review', async () => {
     mockRoutes(baseDashboard(), (url) => {
-      if (url.includes('/stock/settings')) {
+      if (url.includes('/api/v1/inventory/settings')) {
         return jsonResponse(200, { success: true, settings: { configured: false, industryProfile: null, suggestedProfile: 'RETAIL' } });
       }
       if (url.includes('/review-queue')) return reviewQueue(3);
@@ -242,17 +242,17 @@ describe('DashboardPage — one home for the whole product', () => {
 
   it('shows stock value and low stock once inventory is configured', async () => {
     mockRoutes(baseDashboard(), (url) => {
-      if (url.includes('/stock/settings')) {
+      if (url.includes('/api/v1/inventory/settings')) {
         return jsonResponse(200, { success: true, settings: { configured: true, industryProfile: 'RETAIL', suggestedProfile: 'RETAIL' } });
       }
-      if (url.includes('/stock/summary')) {
+      if (url.includes('/api/v1/inventory/summary')) {
         return jsonResponse(200, {
           success: true,
           summary: { activeItemCount: 4, totalValueCents: 250_000, lowStockItemCount: 1, expiringLotCount: 0, locationCount: 2 },
         });
       }
-      if (url.includes('/stock/items')) return jsonResponse(200, { success: true, count: 0, items: [] });
-      if (url.includes('/stock/movements')) return jsonResponse(200, { success: true, count: 0, movements: [] });
+      if (url.includes('/api/v1/inventory/items')) return jsonResponse(200, { success: true, count: 0, items: [] });
+      if (url.includes('/api/v1/inventory/movements')) return jsonResponse(200, { success: true, count: 0, movements: [] });
       if (url.includes('/review-queue')) return reviewQueue(0);
       return undefined;
     });

@@ -20,7 +20,7 @@ import type { Role } from '../../types/auth.js';
  * reach it — naming it keeps the list a readable inventory of what a test starts
  * from, and it survives a future FK changing to RESTRICT.
  *
- * TRUNCATE does **not** fire row-level triggers, so LedgerCore's immutability
+ * TRUNCATE does **not** fire row-level triggers, so Accounting's immutability
  * trigger on posted rows does not block a reset between tests. `audit_logs`
  * is append-only by trigger too (Phase 5), but the same exemption applies —
  * TRUNCATE clears it and RESTART IDENTITY puts its BIGINT id back to 1.

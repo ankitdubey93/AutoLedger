@@ -1,5 +1,5 @@
 /**
- * StockLedger (Phase 28) — GS1 GTIN-8/12/13/14 check-digit validation.
+ * Inventory (Phase 28) — GS1 GTIN-8/12/13/14 check-digit validation.
  *
  * Working from the rightmost non-check digit, weight alternately 3, 1, 3,
  * 1…. The check digit is `(10 − (sum mod 10)) mod 10`. A length other than

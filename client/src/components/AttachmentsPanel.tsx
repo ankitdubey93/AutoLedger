@@ -12,14 +12,14 @@ import ConfirmDialog from './ConfirmDialog';
 
 /**
  * A reusable panel of the documents attached to one record — dropped onto
- * LedgerCore's invoice, bill and journal-entry detail pages, but itself
+ * Accounting's invoice, bill and journal-entry detail pages, but itself
  * app-agnostic: it lives in components/, not Pages/ledger-core/, because the
  * Document Vault is platform infrastructure (Phase 9.5), and this panel is
  * the cross-app proof of that — any app's detail page can mount it.
  */
 
 export interface AttachmentsPanelProps {
-  appSlug: string;
+  module: string;
   entityType: string;
   entityId: string;
   /** Hides the upload control and every detach button. */
@@ -31,7 +31,7 @@ export interface AttachmentsPanelProps {
  * GET /documents (list, filtered) returns document rows only — the link id
  * lives on GET /documents/:id's `links[]`, so each listed document is
  * resolved once to find the one link matching this panel's own
- * (appSlug, entityType, entityId).
+ * (module, entityType, entityId).
  */
 interface AttachedDocument {
   document: VaultDocument;
@@ -45,7 +45,7 @@ function formatBytes(bytes: number): string {
 }
 
 export default function AttachmentsPanel({
-  appSlug,
+  module,
   entityType,
   entityId,
   readOnly = false,
@@ -62,12 +62,12 @@ export default function AttachmentsPanel({
     let ignore = false;
 
     async function load() {
-      const { documents } = await listDocuments({ appSlug, entityType, entityId });
+      const { documents } = await listDocuments({ module, entityType, entityId });
       const resolved = await Promise.all(
         documents.map(async (document) => {
           const { document: detail } = await getDocument(document.id);
           const link = detail.links.find(
-            (l) => l.appSlug === appSlug && l.entityType === entityType && l.entityId === entityId,
+            (l) => l.module === module && l.entityType === entityType && l.entityId === entityId,
           );
           return link === undefined ? null : { document, linkId: link.id };
         }),
@@ -86,7 +86,7 @@ export default function AttachmentsPanel({
     return () => {
       ignore = true;
     };
-  }, [appSlug, entityType, entityId, reloadToken]);
+  }, [module, entityType, entityId, reloadToken]);
 
   async function handleAttach(file: File) {
     setError(null);
@@ -95,7 +95,7 @@ export default function AttachmentsPanel({
       // Two calls, in that order: upload is idempotent, so a file already in
       // the vault attaches without a second copy.
       const { document } = await uploadDocument(file);
-      await attachDocument(document.id, { appSlug, entityType, entityId });
+      await attachDocument(document.id, { module, entityType, entityId });
       setReloadToken((t) => t + 1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Could not attach that file';

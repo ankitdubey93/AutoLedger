@@ -12,7 +12,7 @@ import StatTile from './StatTile';
  * currency symbol appended, matching the rule money.ts documents.
  *
  * Phase 31: a thin wrapper over the shared `StatTile` (its money formatting
- * and Link-vs-div behaviour are the only things specific to LedgerCore).
+ * and Link-vs-div behaviour are the only things specific to Accounting).
  */
 
 export interface MetricTileProps {

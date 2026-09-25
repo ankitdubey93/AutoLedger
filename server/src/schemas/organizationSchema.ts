@@ -3,7 +3,7 @@ import { SUPPORTED_CURRENCIES } from '../config/currencies.js';
 
 /**
  * Request schema for editing the active organization. Platform layer,
- * unprefixed — mirrors `schemas/ledger-core/settingsSchema.ts`'s shape but
+ * unprefixed — mirrors `schemas/accounting/settingsSchema.ts`'s shape but
  * lives at the layer root because `organizations` is a platform table.
  */
 export const updateOrganizationSchema = z

@@ -57,7 +57,7 @@ export async function buildHundredLineStatement(
   for (let i = 0; i < 40; i++) {
     const amountCents = 10000 + i * 137;
     const issueDate = isoPlusDays(BASE_DATE, i % 25);
-    const created = await agent.post('/api/v1/ledger-core/invoices').send({
+    const created = await agent.post('/api/v1/invoices').send({
       customerId,
       issueDate,
       dueDate: isoPlusDays(issueDate, 30),
@@ -74,7 +74,7 @@ export async function buildHundredLineStatement(
       ],
     });
     const invoiceId = created.body.invoice.id as string;
-    const issued = await agent.post(`/api/v1/ledger-core/invoices/${invoiceId}/issue`).send({});
+    const issued = await agent.post(`/api/v1/invoices/${invoiceId}/issue`).send({});
     const invoiceNumber = issued.body.invoice.invoiceNumber as string;
     invoices.push({ id: invoiceId, invoiceNumber, amountCents, issueDate });
   }

@@ -18,7 +18,7 @@ import {
 
 /**
  * The inventory section of the dashboard: summary tiles, a low-stock table
- * and the latest movements. It was StockLedger's own dashboard page until
+ * and the latest movements. It was Inventory's own dashboard page until
  * Phase 33 folded it into the product's single dashboard. Until inventory is
  * set up it renders one invitation card instead, because inventory is
  * optional.

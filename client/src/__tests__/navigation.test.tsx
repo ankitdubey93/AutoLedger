@@ -168,19 +168,19 @@ function mockRoutes(overrides: { settings?: unknown; onboarding?: unknown } = {}
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
-    if (url.includes('/ledger-core/settings/onboarding')) {
+    if (url.includes('/api/v1/settings/onboarding')) {
       return Promise.resolve(jsonResponse(200, overrides.onboarding ?? onboarded));
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, overrides.settings ?? notOnboarded));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, accountsResponse));
     }
-    if (url.includes('/ledger-core/reports/dashboard')) {
+    if (url.includes('/api/v1/reports/dashboard')) {
       return Promise.resolve(jsonResponse(200, emptyDashboard));
     }
-    if (url.includes('/ledger-core/journals')) {
+    if (url.includes('/api/v1/journals')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -192,7 +192,7 @@ function mockRoutes(overrides: { settings?: unknown; onboarding?: unknown } = {}
         }),
       );
     }
-    if (url.includes('/ledger-core/reports/trial-balance')) {
+    if (url.includes('/api/v1/reports/trial-balance')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,

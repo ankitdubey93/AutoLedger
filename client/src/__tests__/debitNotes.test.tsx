@@ -184,14 +184,14 @@ describe('NewDebitNotePage', () => {
     let created: unknown = null;
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
-      if (init?.method === 'POST' && url.endsWith('/ledger-core/debit-notes')) {
+      if (init?.method === 'POST' && url.endsWith('/api/v1/debit-notes')) {
         created = JSON.parse(String(init.body));
         return Promise.resolve(jsonResponse(201, { success: true, debitNote: debitNote({ status: 'DRAFT', debitNoteNumber: null }) }));
       }
-      if (url.includes('/ledger-core/accounts')) {
+      if (url.includes('/api/v1/accounts')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account5100] }));
       }
-      if (url.endsWith('/ledger-core/bills/bill-12')) {
+      if (url.endsWith('/api/v1/bills/bill-12')) {
         return Promise.resolve(jsonResponse(200, { success: true, bill: bill() }));
       }
       return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -235,7 +235,7 @@ describe('DebitNoteDetailPage', () => {
         appliedBody = JSON.parse(String(init.body));
         return Promise.resolve(jsonResponse(201, { success: true, debitNote: { ...note, appliedCents: 100000, unappliedCents: 50000 } }));
       }
-      if (url.includes('/ledger-core/bills?')) {
+      if (url.includes('/api/v1/bills?')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: 1, totalCount: 1, currentPage: 1, totalPages: 1, bills: [target] }));
       }
       if (url.endsWith('/debit-notes/dn-1')) return Promise.resolve(jsonResponse(200, { success: true, debitNote: note }));

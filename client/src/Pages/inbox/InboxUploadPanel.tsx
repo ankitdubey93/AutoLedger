@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
-import { uploadApFlowDocument } from '../../services/fetchServices';
+import { uploadCaptureDocument } from '../../services/fetchServices';
 
 /**
- * AP-Flow's direct-upload panel (Phase 19) — drag-and-drop or a file picker,
- * straight into AP-Flow's own capture endpoint rather than the two-step
+ * Capture's direct-upload panel (Phase 19) — drag-and-drop or a file picker,
+ * straight into Capture's own capture endpoint rather than the two-step
  * "vault it, then pick it from a dropdown" flow below. Files upload
  * sequentially, each reported as it finishes, so a batch of five doesn't
  * look like one opaque spinner.
@@ -26,7 +26,7 @@ export default function InboxUploadPanel({ onUploaded }: { onUploaded: () => voi
 
     for (const [index, file] of list.entries()) {
       try {
-        const res = await uploadApFlowDocument(file);
+        const res = await uploadCaptureDocument(file);
         setOutcomes((prev) => {
           const next = [...prev];
           next[index] = { name: file.name, state: res.created ? 'captured' : 'duplicate' };

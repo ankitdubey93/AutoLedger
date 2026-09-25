@@ -3,11 +3,11 @@ import { createWorker } from 'tesseract.js';
 import type Tesseract from 'tesseract.js';
 import { ApiError } from '../utils/apiError.js';
 import { regionsForWords } from '../utils/pii.js';
-import { AP_FLOW_MAX_PAGES, AP_FLOW_RASTER_DPI, AP_FLOW_REDACTION_PAD_PX, TESSERACT_CACHE_DIR } from '../config/constants.js';
-import type { OcrPageResult, OcrWord, RedactedRegion } from '../types/ap-flow.js';
+import { CAPTURE_MAX_PAGES, CAPTURE_RASTER_DPI, CAPTURE_REDACTION_PAD_PX, TESSERACT_CACHE_DIR } from '../config/constants.js';
+import type { OcrPageResult, OcrWord, RedactedRegion } from '../types/capture.js';
 
 /**
- * The AP-Flow capture pipeline's document-processing surface (Phase 10) —
+ * The Capture capture pipeline's document-processing surface (Phase 10) —
  * shared, unprefixed infrastructure like `storageService.ts`, per
  * docs/ap-flow.md's promotion note. Touches no database — this file must
  * never import db/connect.js. rasterize/redactPage are pure over buffers;
@@ -80,10 +80,10 @@ async function rasterizePdf(buffer: Buffer): Promise<RasterPage[]> {
   const doc = await loadingTask.promise;
 
   try {
-    if (doc.numPages > AP_FLOW_MAX_PAGES) {
+    if (doc.numPages > CAPTURE_MAX_PAGES) {
       throw new ApiError(
         422,
-        `Document has ${String(doc.numPages)} pages; the limit is ${String(AP_FLOW_MAX_PAGES)}`,
+        `Document has ${String(doc.numPages)} pages; the limit is ${String(CAPTURE_MAX_PAGES)}`,
       );
     }
 
@@ -95,7 +95,7 @@ async function rasterizePdf(buffer: Buffer): Promise<RasterPage[]> {
 
     for (let pageNumber = 1; pageNumber <= doc.numPages; pageNumber += 1) {
       const page = await doc.getPage(pageNumber);
-      const viewport = page.getViewport({ scale: AP_FLOW_RASTER_DPI / 72 });
+      const viewport = page.getViewport({ scale: CAPTURE_RASTER_DPI / 72 });
       const width = Math.floor(viewport.width);
       const height = Math.floor(viewport.height);
       const canvasAndContext = canvasFactory.create(width, height);
@@ -131,7 +131,7 @@ export type OcrAdapter = (png: Buffer) => Promise<OcrPageResult>;
  * (`blocks[].paragraphs[].lines[].words[]`) and carries no top-level image
  * dimensions — verified against the installed package's own types. Both are
  * flattened/derived here so the rest of this file only ever sees the flat
- * `OcrWord[]` shape `types/ap-flow.ts` declares.
+ * `OcrWord[]` shape `types/capture.ts` declares.
  */
 function flattenWords(page: Tesseract.Page): OcrWord[] {
   const words: OcrWord[] = [];
@@ -184,7 +184,7 @@ export async function redactPage(
   png: Buffer,
   words: OcrWord[],
 ): Promise<{ png: Buffer; regions: RedactedRegion[] }> {
-  const regions = regionsForWords(words, AP_FLOW_REDACTION_PAD_PX);
+  const regions = regionsForWords(words, CAPTURE_REDACTION_PAD_PX);
   if (regions.length === 0) return { png, regions: [] };
 
   const metadata = await sharp(png).metadata();

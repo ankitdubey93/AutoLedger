@@ -25,7 +25,7 @@ export const list: RequestHandler = async (req, res) => {
   const { logs, totalCount } = await auditService.listAuditLogs(user.orgId, {
     page,
     limit,
-    appSlug: optionalText(req, 'appSlug', 40),
+    module: optionalText(req, 'module', 40),
     tableName: optionalText(req, 'tableName', 63),
     rowId: optionalUuid(req, 'rowId'),
     operation: optionalOperation(req),

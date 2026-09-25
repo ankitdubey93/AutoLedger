@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { FolderSync, Sparkles } from 'lucide-react';
-import { getApFlowSettings, updateApFlowSettings } from '../../services/fetchServices';
+import { getCaptureSettings, updateCaptureSettings } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import PageHeader from '../../components/ui/PageHeader';
 
 /**
- * AP-Flow's settings page — the auto-post gate a reviewer or owner tunes
+ * Capture's settings page — the auto-post gate a reviewer or owner tunes
  * (Phase 19). Google Drive folder intake moved to the platform-level
  * /integrations page in Phase 19.3, since a folder now feeds two apps
- * (AP-Flow and LedgerCore), not just this one.
+ * (Capture and Accounting), not just this one.
  */
 
 export default function InboxSettingsPage() {
@@ -26,7 +26,7 @@ export default function InboxSettingsPage() {
 
   useEffect(() => {
     let ignore = false;
-    getApFlowSettings()
+    getCaptureSettings()
       .then((res) => {
         if (ignore) return;
         setAutoPostEnabled(res.settings.autoPostEnabled);
@@ -65,7 +65,7 @@ export default function InboxSettingsPage() {
 
     setSaving(true);
     try {
-      const res = await updateApFlowSettings({
+      const res = await updateCaptureSettings({
         autoPostEnabled,
         autoPostMinConfidence: confidence,
         autoPostMaxTotalCents: maxTotalCents,

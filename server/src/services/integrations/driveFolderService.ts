@@ -1,7 +1,7 @@
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
 import { enqueue } from '../../queue/queues.js';
-import * as accountService from '../ledger-core/accountService.js';
+import * as accountService from '../accounting/accountService.js';
 import { getConnection, getAccessToken } from './driveConnectionService.js';
 import type { DriveServiceDeps } from './driveConnectionService.js';
 import { getFolder as getDriveFolderMetadata, parseFolderInput } from './googleDriveClient.js';
@@ -21,7 +21,7 @@ function pgErrorCode(err: unknown): string | undefined {
  * BANK_STATEMENT, the ledger account and CSV shape a manual import would
  * otherwise ask for on the form each time.
  *
- * `ledgerAccountId` carries no REFERENCES to LedgerCore's `accounts` table
+ * `ledgerAccountId` carries no REFERENCES to Accounting's `accounts` table
  * (guardrails rules 8 and 16 collide, 16 wins — migration 053's comment on
  * the column states the identical ruling). Validity is checked here through
  * accountService's own public functions, never by querying `accounts`

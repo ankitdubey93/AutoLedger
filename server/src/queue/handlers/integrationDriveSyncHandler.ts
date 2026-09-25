@@ -4,8 +4,8 @@ import type { JobPayloads } from '../../types/jobs.js';
 
 /**
  * One folder's sync run. Its own extraction/classification/metering happens
- * downstream, inside apFlowDocumentService.captureFile's own enqueue of
- * 'ap-flow-extract' for VENDOR_BILL (Phase 19.1's meter picks it up there
+ * downstream, inside captureDocumentService.captureFile's own enqueue of
+ * 'capture-extract' for VENDOR_BILL (Phase 19.1's meter picks it up there
  * with no extra work: entityId is the imported document's own id) — or
  * synchronously inside bankImportService.importStatement for BANK_STATEMENT.
  */

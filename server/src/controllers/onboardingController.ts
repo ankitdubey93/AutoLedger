@@ -10,8 +10,8 @@ import { isOnboardingSlug, type OnboardingSlug } from '../types/onboarding.js';
 /** Thin adapters over onboardingService. Zero SQL (guardrails rule 2). */
 
 function resolveSlug(req: Request): OnboardingSlug {
-  const slug = requireParam(req, 'appSlug');
-  if (!isOnboardingSlug(slug)) throw new ApiError(404, 'Unknown app');
+  const slug = requireParam(req, 'module');
+  if (!isOnboardingSlug(slug)) throw new ApiError(404, 'Unknown setup module');
   return slug;
 }
 
@@ -22,7 +22,7 @@ export const checklist: RequestHandler = async (req, res) => {
   res.json({ success: true, count: items.length, items });
 };
 
-/** GET /onboarding/:appSlug */
+/** GET /onboarding/:module */
 export const getOne: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const slug = resolveSlug(req);
@@ -30,7 +30,7 @@ export const getOne: RequestHandler = async (req, res) => {
   res.json({ success: true, onboarding });
 };
 
-/** PUT /onboarding/:appSlug/draft */
+/** PUT /onboarding/:module/draft */
 export const saveDraft: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const slug = resolveSlug(req);
@@ -39,7 +39,7 @@ export const saveDraft: RequestHandler = async (req, res) => {
   res.json({ success: true, onboarding });
 };
 
-/** POST /onboarding/:appSlug/skip */
+/** POST /onboarding/:module/skip */
 export const skip: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const slug = resolveSlug(req);
@@ -47,7 +47,7 @@ export const skip: RequestHandler = async (req, res) => {
   res.json({ success: true, onboarding });
 };
 
-/** POST /onboarding/:appSlug/resume */
+/** POST /onboarding/:module/resume */
 export const resume: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const slug = resolveSlug(req);

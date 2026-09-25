@@ -1,7 +1,7 @@
 import { cents, scaleCents } from './money.js';
 
 /**
- * StockLedger (Phase 28) — perpetual-inventory valuation arithmetic. Every
+ * Inventory (Phase 28) — perpetual-inventory valuation arithmetic. Every
  * function goes through `scaleCents(cents(x), n, d)`; none does its own
  * multiplication or division on a raw `number` (guardrails rule 3). See
  * `utils/money.ts` for why the scaling itself is BigInt-exact.

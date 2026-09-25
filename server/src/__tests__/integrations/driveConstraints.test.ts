@@ -7,8 +7,8 @@ import type { SeededUser } from '../helpers/factories.js';
  * The database as the guardrail, not the service — every test here drives
  * raw SQL straight at the pool to prove migration 053's constraints and
  * triggers hold regardless of what wrote the row. Ported and extended from
- * ap-flow/apFlowConstraints.test.ts's three Phase 19.2 cases, now that the
- * integration is platform-level, not AP-Flow's.
+ * ap-flow/captureConstraints.test.ts's three Phase 19.2 cases, now that the
+ * integration is platform-level, not Capture's.
  *
  * Assert SQLSTATE, never message text — messages are free to change without
  * being a break in the actual guarantee.

@@ -60,7 +60,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockProfitAndLossRoute() {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/reports/profit-and-loss')) {
+    if (url.includes('/api/v1/reports/profit-and-loss')) {
       return Promise.resolve(jsonResponse(200, { success: true, ...plFixture }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -70,7 +70,7 @@ function mockProfitAndLossRoute() {
 function mockBalanceSheetRoute(balances = true) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/reports/balance-sheet')) {
+    if (url.includes('/api/v1/reports/balance-sheet')) {
       return Promise.resolve(jsonResponse(200, { success: true, ...balanceSheetFixture(balances) }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

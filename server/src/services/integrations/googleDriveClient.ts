@@ -9,7 +9,7 @@ import {
 
 /**
  * Google Drive OAuth 2.0 + PKCE and the Drive v3 REST surface, hand-rolled
- * over `fetch` — no `googleapis` package (guardrails rule 14; AP-Flow is
+ * over `fetch` — no `googleapis` package (guardrails rule 14; Capture is
  * inside the LLM/vision carve-out already, and Drive intake follows the
  * identical no-SDK precedent `modelClient.ts`'s Gemini adapter set).
  *

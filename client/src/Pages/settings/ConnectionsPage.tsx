@@ -18,9 +18,9 @@ import DriveFolderForm from './DriveFolderForm';
 
 /**
  * Platform Integrations — Phase 19.3. One page because a Drive connection now
- * feeds two apps (AP-Flow and LedgerCore) depending on a folder's purpose;
+ * feeds two apps (Capture and Accounting) depending on a folder's purpose;
  * there is no single app this belongs under (guardrails rule 16, mirrored on
- * the client: it sits beside /documents, not under /app/:appSlug).
+ * the client: it sits beside /documents, and needs no module of its own).
  */
 
 function connectionStatusLabel(connection: DriveConnection | null): string {

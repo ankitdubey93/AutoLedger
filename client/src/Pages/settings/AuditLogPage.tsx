@@ -7,14 +7,15 @@ import {
   type AuditLogEntry,
   type AuditOperation,
 } from '../../services/fetchServices';
+import { MODULE_LABELS, moduleLabel } from '../../utils/moduleLabels';
 
 /**
  * The audit trail (Phase 5) — every INSERT/UPDATE/DELETE across every app,
  * captured by database trigger, read here.
  *
- * No `appSlug` filter is applied by default: the trail is platform-level and
+ * No `module` filter is applied by default: the trail is platform-level and
  * records `organizations`/`organization_members` changes too, not only
- * LedgerCore's. It is reached from LedgerCore's rail only because LedgerCore
+ * Accounting's. It is reached from Accounting's rail only because Accounting
  * is the only app with a UI today — this page moves to the platform shell
  * once a second app ships.
  *
@@ -87,7 +88,7 @@ export default function AuditLogPage() {
   const [logs, setLogs] = useState<AuditLogEntry[] | null>(null);
   const [totalCount, setTotalCount] = useState(0);
   const [page, setPage] = useState(1);
-  const [appSlug, setAppSlug] = useState('');
+  const [module, setModule] = useState('');
   const [tableName, setTableName] = useState('');
   const [operation, setOperation] = useState<AuditOperation | ''>('');
   const [error, setError] = useState<string | null>(null);
@@ -106,7 +107,7 @@ export default function AuditLogPage() {
       {
         page,
         limit: PAGE_SIZE,
-        ...(appSlug === '' ? {} : { appSlug }),
+        ...(module === '' ? {} : { module }),
         ...(tableName === '' ? {} : { tableName }),
         ...(operation === '' ? {} : { operation }),
       },
@@ -125,7 +126,7 @@ export default function AuditLogPage() {
       });
 
     return () => controller.abort();
-  }, [page, appSlug, tableName, operation]);
+  }, [page, module, tableName, operation]);
 
   function toggleRow(id: string) {
     if (expandedId === id) {
@@ -174,17 +175,18 @@ export default function AuditLogPage() {
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
-          App
+          Area
           <select
-            value={appSlug}
-            onChange={(e) => onFilterChange(setAppSlug)(e.target.value)}
+            value={module}
+            onChange={(e) => onFilterChange(setModule)(e.target.value)}
             className="px-2 py-1.5 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)]"
           >
             <option value="">All</option>
-            <option value="platform">Platform</option>
-            <option value="ledger-core">Accounting</option>
-            <option value="ap-flow">Bill inbox</option>
-            <option value="stock">Inventory</option>
+            {Object.entries(MODULE_LABELS).map(([tag, label]) => (
+              <option key={tag} value={tag}>
+                {label}
+              </option>
+            ))}
           </select>
         </label>
 
@@ -227,7 +229,7 @@ export default function AuditLogPage() {
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
                 <th className="p-3 font-medium">When</th>
-                <th className="p-3 font-medium">App</th>
+                <th className="p-3 font-medium">Area</th>
                 <th className="p-3 font-medium">Table</th>
                 <th className="p-3 font-medium">Operation</th>
                 <th className="p-3 font-medium">Changed</th>
@@ -243,7 +245,7 @@ export default function AuditLogPage() {
                     onClick={() => toggleRow(log.id)}
                   >
                     <td className="p-3 whitespace-nowrap">{new Date(log.createdAt).toLocaleString()}</td>
-                    <td className="p-3">{log.appSlug}</td>
+                    <td className="p-3">{moduleLabel(log.module)}</td>
                     <td className="p-3 font-mono">{log.tableName}</td>
                     <td className="p-3">
                       <OperationPill operation={log.operation} />

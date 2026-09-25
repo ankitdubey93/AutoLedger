@@ -61,10 +61,10 @@ afterEach(() => {
 function mockRoutes(reconciliation: BankReconciliationReport) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account()] }));
     }
-    if (url.includes('/ledger-core/reports/bank-reconciliation')) {
+    if (url.includes('/api/v1/reports/bank-reconciliation')) {
       return Promise.resolve(jsonResponse(200, { success: true, ...reconciliation }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

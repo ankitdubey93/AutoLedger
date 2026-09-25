@@ -3,7 +3,7 @@ import { closePool, pool } from '../../db/connect.js';
 import { createUserWithOrg, clearStorage, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
 import { dispatchDriveFile, type DriveIntakeTarget } from '../../services/integrations/driveIntakeDispatcher.js';
-import * as apFlowDocumentService from '../../services/ap-flow/apFlowDocumentService.js';
+import * as captureDocumentService from '../../services/capture/captureDocumentService.js';
 
 /**
  * The guardrails rule 16 seam — driveIntakeDispatcher. Integration tier, real
@@ -73,7 +73,7 @@ afterEach(() => {
 afterAll(closePool);
 
 describe('dispatchDriveFile', () => {
-  it('VENDOR_BILL: imports through AP-Flow and creates one ap_flow_documents row', async () => {
+  it('VENDOR_BILL: imports through Capture and creates one ap_flow_documents row', async () => {
     const outcome = await dispatchDriveFile(vendorBillTarget());
 
     expect(outcome.status).toBe('IMPORTED');
@@ -107,7 +107,7 @@ describe('dispatchDriveFile', () => {
     expect(rows[0]?.duplicate_of_id).toBe(first.resultEntityId);
   });
 
-  it('BANK_STATEMENT: imports through LedgerCore and creates the bank transaction rows', async () => {
+  it('BANK_STATEMENT: imports through Accounting and creates the bank transaction rows', async () => {
     const csv = ['Date,Description,Amount', '2026-06-01,Payment,100.00', '2026-06-02,Supplies,-40.00', '2026-06-03,Fee,-5.00'].join(
       '\n',
     );
@@ -160,7 +160,7 @@ describe('dispatchDriveFile', () => {
   });
 
   it('a thrown network error propagates — it is never converted to SKIPPED', async () => {
-    vi.spyOn(apFlowDocumentService, 'captureFile').mockRejectedValueOnce(new Error('ECONNRESET'));
+    vi.spyOn(captureDocumentService, 'captureFile').mockRejectedValueOnce(new Error('ECONNRESET'));
 
     await expect(dispatchDriveFile(vendorBillTarget())).rejects.toThrow('ECONNRESET');
   });

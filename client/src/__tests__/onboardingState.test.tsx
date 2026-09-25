@@ -80,7 +80,7 @@ function onboardingStateResponse(status: string) {
   return {
     success: true,
     onboarding: {
-      appSlug: 'ledger-core',
+      module: 'ledger-core',
       status,
       currentStep: null,
       draft: {},
@@ -97,10 +97,10 @@ function mockRoutes(options: { settings?: unknown; onboardingStatus?: string } =
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
-    if (url.includes('/ledger-core/settings/onboarding')) {
+    if (url.includes('/api/v1/settings/onboarding')) {
       return Promise.resolve(jsonResponse(200, onboarded));
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, options.settings ?? notOnboarded));
     }
     if (url.includes('/onboarding/ledger-core/skip')) {
@@ -109,10 +109,10 @@ function mockRoutes(options: { settings?: unknown; onboardingStatus?: string } =
     if (url.includes('/onboarding/ledger-core')) {
       return Promise.resolve(jsonResponse(200, onboardingStateResponse(options.onboardingStatus ?? 'NOT_STARTED')));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, accountsResponse));
     }
-    if (url.includes('/ledger-core/reports/dashboard')) {
+    if (url.includes('/api/v1/reports/dashboard')) {
       return Promise.resolve(jsonResponse(200, emptyDashboard));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -188,10 +188,10 @@ describe('Skip for now', () => {
 });
 
 describe('the setup checklist', () => {
-  function item(appSlug: string, status: string) {
+  function item(module: string, status: string) {
     return {
-      appSlug,
-      appName: appSlug,
+      module,
+      appName: module,
       appStatus: 'building',
       status,
       currentStep: null,

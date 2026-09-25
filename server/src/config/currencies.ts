@@ -1,12 +1,12 @@
 /**
- * The currencies LedgerCore accepts as an organization's base currency.
+ * The currencies Accounting accepts as an organization's base currency.
  *
  * Platform layer, unprefixed — currency lives on `organizations.base_currency`,
- * not on any LedgerCore table. `as const` keeps each entry a string literal so
+ * not on any Accounting table. `as const` keeps each entry a string literal so
  * `CurrencyCode` is a real union rather than `string`, and this same array
- * feeds both the zod enum (`schemas/ledger-core/settingsSchema.ts`) and the
+ * feeds both the zod enum (`schemas/accounting/settingsSchema.ts`) and the
  * client's currency select — one source of truth, same pattern as
- * `ACCOUNT_TYPES` in `types/ledger-core.ts` and `ROLES` in `types/auth.ts`.
+ * `ACCOUNT_TYPES` in `types/accounting.ts` and `ROLES` in `types/auth.ts`.
  */
 export const SUPPORTED_CURRENCIES = [
   'USD',

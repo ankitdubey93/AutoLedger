@@ -17,7 +17,7 @@ import { parseMoneyText } from '../utils/money.js';
  * answer key.
  *
  * Deliberately not `fixtures/` and not seeded through the API here — this
- * folder is meant to be worked through by a human at the LedgerCore UI
+ * folder is meant to be worked through by a human in the AutoLedger UI
  * (typing a bill or invoice in by hand, uploading a CSV through the
  * importer screens), and is committed as plain, reviewable files. Contrast
  * `sandbox/`, which is replayed through services by a seeder (see
@@ -117,7 +117,7 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
 
   const intro =
     kind === 'invoice'
-      ? `# Invoices to raise\n\nRaise each of these against the customer named, in the order shown, then **Issue** it — the matcher only considers an invoice once it is \`ISSUED\`. LedgerCore assigns the invoice number itself from the numbering settings; there is no "their invoice number" field to fill in.\n\n`
+      ? `# Invoices to raise\n\nRaise each of these against the customer named, in the order shown, then **Issue** it — the matcher only considers an invoice once it is \`ISSUED\`. AutoLedger assigns the invoice number itself from the numbering settings; there is no "their invoice number" field to fill in.\n\n`
       : `# Bills received\n\nEnter each of these against the vendor named, in the order shown, then take it through **Submit for approval → Approve**. The matcher only considers a bill once it is \`POSTED\`.\n\n`;
 
   let out = intro;
@@ -230,7 +230,7 @@ function renderExpectedResults(expected: ExpectedMonth[]): string {
   let out =
     `# Expected results — the answer key\n\n` +
     `Computed from the same dataset the statements and source documents come from, and verified — in this ` +
-    `project's own test suite — against the real LedgerCore reports produced by replaying this exact scenario ` +
+    `project's own test suite — against the real AutoLedger reports produced by replaying this exact scenario ` +
     `through the real API. If your numbers disagree with this file, your entries disagree with the scenario, ` +
     `not the other way around.\n\n`;
 
@@ -287,10 +287,10 @@ function renderExpectedResults(expected: ExpectedMonth[]): string {
 function renderSetup(): string {
   return (
     `# Setup\n\n` +
-    `1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 45-account chart automatically. On the next screen, choose at least **LedgerCore** and click **Continue**.\n` +
+    `1. Register a **fresh** organization — any name, base currency **USD**. Registration seeds the default 47-account chart automatically. Complete the setup wizard that follows (base currency **USD**); on its optional last step, **Skip for now**. This scenario keeps no stock.\n` +
     `2. Go to **Accounts** and create one new account:\n\n` +
     `   | Field | Value |\n   |---|---|\n   | Code | \`4300\` |\n   | Name | Interest Income |\n   | Type | Revenue |\n   | Parent | \`4000 Revenue\` |\n   | Postable | Yes |\n\n` +
-    `3. Do **not** run the sandbox demo loader or the opening-balance importer into this organization — the scenario assumes zero opening cash, and both of those would add balances this pack's answer key does not account for.\n`
+    `3. Do **not** run the opening-balance importer into this organization — the scenario assumes zero opening cash, and an import would add balances this pack's answer key does not account for.\n`
   );
 }
 
@@ -321,7 +321,7 @@ function renderTheBusiness(): string {
 function renderReadme(): string {
   return (
     `# Walkthrough: Harbor Point Fabrication\n\n` +
-    `A complete, four-month accounting scenario for LedgerCore — a vendor and a customer CSV to import, source ` +
+    `A complete, four-month accounting scenario for AutoLedger — a vendor and a customer CSV to import, source ` +
     `documents to enter by hand, four bank statements to import, credit and debit notes in the fourth month, and ` +
     `a computed answer key to check your work against.\n\n` +
     `**Start with \`TUTORIAL.md\`** — it walks the whole thing start to finish with hints. The files below are ` +
@@ -365,9 +365,9 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `Read \`00-the-business.md\` first if you have not already — it is one page and tells you what the company ` +
     `does and which accounts you'll touch.\n\n---\n\n` +
     `## Step 0 — set up the organization\n\n` +
-    `Follow \`01-setup.md\`: register a fresh org (base currency USD), choose at least LedgerCore on the app ` +
-    `picker that follows, then create one account by hand, ` +
-    `\`4300 Interest Income\`. Registration already seeds the other 45 accounts, so this is the only one you ` +
+    `Follow \`01-setup.md\`: register a fresh org (base currency USD), complete the setup wizard (skip the ` +
+    `optional inventory step), then create one account by hand, ` +
+    `\`4300 Interest Income\`. Registration already seeds the other 47 accounts, so this is the only one you ` +
     `create yourself.\n\n` +
     `> **Hint:** if you skip creating 4300 and hit an interest line in the bank statement later, "Post journal" ` +
     `will have no account to offer for it — come back here and add it.\n\n` +
@@ -490,7 +490,7 @@ function renderAdjustments(anchor: AnchorMonth): string {
     `| **Debit note** | us (the buyer) | a vendor | Reduces what we owe the vendor (AP ↓) | QuickBooks "vendor credit", Xero "purchase credit note", Zoho "vendor credit" |\n\n` +
     `The names describe what the document does to the *other party's* account in your books: a credit note ` +
     `**credits** the customer's (receivable) account; a debit note **debits** the vendor's (payable) account. ` +
-    `When you send a vendor a debit note, they usually answer with their own credit note — LedgerCore lets ` +
+    `When you send a vendor a debit note, they usually answer with their own credit note — AutoLedger lets ` +
     `you record its number as the *vendor's credit note no.*\n\n` +
     `## When you need one\n\n` +
     `**Credit note** — the customer returned goods; you agreed a price allowance or an after-the-sale discount; ` +
@@ -500,15 +500,15 @@ function renderAdjustments(anchor: AnchorMonth): string {
     `**When you don't:**\n\n` +
     `- The whole invoice was wrong and nothing has been paid on it → **void** the invoice and re-issue it.\n` +
     `- The customer will simply never pay → that is a bad-debt write-off, a different document (not built in ` +
-    `LedgerCore yet).\n` +
+    `AutoLedger yet).\n` +
     `- The customer owes you **more** than you invoiced → issue another invoice. (Some tax regimes call a ` +
-    `seller's document that *increases* an invoice a "debit note" too — e.g. India's GST. LedgerCore does not ` +
+    `seller's document that *increases* an invoice a "debit note" too — e.g. India's GST. AutoLedger does not ` +
     `build that variant; a supplementary invoice does the same job in the books.)\n\n` +
     `> For background (verify for your jurisdiction): returns and allowances reduce revenue under IFRS 15 / ` +
     `ASC 606; India's CGST Act s.34 and the EU VAT Directive (art. 219) treat a document that amends an invoice ` +
     `as part of the invoice record, which is why it references the original and carries its own number series.\n\n` +
     `## Why a separate document instead of editing or voiding the original\n\n` +
-    `- **The original stays intact.** An issued invoice is immutable in LedgerCore (and in any audited set of ` +
+    `- **The original stays intact.** An issued invoice is immutable in AutoLedger (and in any audited set of ` +
     `books); tax records and the customer both hold a copy of it.\n` +
     `- **Partial corrections.** Returning 3 kits out of 20 is not a reason to cancel the other 17.\n` +
     `- **Closed periods stay closed.** The note is dated when the return happens, so last month's reports ` +
@@ -532,7 +532,7 @@ function renderAdjustments(anchor: AnchorMonth): string {
     `account. On the P&L it shows as a negative line under Revenue, so gross sales and returns stay visible ` +
     `separately. The debit note, by contrast, credits the original expense account (5100) directly: the steel ` +
     `you sent back simply never became a cost.\n\n` +
-    `## Rules LedgerCore enforces\n\n` +
+    `## Rules AutoLedger enforces\n\n` +
     `- A note must reference its original invoice (credit note) or approved bill (debit note), and takes ` +
     `that document's customer/vendor, currency and exchange rate — you never pick them.\n` +
     `- All notes against one document together can never exceed that document's total.\n` +

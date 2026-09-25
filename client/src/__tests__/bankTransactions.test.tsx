@@ -89,7 +89,7 @@ function account(overrides: Partial<import('../services/fetchServices').Account>
 function mockListRoutes(transactions: BankTransaction[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/bank-transactions') && (init === undefined || init.method === undefined)) {
+    if (url.includes('/api/v1/bank-transactions') && (init === undefined || init.method === undefined)) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -101,7 +101,7 @@ function mockListRoutes(transactions: BankTransaction[]) {
         }),
       );
     }
-    if (url.includes('/ledger-core/accounts') && (init === undefined || init.method === undefined)) {
+    if (url.includes('/api/v1/accounts') && (init === undefined || init.method === undefined)) {
       return Promise.resolve(jsonResponse(200, { success: true, accounts: [account()] }));
     }
     if (init?.method === 'POST' && url.includes('/match')) {

@@ -9,11 +9,11 @@ import {
 
 /**
  * What an invoice/bill line needs to show an INVENTORY product (Phase 32): its
- * on-hand quantity, the StockLedger locations a line can move stock at, and the
- * default location. Everything comes from StockLedger's own API through
- * fetchServices — no import of any StockLedger page or module.
+ * on-hand quantity, the Inventory locations a line can move stock at, and the
+ * default location. Everything comes from Inventory's own API through
+ * fetchServices — no import of any Inventory page or module.
  *
- * Best effort: an org that has never opened StockLedger has no locations and no
+ * Best effort: an org that has never opened Inventory has no locations and no
  * stock products, and a failed call must not stop the document form from
  * working, so every failure just leaves the empty defaults.
  */

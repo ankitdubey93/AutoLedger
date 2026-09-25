@@ -42,7 +42,7 @@ interface CallRow {
 function toModelCall(row: CallRow): AiModelCall {
   return {
     id: row.id,
-    appSlug: row.app_slug,
+    module: row.app_slug,
     purpose: row.purpose as AiModelCall['purpose'],
     provider: row.provider as AiModelCall['provider'],
     model: row.model,
@@ -116,7 +116,7 @@ export async function recordCall(orgId: string, record: ModelCallRecord): Promis
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)`,
         [
           orgId,
-          record.appSlug,
+          record.module,
           record.purpose,
           record.provider,
           record.model,
@@ -147,7 +147,7 @@ export async function recordCall(orgId: string, record: ModelCallRecord): Promis
  * day, the same ruling auditService.buildFilters uses.
  */
 function buildFilters(orgId: string, filters: AiUsageFilters): { where: string; values: unknown[] } {
-  const values: unknown[] = [orgId, filters.from, filters.to, filters.appSlug];
+  const values: unknown[] = [orgId, filters.from, filters.to, filters.module];
   const where = `org_id = $1
       AND ($2::date IS NULL OR created_at >= $2::date)
       AND ($3::date IS NULL OR created_at < ($3::date + 1))

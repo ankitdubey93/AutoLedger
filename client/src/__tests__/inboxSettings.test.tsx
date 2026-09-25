@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import InboxSettingsPage from '../Pages/settings/InboxSettingsPage';
 
 /**
- * AP-Flow's settings page — auto-post gates (Phase 19). Google Drive folder
+ * Capture's settings page — auto-post gates (Phase 19). Google Drive folder
  * intake moved to Settings → Connections (/settings/connections); this page
  * now only links there (see connectionsDrive.test.tsx for that page's own
  * coverage).
@@ -36,10 +36,10 @@ function mockRoutes() {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
 
-    if (method === 'GET' && url.includes('/api/v1/ap-flow/settings')) {
+    if (method === 'GET' && url.includes('/api/v1/capture/settings')) {
       return Promise.resolve(jsonResponse(200, SETTINGS_BODY));
     }
-    if (method === 'PUT' && url.includes('/api/v1/ap-flow/settings')) {
+    if (method === 'PUT' && url.includes('/api/v1/capture/settings')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -89,7 +89,7 @@ describe('InboxSettingsPage', () => {
     await waitFor(() => {
       const putCall = fetchMock.mock.calls.find((c) => {
         const url = typeof c[0] === 'string' ? c[0] : (c[0] as URL | Request).toString();
-        return (c[1] as RequestInit | undefined)?.method === 'PUT' && url.includes('/ap-flow/settings');
+        return (c[1] as RequestInit | undefined)?.method === 'PUT' && url.includes('/api/v1/capture/settings');
       });
       expect(putCall).toBeDefined();
       const body = JSON.parse((putCall?.[1] as RequestInit).body as string) as { autoPostMaxTotalCents: number };

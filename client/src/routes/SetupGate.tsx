@@ -46,7 +46,7 @@ export function OnboardingRoute() {
 
 /**
  * The setup gate in front of every product page (Phase 3.5's onboarding gate,
- * lifted out of LedgerCore's routes in Phase 33 now there is one product).
+ * lifted out of Accounting's routes in Phase 33 now there is one product).
  *
  * A fresh organization is redirected to `/onboarding` until the wizard is
  * completed. Phase 9a made the gate soft: a wizard that was explicitly

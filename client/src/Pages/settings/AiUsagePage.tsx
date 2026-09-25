@@ -4,7 +4,7 @@ import { formatMicroUsd } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 
 /**
- * AP-Flow's AI usage report (Phase 19.1) — every metered token/cost call
+ * Capture's AI usage report (Phase 19.1) — every metered token/cost call
  * this app has made, org-scoped. A model with no verified price in
  * config/aiPricing.ts records its tokens but no cost; that gap is shown
  * explicitly rather than silently rolled into a total that would then
@@ -23,7 +23,7 @@ export default function AiUsagePage() {
 
     getAiUsage(
       {
-        appSlug: 'ap-flow',
+        module: 'ap-flow',
         ...(from !== '' && { from }),
         ...(to !== '' && { to }),
       },

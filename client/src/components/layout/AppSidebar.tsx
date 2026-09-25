@@ -19,7 +19,7 @@ export interface SidebarNavGroup {
 }
 
 export interface AppSidebarProps {
-  /** The <nav> accessible name — 'LedgerCore', 'StockLedger', 'AP-Flow'. */
+  /** The <nav> accessible name — 'Accounting', 'Inventory', 'Capture'. */
   ariaLabel: string;
   /** Namespaces this app's group-collapse persistence in localStorage. */
   storageKey: string;
@@ -51,7 +51,7 @@ const linkClass = (isActive: boolean, collapsed: boolean) =>
   );
 
 /**
- * The shared rail behind LedgerCoreSidebar, StockSidebar and ApFlowSidebar —
+ * The shared rail behind AccountingSidebar, StockSidebar and CaptureSidebar —
  * grouped links, a collapsible icon rail on desktop, and an off-canvas
  * drawer on mobile that replaces the old horizontal scroll strip.
  *

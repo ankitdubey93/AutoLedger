@@ -195,16 +195,16 @@ async function renderDocument(scenario: Scenario = {}) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, makeSession(org)));
-    if (url.includes('/ledger-core/settings/invoicing')) {
+    if (url.includes('/api/v1/settings/invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings: settings }));
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
-    if (url.endsWith(`/ledger-core/invoices/${invoice.id}`)) {
+    if (url.endsWith(`/api/v1/invoices/${invoice.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, invoice }));
     }
-    if (url.includes('/ledger-core/payments')) {
+    if (url.includes('/api/v1/payments')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
       );
@@ -331,16 +331,16 @@ describe('printed invoice document (characterisation)', () => {
       if (url.includes('/auth/check')) {
         return Promise.resolve(jsonResponse(200, makeSession({ taxNumber: 'TAX-123', businessNumber: null })));
       }
-      if (url.includes('/ledger-core/settings/invoicing')) {
+      if (url.includes('/api/v1/settings/invoicing')) {
         return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
       }
-      if (url.includes('/ledger-core/settings')) {
+      if (url.includes('/api/v1/settings')) {
         return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
       }
-      if (url.endsWith(`/ledger-core/invoices/${invoice.id}`)) {
+      if (url.endsWith(`/api/v1/invoices/${invoice.id}`)) {
         return Promise.resolve(jsonResponse(200, { success: true, invoice }));
       }
-      if (url.includes('/ledger-core/payments')) {
+      if (url.includes('/api/v1/payments')) {
         return Promise.resolve(
           jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
         );

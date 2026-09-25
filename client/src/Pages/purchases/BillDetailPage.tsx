@@ -407,7 +407,7 @@ export default function BillDetailPage() {
         </div>
       )}
 
-      <AttachmentsPanel appSlug="ledger-core" entityType="bill" entityId={bill.id} />
+      <AttachmentsPanel module="ledger-core" entityType="bill" entityId={bill.id} />
 
       {confirmAction === 'approve' && (
         <ConfirmDialog

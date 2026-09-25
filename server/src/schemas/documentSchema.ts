@@ -11,7 +11,7 @@ import { z } from 'zod';
 
 /** Body for POST /documents/:id/links. */
 export const attachDocumentSchema = z.object({
-  appSlug: z.string().trim().min(1).max(40),
+  module: z.string().trim().min(1).max(40),
   entityType: z.string().trim().min(1).max(40),
   entityId: z.uuid(),
 });

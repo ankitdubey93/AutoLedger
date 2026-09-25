@@ -17,8 +17,8 @@ interface SettingsSection {
 
 /**
  * Every setting in the product, grouped the way a bookkeeper looks for them
- * (Phase 33). Before, settings were spread across three apps: LedgerCore's
- * tabs, StockLedger's catalogue pages and AP-Flow's auto-post page. They
+ * (Phase 33). Before, settings were spread across three apps: Accounting's
+ * tabs, Inventory's catalogue pages and Capture's auto-post page. They
  * still live on their own pages; this is the one place that lists them all.
  */
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [

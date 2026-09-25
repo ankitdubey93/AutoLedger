@@ -189,7 +189,7 @@ async function checkBankLineJournalEntriesExist(): Promise<IntegrityCheck> {
 }
 
 /**
- * Phase 28 — StockLedger's `stock_balances` is a derived cache
+ * Phase 28 — Inventory's `stock_balances` is a derived cache
  * (movementService.ts writes it in the same transaction as each movement);
  * this re-derives it from scratch by summing `stock_movements` and compares.
  *
@@ -251,7 +251,7 @@ async function checkStockBalancesMatchMovements(): Promise<IntegrityCheck> {
  * Scope, stated openly: this reconciles each DOCUMENT with its movements, not
  * the whole inventory account with total stock value. A manual journal
  * straight to the inventory account, or stock that pre-dates its product link,
- * can still make the account differ from StockLedger's valuation — treating
+ * can still make the account differ from Inventory's valuation — treating
  * inventory as a control account is the next step.
  */
 async function checkStockMovementsReconcileWithGl(): Promise<IntegrityCheck> {

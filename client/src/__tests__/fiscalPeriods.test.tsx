@@ -52,7 +52,7 @@ function mockListRoute(periods: FiscalPeriod[]) {
     if (url.match(/\/fiscal-periods\/[^/]+\/close$/) && method === 'POST') {
       return Promise.resolve(jsonResponse(403, { success: false, error: 'Forbidden' }));
     }
-    if (url.includes('/ledger-core/fiscal-periods') && method === 'GET') {
+    if (url.includes('/api/v1/fiscal-periods') && method === 'GET') {
       return Promise.resolve(jsonResponse(200, { success: true, count: periods.length, periods }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));

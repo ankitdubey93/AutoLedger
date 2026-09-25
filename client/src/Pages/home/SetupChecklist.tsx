@@ -48,7 +48,7 @@ export default function SetupChecklist() {
 
   if (items === null) return null;
 
-  const tasks = items.filter((item) => TASKS[item.appSlug] !== undefined);
+  const tasks = items.filter((item) => TASKS[item.module] !== undefined);
   if (tasks.every((item) => item.status === 'COMPLETED')) return null;
 
   return (
@@ -56,10 +56,10 @@ export default function SetupChecklist() {
       <h2 className="text-base font-semibold m-0">Finish setting up</h2>
       <ul className="flex flex-col gap-2 m-0 p-0 list-none">
         {tasks.map((item) => {
-          const task = TASKS[item.appSlug];
+          const task = TASKS[item.module];
           if (task === undefined) return null;
           return (
-            <li key={item.appSlug} className="flex items-center justify-between gap-4 text-sm">
+            <li key={item.module} className="flex items-center justify-between gap-4 text-sm">
               <span>{task.label}</span>
               <span className="flex items-center gap-3">
                 <span className="chip chip--muted">{STATUS_LABEL[item.status]}</span>

@@ -43,7 +43,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockTrialBalanceRoute() {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/reports/trial-balance')) {
+    if (url.includes('/api/v1/reports/trial-balance')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,

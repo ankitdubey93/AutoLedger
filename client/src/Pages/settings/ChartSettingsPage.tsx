@@ -27,7 +27,7 @@ import PageHeader from '../../components/ui/PageHeader';
  * this page and the create form can never disagree about the list.
  *
  * An account is never deleted here (rule 6, extended by convention): rename
- * and retire are the only two verbs, both `PATCH /ledger-core/accounts/:id`,
+ * and retire are the only two verbs, both `PATCH /accounts/:id`,
  * which the server's zod schema restricts to `name`, `description`,
  * `isActive`, `parentId` — never `code` or `type`.
  */

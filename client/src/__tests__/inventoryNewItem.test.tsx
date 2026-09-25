@@ -7,7 +7,7 @@ import InventoryNewItemPage from '../Pages/inventory/InventoryNewItemPage';
 import type { StockAttributeDefinition, StockCategory, StockCodeScheme, StockUom } from '../services/fetchServices';
 
 /**
- * StockLedger (Phase 28) — the new-item form: dynamic custom fields from
+ * Inventory (Phase 28) — the new-item form: dynamic custom fields from
  * the chosen category, live code-scheme preview, manual-code upper-casing.
  * Renders under AuthProvider, mirroring UniteconSettingsPage's tests.
  */
@@ -88,7 +88,7 @@ function mockRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor('OWNER')));
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       const at = new Date().toISOString();
       const make = (id: string, code: string, name: string, type: string) => ({ id, code, name, type, parentId: null, isPostable: true, isActive: true, description: null, createdAt: at, updatedAt: at });
       return Promise.resolve(
@@ -99,22 +99,22 @@ function mockRoutes() {
         }),
       );
     }
-    if (url.includes('/stock/categories/cat-res')) {
+    if (url.includes('/api/v1/inventory/categories/cat-res')) {
       return Promise.resolve(jsonResponse(200, { success: true, category: categories[0], attributes: resAttributes }));
     }
-    if (url.includes('/stock/categories')) {
+    if (url.includes('/api/v1/inventory/categories')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: categories.length, categories }));
     }
-    if (url.includes('/stock/uoms')) {
+    if (url.includes('/api/v1/inventory/uoms')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: uoms.length, uoms }));
     }
-    if (url.includes('/stock/code-schemes/preview')) {
+    if (url.includes('/api/v1/inventory/code-schemes/preview')) {
       return Promise.resolve(jsonResponse(200, { success: true, valid: true, example: 'RES-0001', scopeKey: 'RES-#' }));
     }
-    if (url.includes('/stock/code-schemes')) {
+    if (url.includes('/api/v1/inventory/code-schemes')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: codeSchemes.length, codeSchemes }));
     }
-    if (url.includes('/stock/items')) {
+    if (url.includes('/api/v1/inventory/items')) {
       if (init?.method === 'POST') {
         postItemBody = init.body !== undefined ? (JSON.parse(init.body as string) as Record<string, unknown>) : null;
         if (itemsPostStatus !== 201) {

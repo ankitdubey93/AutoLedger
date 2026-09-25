@@ -1,7 +1,7 @@
-import type { StockAttributeDefinition, StockAttributes } from '../types/stock.js';
+import type { StockAttributeDefinition, StockAttributes } from '../types/inventory.js';
 
 /**
- * StockLedger (Phase 28) — validates a category's user-defined custom
+ * Inventory (Phase 28) — validates a category's user-defined custom
  * fields. A pure function of its arguments: no database import, no
  * `ApiError`. It returns a result and never throws, mirroring
  * `utils/stockCodePattern.ts`.

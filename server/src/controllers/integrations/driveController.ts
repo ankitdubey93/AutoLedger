@@ -42,7 +42,7 @@ export const connectServiceAccount: RequestHandler = async (req, res) => {
 
 /** GET /integrations/drive/oauth/callback — no `authenticate`; the state IS the credential. */
 export const oauthCallback: RequestHandler = async (req, res) => {
-  const integrationsUrl = `${env.FRONTEND_URL}/integrations`;
+  const integrationsUrl = `${env.FRONTEND_URL}/settings/connections`;
 
   const code = typeof req.query.code === 'string' ? req.query.code : undefined;
   const state = typeof req.query.state === 'string' ? req.query.state : undefined;

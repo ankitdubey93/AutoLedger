@@ -145,7 +145,7 @@ function callsMatching(predicate: (url: string, init: RequestInit | undefined) =
 }
 
 function patchCalls() {
-  return callsMatching((url, init) => init?.method === 'PATCH' && url.endsWith('/ledger-core/settings/invoicing'));
+  return callsMatching((url, init) => init?.method === 'PATCH' && url.endsWith('/api/v1/settings/invoicing'));
 }
 
 async function renderEditor(scenario: Scenario = {}) {
@@ -155,11 +155,11 @@ async function renderEditor(scenario: Scenario = {}) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, makeSession()));
-    if (init?.method === 'PATCH' && url.endsWith('/ledger-core/settings/invoicing')) {
+    if (init?.method === 'PATCH' && url.endsWith('/api/v1/settings/invoicing')) {
       const patch = JSON.parse(init.body as string) as Partial<InvoiceSettings>;
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings: { ...settings, ...patch } }));
     }
-    if (url.endsWith('/ledger-core/settings/invoicing')) {
+    if (url.endsWith('/api/v1/settings/invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings: settings }));
     }
     if (url.endsWith('/organizations/profile')) {

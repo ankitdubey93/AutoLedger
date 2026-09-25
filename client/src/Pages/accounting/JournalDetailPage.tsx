@@ -208,7 +208,7 @@ export default function JournalDetailPage() {
         </table>
       </div>
 
-      <AttachmentsPanel appSlug="ledger-core" entityType="journal_entry" entityId={entry.id} />
+      <AttachmentsPanel module="ledger-core" entityType="journal_entry" entityId={entry.id} />
 
       {confirming && (
         <ConfirmDialog

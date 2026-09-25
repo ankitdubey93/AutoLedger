@@ -148,7 +148,7 @@ afterEach(() => {
 function renderInvoicesPage(invoices: Invoice[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/ledger-core/invoices')) {
+    if (url.includes('/api/v1/invoices')) {
       return Promise.resolve(
         jsonResponse(200, {
           success: true,
@@ -178,10 +178,10 @@ function mockNewInvoiceRoutes(
 ) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/ledger-core/invoices')) {
+    if (init?.method === 'POST' && url.includes('/api/v1/invoices')) {
       return Promise.resolve(jsonResponse(createResponse.status, createResponse.body));
     }
-    if (url.includes('/ledger-core/fx-rates/latest')) {
+    if (url.includes('/api/v1/fx-rates/latest')) {
       if (rateResponse !== undefined) return Promise.resolve(jsonResponse(rateResponse.status, rateResponse.body));
       return Promise.resolve(
         jsonResponse(200, {
@@ -190,22 +190,22 @@ function mockNewInvoiceRoutes(
         }),
       );
     }
-    if (url.includes('/ledger-core/customers')) {
+    if (url.includes('/api/v1/customers')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer1] }));
     }
-    if (url.includes('/ledger-core/settings/invoicing')) {
+    if (url.includes('/api/v1/settings/invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
     }
-    if (url.includes('/ledger-core/accounts')) {
+    if (url.includes('/api/v1/accounts')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
     }
-    if (url.includes('/ledger-core/items')) {
+    if (url.includes('/api/v1/items')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, items: [] }));
     }
-    if (url.includes('/ledger-core/payment-terms')) {
+    if (url.includes('/api/v1/payment-terms')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: 0, paymentTerms: [] }));
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
@@ -278,16 +278,16 @@ function mockDetailRoutes(invoice: Invoice) {
       );
     }
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
-    if (url.includes('/ledger-core/settings/invoicing')) {
+    if (url.includes('/api/v1/settings/invoicing')) {
       return Promise.resolve(jsonResponse(200, { success: true, invoiceSettings }));
     }
-    if (url.includes('/ledger-core/settings')) {
+    if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
-    if (url.endsWith(`/ledger-core/invoices/${invoice.id}`)) {
+    if (url.endsWith(`/api/v1/invoices/${invoice.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, invoice }));
     }
-    if (url.includes('/ledger-core/payments')) {
+    if (url.includes('/api/v1/payments')) {
       return Promise.resolve(
         jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, payments: [] }),
       );
@@ -376,7 +376,7 @@ describe('NewInvoicePage', () => {
       const createCall = fetchMock.mock.calls.find((call) => {
         const [input, init] = call as [RequestInfo | URL, RequestInit?];
         const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.endsWith('/ledger-core/invoices');
+        return init?.method === 'POST' && url.endsWith('/api/v1/invoices');
       });
       expect(createCall).toBeDefined();
     });
@@ -384,7 +384,7 @@ describe('NewInvoicePage', () => {
     const createCall = fetchMock.mock.calls.find((call) => {
       const [input, init] = call as [RequestInfo | URL, RequestInit?];
       const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.endsWith('/ledger-core/invoices');
+      return init?.method === 'POST' && url.endsWith('/api/v1/invoices');
     });
     const body = JSON.parse((createCall as [RequestInfo | URL, RequestInit])[1].body as string) as {
       lines: { quantityMilli: number; unitPriceCents: number; taxRateBp: number }[];

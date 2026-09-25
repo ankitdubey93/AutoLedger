@@ -11,7 +11,7 @@ import { useDocumentObjectUrl } from '../utils/useDocumentObjectUrl';
 /**
  * The organization's postal identity: legal name, industry, street and postal
  * address, contact details and a logo. Platform-level (Phase 30) — the invoice
- * document in LedgerCore reads it, and so can any other app.
+ * document in Accounting reads it, and so can any other app.
  *
  * Seeded once from GET /organizations/profile, then edited locally and saved
  * with PATCH. Blank inputs are sent as `null` (the server rejects a blank

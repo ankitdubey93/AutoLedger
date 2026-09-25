@@ -221,10 +221,10 @@ describe('documents API', () => {
 
       const res = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       expect(res.status).toBe(201);
-      expect(res.body.link.appSlug).toBe('ledger-core');
+      expect(res.body.link.module).toBe('ledger-core');
       expect(res.body.link.entityType).toBe('invoice');
     });
 
@@ -232,7 +232,7 @@ describe('documents API', () => {
       const agent = await loginAgent(app, userA);
       const created = await agent.post(BASE).attach('file', PDF_BYTES, 'invoice.pdf');
       const entityId = randomUUID();
-      const body = { appSlug: 'ledger-core', entityType: 'invoice', entityId };
+      const body = { module: 'ledger-core', entityType: 'invoice', entityId };
 
       await agent.post(`${BASE}/${created.body.document.id as string}/links`).send(body);
       const res = await agent.post(`${BASE}/${created.body.document.id as string}/links`).send(body);
@@ -246,7 +246,7 @@ describe('documents API', () => {
 
       const res = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'not-a-real-app', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'not-a-real-app', entityType: 'invoice', entityId: randomUUID() });
 
       expect(res.status).toBe(422);
       expect(res.body.error).toContain('Unknown app slug');
@@ -258,7 +258,7 @@ describe('documents API', () => {
 
       const res = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'spaceship', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'spaceship', entityId: randomUUID() });
 
       expect(res.status).toBe(422);
     });
@@ -269,7 +269,7 @@ describe('documents API', () => {
 
       const res = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: 'not-a-uuid' });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: 'not-a-uuid' });
 
       expect(res.status).toBe(400);
     });
@@ -282,10 +282,10 @@ describe('documents API', () => {
       const entityId = randomUUID();
       await agent
         .post(`${BASE}/${attached.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId });
 
       const res = await agent.get(
-        `${BASE}?appSlug=ledger-core&entityType=invoice&entityId=${entityId}`,
+        `${BASE}?module=ledger-core&entityType=invoice&entityId=${entityId}`,
       );
       expect(res.status).toBe(200);
       expect(res.body.documents).toHaveLength(1);
@@ -297,7 +297,7 @@ describe('documents API', () => {
       const created = await agent.post(BASE).attach('file', PDF_BYTES, 'invoice.pdf');
       await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       const res = await agent.get(`${BASE}/${created.body.document.id as string}`);
       expect(res.body.document.links).toHaveLength(1);
@@ -309,7 +309,7 @@ describe('documents API', () => {
       const created = await agent.post(BASE).attach('file', PDF_BYTES, 'invoice.pdf');
       await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       const res = await agent.delete(`${BASE}/${created.body.document.id as string}`);
       expect(res.status).toBe(409);
@@ -321,7 +321,7 @@ describe('documents API', () => {
       const created = await agent.post(BASE).attach('file', PDF_BYTES, 'invoice.pdf');
       const link = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       const detach = await agent.delete(
         `${BASE}/${created.body.document.id as string}/links/${link.body.link.id as string}`,
@@ -339,7 +339,7 @@ describe('documents API', () => {
       const viewerAgent = await switchTo(await loginAgent(app, userViewer), orgA);
       const res = await viewerAgent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       expect(res.status).toBe(403);
     });
@@ -351,7 +351,7 @@ describe('documents API', () => {
       const agentA = await loginAgent(app, userA);
       const res = await agentA
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       expect(res.status).toBe(404);
     });
@@ -361,7 +361,7 @@ describe('documents API', () => {
       const created = await agentA.post(BASE).attach('file', PDF_BYTES, 'invoice.pdf');
       const link = await agentA
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       const agentC = await loginAgent(app, userC);
       const res = await agentC.delete(
@@ -380,7 +380,7 @@ describe('documents API', () => {
 
       const res = await agent
         .post(`${BASE}/${created.body.document.id as string}/links`)
-        .send({ appSlug: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
+        .send({ module: 'ledger-core', entityType: 'invoice', entityId: randomUUID() });
 
       expect(res.status).toBe(201);
     });

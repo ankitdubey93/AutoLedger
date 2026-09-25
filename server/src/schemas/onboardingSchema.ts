@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 /**
- * Request schema for PUT /onboarding/:appSlug/draft. Platform layer,
+ * Request schema for PUT /onboarding/:module/draft. Platform layer,
  * unprefixed, mirroring `schemas/organizationSchema.ts`.
  *
  * `draft` is untrusted JSON — it is stored opaquely and re-parsed through the

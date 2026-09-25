@@ -1,5 +1,5 @@
 /**
- * StockLedger (Phase 28) — quantity formatting and parsing for a unit of
+ * Inventory (Phase 28) — quantity formatting and parsing for a unit of
  * measure whose decimal precision varies per item (0–3 places), unlike the
  * fixed 3-decimal `quantity_milli` convention `utils/money.ts`'s
  * `parseQuantityInput` assumes for invoice/bill lines. String math

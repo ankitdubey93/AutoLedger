@@ -1,6 +1,6 @@
 # Expected results — the answer key
 
-Computed from the same dataset the statements and source documents come from, and verified — in this project's own test suite — against the real LedgerCore reports produced by replaying this exact scenario through the real API. If your numbers disagree with this file, your entries disagree with the scenario, not the other way around.
+Computed from the same dataset the statements and source documents come from, and verified — in this project's own test suite — against the real AutoLedger reports produced by replaying this exact scenario through the real API. If your numbers disagree with this file, your entries disagree with the scenario, not the other way around.
 
 ## Month 1 — as of 2026-06-30
 
