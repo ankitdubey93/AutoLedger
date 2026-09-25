@@ -23,22 +23,11 @@ function session(role: Role) {
   };
 }
 
-const orgApps = {
-  success: true,
-  selectionCompletedAt: '2026-09-01T00:00:00.000Z',
-  count: 2,
-  apps: [
-    { slug: 'ledger-core', name: 'LedgerCore', domain: 'x', tagline: 'y', skills: [], status: 'building', requires: [], enabled: true, enabledAt: '2026-09-01T00:00:00.000Z' },
-    { slug: 'stock', name: 'StockLedger', domain: 'x', tagline: 'y', skills: [], status: 'building', requires: [], enabled: true, enabledAt: '2026-09-01T00:00:00.000Z' },
-  ],
-};
-
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/organizations/apps')) return Promise.resolve(jsonResponse(200, orgApps));
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session('OWNER')));
     return Promise.resolve(jsonResponse(404, { success: false, error: `unmocked ${url}` }));
   });
@@ -60,14 +49,14 @@ function OpenButton() {
 
 function renderPalette() {
   return render(
-    <MemoryRouter initialEntries={['/app/ledger-core']}>
+    <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
         <OrgProvider>
           <ShellProvider>
             <OpenButton />
             <CommandPalette />
             <Routes>
-              <Route path="/app/:appSlug" element={<p>APP PAGE</p>} />
+              <Route path="/inventory/items" element={<p>STOCK PAGE</p>} />
               <Route path="/documents" element={<p>DOCUMENTS PAGE</p>} />
             </Routes>
           </ShellProvider>
@@ -128,5 +117,22 @@ describe('CommandPalette', () => {
     await user.keyboard('{Escape}');
 
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('searches the whole product under section names, not app names', async () => {
+    const user = userEvent.setup();
+    renderPalette();
+    await user.click(screen.getByRole('button', { name: 'open palette' }));
+    await screen.findByRole('dialog');
+
+    // One list covers accounting, the bill inbox and inventory alike.
+    expect(screen.getByRole('option', { name: /invoices\s*sales/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /bill inbox\s*purchases/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /stock on hand\s*products & inventory/i })).toBeInTheDocument();
+    expect(screen.queryByText(/LedgerCore|StockLedger|AP-Flow/)).not.toBeInTheDocument();
+
+    await user.type(screen.getByRole('combobox'), 'stock on hand');
+    await user.keyboard('{Enter}');
+    expect(await screen.findByText('STOCK PAGE')).toBeInTheDocument();
   });
 });

@@ -1,7 +1,7 @@
-import { Building2, Grid2x2, KeyRound, Server, Users } from 'lucide-react';
+import { Building2, KeyRound, Server, Users } from 'lucide-react';
 import TabBar from '../components/ui/TabBar';
 
-export type AccountTab = 'organization' | 'apps' | 'members' | 'session' | 'system';
+export type AccountTab = 'organization' | 'members' | 'session' | 'system';
 
 export interface AccountTabsProps {
   active: AccountTab;
@@ -19,7 +19,6 @@ export default function AccountTabs({ active, onChange }: AccountTabsProps) {
       onChange={(id) => onChange(id as AccountTab)}
       items={[
         { id: 'organization', label: 'Organisation', icon: Building2 },
-        { id: 'apps', label: 'Apps', icon: Grid2x2 },
         { id: 'members', label: 'Members', icon: Users },
         { id: 'session', label: 'Session', icon: KeyRound },
         { id: 'system', label: 'System', icon: Server },

@@ -1,7 +1,7 @@
 /**
  * The settings-form class strings that used to be copied by hand into every
- * LedgerCore/AP-Flow/Stock settings page (SettingsPage, ChartSettingsPage,
- * ApFlowSettingsPage, StockCatalogueSettingsPage, and others). One copy here
+ * LedgerCore/AP-Flow/Stock settings page (GeneralSettingsPage, ChartSettingsPage,
+ * InboxSettingsPage, InventoryCatalogueSettingsPage, and others). One copy here
  * means a future style change lands once instead of N times.
  */
 export const inputClass =

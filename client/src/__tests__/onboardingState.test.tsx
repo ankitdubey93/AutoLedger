@@ -1,11 +1,11 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
-import LedgerCoreRoutes from '../Pages/ledger-core/LedgerCoreRoutes';
-import AppChooserPage from '../Pages/AppChooserPage';
+import ProductRoutes from '../routes/ProductRoutes';
+import SetupChecklist from '../Pages/home/SetupChecklist';
 
 /**
  * Phase 9a — the soft onboarding gate, Skip, and the suite-level checklist.
@@ -128,13 +128,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function renderLedgerCore() {
+function renderProduct() {
   return render(
-    <MemoryRouter initialEntries={['/app/ledger-core']}>
+    <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
         <OrgProvider>
           <Routes>
-            <Route path="/app/:appSlug/*" element={<LedgerCoreRoutes />} />
+            <Route path="/*" element={<ProductRoutes />} />
           </Routes>
         </OrgProvider>
       </AuthProvider>
@@ -143,27 +143,27 @@ function renderLedgerCore() {
 }
 
 describe('the soft onboarding gate', () => {
-  it('a skipped wizard leaves LedgerCore routes reachable behind a banner', async () => {
+  it('a skipped wizard leaves every page reachable behind a banner', async () => {
     mockRoutes({ settings: notOnboarded, onboardingStatus: 'SKIPPED' });
-    renderLedgerCore();
+    renderProduct();
 
-    expect(await screen.findByText('Chart of Accounts')).toBeInTheDocument();
+    expect(await screen.findByText('Chart of accounts')).toBeInTheDocument();
     expect(screen.getByText(/setup was skipped/i)).toBeInTheDocument();
   });
 
   it('a never-started wizard still redirects to onboarding', async () => {
     mockRoutes({ settings: notOnboarded, onboardingStatus: 'NOT_STARTED' });
-    renderLedgerCore();
+    renderProduct();
 
-    expect(await screen.findByText(/set up ledgercore/i)).toBeInTheDocument();
-    expect(screen.queryByText('Chart of Accounts')).not.toBeInTheDocument();
+    expect(await screen.findByText(/set up autoledger/i)).toBeInTheDocument();
+    expect(screen.queryByText('Chart of accounts')).not.toBeInTheDocument();
   });
 
   it('a completed wizard renders no banner', async () => {
     mockRoutes({ settings: onboarded });
-    renderLedgerCore();
+    renderProduct();
 
-    expect(await screen.findByText('Chart of Accounts')).toBeInTheDocument();
+    expect(await screen.findByText('Chart of accounts')).toBeInTheDocument();
     expect(screen.queryByText(/setup was skipped/i)).not.toBeInTheDocument();
   });
 });
@@ -171,10 +171,10 @@ describe('the soft onboarding gate', () => {
 describe('Skip for now', () => {
   it('posts to the skip endpoint and returns to the dashboard', async () => {
     mockRoutes({ settings: notOnboarded, onboardingStatus: 'NOT_STARTED' });
-    renderLedgerCore();
+    renderProduct();
     const user = userEvent.setup();
 
-    await screen.findByText(/set up ledgercore/i);
+    await screen.findByText(/set up autoledger/i);
     await user.click(screen.getByRole('button', { name: /skip for now/i }));
 
     const skipCall = fetchMock.mock.calls.find((call: unknown[]) => {
@@ -187,87 +187,56 @@ describe('Skip for now', () => {
   });
 });
 
-describe('the suite checklist', () => {
-  // AuthProvider because the SetupChecklist on the chooser page reads the
-  // session for its OWNER-only actions — the same provider the real app
-  // always mounts this page inside.
-  function renderChooser() {
+describe('the setup checklist', () => {
+  function item(appSlug: string, status: string) {
+    return {
+      appSlug,
+      appName: appSlug,
+      appStatus: 'building',
+      status,
+      currentStep: null,
+      draft: {},
+      completedAt: null,
+      skippedAt: null,
+      updatedAt: null,
+    };
+  }
+
+  function renderChecklist(items: unknown[]) {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/onboarding')) {
+        return Promise.resolve(jsonResponse(200, { success: true, count: items.length, items }));
+      }
+      return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
+    });
     return render(
       <MemoryRouter>
-        <AuthProvider>
-          <OrgProvider>
-            <AppChooserPage />
-          </OrgProvider>
-        </AuthProvider>
+        <SetupChecklist />
       </MemoryRouter>,
     );
   }
 
-  it('lists only apps with a wizard', async () => {
-    fetchMock.mockImplementation((input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/onboarding')) {
-        return Promise.resolve(
-          jsonResponse(200, {
-            success: true,
-            count: 8,
-            items: [
-              {
-                appSlug: 'ledger-core',
-                appName: 'LedgerCore',
-                appStatus: 'building',
-                status: 'NOT_STARTED',
-                currentStep: null,
-                draft: {},
-                completedAt: null,
-                skippedAt: null,
-                updatedAt: null,
-              },
-              ...Array.from({ length: 7 }, (_, i) => ({
-                appSlug: `planned-${String(i)}`,
-                appName: `Planned ${String(i)}`,
-                appStatus: 'planned',
-                status: 'NOT_STARTED',
-                currentStep: null,
-                draft: {},
-                completedAt: null,
-                skippedAt: null,
-                updatedAt: null,
-              })),
-            ],
-          }),
-        );
-      }
-      // Phase 27: the chooser reads GET /organizations/apps and lists only
-      // enabled apps, so the one building app must be enabled here.
-      return Promise.resolve(
-        jsonResponse(200, {
-          success: true,
-          selectionCompletedAt: '2026-09-01T00:00:00.000Z',
-          count: 1,
-          apps: [
-            {
-              slug: 'ledger-core',
-              name: 'LedgerCore',
-              domain: 'x',
-              tagline: 'y',
-              skills: [],
-              status: 'building',
-              requires: [],
-              enabled: true,
-              enabledAt: '2026-09-01T00:00:00.000Z',
-            },
-          ],
-        }),
-      );
-    });
+  it('lists accounting and inventory by task name, never the internal module tags or the retired platform row', async () => {
+    renderChecklist([
+      item('ledger-core', 'NOT_STARTED'),
+      item('stock', 'NOT_STARTED'),
+      item('ap-flow', 'NOT_STARTED'),
+      item('platform', 'COMPLETED'),
+    ]);
 
-    renderChooser();
+    expect(await screen.findByText('Finish setting up')).toBeInTheDocument();
+    expect(screen.getByText('Accounting setup')).toBeInTheDocument();
+    expect(screen.getByText('Inventory (optional)')).toBeInTheDocument();
+    const links = screen.getAllByRole('link', { name: 'Set up' });
+    expect(links.map((l) => l.getAttribute('href'))).toEqual(['/onboarding', '/inventory/setup']);
+    expect(screen.queryByText(/ap-flow|platform|ledger-core/)).not.toBeInTheDocument();
+  });
 
-    const setupSection = await screen.findByText('Setup');
-    expect(setupSection).toBeInTheDocument();
+  it('renders nothing once every task is complete', async () => {
+    renderChecklist([item('ledger-core', 'COMPLETED'), item('stock', 'COMPLETED')]);
 
-    const checklistItems = screen.getAllByText('Set up');
-    expect(checklistItems).toHaveLength(1);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(screen.queryByText('Finish setting up')).not.toBeInTheDocument();
   });
 });

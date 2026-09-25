@@ -1,0 +1,434 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  Banknote,
+  BookPlus,
+  CheckCircle2,
+  Clock,
+  CreditCard,
+  FilePlus2,
+  LayoutDashboard,
+  LineChart,
+  PiggyBank,
+  ReceiptText,
+  Scale,
+  TrendingDown,
+  TrendingUp,
+  Upload,
+  Wallet,
+  XCircle,
+  Inbox,
+} from 'lucide-react';
+import { useOrg } from '../../context/OrgContext';
+import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
+import { formatCents } from '../../utils/money';
+import TrendChart from '../../components/TrendChart';
+import InventoryOverview from '../inventory/InventoryOverview';
+import InboxSummaryCard from './InboxSummaryCard';
+import SetupChecklist from './SetupChecklist';
+import MetricTile from '../../components/ui/MetricTile';
+import EquationBar from './EquationBar';
+import ProportionBar from './ProportionBar';
+import BarChart from './BarChart';
+import PageHeader from '../../components/ui/PageHeader';
+
+/**
+ * LedgerCore's home page. Every figure is aggregated from raw `ledger_lines`
+ * on each request — the same "no summary table" rule `TrialBalancePage`
+ * states for its own report.
+ *
+ * The four position tiles are links into the trial balance filtered by
+ * account type (`TrialBalancePage`'s `?type=`) — the only real drilldown
+ * destination that exists today. A per-account ledger detail page would be
+ * the ideal target and does not exist; that is a separate future plan, not
+ * Phase 4 either.
+ */
+
+function entryTotalCents(lines: { debitCents: number }[]): number {
+  return lines.reduce((sum, line) => sum + line.debitCents, 0);
+}
+
+export default function DashboardPage() {
+  const { organization } = useOrg();
+  const currency = organization?.baseCurrency ?? '';
+  const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+
+    getLedgerDashboard()
+      .then((res) => {
+        if (!ignore) setDashboard(res);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) {
+          setError(err instanceof Error ? err.message : 'Could not load the dashboard');
+        }
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  if (error !== null) {
+    return <p className="status status--bad">{error}</p>;
+  }
+
+  if (dashboard === null) {
+    return (
+      <div aria-busy="true" className="flex flex-col gap-3">
+        <div className="skeleton skeleton--title" />
+        <div className="skeleton skeleton--card" />
+        <span className="visually-hidden">Loading dashboard…</span>
+      </div>
+    );
+  }
+
+  const { position, performance, activity, integrity, trend, fiscalYear, receivables, payables } = dashboard;
+
+  return (
+    <section className="flex flex-col gap-6">
+      <PageHeader
+        as="h2"
+        icon={LayoutDashboard}
+        title={organization?.name ?? 'Dashboard'}
+        subtitle={fiscalYear.label}
+        actions={
+          <>
+            <Link
+              to="/invoices/new"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <FilePlus2 size={13} aria-hidden="true" /> New invoice
+            </Link>
+            <Link
+              to="/expenses/new"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <ReceiptText size={13} aria-hidden="true" /> New expense
+            </Link>
+            <Link
+              to="/journals/new"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <BookPlus size={13} aria-hidden="true" /> New journal entry
+            </Link>
+            <Link
+              to="/bank/import"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <Upload size={13} aria-hidden="true" /> Import bank statement
+            </Link>
+            <Link
+              to="/inbox"
+              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+            >
+              <Inbox size={13} aria-hidden="true" /> Upload a bill
+            </Link>
+          </>
+        }
+      />
+
+      <SetupChecklist />
+
+      {!position.equationHolds && (
+        <p className="status status--bad">
+          Assets do not equal Liabilities + Equity + current earnings — this should be impossible.
+        </p>
+      )}
+
+      <div className="grid">
+        <MetricTile
+          label="Assets"
+          valueCents={position.assetsCents}
+          currency={currency}
+          icon={Wallet}
+          tone="neutral"
+          to="/trial-balance?type=Asset"
+          hint={null}
+        />
+        <MetricTile
+          label="Liabilities"
+          valueCents={position.liabilitiesCents}
+          currency={currency}
+          icon={CreditCard}
+          tone="neutral"
+          to="/trial-balance?type=Liability"
+          hint={null}
+        />
+        <MetricTile
+          label="Equity"
+          valueCents={position.equityCents}
+          currency={currency}
+          icon={PiggyBank}
+          tone="neutral"
+          to="/trial-balance?type=Equity"
+          hint={null}
+        />
+        <MetricTile
+          label="Cash"
+          valueCents={position.cashCents}
+          currency={currency}
+          icon={Banknote}
+          tone="good"
+          to={position.cashCents === null ? '/settings/general' : '/trial-balance?type=Asset'}
+          hint={
+            position.cashCents === null ? 'No cash account configured — set one in Settings.' : null
+          }
+        />
+      </div>
+
+      <div className="card">
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Scale size={14} aria-hidden="true" className="text-[var(--muted)]" /> Accounting equation</p>
+        <EquationBar
+          assetsCents={position.assetsCents}
+          liabilitiesCents={position.liabilitiesCents}
+          equityCents={position.equityCents}
+          currentEarningsCents={position.currentEarningsCents}
+          currency={currency}
+          holds={position.equationHolds}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-3">This fiscal year</p>
+          <dl className="flex flex-col gap-1.5 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">Revenue</dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.revenueCents)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">Expenses</dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.expenseCents)}</dd>
+            </div>
+            <div className="flex justify-between gap-4 font-medium">
+              <dt>Net income</dt>
+              <dd
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
+                style={{ color: performance.yearToDate.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
+              >
+                {performance.yearToDate.netIncomeCents < 0 ? (
+                  <TrendingDown size={15} aria-hidden="true" />
+                ) : (
+                  <TrendingUp size={15} aria-hidden="true" />
+                )}
+                {formatCents(performance.yearToDate.netIncomeCents)}
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-3">
+            <ProportionBar
+              segments={[
+                { label: 'Revenue', valueCents: performance.yearToDate.revenueCents, color: 'var(--good)' },
+                { label: 'Expenses', valueCents: performance.yearToDate.expenseCents, color: 'var(--bad)' },
+              ]}
+              currency={currency}
+            />
+          </div>
+        </div>
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-3">This month</p>
+          <dl className="flex flex-col gap-1.5 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">Revenue</dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.revenueCents)}</dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">Expenses</dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.expenseCents)}</dd>
+            </div>
+            <div className="flex justify-between gap-4 font-medium">
+              <dt>Net income</dt>
+              <dd
+                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
+                style={{ color: performance.currentMonth.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
+              >
+                {performance.currentMonth.netIncomeCents < 0 ? (
+                  <TrendingDown size={15} aria-hidden="true" />
+                ) : (
+                  <TrendingUp size={15} aria-hidden="true" />
+                )}
+                {formatCents(performance.currentMonth.netIncomeCents)}
+              </dd>
+            </div>
+          </dl>
+          <div className="mt-3">
+            <ProportionBar
+              segments={[
+                { label: 'Revenue', valueCents: performance.currentMonth.revenueCents, color: 'var(--good)' },
+                { label: 'Expenses', valueCents: performance.currentMonth.expenseCents, color: 'var(--bad)' },
+              ]}
+              currency={currency}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-1">Invoices owed to you</p>
+          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+            {formatCents(receivables.outstandingCents)}{' '}
+            <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+          </p>
+          <dl className="flex flex-col gap-1 text-sm mt-3">
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">
+                <Link to="/invoices?status=ISSUED&settlement=OUTSTANDING">Awaiting payment</Link>
+              </dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">
+                {formatCents(receivables.outstandingCents - receivables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">
+                <Link to="/invoices?status=ISSUED&settlement=OVERDUE">Overdue</Link>
+              </dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap" style={{ color: receivables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+                {formatCents(receivables.overdueCents)}
+              </dd>
+            </div>
+          </dl>
+          {receivables.draftCount > 0 && (
+            <p className="text-xs text-[var(--muted)] m-0 mt-2">
+              <Link to="/invoices?status=DRAFT">
+                {receivables.draftCount} draft {receivables.draftCount === 1 ? 'invoice' : 'invoices'}
+              </Link>
+            </p>
+          )}
+          <div className="mt-3">
+            <BarChart
+              accessibleTitle="Receivables by age"
+              data={receivables.buckets.map((b, i) => ({
+                label: b.label,
+                amountCents: b.amountCents,
+                emphasis: i > 0,
+              }))}
+            />
+          </div>
+        </div>
+
+        <div className="card">
+          <p className="text-sm font-medium m-0 mb-1">Expenses you need to pay</p>
+          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+            {formatCents(payables.outstandingCents)}{' '}
+            <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+          </p>
+          <dl className="flex flex-col gap-1 text-sm mt-3">
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">
+                <Link to="/expenses?status=POSTED&settlement=OUTSTANDING">Awaiting payment</Link>
+              </dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">
+                {formatCents(payables.outstandingCents - payables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">
+                <Link to="/expenses?status=POSTED&settlement=OVERDUE">Overdue</Link>
+              </dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap" style={{ color: payables.overdueCents > 0 ? 'var(--bad)' : undefined }}>
+                {formatCents(payables.overdueCents)}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="text-[var(--muted)]">
+                <Link to="/expenses?status=AWAITING_APPROVAL">To review</Link>
+              </dt>
+              <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(payables.awaitingReviewCents)}</dd>
+            </div>
+          </dl>
+          <p className="text-xs text-[var(--muted)] m-0 mt-2">Bills entered but not yet approved.</p>
+          {payables.draftCount > 0 && (
+            <p className="text-xs text-[var(--muted)] m-0 mt-1">
+              <Link to="/expenses?status=DRAFT">
+                {payables.draftCount} draft {payables.draftCount === 1 ? 'expense' : 'expenses'}
+              </Link>
+            </p>
+          )}
+          <div className="mt-3">
+            <BarChart
+              accessibleTitle="Payables by age"
+              data={payables.buckets.map((b, i) => ({
+                label: b.label,
+                amountCents: b.amountCents,
+                emphasis: i > 0,
+              }))}
+            />
+          </div>
+        </div>
+      </div>
+
+      <InboxSummaryCard />
+
+      <InventoryOverview />
+
+      <div className="card">
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><LineChart size={14} aria-hidden="true" className="text-[var(--muted)]" /> Last 6 months</p>
+        <TrendChart points={trend} />
+      </div>
+
+      <div className="card">
+        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Clock size={14} aria-hidden="true" className="text-[var(--muted)]" /> Recent entries</p>
+        {activity.recentEntries.length === 0 ? (
+          <p className="text-sm text-[var(--muted)] m-0">No activity yet.</p>
+        ) : (
+          <div className="rounded-lg border border-[var(--border)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[28rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-3 font-medium">Date</th>
+                  <th className="p-3 font-medium">Description</th>
+                  <th className="p-3 font-medium text-right">Lines</th>
+                  <th className="p-3 font-medium text-right">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activity.recentEntries.map((entry) => (
+                  <tr key={entry.id} className="border-t border-[var(--border)]">
+                    <td className="p-3">
+                      <Link to="/journals" className="text-[var(--text)]">
+                        {entry.entryDate}
+                      </Link>
+                    </td>
+                    <td className="p-3">{entry.description ?? '—'}</td>
+                    <td className="p-3 text-right tabular-nums">{entry.lines.length}</td>
+                    <td className="p-3 text-right tabular-nums">
+                      {formatCents(entryTotalCents(entry.lines))}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div
+        className="flex items-center gap-2.5 rounded-lg px-4 py-3 text-sm ring-1 ring-inset"
+        style={
+          integrity.isBalanced
+            ? { background: 'var(--good-soft)', color: 'var(--good)', boxShadow: 'inset 0 0 0 1px var(--good-soft)' }
+            : { background: 'var(--bad-soft)', color: 'var(--bad)', boxShadow: 'inset 0 0 0 1px var(--bad-soft)' }
+        }
+        role="status"
+      >
+        {integrity.isBalanced ? (
+          <CheckCircle2 size={17} aria-hidden="true" />
+        ) : (
+          <XCircle size={17} aria-hidden="true" />
+        )}
+        <span>
+          {integrity.isBalanced
+            ? 'Debits equal credits exactly.'
+            : `Books are not balanced — out by ${formatCents(
+                Math.abs(integrity.totalDebitCents - integrity.totalCreditCents),
+              )}.`}
+        </span>
+      </div>
+    </section>
+  );
+}

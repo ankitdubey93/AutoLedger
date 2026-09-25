@@ -1,7 +1,7 @@
 /**
  * Small helpers over the `.skeleton` class in index.css, for pages that
- * currently show a bare "Loading…" string (StockDashboardPage,
- * StockCatalogueSettingsPage, and others) rather than a shape that holds the
+ * currently show a bare "Loading…" string (InventoryOverview,
+ * InventoryCatalogueSettingsPage, and others) rather than a shape that holds the
  * eventual layout.
  */
 export function SkeletonRows({ count = 4 }: { count?: number }) {

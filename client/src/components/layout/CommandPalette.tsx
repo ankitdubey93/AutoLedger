@@ -1,10 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { FolderOpen, Grid2x2, Plug, Search, UserCog } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, UserCog } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useShell } from './ShellContext';
-import { useEnabledApps } from '../../apps/useEnabledApps';
-import { APP_BRAND, APP_NAV } from '../../apps/registry';
+import { NAV_GROUPS } from './nav';
 import { cx } from '../../utils/cx';
 
 interface Command {
@@ -15,15 +14,21 @@ interface Command {
   to: string;
 }
 
-function appHref(slug: string, suffix: string): string {
-  return suffix === '' ? `/app/${slug}` : `/app/${slug}/${suffix}`;
-}
-
-const WORKSPACE_COMMANDS: Command[] = [
-  { id: 'workspace-all', label: 'All apps', group: 'Workspace', icon: Grid2x2, to: '/' },
-  { id: 'workspace-documents', label: 'Documents', group: 'Workspace', icon: FolderOpen, to: '/documents' },
-  { id: 'workspace-integrations', label: 'Integrations', group: 'Workspace', icon: Plug, to: '/integrations' },
-  { id: 'workspace-account', label: 'Account', group: 'Workspace', icon: UserCog, to: '/account' },
+/**
+ * Every sidebar entry, labelled with its sidebar group, plus the pages that
+ * live outside the sidebar. Built once at module load: the nav is static data.
+ */
+const COMMANDS: Command[] = [
+  ...NAV_GROUPS.flatMap((group) =>
+    group.items.map((item) => ({
+      id: item.to,
+      label: item.label,
+      group: group.heading,
+      icon: item.icon,
+      to: item.to,
+    })),
+  ),
+  { id: '/account', label: 'Account', group: 'Workspace', icon: UserCog, to: '/account' },
 ];
 
 /** Simple case-insensitive substring match — no dependency, rule 14. */
@@ -33,44 +38,18 @@ function matches(query: string, label: string): boolean {
 
 /**
  * ⌘K / Ctrl+K navigation, opened from ShellContext (the top bar's search
- * trigger sets the same state). Navigation only — it makes no server call of
- * its own, just assembles hrefs from data the sidebars already have
- * (apps/registry.ts's APP_NAV), so it never reads another app's page (rule
- * 16's client-side counterpart).
+ * trigger sets the same state). Navigation only: it makes no server call and
+ * searches the same `NAV_GROUPS` the sidebar renders.
  */
 export default function CommandPalette() {
   const { paletteOpen, closePalette } = useShell();
   const navigate = useNavigate();
-  const enabled = useEnabledApps();
-  const { appSlug: currentSlug } = useParams<{ appSlug?: string }>();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const enabledSlugs = enabled.status === 'ready' ? enabled.apps.map((a) => a.slug) : [];
-  const orderedSlugs = [...enabledSlugs].sort((a) => (a === currentSlug ? -1 : 0));
-
-  const commands = useMemo<Command[]>(() => {
-    const appCommands: Command[] = orderedSlugs.flatMap((slug) => {
-      const groups = APP_NAV[slug] ?? [];
-      const brand = APP_BRAND[slug];
-      const appLabel = enabled.status === 'ready' ? (enabled.apps.find((a) => a.slug === slug)?.name ?? slug) : slug;
-      return groups.flatMap((group) =>
-        group.items.map((item) => ({
-          id: `${slug}-${item.to}`,
-          label: item.label,
-          group: appLabel,
-          icon: (brand?.icon ?? Search) as LucideIcon,
-          to: appHref(slug, item.to),
-        })),
-      );
-    });
-    return [...appCommands, ...WORKSPACE_COMMANDS];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orderedSlugs.join(','), enabled.status]);
-
-  const filtered = query.trim() === '' ? commands : commands.filter((c) => matches(query, c.label) || matches(query, c.group));
+  const filtered = query.trim() === '' ? COMMANDS : COMMANDS.filter((c) => matches(query, c.label) || matches(query, c.group));
 
   useEffect(() => {
     if (paletteOpen) {

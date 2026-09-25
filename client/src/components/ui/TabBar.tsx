@@ -42,7 +42,7 @@ const itemClass = (isActive: boolean, fullWidth?: boolean) =>
 
 /**
  * Shared tab-strip styling for SettingsTabs (route links), AccountTabs and
- * StockCatalogueSettingsPage's inline tablist (both button-driven, ARIA
+ * InventoryCatalogueSettingsPage's inline tablist (both button-driven, ARIA
  * "Tabs" pattern). A thin accent indicator slides under the active tab,
  * measured against the strip's own DOM rather than hard-coded per item.
  */

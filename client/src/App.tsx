@@ -1,37 +1,31 @@
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { OrgProvider } from './context/OrgContext';
 import ProtectedRoute from './components/ProtectedRoute';
-import PlatformLayout from './components/layout/PlatformLayout';
-import AppFrame from './components/layout/AppFrame';
+import AppShell from './components/layout/AppShell';
+import WorkspaceLayout from './routes/WorkspaceLayout';
+import ProductRoutes from './routes/ProductRoutes';
+import LegacyAppRedirect from './routes/LegacyAppRedirect';
 import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
-import AppChooserPage from './Pages/AppChooserPage';
-import AccountPage from './Pages/AccountPage';
-import WelcomeAppsPage from './Pages/WelcomeAppsPage';
-import DocumentsPage from './Pages/DocumentsPage';
-import IntegrationsPage from './Pages/IntegrationsPage';
 import NotFoundPage from './Pages/NotFoundPage';
-import ActiveAppRoutes from './apps/ActiveAppRoutes';
+import AccountPage from './Pages/AccountPage';
+import DocumentsPage from './Pages/DocumentsPage';
 
 /**
  * Provider composition, outermost first:
  *
  *   BrowserRouter → AuthProvider → OrgProvider → routes
  *
- * The router has to be outermost because the providers and ProtectedRoute use
- * router hooks (`useLocation`, `<Navigate>`), and a hook cannot reach a
- * context that is mounted below it. OrgProvider sits inside AuthProvider
- * because the active organization is derived from the session rather than
- * stored separately — see context/OrgContext.tsx.
+ * The router is outermost because the providers and ProtectedRoute use router
+ * hooks, and a hook cannot reach a context mounted below it.
  *
- * Two sibling shells inside ProtectedRoute, not nested: PlatformLayout is the
- * suite shell (brand, org switcher, account, sign out), used by the
- * chooser at "/", the post-sign-up app picker at /welcome (Phase 27), and
- * /account. AppFrame is the per-app shell, mounted at
- * /app/:appSlug — inside an app, the suite header does not render at all;
- * AppFrame's own AppTopBar shrinks AutoLedger to a small mark-and-link and
- * gives the app itself top billing.
+ * Phase 33: one product, one route tree. Every signed-in page renders in
+ * AppShell. Product pages sit behind SetupGate, which sends a new
+ * organization to the setup wizard. /account and /documents do not, so an
+ * organization that is mid-setup can still reach them. Pre-Phase-33
+ * `/app/<slug>/...` URLs, including printed QR labels, go through
+ * LegacyAppRedirect.
  */
 export default function App() {
   return (
@@ -42,27 +36,16 @@ export default function App() {
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
 
-            {/* Everything below requires a session. */}
             <Route element={<ProtectedRoute />}>
-              <Route element={<PlatformLayout />}>
-                <Route path="/" element={<AppChooserPage />} />
-                <Route path="/welcome" element={<WelcomeAppsPage />} />
-                <Route path="/account" element={<AccountPage />} />
-                <Route path="/documents" element={<DocumentsPage />} />
-                <Route path="/integrations" element={<IntegrationsPage />} />
-                <Route path="/dashboard" element={<Navigate to="/account" replace />} />
-              </Route>
+              <Route element={<AppShell />}>
+                <Route path="/app/:appSlug/*" element={<LegacyAppRedirect />} />
 
-              {/*
-                One splat child, not one Route per app. The app that owns
-                :appSlug is resolved at render time and brings its own nested
-                routes — LedgerCore ships three pages, and generating sibling
-                `index` routes per slug would make several routes match the
-                same path with the first winning regardless of the slug.
-              */}
-              <Route path="/app/:appSlug" element={<AppFrame />}>
-                <Route path="*" element={<ActiveAppRoutes />} />
-                <Route index element={<ActiveAppRoutes />} />
+                <Route element={<WorkspaceLayout />}>
+                  <Route path="/account" element={<AccountPage />} />
+                  <Route path="/documents" element={<DocumentsPage />} />
+                </Route>
+
+                <Route path="/*" element={<ProductRoutes />} />
               </Route>
             </Route>
 

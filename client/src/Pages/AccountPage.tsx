@@ -1,29 +1,21 @@
-import { useCallback, useEffect, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useEffect, useState } from 'react';
 import {
   getHealth,
-  getOrganizationApps,
   listMembers,
-  setOrganizationApps,
   updateOrganization,
   ApiRequestError,
   type HealthResponse,
-  type OrganizationAppEntry,
   type OrganizationMember,
 } from '../services/fetchServices';
 import { useAuth, useAuthActions } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
-import AppPicker from '../components/AppPicker';
 import AccountTabs, { type AccountTab } from './AccountTabs';
 import OrganizationProfilePanel from './OrganizationProfilePanel';
 import { initials } from '../utils/initials';
 
 /**
- * The account page: identity, organization, membership, and session details
- * that apply across the whole suite rather than to any one app. This used to
- * be the post-login landing page; the app chooser (Pages/AppChooserPage.tsx)
- * took that role when AutoLedger became a suite of apps — see /account's
- * link from PlatformLayout's header.
+ * The account page: identity, organization, membership, and session details.
+ * Reached from the user menu in the top bar.
  *
  * Every value below comes from a real Phase 1 endpoint. There is no
  * placeholder data and no link to a screen that does not exist — the modules
@@ -34,120 +26,6 @@ import { initials } from '../utils/initials';
 /** A calendar date, spelled out — "22 September 2026" in en-GB. */
 function formatDay(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-}
-
-function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
-  return a.size === b.size && [...a].every((slug) => b.has(slug));
-}
-
-/**
- * Which apps the organization uses — Phase 27. OWNER/ADMIN edit the set with
- * the same picker /welcome uses; every other role sees a read-only list.
- * Removing an app only hides it: nothing is deleted.
- */
-function AppsPanel({ onReady }: { onReady: () => void }) {
-  const { role } = useOrg();
-  const canEdit = role === 'OWNER' || role === 'ADMIN';
-
-  const [apps, setApps] = useState<OrganizationAppEntry[] | null>(null);
-  const [saved, setSaved] = useState<Set<string>>(new Set());
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [saving, setSaving] = useState(false);
-  const [savedOk, setSavedOk] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  function seed(entries: OrganizationAppEntry[]) {
-    const enabled = new Set(entries.filter((a) => a.enabled).map((a) => a.slug));
-    setApps(entries);
-    setSaved(enabled);
-    setSelected(new Set(enabled));
-  }
-
-  useEffect(() => {
-    let ignore = false;
-
-    getOrganizationApps()
-      .then((res) => {
-        if (ignore) return;
-        seed(res.apps);
-        onReady();
-      })
-      .catch((err: unknown) => {
-        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load apps');
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [onReady]);
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    setSavedOk(false);
-    try {
-      const res = await setOrganizationApps([...selected]);
-      seed(res.apps);
-      setSavedOk(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save apps');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="card" id="apps">
-      <h2>Apps</h2>
-
-      {apps === null && error === null && <p className="muted">Loading…</p>}
-
-      {apps !== null && canEdit && (
-        <>
-          <AppPicker
-            apps={apps}
-            selected={selected}
-            onChange={(next) => {
-              setSelected(next);
-              setSavedOk(false);
-            }}
-            disabled={saving}
-          />
-          <p className="muted">
-            Removing an app hides it for everyone in this organization. Its data is kept and returns if you
-            add the app again.
-          </p>
-        </>
-      )}
-
-      {apps !== null && !canEdit && (
-        <>
-          <ul>
-            {apps
-              .filter((a) => a.enabled)
-              .map((a) => (
-                <li key={a.slug}>{a.name}</li>
-              ))}
-          </ul>
-          <p className="muted">Only an owner or admin can change which apps are enabled.</p>
-        </>
-      )}
-
-      {error !== null && <p className="status status--bad">{error}</p>}
-      {savedOk && error === null && <p className="status status--good">Saved.</p>}
-
-      {apps !== null && canEdit && (
-        <button
-          type="button"
-          className="btn"
-          disabled={selected.size === 0 || sameSet(selected, saved) || saving}
-          onClick={() => void handleSave()}
-        >
-          {saving ? 'Saving…' : 'Save'}
-        </button>
-      )}
-    </section>
-  );
 }
 
 /** Formats the remaining access-token lifetime as m:ss, or "expired". */
@@ -309,7 +187,7 @@ function BusinessIdentificationPanel() {
         onChange={(e) => setBusinessNumber(e.target.value)}
       />
 
-      <p className="muted">Shown on invoices when enabled in LedgerCore's invoice settings.</p>
+      <p className="muted">Shown on invoices when enabled in the invoice settings.</p>
 
       {error !== null && <p className="status status--bad">{error}</p>}
       {saved && error === null && <p className="status status--good">Saved.</p>}
@@ -411,23 +289,9 @@ function HealthPanel() {
 export default function AccountPage() {
   const auth = useAuth();
   const { organization, role } = useOrg();
-  const { hash } = useLocation();
-  const [tab, setTab] = useState<AccountTab>(() => (hash === '#apps' ? 'apps' : 'organization'));
-  const [appsReady, setAppsReady] = useState(false);
-  const markAppsReady = useCallback(() => setAppsReady(true), []);
+  const [tab, setTab] = useState<AccountTab>('organization');
 
-  // The chooser links to /account#apps. The router does not scroll to a hash
-  // by itself, and the panel's height is only final once its apps load.
-  useEffect(() => {
-    if (hash === '#apps' && appsReady) document.getElementById('apps')?.scrollIntoView();
-  }, [hash, appsReady]);
-
-  // Keep tab in sync with hash for deep links like /account#apps
-  useEffect(() => {
-    if (hash === '#apps') setTab('apps');
-  }, [hash]);
-
-  // PlatformLayout renders behind ProtectedRoute, so this is defensive only.
+  // AppShell renders behind ProtectedRoute, so this is defensive only.
   if (auth.status !== 'authenticated') return null;
 
   // When the caller joined the active organization — their membership row.
@@ -514,7 +378,6 @@ export default function AccountPage() {
             <BusinessIdentificationPanel />
           </>
         )}
-        {tab === 'apps' && <AppsPanel onReady={markAppsReady} />}
         {tab === 'members' && <MembersPanel />}
         {tab === 'session' && <SessionPanel expiresAt={auth.accessTokenExpiresAt} />}
         {tab === 'system' && <HealthPanel />}

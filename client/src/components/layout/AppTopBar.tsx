@@ -1,12 +1,9 @@
-import { Layers, LogOut, Menu as MenuIcon, Monitor, Moon, Search, Sun, UserCog, ChevronsUpDown, Grid2x2 } from 'lucide-react';
+import { Layers, LogOut, Menu as MenuIcon, Monitor, Moon, Search, Sun, UserCog } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
 import { useOrg } from '../../context/OrgContext';
 import { useTheme, type Theme } from '../../context/ThemeContext';
 import { useShell } from './ShellContext';
-import { useEnabledApps } from '../../apps/useEnabledApps';
-import { APP_BRAND } from '../../apps/registry';
-import type { AppSummary } from '../../services/fetchServices';
 import OrgSwitcher from './OrgSwitcher';
 import Menu from '../ui/Menu';
 import { initials } from '../../utils/initials';
@@ -18,38 +15,32 @@ const THEME_OPTIONS: Array<{ id: Theme; label: string; icon: typeof Sun }> = [
 ];
 
 /**
- * The top bar rendered by both AppFrame (`app` set) and PlatformLayout
- * (`app` null) — one header for the whole workspace, replacing the two
- * near-duplicate chromes Phase 30 still had. Left to right: a mobile
- * sidebar toggle (only where there is a sidebar to toggle), the brand mark,
- * an app-switcher menu, a search trigger for the command palette, a theme
- * toggle, the org switcher, and a user menu.
+ * The product's top bar. Left to right: the mobile sidebar toggle, the brand
+ * mark, a search trigger for the command palette, a theme toggle, the org
+ * switcher, and a user menu. Phase 33 removed the app switcher: there is one
+ * product, so there is nothing to switch between.
  */
-export default function AppTopBar({ app }: { app: AppSummary | null }) {
+export default function AppTopBar() {
   const auth = useAuth();
   const { logout } = useAuthActions();
   const { organization } = useOrg();
   const { resolvedTheme, setTheme } = useTheme();
   const { setMobileOpen, openPalette } = useShell();
-  const enabled = useEnabledApps();
 
   const email = auth.status === 'authenticated' ? auth.user.email : '';
   const name = auth.status === 'authenticated' ? auth.user.name : null;
-  const otherApps = enabled.status === 'ready' ? enabled.apps.filter((a) => a.slug !== app?.slug) : [];
   const ThemeIcon = resolvedTheme === 'light' ? Sun : Moon;
 
   return (
     <header className="app-topbar no-print sticky top-0 z-30 h-14 flex items-center gap-2 px-3 md:px-4 border-b border-[var(--border)] bg-[var(--panel)]">
-      {app !== null && (
-        <button
-          type="button"
-          onClick={() => setMobileOpen(true)}
-          aria-label="Open menu"
-          className="md:hidden p-1.5 -ml-1 rounded-md text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]"
-        >
-          <MenuIcon size={19} aria-hidden="true" />
-        </button>
-      )}
+      <button
+        type="button"
+        onClick={() => setMobileOpen(true)}
+        aria-label="Open menu"
+        className="md:hidden p-1.5 -ml-1 rounded-md text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]"
+      >
+        <MenuIcon size={19} aria-hidden="true" />
+      </button>
 
       <Link
         to="/"
@@ -59,39 +50,9 @@ export default function AppTopBar({ app }: { app: AppSummary | null }) {
         <span className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-white">
           <Layers size={13} aria-hidden="true" />
         </span>
-        <span className="hidden sm:inline text-xs font-semibold tracking-wide">AutoLedger</span>
+        <span className="hidden sm:inline text-sm font-semibold tracking-wide">AutoLedger</span>
       </Link>
 
-      {app !== null && (
-        <>
-          <span aria-hidden="true" className="text-[var(--border)]">
-            /
-          </span>
-          <Menu
-            panelLabel="Switch app"
-            align="left"
-            items={[
-              ...otherApps.map((a) => ({
-                label: a.name,
-                icon: APP_BRAND[a.slug]?.icon ?? Grid2x2,
-                to: `/app/${a.slug}`,
-              })),
-              { type: 'separator' as const },
-              { label: 'All apps', icon: Grid2x2, to: '/' },
-            ]}
-            trigger={({ buttonProps }) => (
-              <button
-                {...buttonProps}
-                type="button"
-                className="flex items-center gap-1.5 px-1.5 py-1 -ml-1 rounded-md text-[15px] font-semibold hover:bg-[var(--panel-2)] transition-colors"
-              >
-                <span className="truncate max-w-[9rem] sm:max-w-none">{app.name}</span>
-                <ChevronsUpDown size={13} aria-hidden="true" className="text-[var(--muted)]" />
-              </button>
-            )}
-          />
-        </>
-      )}
 
       <button
         type="button"

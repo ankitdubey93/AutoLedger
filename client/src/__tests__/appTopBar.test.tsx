@@ -7,7 +7,7 @@ import { OrgProvider } from '../context/OrgContext';
 import { ThemeProvider } from '../context/ThemeContext';
 import { ShellProvider } from '../components/layout/ShellContext';
 import AppTopBar from '../components/layout/AppTopBar';
-import type { AppSummary, Role } from '../services/fetchServices';
+import type { Role } from '../services/fetchServices';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -24,33 +24,11 @@ function session(role: Role) {
   };
 }
 
-const ledgerCoreApp: AppSummary = {
-  slug: 'ledger-core',
-  name: 'LedgerCore',
-  domain: 'x',
-  tagline: 'y',
-  skills: [],
-  status: 'building',
-  requires: [],
-};
-
-const orgApps = {
-  success: true,
-  selectionCompletedAt: '2026-09-01T00:00:00.000Z',
-  count: 2,
-  apps: [
-    { ...ledgerCoreApp, enabled: true, enabledAt: '2026-09-01T00:00:00.000Z' },
-    { slug: 'stock', name: 'StockLedger', domain: 'x', tagline: 'y', skills: [], status: 'building', requires: [], enabled: true, enabledAt: '2026-09-01T00:00:00.000Z' },
-    { slug: 'ap-flow', name: 'AP-Flow', domain: 'x', tagline: 'y', skills: [], status: 'building', requires: ['ledger-core'], enabled: false, enabledAt: null },
-  ],
-};
-
 let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   fetchMock = vi.fn((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/organizations/apps')) return Promise.resolve(jsonResponse(200, orgApps));
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session('OWNER')));
     return Promise.resolve(jsonResponse(404, { success: false, error: `unmocked ${url}` }));
   });
@@ -63,17 +41,16 @@ afterEach(() => {
   localStorage.clear();
 });
 
-function renderTopBar(app: AppSummary | null) {
+function renderTopBar() {
   return render(
-    <MemoryRouter initialEntries={['/app/ledger-core']}>
+    <MemoryRouter initialEntries={['/']}>
       <AuthProvider>
         <OrgProvider>
           <ThemeProvider>
             <ShellProvider>
-              <AppTopBar app={app} />
+              <AppTopBar />
               <Routes>
                 <Route path="/account" element={<p>ACCOUNT PAGE</p>} />
-                <Route path="/app/:appSlug" element={<p>APP PAGE</p>} />
               </Routes>
             </ShellProvider>
           </ThemeProvider>
@@ -86,7 +63,7 @@ function renderTopBar(app: AppSummary | null) {
 describe('AppTopBar', () => {
   it("the user menu holds Sign out and a link to Account", async () => {
     const user = userEvent.setup();
-    renderTopBar(ledgerCoreApp);
+    renderTopBar();
 
     await user.click(await screen.findByRole('button', { name: /ada@example\.com/i }));
 
@@ -94,27 +71,18 @@ describe('AppTopBar', () => {
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
 
-  it('the app switcher lists only the OTHER enabled apps, never the disabled one', async () => {
-    const user = userEvent.setup();
-    renderTopBar(ledgerCoreApp);
+  it('is one product: the brand links home, there is no app switcher, and the mobile menu opens the sidebar', async () => {
+    renderTopBar();
 
-    await user.click(await screen.findByRole('button', { name: /LedgerCore/ }));
-
-    expect(screen.getByRole('menuitem', { name: 'StockLedger' })).toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'AP-Flow' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: 'LedgerCore' })).not.toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: 'All apps' })).toHaveAttribute('href', '/');
-  });
-
-  it('has no app switcher or mobile menu button when rendered outside an app (PlatformLayout)', async () => {
-    renderTopBar(null);
-    expect(screen.queryByRole('button', { name: 'Open menu' })).not.toBeInTheDocument();
     expect(await screen.findByRole('button', { name: /ada@example\.com/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /AutoLedger/ })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('button', { name: 'Open menu' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /LedgerCore|StockLedger|AP-Flow/ })).not.toBeInTheDocument();
   });
 
   it('the theme menu switches themes', async () => {
     const user = userEvent.setup();
-    renderTopBar(ledgerCoreApp);
+    renderTopBar();
 
     await user.click(await screen.findByRole('button', { name: 'Change theme' }));
     await user.click(screen.getByRole('menuitem', { name: 'Dark' }));
