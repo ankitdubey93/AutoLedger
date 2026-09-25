@@ -7,6 +7,8 @@ import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import * as onboardingService from '../onboardingService.js';
 import * as organizationProfileService from '../organizationProfileService.js';
+import * as itemService from './itemService.js';
+import * as inventoryAccountingService from './inventoryAccountingService.js';
 import type { LedgerSettings } from '../../types/accounting.js';
 import type { UpdateOrganizationProfileInput } from '../../types/organization.js';
 import { MODULE_TAGS } from '../../config/modules.js';
@@ -79,6 +81,10 @@ export interface UpdateSettingsInput {
   realizedFxGainAccountId?: string | null | undefined;
   realizedFxLossAccountId?: string | null | undefined;
   unrealizedFxAccountId?: string | null | undefined;
+  inventoryAccountId?: string | null | undefined;
+  cogsAccountId?: string | null | undefined;
+  inventoryAdjustmentAccountId?: string | null | undefined;
+  stockOpeningAccountId?: string | null | undefined;
 }
 
 interface SettingsRow {
@@ -98,6 +104,10 @@ interface SettingsRow {
   realized_fx_gain_account_id: string | null;
   realized_fx_loss_account_id: string | null;
   unrealized_fx_account_id: string | null;
+  inventory_account_id: string | null;
+  cogs_account_id: string | null;
+  inventory_adjustment_account_id: string | null;
+  stock_opening_account_id: string | null;
 }
 
 function toLedgerSettings(row: SettingsRow): LedgerSettings {
@@ -122,6 +132,10 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     realizedFxGainAccountId: row.realized_fx_gain_account_id,
     realizedFxLossAccountId: row.realized_fx_loss_account_id,
     unrealizedFxAccountId: row.unrealized_fx_account_id,
+    inventoryAccountId: row.inventory_account_id,
+    cogsAccountId: row.cogs_account_id,
+    inventoryAdjustmentAccountId: row.inventory_adjustment_account_id,
+    stockOpeningAccountId: row.stock_opening_account_id,
   };
 }
 
@@ -131,6 +145,7 @@ const SETTINGS_SELECT = `
          s.books_start_date, p.industry, s.timezone, s.cash_account_id, s.onboarded_at,
          s.unmatched_alert_threshold_cents,
          s.realized_fx_gain_account_id, s.realized_fx_loss_account_id, s.unrealized_fx_account_id,
+         s.inventory_account_id, s.cogs_account_id, s.inventory_adjustment_account_id, s.stock_opening_account_id,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
@@ -235,8 +250,46 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
   }
 }
 
+/**
+ * Phase 35a — the four inventory posting accounts. Validated explicitly
+ * (type + postable), not left to the composite FK: the FK alone would let a
+ * non-postable header or a wrong-type account through with an opaque
+ * constraint-violation message instead of a readable 422.
+ */
+const INVENTORY_ACCOUNT_FIELDS: {
+  key: 'inventoryAccountId' | 'cogsAccountId' | 'inventoryAdjustmentAccountId' | 'stockOpeningAccountId';
+  label: string;
+  type: 'Asset' | 'Expense' | 'Equity';
+}[] = [
+  { key: 'inventoryAccountId', label: 'Inventory account', type: 'Asset' },
+  { key: 'cogsAccountId', label: 'Cost of sales account', type: 'Expense' },
+  { key: 'inventoryAdjustmentAccountId', label: 'Inventory adjustment account', type: 'Expense' },
+  { key: 'stockOpeningAccountId', label: 'Opening stock account', type: 'Equity' },
+];
+
+async function assertInventoryAccount(
+  client: PoolClient,
+  orgId: string,
+  accountId: string,
+  label: string,
+  type: 'Asset' | 'Expense' | 'Equity',
+): Promise<void> {
+  const { rows } = await client.query<{ type: string; is_postable: boolean }>(
+    'SELECT type, is_postable FROM accounts WHERE org_id = $1 AND id = $2',
+    [orgId, accountId],
+  );
+  const account = rows[0];
+  if (account === undefined) throw new ApiError(422, `${label} does not exist in this organization`);
+  if (account.type !== type) throw new ApiError(422, `${label} must be a ${type} account`);
+  if (!account.is_postable) throw new ApiError(422, `${label} must be postable`);
+}
+
 /** PATCH /settings. Refuses to write until onboarding has completed once. */
-export async function updateSettings(orgId: string, input: UpdateSettingsInput): Promise<LedgerSettings> {
+export async function updateSettings(
+  orgId: string,
+  userId: string,
+  input: UpdateSettingsInput,
+): Promise<LedgerSettings> {
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence.
   const COLUMNS = {
@@ -249,6 +302,10 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
     realizedFxGainAccountId: 'realized_fx_gain_account_id',
     realizedFxLossAccountId: 'realized_fx_loss_account_id',
     unrealizedFxAccountId: 'unrealized_fx_account_id',
+    inventoryAccountId: 'inventory_account_id',
+    cogsAccountId: 'cogs_account_id',
+    inventoryAdjustmentAccountId: 'inventory_adjustment_account_id',
+    stockOpeningAccountId: 'stock_opening_account_id',
   } as const;
 
   const assignments: string[] = [];
@@ -275,6 +332,15 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
 
   try {
     await withTransaction(async (client) => {
+      // Validated before any write (Phase 35a): a bad inventory account
+      // should not leave a profile update or another column change committed.
+      for (const field of INVENTORY_ACCOUNT_FIELDS) {
+        const value = input[field.key];
+        if (value !== undefined && value !== null) {
+          await assertInventoryAccount(client, orgId, value, field.label, field.type);
+        }
+      }
+
       // Same `client` for both writes (rule 5): they commit or roll back together.
       //
       // The 409 applies to every input, profile-only included — the profile
@@ -298,6 +364,13 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
       // Nothing to set on `ledger_settings` for a profile-only change.
       if (assignments.length === 0) return;
 
+      // Phase 35a lock order (Core model §4): the products a default change
+      // affects are locked BEFORE the `ledger_settings` UPDATE locks the row.
+      let affectedDefaultedItemIds: string[] = [];
+      if (input.inventoryAccountId !== undefined) {
+        affectedDefaultedItemIds = await itemService.lockDefaultedInventoryItemsOnClient(client, orgId);
+      }
+
       const { rows } = await client.query<{ org_id: string }>(
         `UPDATE ledger_settings SET ${assignments.join(', ')} WHERE org_id = $1 RETURNING org_id`,
         values,
@@ -309,6 +382,16 @@ export async function updateSettings(orgId: string, input: UpdateSettingsInput):
       // updateAccount). Throwing rolls back the profile upsert above too.
       if (rows[0] === undefined) {
         throw new ApiError(409, 'Complete setup before changing settings');
+      }
+
+      if (input.inventoryAccountId !== undefined) {
+        await inventoryAccountingService.reclassToCurrentAccountsOnClient(
+          client,
+          orgId,
+          userId,
+          affectedDefaultedItemIds,
+          'Inventory account changed in settings — stock value moved',
+        );
       }
     });
   } catch (err) {
@@ -398,7 +481,7 @@ export interface InventoryPostingAccounts {
 }
 
 export async function resolveInventoryPostingAccountsOnClient(
-  client: PoolClient,
+  client: Pick<PoolClient, 'query'>,
   orgId: string,
 ): Promise<InventoryPostingAccounts> {
   const { rows } = await client.query<{
@@ -408,7 +491,7 @@ export async function resolveInventoryPostingAccountsOnClient(
     stock_opening_account_id: string | null;
   }>(
     `SELECT inventory_account_id, cogs_account_id, inventory_adjustment_account_id, stock_opening_account_id
-       FROM ledger_settings WHERE org_id = $1`,
+       FROM ledger_settings WHERE org_id = $1 FOR SHARE`,
     [orgId],
   );
   const settings = rows[0];

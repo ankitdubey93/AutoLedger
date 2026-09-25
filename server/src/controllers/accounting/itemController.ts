@@ -54,6 +54,6 @@ export const create: RequestHandler = async (req, res) => {
 export const update: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateItemSchema, req.body);
-  const item = await itemService.updateItem(user.orgId, requireParam(req, 'id'), input);
+  const item = await itemService.updateItem(user.orgId, user.id, requireParam(req, 'id'), input);
   res.json({ success: true, item });
 };

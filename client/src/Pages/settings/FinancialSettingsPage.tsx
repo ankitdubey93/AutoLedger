@@ -102,6 +102,10 @@ export default function FinancialSettingsPage() {
   const [realizedGainId, setRealizedGainId] = useState('');
   const [realizedLossId, setRealizedLossId] = useState('');
   const [unrealizedId, setUnrealizedId] = useState('');
+  const [inventoryId, setInventoryId] = useState('');
+  const [cogsId, setCogsId] = useState('');
+  const [inventoryAdjustmentId, setInventoryAdjustmentId] = useState('');
+  const [stockOpeningId, setStockOpeningId] = useState('');
   const [seeded, setSeeded] = useState(false);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -124,6 +128,10 @@ export default function FinancialSettingsPage() {
       setRealizedGainId(settings.realizedFxGainAccountId ?? '');
       setRealizedLossId(settings.realizedFxLossAccountId ?? '');
       setUnrealizedId(settings.unrealizedFxAccountId ?? '');
+      setInventoryId(settings.inventoryAccountId ?? '');
+      setCogsId(settings.cogsAccountId ?? '');
+      setInventoryAdjustmentId(settings.inventoryAdjustmentAccountId ?? '');
+      setStockOpeningId(settings.stockOpeningAccountId ?? '');
       setSeeded(true);
     }
   }, [ledgerSettings, seeded]);
@@ -190,6 +198,10 @@ export default function FinancialSettingsPage() {
         realizedFxGainAccountId: realizedGainId === '' ? null : realizedGainId,
         realizedFxLossAccountId: realizedLossId === '' ? null : realizedLossId,
         unrealizedFxAccountId: unrealizedId === '' ? null : unrealizedId,
+        inventoryAccountId: inventoryId === '' ? null : inventoryId,
+        cogsAccountId: cogsId === '' ? null : cogsId,
+        inventoryAdjustmentAccountId: inventoryAdjustmentId === '' ? null : inventoryAdjustmentId,
+        stockOpeningAccountId: stockOpeningId === '' ? null : stockOpeningId,
       });
       applySettings(next);
       setSaved(true);
@@ -287,6 +299,45 @@ export default function FinancialSettingsPage() {
           accounts={accounts}
           type={null}
           hint="Revaluation posts either a gain or a loss here, so any postable account is offered."
+        />
+      </div>
+
+      <div id="inventory" className="flex flex-col gap-3">
+        <h3 className="text-base font-semibold m-0">Inventory accounting</h3>
+        <p className="text-sm text-[var(--muted)] m-0">
+          Stock value posts to these accounts. Leave a field blank to use the default chart account. Changing the inventory account moves existing stock value to the new account with a journal dated today.
+        </p>
+        <AccountSelect
+          label="Inventory"
+          value={inventoryId}
+          onChange={setInventoryId}
+          accounts={accounts}
+          type="Asset"
+          hint="Default: 1140 Inventory"
+        />
+        <AccountSelect
+          label="Cost of sales"
+          value={cogsId}
+          onChange={setCogsId}
+          accounts={accounts}
+          type="Expense"
+          hint="Default: 5050 Cost of Sales — Inventory"
+        />
+        <AccountSelect
+          label="Inventory adjustments"
+          value={inventoryAdjustmentId}
+          onChange={setInventoryAdjustmentId}
+          accounts={accounts}
+          type="Expense"
+          hint="Default: 5400 Inventory Adjustments & Shrinkage"
+        />
+        <AccountSelect
+          label="Opening stock"
+          value={stockOpeningId}
+          onChange={setStockOpeningId}
+          accounts={accounts}
+          type="Equity"
+          hint="Default: 3400 Opening Balance Equity"
         />
       </div>
 

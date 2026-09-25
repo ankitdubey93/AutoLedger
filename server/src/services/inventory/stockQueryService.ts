@@ -328,6 +328,9 @@ export async function getSummary(orgId: string): Promise<StockSummary> {
     low_stock_item_count: string;
     expiring_lot_count: string;
     location_count: string;
+    linked_value_cents: string;
+    unlinked_value_cents: string;
+    unlinked_item_count: string;
   }>(
     `SELECT
        (SELECT count(*) FROM stock_items WHERE org_id = $1 AND is_active) AS active_item_count,
@@ -344,7 +347,17 @@ export async function getSummary(orgId: string): Promise<StockSummary> {
               (SELECT SUM(b.quantity_milli) FROM stock_balances b WHERE b.org_id = $1 AND b.lot_id = l.id), 0
             ) > 0
        ) AS expiring_lot_count,
-       (SELECT count(*) FROM stock_locations WHERE org_id = $1 AND is_active) AS location_count`,
+       (SELECT count(*) FROM stock_locations WHERE org_id = $1 AND is_active) AS location_count,
+       -- Phase 35a: value on products linked to the GL vs. not yet linked.
+       (SELECT COALESCE(SUM(b.value_cents), 0)::text
+          FROM stock_balances b JOIN stock_items i ON i.id = b.item_id AND i.org_id = b.org_id
+         WHERE b.org_id = $1 AND i.ledger_item_id IS NOT NULL) AS linked_value_cents,
+       (SELECT COALESCE(SUM(b.value_cents), 0)::text
+          FROM stock_balances b JOIN stock_items i ON i.id = b.item_id AND i.org_id = b.org_id
+         WHERE b.org_id = $1 AND i.ledger_item_id IS NULL) AS unlinked_value_cents,
+       (SELECT count(DISTINCT i.id)
+          FROM stock_items i JOIN stock_balances b ON b.item_id = i.id AND b.org_id = i.org_id
+         WHERE i.org_id = $1 AND i.ledger_item_id IS NULL AND b.value_cents > 0) AS unlinked_item_count`,
     [orgId],
   );
   const row = rows[0];
@@ -356,6 +369,9 @@ export async function getSummary(orgId: string): Promise<StockSummary> {
     lowStockItemCount: Number(row.low_stock_item_count),
     expiringLotCount: Number(row.expiring_lot_count),
     locationCount: Number(row.location_count),
+    linkedValueCents: parseCents(row.linked_value_cents),
+    unlinkedValueCents: parseCents(row.unlinked_value_cents),
+    unlinkedItemCount: Number(row.unlinked_item_count),
   };
 }
 

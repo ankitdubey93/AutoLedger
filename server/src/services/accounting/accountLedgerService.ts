@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
 import { parseCents } from '../../utils/money.js';
@@ -9,6 +10,10 @@ import {
   type AccountLedger,
   type AccountLedgerRow,
 } from '../../types/accounting.js';
+import type { InventoryValuationLine } from '../../types/inventory.js';
+
+/** Phase 35a — read-only helpers below accept either `pool` or a transaction `client`. */
+type Queryable = Pick<PoolClient, 'query'>;
 
 /**
  * One postable account's ledger — opening balance, every posted line with a
@@ -295,4 +300,108 @@ export async function accountBalances(
         direction * (parseCents(row.rollup_debit_cents) - parseCents(row.rollup_credit_cents)),
     };
   });
+}
+
+// ---------------------------------------------------- Phase 35a — GL reconciliation reads
+
+/**
+ * Net debit-positive base-currency balance of each given account, as of a
+ * date (or all-time when `asOf` is null). Every id in `accountIds` is present
+ * in the returned map, at 0 when the account has no lines in the window —
+ * pre-filtered in a subquery, like `accountBalances` above, so an account
+ * absent from `ledger_lines` entirely is never dropped by the join.
+ */
+export async function balancesForAccountsOnClient(
+  client: Queryable,
+  orgId: string,
+  accountIds: string[],
+  asOf: string | null,
+): Promise<Map<string, { code: string; name: string; netDebitCents: number }>> {
+  const result = new Map<string, { code: string; name: string; netDebitCents: number }>();
+  if (accountIds.length === 0) return result;
+
+  const { rows } = await client.query<{
+    account_id: string;
+    code: string;
+    name: string;
+    net_debit_cents: string;
+  }>(
+    `SELECT a.id AS account_id, a.code, a.name,
+            COALESCE(SUM(fl.base_debit_cents - fl.base_credit_cents), 0)::text AS net_debit_cents
+       FROM accounts a
+       LEFT JOIN (
+         SELECT l.account_id, l.org_id, l.base_debit_cents, l.base_credit_cents
+           FROM ledger_lines l
+           JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+          WHERE l.org_id = $1 AND ($3::date IS NULL OR e.entry_date <= $3::date)
+       ) fl ON fl.account_id = a.id AND fl.org_id = a.org_id
+      WHERE a.org_id = $1 AND a.id = ANY($2::uuid[])
+      GROUP BY a.id, a.code, a.name`,
+    [orgId, accountIds, asOf],
+  );
+  for (const row of rows) {
+    result.set(row.account_id, { code: row.code, name: row.name, netDebitCents: parseCents(row.net_debit_cents) });
+  }
+  return result;
+}
+
+/**
+ * Lines on these accounts whose entry's EFFECTIVE source (a reversal's
+ * original entry's source, followed through `reverses_entry_id`) is not one
+ * of `subledgerSourceTypes` — the lines a stock reconciliation cannot explain
+ * from `bill`/`invoice`/`stock` postings. Newest first, capped at `limit` per
+ * account with a window function (not a per-account query loop).
+ */
+export async function listNonSubledgerLinesOnClient(
+  client: Queryable,
+  orgId: string,
+  accountIds: string[],
+  asOf: string | null,
+  subledgerSourceTypes: string[],
+  limit: number,
+): Promise<Map<string, InventoryValuationLine[]>> {
+  const result = new Map<string, InventoryValuationLine[]>();
+  if (accountIds.length === 0) return result;
+
+  const { rows } = await client.query<{
+    account_id: string;
+    journal_entry_id: string;
+    entry_date: string;
+    description: string | null;
+    effective_source_type: string;
+    net_debit_cents: string;
+  }>(
+    `WITH lines AS (
+       SELECT l.account_id, e.id AS journal_entry_id, e.entry_date, e.description,
+              COALESCE(o.source_type, e.source_type) AS effective_source_type,
+              SUM(l.base_debit_cents - l.base_credit_cents) AS net_debit_cents
+         FROM ledger_lines l
+         JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
+         LEFT JOIN journal_entries o ON o.id = e.reverses_entry_id AND o.org_id = e.org_id
+        WHERE l.org_id = $1 AND l.account_id = ANY($2::uuid[])
+          AND ($3::date IS NULL OR e.entry_date <= $3::date)
+        GROUP BY l.account_id, e.id, e.entry_date, e.description, COALESCE(o.source_type, e.source_type)
+     ), ranked AS (
+       SELECT *, ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY entry_date DESC, journal_entry_id DESC) AS rn
+         FROM lines
+        WHERE NOT (effective_source_type = ANY($4::text[]))
+     )
+     SELECT account_id, journal_entry_id, entry_date, description, effective_source_type, net_debit_cents::text
+       FROM ranked
+      WHERE rn <= $5
+      ORDER BY account_id, entry_date DESC, journal_entry_id DESC`,
+    [orgId, accountIds, asOf, subledgerSourceTypes, limit],
+  );
+  for (const row of rows) {
+    const list = result.get(row.account_id) ?? [];
+    list.push({
+      journalEntryId: row.journal_entry_id,
+      entryDate: row.entry_date,
+      description: row.description,
+      sourceType: row.effective_source_type,
+      netDebitCents: parseCents(row.net_debit_cents),
+    });
+    result.set(row.account_id, list);
+  }
+  return result;
 }

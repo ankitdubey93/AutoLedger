@@ -1,10 +1,12 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
+import { LedgerSettingsProvider } from '../context/LedgerSettingsContext';
 import ProductRoutes from '../routes/ProductRoutes';
+import FinancialSettingsPage from '../Pages/settings/FinancialSettingsPage';
 
 /**
  * Characterisation of Accounting's Organization settings page (`/settings`).
@@ -63,6 +65,10 @@ const settings = {
   realizedFxGainAccountId: null,
   realizedFxLossAccountId: null,
   unrealizedFxAccountId: null,
+  inventoryAccountId: null,
+  cogsAccountId: null,
+  inventoryAdjustmentAccountId: null,
+  stockOpeningAccountId: null,
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -206,5 +212,74 @@ describe('GeneralSettingsPage (Organization tab)', () => {
       name: "Address, contact details and logo are on your account's Organisation page.",
     });
     expect(link).toHaveAttribute('href', '/account');
+  });
+});
+
+/**
+ * Phase 35a — the four inventory-account selects on the Financial tab
+ * (`FinancialSettingsPage`). Mounted directly (as `settingsTabs.test.tsx`
+ * mounts the same page) rather than through the full `ProductRoutes` shell —
+ * the shell's sidebar needs several more unrelated fetches mocked and adds
+ * nothing this case needs to prove.
+ */
+function renderFinancialTab() {
+  return render(
+    <MemoryRouter initialEntries={['/settings/financial']}>
+      <Routes>
+        <Route
+          path="/settings/financial"
+          element={
+            <LedgerSettingsProvider>
+              <FinancialSettingsPage />
+            </LedgerSettingsProvider>
+          }
+        />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+/**
+ * Each `AccountSelect` wraps its hint text inside the same `<label>` as the
+ * `<select>`, so the accessible name computed by `getByLabelText` is the
+ * label text plus the hint ("Inventory Default: 1140 Inventory"), not the
+ * bare field label — `getByLabelText('Inventory')`'s exact match never hits.
+ * Scoping to the `#inventory` section and reading the four comboboxes by
+ * position (Inventory, Cost of sales, Inventory adjustments, Opening stock —
+ * the order they're declared in `FinancialSettingsPage`) sidesteps that.
+ */
+function inventorySelects(container: HTMLElement): HTMLSelectElement[] {
+  const section = container.querySelector('#inventory');
+  if (section === null) throw new Error('inventory accounting section not found');
+  return within(section as HTMLElement).getAllByRole('combobox') as HTMLSelectElement[];
+}
+
+describe('FinancialSettingsPage — inventory accounting (Phase 35a)', () => {
+  it('renders the four inventory selects, all unset', async () => {
+    const { container } = renderFinancialTab();
+
+    await screen.findByText('Inventory accounting');
+    const [inventory, cogs, adjustment, opening] = inventorySelects(container);
+    expect(inventory).toHaveValue('');
+    expect(cogs).toHaveValue('');
+    expect(adjustment).toHaveValue('');
+    expect(opening).toHaveValue('');
+  });
+
+  it('saving with every inventory select left blank sends all four as null', async () => {
+    const user = userEvent.setup();
+    renderFinancialTab();
+
+    await screen.findByText('Inventory accounting');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(callsTo('PATCH', '/api/v1/settings')).toHaveLength(1));
+    const body = bodyOf(callsTo('PATCH', '/api/v1/settings')[0]);
+    expect(body).toMatchObject({
+      inventoryAccountId: null,
+      cogsAccountId: null,
+      inventoryAdjustmentAccountId: null,
+      stockOpeningAccountId: null,
+    });
   });
 });

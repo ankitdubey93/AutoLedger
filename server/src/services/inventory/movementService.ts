@@ -8,6 +8,7 @@ import { validateAttributes } from '../../utils/stockAttributes.js';
 import { getActiveDefinitions } from './catalogueService.js';
 import { getLocationOnClient } from './locationService.js';
 import { postManualMovementsOnClient, resolveGlAccountsOnClient } from './stockGlService.js';
+import * as ledgerItemService from '../accounting/itemService.js';
 import { canTransitionSerial } from '../../types/inventory.js';
 import type { StockMovement, StockMovementType, StockSerialStatus, StockTrackingMode } from '../../types/inventory.js';
 
@@ -326,12 +327,32 @@ async function insertMovement(
   const bal = balances.get(key);
   if (bal === undefined) throw new Error(`balance not locked for key ${key}`);
 
-  await client.query('UPDATE stock_balances SET quantity_milli = quantity_milli + $3, value_cents = value_cents + $4 WHERE id = $1 AND org_id = $2', [
-    bal.id,
-    orgId,
-    spec.quantityMilli,
-    spec.valueCents,
-  ]);
+  // RECLASS_OUT/RECLASS_IN net to zero on their shared anchor row BY
+  // CONSTRUCTION (Core model §3 — they re-attribute an item's already-posted
+  // value to a different GL account; they never change the balance's own
+  // quantity or value). Each half still carries its own nonzero value_cents
+  // on its stock_movements row (the record of what moved and between which
+  // accounts), but two SEPARATE UPDATEs to the same stock_balances row — one
+  // per half — can transiently violate `value_cents >= 0` /
+  // `ck_stock_balances_empty_has_no_value` even though they cancel by the
+  // time both commit: the OUT half alone can carry the anchor negative when
+  // an item's value is split across locations and the anchor does not itself
+  // hold the full amount, and on a fully-voided item (quantity 0) NO
+  // transient nonzero value is allowed on that row in either order. So a
+  // RECLASS half writes its stock_movements row only and never touches
+  // stock_balances — its net contribution there is zero anyway, and
+  // integrity check 5 (`stock_balances_match_movements`) still ties out
+  // because both halves share the same (item, location, lot) key and cancel
+  // in the SUM(value_cents) it re-derives.
+  const isReclass = spec.movementType === 'RECLASS_OUT' || spec.movementType === 'RECLASS_IN';
+  if (!isReclass) {
+    await client.query('UPDATE stock_balances SET quantity_milli = quantity_milli + $3, value_cents = value_cents + $4 WHERE id = $1 AND org_id = $2', [
+      bal.id,
+      orgId,
+      spec.quantityMilli,
+      spec.valueCents,
+    ]);
+  }
   bal.quantityMilli += spec.quantityMilli;
   bal.valueCents += spec.valueCents;
 
@@ -393,7 +414,14 @@ export interface MovementResult {
   movements: StockMovement[];
 }
 
-export type ReceiveInput = { occurredOn: string; reference: string | null; locationId: string; lines: ReceiptLineInput[] };
+export type ReceiveInput = {
+  occurredOn: string;
+  reference: string | null;
+  locationId: string;
+  lines: ReceiptLineInput[];
+  /** Phase 35a — which counter account this receipt posts against. Manual only. */
+  purpose?: 'OPENING' | 'ADJUSTMENT';
+};
 
 export async function receiveOnClient(
   client: PoolClient,
@@ -551,7 +579,14 @@ export async function receiveOnClient(
   return results;
 }
 
-export type IssueInput = { occurredOn: string; reference: string | null; locationId: string; lines: OutboundLineInput[] };
+export type IssueInput = {
+  occurredOn: string;
+  reference: string | null;
+  locationId: string;
+  lines: OutboundLineInput[];
+  /** Phase 35a — an expense account to charge stock consumption to. Manual only. */
+  expenseAccountId?: string | null;
+};
 
 export async function issueOnClient(
   client: PoolClient,
@@ -1040,6 +1075,126 @@ export async function adjustOnClient(
   return results;
 }
 
+// ------------------------------------------------------------- reclass (Phase 35a)
+
+/**
+ * One value transfer between GL accounts for one item, anchored on one
+ * balance row. `valueCents > 0` leaves `fromAccountId`, enters `toAccountId`.
+ */
+export interface ReclassMove {
+  itemId: string;
+  locationId: string;
+  lotId: string | null;
+  fromAccountId: string | null;
+  toAccountId: string;
+  valueCents: number;
+}
+
+/**
+ * Writes a `RECLASS_OUT`/`RECLASS_IN` pair (quantity 0) for each move,
+ * anchored on the item's existing balance row. Both rows share the caller's
+ * `movementGroupId`, so a multi-item reclass is one movement group. Every
+ * balance is locked (via `lockBalances`) before any row is written — locking
+ * a row this transaction already holds does not wait.
+ */
+export async function reclassOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  movementGroupId: string,
+  moves: ReclassMove[],
+  occurredOn: string,
+  reason: string,
+  source: { type: string; id: string },
+): Promise<StockMovement[]> {
+  if (moves.some((m) => m.valueCents <= 0)) throw new Error('reclass value must be positive');
+
+  const balances = await lockBalances(
+    client,
+    orgId,
+    moves.map((m) => ({ itemId: m.itemId, locationId: m.locationId, lotId: m.lotId })),
+  );
+
+  const itemIds = [...new Set(moves.map((m) => m.itemId))];
+  const locationIds = [...new Set(moves.map((m) => m.locationId))];
+  const { rows: itemRows } = await client.query<{ id: string; code: string }>(
+    'SELECT id, code FROM stock_items WHERE org_id = $1 AND id = ANY($2::uuid[])',
+    [orgId, itemIds],
+  );
+  const itemCodes = new Map(itemRows.map((r) => [r.id, r.code]));
+  const { rows: locationRows } = await client.query<{ id: string; code: string }>(
+    'SELECT id, code FROM stock_locations WHERE org_id = $1 AND id = ANY($2::uuid[])',
+    [orgId, locationIds],
+  );
+  const locationCodes = new Map(locationRows.map((r) => [r.id, r.code]));
+
+  const opts: MovementOptions = { source, glAccountByItem: new Map(), allowFuture: true };
+  const results: StockMovement[] = [];
+  for (const move of moves) {
+    const itemCode = itemCodes.get(move.itemId);
+    if (itemCode === undefined) throw new ApiError(422, 'Item does not exist in this organization');
+    const locationCode = locationCodes.get(move.locationId);
+    if (locationCode === undefined) throw new ApiError(422, 'Location does not exist in this organization');
+
+    const outMovement = await insertMovement(
+      client,
+      orgId,
+      userId,
+      movementGroupId,
+      {
+        movementType: 'RECLASS_OUT',
+        itemId: move.itemId,
+        itemCode,
+        locationId: move.locationId,
+        locationCode,
+        lotId: move.lotId,
+        lotNumber: null,
+        serialId: null,
+        serialNumber: null,
+        quantityMilli: 0,
+        valueCents: -move.valueCents,
+        reference: null,
+        reason,
+        occurredOn,
+        source,
+        glAccountId: move.fromAccountId,
+      },
+      balances,
+      opts,
+    );
+    results.push(outMovement);
+
+    const inMovement = await insertMovement(
+      client,
+      orgId,
+      userId,
+      movementGroupId,
+      {
+        movementType: 'RECLASS_IN',
+        itemId: move.itemId,
+        itemCode,
+        locationId: move.locationId,
+        locationCode,
+        lotId: move.lotId,
+        lotNumber: null,
+        serialId: null,
+        serialNumber: null,
+        quantityMilli: 0,
+        valueCents: move.valueCents,
+        reference: null,
+        reason,
+        occurredOn,
+        source,
+        glAccountId: move.toAccountId,
+      },
+      balances,
+      opts,
+    );
+    results.push(inMovement);
+  }
+  return results;
+}
+
 // ------------------------------------------------------------- document reversal (Phase 32)
 
 export interface OriginalMovement {
@@ -1061,6 +1216,12 @@ export interface ReversalSummary {
   originalValueCents: number;
   /** Signed cents the reversals moved — equals -originalValueCents unless a receipt reversal was clamped. */
   reversedValueCents: number;
+}
+
+/** Phase 35a: per-account summaries plus the individual reversal rows written (`insertMovement`'s return, in order). */
+export interface ReversalOutcome {
+  summaries: ReversalSummary[];
+  movements: StockMovement[];
 }
 
 /**
@@ -1090,7 +1251,7 @@ export async function reverseMovementsOnClient(
   originals: OriginalMovement[],
   occurredOn: string | null,
   source: { type: string; id: string },
-): Promise<ReversalSummary[]> {
+): Promise<ReversalOutcome> {
   const balances = await lockBalances(
     client,
     orgId,
@@ -1098,6 +1259,7 @@ export async function reverseMovementsOnClient(
   );
   const opts: MovementOptions = { source, glAccountByItem: new Map(), allowFuture: true };
   const totals = new Map<string, ReversalSummary>();
+  const movements: StockMovement[] = [];
 
   for (const original of originals) {
     const bal = balances.get(balanceKey(original.itemId, original.locationId, null));
@@ -1124,7 +1286,7 @@ export async function reverseMovementsOnClient(
       valueCents = -removed;
     }
 
-    await insertMovement(
+    const reversal = await insertMovement(
       client,
       orgId,
       userId,
@@ -1151,6 +1313,7 @@ export async function reverseMovementsOnClient(
       balances,
       opts,
     );
+    movements.push(reversal);
 
     const entry = totals.get(original.glAccountId) ?? {
       glAccountId: original.glAccountId,
@@ -1161,7 +1324,7 @@ export async function reverseMovementsOnClient(
     entry.reversedValueCents += valueCents;
     totals.set(original.glAccountId, entry);
   }
-  return [...totals.values()];
+  return { summaries: [...totals.values()], movements };
 }
 
 // ------------------------------------------------------------- public API (manual movements)
@@ -1185,10 +1348,15 @@ async function manualOptions(
 export async function receive(orgId: string, userId: string, input: ReceiveInput): Promise<MovementResult> {
   assertNotFuture(input.occurredOn);
   const movementGroupId = randomUUID();
+  const purpose = input.purpose ?? 'OPENING';
+  const description = purpose === 'OPENING' ? 'Opening stock' : 'Stock found — count gain';
   const movements = await withTransaction(async (client) => {
     const opts = await manualOptions(client, orgId, movementGroupId, input.lines.map((l) => l.itemId));
     const created = await receiveOnClient(client, orgId, userId, movementGroupId, input, opts);
-    await postManualMovementsOnClient(client, orgId, userId, movementGroupId, created, input.occurredOn, 'Stock receipt');
+    await postManualMovementsOnClient(client, orgId, userId, movementGroupId, created, input.occurredOn, description, {
+      receiptPurpose: purpose,
+      issueExpenseAccountId: null,
+    });
     return created;
   });
   return { movementGroupId, movements };
@@ -1197,10 +1365,18 @@ export async function receive(orgId: string, userId: string, input: ReceiveInput
 export async function issue(orgId: string, userId: string, input: IssueInput): Promise<MovementResult> {
   assertNotFuture(input.occurredOn);
   const movementGroupId = randomUUID();
+  const expenseAccountId = input.expenseAccountId ?? null;
+  const description = expenseAccountId !== null ? 'Stock consumed' : 'Stock issue';
   const movements = await withTransaction(async (client) => {
+    if (expenseAccountId !== null) {
+      await ledgerItemService.assertExpenseAccountOnClient(client, orgId, expenseAccountId);
+    }
     const opts = await manualOptions(client, orgId, movementGroupId, input.lines.map((l) => l.itemId));
     const created = await issueOnClient(client, orgId, userId, movementGroupId, input, opts);
-    await postManualMovementsOnClient(client, orgId, userId, movementGroupId, created, input.occurredOn, 'Stock issue');
+    await postManualMovementsOnClient(client, orgId, userId, movementGroupId, created, input.occurredOn, description, {
+      receiptPurpose: 'OPENING',
+      issueExpenseAccountId: expenseAccountId,
+    });
     return created;
   });
   return { movementGroupId, movements };
@@ -1231,6 +1407,7 @@ export async function adjust(orgId: string, userId: string, input: AdjustInput):
       created,
       input.occurredOn,
       `Stock adjustment — ${input.reason}`,
+      { receiptPurpose: 'OPENING', issueExpenseAccountId: null },
     );
     return created;
   });

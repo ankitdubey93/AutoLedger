@@ -60,6 +60,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
       { to: '/inventory/setup', label: 'Industry template' },
       { to: '/settings/inventory', label: 'Catalogue' },
       { to: '/settings/inventory/codes', label: 'Item codes' },
+      { to: '/inventory/valuation', label: 'Valuation & GL reconciliation' },
+      { to: '/settings/financial#inventory', label: 'Inventory accounts' },
     ],
   },
   {

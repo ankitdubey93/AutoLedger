@@ -77,6 +77,10 @@ function baseLedgerSettings(overrides: Partial<LedgerSettings> = {}): LedgerSett
     realizedFxGainAccountId: null,
     realizedFxLossAccountId: null,
     unrealizedFxAccountId: null,
+    inventoryAccountId: null,
+    cogsAccountId: null,
+    inventoryAdjustmentAccountId: null,
+    stockOpeningAccountId: null,
     ...overrides,
   };
 }

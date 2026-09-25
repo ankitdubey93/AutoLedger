@@ -33,6 +33,7 @@ import InventoryItemsPage from '../Pages/inventory/InventoryItemsPage';
 import InventoryNewItemPage from '../Pages/inventory/InventoryNewItemPage';
 import InventoryItemDetailPage from '../Pages/inventory/InventoryItemDetailPage';
 import InventoryMovementsPage from '../Pages/inventory/InventoryMovementsPage';
+import InventoryValuationPage from '../Pages/inventory/InventoryValuationPage';
 import InventoryLocationsPage from '../Pages/inventory/InventoryLocationsPage';
 import InventoryLabelsPage from '../Pages/inventory/InventoryLabelsPage';
 import InventoryLookupPage from '../Pages/inventory/InventoryLookupPage';
@@ -143,6 +144,7 @@ export default function ProductRoutes() {
             <Route path="/inventory/items/new" element={<InventoryNewItemPage />} />
             <Route path="/inventory/items/:id" element={<InventoryItemDetailPage />} />
             <Route path="/inventory/movements" element={<InventoryMovementsPage />} />
+            <Route path="/inventory/valuation" element={<InventoryValuationPage />} />
             <Route path="/inventory/locations" element={<InventoryLocationsPage />} />
             <Route path="/inventory/labels" element={<InventoryLabelsPage />} />
             <Route path="/inventory/lookup" element={<InventoryLookupPage />} />

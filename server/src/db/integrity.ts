@@ -28,7 +28,8 @@ export interface IntegrityCheck {
     | 'no_orphaned_ledger_lines'
     | 'bank_line_journal_entries_exist'
     | 'stock_balances_match_movements'
-    | 'stock_movements_reconcile_with_gl';
+    | 'stock_movements_reconcile_with_gl'
+    | 'inventory_accounts_reconcile_with_gl';
   description: string;
   passed: boolean;
   /** Up to 20 offending rows, for the operator to go look at. Empty when passed. */
@@ -251,8 +252,8 @@ async function checkStockBalancesMatchMovements(): Promise<IntegrityCheck> {
  * Scope, stated openly: this reconciles each DOCUMENT with its movements, not
  * the whole inventory account with total stock value. A manual journal
  * straight to the inventory account, or stock that pre-dates its product link,
- * can still make the account differ from Inventory's valuation — treating
- * inventory as a control account is the next step.
+ * can still make the account differ from Inventory's valuation — see check 7,
+ * `inventory_accounts_reconcile_with_gl`, below for the whole-account version.
  */
 async function checkStockMovementsReconcileWithGl(): Promise<IntegrityCheck> {
   const { rows } = await pool.query<{
@@ -302,6 +303,65 @@ async function checkStockMovementsReconcileWithGl(): Promise<IntegrityCheck> {
   };
 }
 
+/**
+ * Phase 35a — the whole-account version of check 6: an inventory control
+ * account's GL balance (Core model §2 of plans/phase-35a) must equal the
+ * stock subledger posted to it — `SUM(stock_movements.value_cents)` where
+ * `gl_account_id` is that account, across every source, not just one
+ * document at a time. `ctrl` is every account that is either linked to by a
+ * GL-tagged movement, is an INVENTORY product's own override account, or is
+ * the org's resolved default inventory account for its defaulted products.
+ *
+ * An org created before 35a with a manual journal straight to its inventory
+ * account, or a product mapping changed before the reclass machinery
+ * existed, will fail this check until an OWNER runs the true-up (or "Move to
+ * current accounts") — that is the intended remediation path, not a bug in
+ * this check.
+ */
+async function checkInventoryAccountsReconcileWithGl(): Promise<IntegrityCheck> {
+  const { rows } = await pool.query<{
+    org_id: string;
+    account_id: string;
+    subledger: string;
+    gl: string;
+  }>(
+    `WITH ctrl AS (
+       SELECT DISTINCT org_id, gl_account_id AS account_id FROM stock_movements WHERE gl_account_id IS NOT NULL
+       UNION
+       SELECT org_id, asset_account_id FROM items WHERE item_type = 'INVENTORY' AND asset_account_id IS NOT NULL
+       UNION
+       SELECT d.org_id, COALESCE(s.inventory_account_id, a.id)
+         FROM (SELECT DISTINCT org_id FROM items WHERE item_type = 'INVENTORY' AND asset_account_id IS NULL) d
+         LEFT JOIN ledger_settings s ON s.org_id = d.org_id
+         LEFT JOIN accounts a ON a.org_id = d.org_id AND a.code = '1140' AND a.type = 'Asset' AND a.is_postable
+        WHERE COALESCE(s.inventory_account_id, a.id) IS NOT NULL
+     ), m AS (
+       SELECT org_id, gl_account_id AS account_id, SUM(value_cents) AS v FROM stock_movements
+        WHERE gl_account_id IS NOT NULL GROUP BY 1, 2
+     ), g AS (
+       SELECT l.org_id, l.account_id, SUM(l.base_debit_cents - l.base_credit_cents) AS v
+         FROM ledger_lines l JOIN ctrl c ON c.org_id = l.org_id AND c.account_id = l.account_id GROUP BY 1, 2
+     )
+     SELECT c.org_id, c.account_id::text, COALESCE(m.v, 0)::text AS subledger, COALESCE(g.v, 0)::text AS gl
+       FROM ctrl c
+       LEFT JOIN m ON m.org_id = c.org_id AND m.account_id = c.account_id
+       LEFT JOIN g ON g.org_id = c.org_id AND g.account_id = c.account_id
+      WHERE COALESCE(m.v, 0) <> COALESCE(g.v, 0)
+      LIMIT 20`,
+  );
+
+  return {
+    name: 'inventory_accounts_reconcile_with_gl',
+    description: "Every inventory control account's GL balance equals the stock subledger posted to it",
+    passed: rows.length === 0,
+    offenders: rows.map((r) => ({
+      orgId: r.org_id,
+      subject: `account ${r.account_id}`,
+      detail: `stock subledger ${r.subledger} ≠ GL ${r.gl}`,
+    })),
+  };
+}
+
 export async function runIntegrityChecks(): Promise<IntegrityReport> {
   const checks = await Promise.all([
     checkDebitsEqualCredits(),
@@ -310,6 +370,7 @@ export async function runIntegrityChecks(): Promise<IntegrityReport> {
     checkBankLineJournalEntriesExist(),
     checkStockBalancesMatchMovements(),
     checkStockMovementsReconcileWithGl(),
+    checkInventoryAccountsReconcileWithGl(),
   ]);
 
   return {

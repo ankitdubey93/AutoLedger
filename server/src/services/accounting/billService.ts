@@ -11,6 +11,8 @@ import * as paymentTermService from './paymentTermService.js';
 import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { resolveApPostingAccountsOnClient, resolveInventoryPostingAccountsOnClient } from './settingsService.js';
 import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
+import { resolveInventoryControlAccountIdsOnClient, resolveStockAccountsOnClient } from './itemService.js';
+import * as inventoryAccountingService from './inventoryAccountingService.js';
 import * as documentStockService from '../inventory/documentStockService.js';
 import {
   canTransitionBill,
@@ -1048,8 +1050,14 @@ export async function approveBillOnClient(
     })),
   );
   const stockAccountIds = new Set([...stockLines.values()].map((l) => l.accounts.assetAccountId));
+  // Phase 35a: also refuse a free-typed line on ANY inventory control account,
+  // not just one this bill's own stock lines use (Core model §2).
+  const inventoryControlAccountIds = await resolveInventoryControlAccountIdsOnClient(client, orgId);
   for (const line of lineRows) {
-    if (!stockLines.has(line.line_number) && stockAccountIds.has(line.expense_account_id)) {
+    if (
+      !stockLines.has(line.line_number) &&
+      (stockAccountIds.has(line.expense_account_id) || inventoryControlAccountIds.has(line.expense_account_id))
+    ) {
       // Otherwise the GL inventory account would gain value the stock ledger never saw.
       throw new ApiError(422, `Line ${String(line.line_number)} posts to an inventory account that only inventory items may use on a bill`);
     }
@@ -1292,6 +1300,11 @@ export async function voidBill(
       if (row.journal_entry_id === null) {
         throw new Error(`Posted bill ${id} has no journal_entry_id`);
       }
+      // Phase 35a lock order: resolve the products' CURRENT accounts before
+      // any stock balance is locked by the reversal below.
+      const ledgerItemIds = await documentStockService.listDocumentLedgerItemIdsOnClient(client, orgId, 'bill', id);
+      const stockTargets = await resolveStockAccountsOnClient(client, orgId, ledgerItemIds);
+
       // Phase 32: undo the bill's stock FIRST (lock order: bill row -> stock
       // balances -> journal). Refuses with 409 if the received stock has since
       // been issued.
@@ -1308,6 +1321,16 @@ export async function voidBill(
         entryDate,
       );
       await postReceiptVarianceOnClient(client, orgId, userId, id, row.journal_entry_id, entryDate, stockReversal.byAccount);
+      // Phase 35a: sweep the reversal's value onto each product's current
+      // inventory account (it may have changed since the bill was received).
+      await inventoryAccountingService.sweepVoidOnClient(
+        client,
+        orgId,
+        userId,
+        stockReversal,
+        stockTargets,
+        'Void — stock value returned to the current inventory account',
+      );
       await client.query(
         `UPDATE bills SET status = 'VOID', voided_at = now(), void_journal_entry_id = $1
           WHERE id = $2 AND org_id = $3`,

@@ -8,6 +8,8 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import type { JournalLineInput } from './journalService.js';
 import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
+import { resolveStockAccountsOnClient } from './itemService.js';
+import * as inventoryAccountingService from './inventoryAccountingService.js';
 import * as documentStockService from '../inventory/documentStockService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
@@ -1101,9 +1103,14 @@ export async function voidInvoice(
       if (row.journal_entry_id === null) {
         throw new Error(`Issued invoice ${id} has no journal_entry_id`);
       }
+      // Phase 35a lock order: resolve the products' CURRENT accounts before
+      // any stock balance is locked by the reversal below.
+      const ledgerItemIds = await documentStockService.listDocumentLedgerItemIdsOnClient(client, orgId, 'invoice', id);
+      const stockTargets = await resolveStockAccountsOnClient(client, orgId, ledgerItemIds);
+
       // Phase 32: stock comes back at the EXACT value it left at (the reversing
       // entry below already mirrors the COGS lines), so no variance is possible.
-      await documentStockService.reverseDocumentOnClient(client, orgId, userId, {
+      const stockReversal = await documentStockService.reverseDocumentOnClient(client, orgId, userId, {
         sourceType: 'invoice',
         sourceId: id,
         occurredOn: entryDate,
@@ -1114,6 +1121,16 @@ export async function voidInvoice(
         userId,
         row.journal_entry_id,
         entryDate,
+      );
+      // Phase 35a: sweep the reversal's value onto each product's current
+      // inventory account (it may have changed since the invoice was issued).
+      await inventoryAccountingService.sweepVoidOnClient(
+        client,
+        orgId,
+        userId,
+        stockReversal,
+        stockTargets,
+        'Void — stock value returned to the current inventory account',
       );
       await client.query(
         `UPDATE invoices SET status = 'VOID', voided_at = now(), void_journal_entry_id = $1

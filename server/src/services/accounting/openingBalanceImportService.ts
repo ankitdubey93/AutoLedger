@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import * as journalService from './journalService.js';
+import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import type { MigrationCommitPreview, MigrationImportRow } from '../../types/accounting.js';
 
 /**
@@ -23,6 +24,7 @@ interface RefusedAccounts {
   retainedEarningsId: string | null;
   receivableAccountId: string | null;
   payableAccountId: string | null;
+  inventoryAccountIds: Set<string>;
 }
 
 async function loadRefusedAccounts(client: PoolClient, orgId: string): Promise<RefusedAccounts> {
@@ -41,10 +43,14 @@ async function loadRefusedAccounts(client: PoolClient, orgId: string): Promise<R
     [orgId],
   );
 
+  // Phase 35a — inventory control accounts (Core model §2).
+  const inventoryAccountIds = await resolveInventoryControlAccountIdsOnClient(client, orgId);
+
   return {
     retainedEarningsId: idByCode.get('3200') ?? null,
     receivableAccountId: invoiceSettingsRows[0]?.receivable_account_id ?? idByCode.get('1120') ?? null,
     payableAccountId: settingsRows[0]?.payable_account_id ?? idByCode.get('2100') ?? null,
+    inventoryAccountIds,
   };
 }
 
@@ -108,6 +114,11 @@ export async function validateRows(
       if (refused.payableAccountId !== null && account.id === refused.payableAccountId) {
         errors.push(
           'the payable control account is built from bills — migrate open items through /bills, not here',
+        );
+      }
+      if (refused.inventoryAccountIds.has(account.id)) {
+        errors.push(
+          `account ${row.accountCode} is an inventory control account — enter opening stock as an Inventory receipt (purpose: opening stock), not here`,
         );
       }
     }

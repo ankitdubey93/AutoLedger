@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import InventoryMovementsPage from '../Pages/inventory/InventoryMovementsPage';
-import type { StockItem, StockLocation, StockLot } from '../services/fetchServices';
+import type { Account, StockItem, StockLocation, StockLot } from '../services/fetchServices';
 
 /**
  * Inventory (Phase 28) — the movement entry form. Renders under
@@ -68,17 +68,34 @@ const lots: StockLot[] = [
   { id: 'lot-1', itemId: 'item-3', lotNumber: 'L1', manufacturedOn: null, expiresOn: '2027-03-01', onHandQuantityMilli: 1000, createdAt: new Date().toISOString() },
 ];
 
+const expenseAccount: Account = {
+  id: 'acc-6100',
+  code: '6100',
+  name: 'Office Expenses',
+  type: 'Expense',
+  parentId: null,
+  isPostable: true,
+  isActive: true,
+  description: null,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 let receiptBody: Record<string, unknown> | null;
+let issueBody: Record<string, unknown> | null;
 let issueStatus: number;
 let issueError: string;
 let searchResults: StockItem[];
+let accountResults: Account[];
 
 beforeEach(() => {
   receiptBody = null;
+  issueBody = null;
   issueStatus = 201;
   issueError = '';
   searchResults = [quantityItem];
+  accountResults = [];
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
 });
@@ -91,6 +108,7 @@ function mockRoutes() {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, sessionFor('OWNER')));
+    if (url.includes('/api/v1/accounts')) return Promise.resolve(jsonResponse(200, { success: true, count: accountResults.length, accounts: accountResults }));
     if (url.includes('/api/v1/inventory/locations')) return Promise.resolve(jsonResponse(200, { success: true, count: locations.length, locations }));
     if (url.includes('/api/v1/inventory/items?q=')) return Promise.resolve(jsonResponse(200, { success: true, count: searchResults.length, totalCount: searchResults.length, currentPage: 1, totalPages: 1, items: searchResults }));
     if (url.includes('/item-3/lots')) return Promise.resolve(jsonResponse(200, { success: true, count: lots.length, lots }));
@@ -100,6 +118,7 @@ function mockRoutes() {
       return Promise.resolve(jsonResponse(201, { success: true, movementGroupId: 'grp-1', movements: [{ id: 'mv-1' }] }));
     }
     if (url.includes('/api/v1/inventory/issues')) {
+      issueBody = init?.body !== undefined ? (JSON.parse(init.body as string) as Record<string, unknown>) : null;
       if (issueStatus !== 201) {
         return Promise.resolve(jsonResponse(issueStatus, { success: false, error: issueError }));
       }
@@ -194,6 +213,79 @@ describe('InventoryMovementsPage', () => {
     const serials = line.serials as { serialNumber: string }[];
     expect(serials).toHaveLength(2);
     expect(serials.map((s) => s.serialNumber)).toEqual(['SN1', 'SN2']);
+  });
+
+  it('a receipt with "Found in a count" chosen posts purpose ADJUSTMENT', async () => {
+    searchResults = [quantityItem];
+    mockRoutes();
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.selectOptions(await screen.findByLabelText('Location'), 'loc-main');
+    await user.click(screen.getByRole('radio', { name: 'Found in a count' }));
+    await selectFirstLineItem(user);
+
+    await user.type(screen.getByLabelText('Quantity'), '2.5');
+    await user.type(screen.getByLabelText('Unit cost'), '19.99');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(receiptBody).not.toBeNull());
+    expect(receiptBody?.purpose).toBe('ADJUSTMENT');
+  });
+
+  it('a receipt defaults to purpose OPENING without touching the radio group', async () => {
+    searchResults = [quantityItem];
+    mockRoutes();
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.selectOptions(await screen.findByLabelText('Location'), 'loc-main');
+    await selectFirstLineItem(user);
+
+    await user.type(screen.getByLabelText('Quantity'), '2.5');
+    await user.type(screen.getByLabelText('Unit cost'), '19.99');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(receiptBody).not.toBeNull());
+    expect(receiptBody?.purpose).toBe('OPENING');
+  });
+
+  it('an issue with an expense account chosen posts expenseAccountId', async () => {
+    searchResults = [quantityItem];
+    accountResults = [expenseAccount];
+    mockRoutes();
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('tab', { name: 'Receive' });
+    await user.click(screen.getByRole('tab', { name: 'Issue' }));
+    await user.selectOptions(await screen.findByLabelText('Location'), 'loc-main');
+    await selectFirstLineItem(user);
+    await user.type(screen.getByLabelText('Quantity'), '1');
+
+    await user.selectOptions(await screen.findByLabelText('Expense account'), 'acc-6100');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(issueBody).not.toBeNull());
+    expect(issueBody?.expenseAccountId).toBe('acc-6100');
+  });
+
+  it('an issue with no expense account chosen posts expenseAccountId null', async () => {
+    searchResults = [quantityItem];
+    accountResults = [expenseAccount];
+    mockRoutes();
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByRole('tab', { name: 'Receive' });
+    await user.click(screen.getByRole('tab', { name: 'Issue' }));
+    await user.selectOptions(await screen.findByLabelText('Location'), 'loc-main');
+    await selectFirstLineItem(user);
+    await user.type(screen.getByLabelText('Quantity'), '1');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(issueBody).not.toBeNull());
+    expect(issueBody?.expenseAccountId).toBeNull();
   });
 
   it('shows the 409 insufficient-stock message verbatim', async () => {

@@ -55,14 +55,18 @@ export async function resolveGlAccountsOnClient(
 /**
  * Posts ONE journal entry for a manual movement group.
  *
- *   RECEIPT                 Dr Inventory   / Cr Opening-stock equity (3400)
- *   ISSUE, ADJUSTMENT_OUT   Dr Adjustments / Cr Inventory
- *   ADJUSTMENT_IN           Dr Inventory   / Cr Adjustments
- *   TRANSFER_*              nothing — the inventory account belongs to the item, not the location
+ *   RECEIPT (purpose OPENING)      Dr Inventory   / Cr Opening-stock equity (3400)
+ *   RECEIPT (purpose ADJUSTMENT)   Dr Inventory   / Cr Adjustments (5400) — "found in a count"
+ *   ISSUE                          Dr expenseAccountId ?? Adjustments / Cr Inventory
+ *   ADJUSTMENT_OUT                 Dr Adjustments / Cr Inventory
+ *   ADJUSTMENT_IN                  Dr Inventory   / Cr Adjustments
+ *   TRANSFER_*                     nothing — the inventory account belongs to the item, not the location
  *
  * For a linked item a purchase should go through a bill; a manual receipt is
- * treated as opening stock. Returns the journal entry id, or null when nothing
- * needed posting (unlinked items, transfers, zero-value movements).
+ * opening stock or a count gain (Phase 35a's `purpose`), and a manual issue
+ * charges the inventory-adjustments account by default or a chosen expense
+ * account ("stock consumed"). Returns the journal entry id, or null when
+ * nothing needed posting (unlinked items, transfers, zero-value movements).
  */
 export async function postManualMovementsOnClient(
   client: PoolClient,
@@ -72,6 +76,7 @@ export async function postManualMovementsOnClient(
   movements: StockMovement[],
   occurredOn: string,
   description: string,
+  counter: { receiptPurpose: 'OPENING' | 'ADJUSTMENT'; issueExpenseAccountId: string | null },
 ): Promise<string | null> {
   const posting = movements.filter(
     (m) =>
@@ -85,6 +90,12 @@ export async function postManualMovementsOnClient(
   if (posting.length === 0) return null;
 
   const defaults = await resolveInventoryPostingAccountsOnClient(client, orgId);
+  const adjustmentAccountIdOrThrow = (): string => {
+    if (defaults.adjustmentAccountId === null) {
+      throw new ApiError(422, 'No inventory-adjustment account is configured. Set one in settings.');
+    }
+    return defaults.adjustmentAccountId;
+  };
 
   // Net signed amount per account (debit positive). Every movement adds +v to
   // its inventory account and -v to its counter account, so the entry balances
@@ -96,16 +107,23 @@ export async function postManualMovementsOnClient(
   for (const m of posting) {
     const inventoryAccountId = m.glAccountId;
     if (inventoryAccountId === null) continue;
-    let counter: string | null;
+    let counterAccountId: string;
     if (m.movementType === 'RECEIPT') {
-      counter = defaults.openingAccountId;
-      if (counter === null) throw new ApiError(422, 'No opening-stock equity account is configured. Set one in settings.');
+      if (counter.receiptPurpose === 'OPENING') {
+        if (defaults.openingAccountId === null) {
+          throw new ApiError(422, 'No opening-stock equity account is configured. Set one in settings.');
+        }
+        counterAccountId = defaults.openingAccountId;
+      } else {
+        counterAccountId = adjustmentAccountIdOrThrow();
+      }
+    } else if (m.movementType === 'ISSUE') {
+      counterAccountId = counter.issueExpenseAccountId ?? adjustmentAccountIdOrThrow();
     } else {
-      counter = defaults.adjustmentAccountId;
-      if (counter === null) throw new ApiError(422, 'No inventory-adjustment account is configured. Set one in settings.');
+      counterAccountId = adjustmentAccountIdOrThrow();
     }
     add(inventoryAccountId, m.valueCents);
-    add(counter, -m.valueCents);
+    add(counterAccountId, -m.valueCents);
   }
 
   const lines: JournalLineInput[] = [];

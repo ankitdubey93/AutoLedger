@@ -30,6 +30,6 @@ export const onboard: RequestHandler = async (req, res) => {
 export const update: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateSettingsSchema, req.body);
-  const settings = await settingsService.updateSettings(user.orgId, input);
+  const settings = await settingsService.updateSettings(user.orgId, user.id, input);
   res.json({ success: true, settings });
 };

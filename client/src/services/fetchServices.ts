@@ -526,6 +526,11 @@ export interface LedgerSettings {
   realizedFxGainAccountId: string | null;
   realizedFxLossAccountId: string | null;
   unrealizedFxAccountId: string | null;
+  /** Phase 35a. `null` falls back to chart codes 1140/5050/5400/3400. */
+  inventoryAccountId: string | null;
+  cogsAccountId: string | null;
+  inventoryAdjustmentAccountId: string | null;
+  stockOpeningAccountId: string | null;
 }
 
 /** Mirrors server/src/services/accounting/settingsService.ts's OnboardingInput. */
@@ -550,6 +555,10 @@ export type LedgerSettingsPatch = Partial<OnboardingInput> & {
   realizedFxGainAccountId?: string | null;
   realizedFxLossAccountId?: string | null;
   unrealizedFxAccountId?: string | null;
+  inventoryAccountId?: string | null;
+  cogsAccountId?: string | null;
+  inventoryAdjustmentAccountId?: string | null;
+  stockOpeningAccountId?: string | null;
 };
 
 /** GET /settings — a missing settings row means "not yet onboarded", not a 404. */
@@ -3878,6 +3887,8 @@ export const STOCK_MOVEMENT_TYPES = [
   'ADJUSTMENT_OUT',
   'RECEIPT_REVERSAL',
   'ISSUE_REVERSAL',
+  'RECLASS_OUT', // Phase 35a: value-only pair (qty 0) moving an item's value between GL accounts.
+  'RECLASS_IN',
 ] as const;
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 
@@ -4048,6 +4059,58 @@ export interface StockSummary {
   lowStockItemCount: number;
   expiringLotCount: number;
   locationCount: number;
+  linkedValueCents: number;
+  unlinkedValueCents: number;
+  unlinkedItemCount: number;
+}
+/** Phase 35a — GET /inventory/valuation. Differences are GL minus stock subledger, base cents. */
+export interface InventoryValuationLine {
+  journalEntryId: string;
+  entryDate: string;
+  description: string | null;
+  sourceType: string;
+  netDebitCents: number;
+}
+export interface InventoryValuationAccount {
+  accountId: string;
+  code: string;
+  name: string;
+  subledgerCents: number;
+  glCents: number;
+  differenceCents: number;
+  unexplainedLines: InventoryValuationLine[];
+}
+export interface InventoryMisplacedValue {
+  stockItemId: string;
+  itemCode: string;
+  itemName: string;
+  accountId: string;
+  currentAccountId: string;
+  valueCents: number;
+}
+export interface InventoryValuation {
+  asOf: string | null;
+  accounts: InventoryValuationAccount[];
+  totalSubledgerCents: number;
+  totalGlCents: number;
+  totalDifferenceCents: number;
+  misplaced: InventoryMisplacedValue[];
+  unlinkedItemCount: number;
+  unlinkedValueCents: number;
+  tiesOut: boolean;
+}
+export interface InventoryTrueUp {
+  id: string;
+  accountId: string;
+  glBeforeCents: number;
+  subledgerCents: number;
+  differenceCents: number;
+  journalEntryId: string;
+  occurredOn: string;
+}
+export interface LinkAllResult {
+  linkedCount: number;
+  failures: { stockItemId: string; code: string; message: string }[];
 }
 export interface StockLabel {
   kind: StockLabelKind;
@@ -4425,6 +4488,7 @@ export function postStockReceipt(input: {
   reference: string | null;
   locationId: string;
   lines: StockReceiptLineInput[];
+  purpose?: 'OPENING' | 'ADJUSTMENT';
 }): Promise<{ success: boolean } & StockMovementResult> {
   return apiFetch('/inventory/receipts', { method: 'POST', body: JSON.stringify(input) });
 }
@@ -4435,6 +4499,7 @@ export function postStockIssue(input: {
   reference: string | null;
   locationId: string;
   lines: StockOutboundLineInput[];
+  expenseAccountId?: string | null;
 }): Promise<{ success: boolean } & StockMovementResult> {
   return apiFetch('/inventory/issues', { method: 'POST', body: JSON.stringify(input) });
 }
@@ -4528,6 +4593,25 @@ export function fetchStockItemSerials(
 /** GET /inventory/summary */
 export function fetchStockSummary(signal?: AbortSignal): Promise<{ success: boolean; summary: StockSummary }> {
   return apiFetch('/inventory/summary', { signal: signal ?? null });
+}
+
+export function fetchInventoryValuation(asOf?: string, signal?: AbortSignal): Promise<{ success: boolean; valuation: InventoryValuation }> {
+  const query = new URLSearchParams();
+  if (asOf !== undefined) query.set('asOf', asOf);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/inventory/valuation${suffix}`, { signal: signal ?? null });
+}
+
+export function postInventoryTrueUp(input: { accountId: string; expectedDifferenceCents: number }): Promise<{ success: boolean; trueUp: InventoryTrueUp }> {
+  return apiFetch('/inventory/reconcile/true-up', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function postInventoryReclass(): Promise<{ success: boolean; postingCount: number }> {
+  return apiFetch('/inventory/reconcile/reclass', { method: 'POST', body: JSON.stringify({}) });
+}
+
+export function postLinkAllStockItems(): Promise<{ success: boolean; result: LinkAllResult }> {
+  return apiFetch('/inventory/items/link-all', { method: 'POST', body: JSON.stringify({}) });
 }
 
 /** POST /inventory/serials/:id/status */

@@ -9,10 +9,12 @@ import {
   fetchStockItemSerials,
   fetchStockItems,
   fetchStockLocations,
+  listAccounts,
   postStockAdjustment,
   postStockIssue,
   postStockReceipt,
   postStockTransfer,
+  type Account,
   type StockAttributeDefinition,
   type StockItem,
   type StockLocation,
@@ -94,15 +96,21 @@ export default function InventoryMovementsPage() {
   const [fromLocationId, setFromLocationId] = useState('');
   const [toLocationId, setToLocationId] = useState('');
   const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [lines, setLines] = useState<LineState[]>([emptyLine()]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ movementGroupId: string; count: number } | null>(null);
+  const [receiptPurpose, setReceiptPurpose] = useState<'OPENING' | 'ADJUSTMENT'>('OPENING');
+  const [expenseAccountId, setExpenseAccountId] = useState('');
 
   useEffect(() => {
     fetchStockLocations()
       .then((res) => setLocations(res.locations))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load locations'));
+    listAccounts()
+      .then((res) => setAccounts(res.accounts))
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load accounts'));
   }, []);
 
   const activeLocations = locations.filter((l) => l.isActive);
@@ -233,7 +241,7 @@ export default function InventoryMovementsPage() {
               serials: null,
             };
           });
-        const res = await postStockReceipt({ occurredOn, reference: reference === '' ? null : reference, locationId, lines: receiptLines });
+        const res = await postStockReceipt({ occurredOn, reference: reference === '' ? null : reference, locationId, lines: receiptLines, purpose: receiptPurpose });
         setResult({ movementGroupId: res.movementGroupId, count: res.movements.length });
       } else if (tab === 'ISSUE' || tab === 'TRANSFER') {
         const outboundLines = lines
@@ -249,7 +257,7 @@ export default function InventoryMovementsPage() {
             };
           });
         if (tab === 'ISSUE') {
-          const res = await postStockIssue({ occurredOn, reference: reference === '' ? null : reference, locationId, lines: outboundLines });
+          const res = await postStockIssue({ occurredOn, reference: reference === '' ? null : reference, locationId, lines: outboundLines, expenseAccountId: expenseAccountId === '' ? null : expenseAccountId });
           setResult({ movementGroupId: res.movementGroupId, count: res.movements.length });
         } else {
           const res = await postStockTransfer({
@@ -293,9 +301,9 @@ export default function InventoryMovementsPage() {
     <div className="space-y-6">
       <h1 className="text-lg font-semibold text-[var(--text)]">Movements</h1>
       <p className="text-sm text-[var(--muted)]">
-        Movements of items linked to Products &amp; Services also post a journal entry to your ledger: a receipt is
-        treated as opening stock, an issue or adjustment goes to inventory adjustments, and a transfer posts nothing.
-        To record a purchase, approve a bill instead; to record a sale, issue an invoice.
+        Movements of items linked to Products &amp; Services also post to your ledger. Receipts post as opening stock
+        or a count gain; issues go to inventory adjustments or the expense account you choose; transfers post nothing.
+        To record a purchase, approve a bill; to record a sale, issue an invoice.
       </p>
 
       {error !== null ? (
@@ -390,6 +398,60 @@ export default function InventoryMovementsPage() {
           </label>
         )}
       </div>
+
+      {tab === 'RECEIVE' ? (
+        <div className="flex flex-wrap gap-6">
+          <fieldset className="text-sm">
+            <legend className="text-[var(--text)] font-medium mb-2">Why is this stock arriving?</legend>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-[var(--text)]">
+                <input
+                  type="radio"
+                  name="receipt-purpose"
+                  value="OPENING"
+                  checked={receiptPurpose === 'OPENING'}
+                  onChange={(e) => setReceiptPurpose(e.target.value as 'OPENING' | 'ADJUSTMENT')}
+                />
+                Opening stock
+              </label>
+              <label className="flex items-center gap-2 text-[var(--text)]">
+                <input
+                  type="radio"
+                  name="receipt-purpose"
+                  value="ADJUSTMENT"
+                  checked={receiptPurpose === 'ADJUSTMENT'}
+                  onChange={(e) => setReceiptPurpose(e.target.value as 'OPENING' | 'ADJUSTMENT')}
+                />
+                Found in a count
+              </label>
+            </div>
+          </fieldset>
+        </div>
+      ) : null}
+
+      {tab === 'ISSUE' ? (
+        <div className="flex flex-wrap gap-3 items-end">
+          <label className="text-sm text-[var(--text)]">
+            Charge to expense account
+            <select
+              aria-label="Expense account"
+              value={expenseAccountId}
+              onChange={(e) => setExpenseAccountId(e.target.value)}
+              className={`${inputClass} block mt-1`}
+            >
+              <option value="">Inventory adjustments (default)</option>
+              {accounts
+                .filter((account) => account.isPostable && account.isActive && account.type === 'Expense')
+                .sort((a, b) => a.code.localeCompare(b.code))
+                .map((account) => (
+                  <option key={account.id} value={account.id}>
+                    {account.code} {account.name}
+                  </option>
+                ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
 
       <div className="space-y-4">
         {lines.map((line) => (

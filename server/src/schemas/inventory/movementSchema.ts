@@ -34,6 +34,8 @@ export const receiptSchema = z.object({
   reference: z.string().trim().max(100).nullable().default(null),
   locationId: z.uuid(),
   lines: z.array(receiptLineSchema).min(1).max(200),
+  // Phase 35a — which counter account a manual receipt posts against.
+  purpose: z.enum(['OPENING', 'ADJUSTMENT']).default('OPENING'),
 });
 
 const outboundLineSchema = z.object({
@@ -48,6 +50,9 @@ export const issueSchema = z.object({
   reference: z.string().trim().max(100).nullable().default(null),
   locationId: z.uuid(),
   lines: z.array(outboundLineSchema).min(1).max(200),
+  // Phase 35a — an expense account to charge stock consumption to, instead
+  // of the default inventory-adjustments account.
+  expenseAccountId: z.uuid().nullable().default(null),
 });
 
 export const transferSchema = z.object({

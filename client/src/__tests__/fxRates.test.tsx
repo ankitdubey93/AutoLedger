@@ -28,6 +28,10 @@ const ledgerSettings = {
   realizedFxGainAccountId: null,
   realizedFxLossAccountId: null,
   unrealizedFxAccountId: null,
+  inventoryAccountId: null,
+  cogsAccountId: null,
+  inventoryAdjustmentAccountId: null,
+  stockOpeningAccountId: null,
 };
 
 const rate1: FxRate = {

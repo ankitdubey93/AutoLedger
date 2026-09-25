@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -7,7 +8,10 @@ import { getActiveDefinitions } from './catalogueService.js';
 import { nextCodeOnClient } from './codeSchemeService.js';
 import * as ledgerItemService from '../accounting/itemService.js';
 import { postLinkOpeningOnClient } from './stockGlService.js';
+import { lockBalances, reclassOnClient } from './movementService.js';
+import { MODULE_TAGS } from '../../config/modules.js';
 import type {
+  LinkAllResult,
   StockAttributeDefinition,
   StockAttributes,
   StockItem,
@@ -459,28 +463,90 @@ export async function linkProduct(
       ledgerItem.id,
     ]);
 
-    const { rows: valueRows } = await client.query<{ v: string }>(
-      'SELECT COALESCE(SUM(value_cents), 0) AS v FROM stock_balances WHERE org_id = $1 AND item_id = $2',
+    // Phase 35a: lock every balance of the item so the opening journal and the
+    // RECLASS pair below agree on the same locked on-hand value.
+    const { rows: balanceRows } = await client.query<{ location_id: string; lot_id: string | null }>(
+      'SELECT location_id, lot_id FROM stock_balances WHERE org_id = $1 AND item_id = $2',
       [orgId, id],
     );
-    const onHandValueCents = Number(valueRows[0]?.v ?? '0');
+    const balances = await lockBalances(
+      client,
+      orgId,
+      balanceRows.map((r) => ({ itemId: id, locationId: r.location_id, lotId: r.lot_id })),
+    );
+    let onHandValueCents = 0;
+    let anchor: { locationId: string; lotId: string | null } | undefined;
+    for (const [key, bal] of balances) {
+      onHandValueCents += bal.valueCents;
+      if (anchor === undefined) {
+        const parts = key.split('|');
+        const locationId = parts[1];
+        const lot = parts[2];
+        if (locationId !== undefined) anchor = { locationId, lotId: lot === undefined || lot === '' ? null : lot };
+      }
+    }
+
     if (onHandValueCents > 0) {
       const accounts = await ledgerItemService.resolveStockAccountsOnClient(client, orgId, [ledgerItem.id]);
       const inventoryAccountId = accounts.get(ledgerItem.id)?.assetAccountId;
       if (inventoryAccountId === undefined) throw new Error('linked product did not resolve inventory accounts');
-      await postLinkOpeningOnClient(
+      if (anchor === undefined) throw new Error('item has on-hand value but no balance row');
+      const today = new Date().toISOString().slice(0, 10);
+      await postLinkOpeningOnClient(client, orgId, userId, id, inventoryAccountId, onHandValueCents, today, item.code);
+      // Phase 35a: the stock ledger already carried this value with no GL
+      // account (gl_account_id NULL) — the RECLASS pair below is what makes
+      // Σ movements on the inventory account agree with the opening journal.
+      await reclassOnClient(
         client,
         orgId,
         userId,
-        id,
-        inventoryAccountId,
-        onHandValueCents,
-        new Date().toISOString().slice(0, 10),
-        item.code,
+        randomUUID(),
+        [
+          {
+            itemId: id,
+            locationId: anchor.locationId,
+            lotId: anchor.lotId,
+            fromAccountId: null,
+            toAccountId: inventoryAccountId,
+            valueCents: onHandValueCents,
+          },
+        ],
+        today,
+        'Link to general ledger',
+        { type: MODULE_TAGS.inventory, id },
       );
     }
   });
 
   const { item } = await getItem(orgId, id);
   return item;
+}
+
+/**
+ * Phase 35a — links every unlinked stock item to a new Products & Services
+ * entry, oldest code first. Each link runs in its own transaction (via
+ * `linkProduct`), so a code collision on one item does not roll back the
+ * rest — its failure is recorded and the loop continues.
+ */
+export async function linkAllProducts(orgId: string, userId: string): Promise<LinkAllResult> {
+  const { rows } = await pool.query<{ id: string; code: string }>(
+    'SELECT id, code FROM stock_items WHERE org_id = $1 AND ledger_item_id IS NULL ORDER BY code',
+    [orgId],
+  );
+
+  let linkedCount = 0;
+  const failures: LinkAllResult['failures'] = [];
+  for (const row of rows) {
+    try {
+      await linkProduct(orgId, userId, row.id, EMPTY_PRODUCT);
+      linkedCount += 1;
+    } catch (err) {
+      if (err instanceof ApiError) {
+        failures.push({ stockItemId: row.id, code: row.code, message: err.message });
+        continue;
+      }
+      throw err;
+    }
+  }
+  return { linkedCount, failures };
 }

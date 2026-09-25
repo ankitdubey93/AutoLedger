@@ -35,6 +35,11 @@ export const updateSettingsSchema = z
     realizedFxGainAccountId: z.uuid().nullable().optional(),
     realizedFxLossAccountId: z.uuid().nullable().optional(),
     unrealizedFxAccountId: z.uuid().nullable().optional(),
+    // Phase 35a — the four inventory posting accounts.
+    inventoryAccountId: z.uuid().nullable().optional(),
+    cogsAccountId: z.uuid().nullable().optional(),
+    inventoryAdjustmentAccountId: z.uuid().nullable().optional(),
+    stockOpeningAccountId: z.uuid().nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'No fields to update',

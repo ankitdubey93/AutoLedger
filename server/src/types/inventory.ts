@@ -61,6 +61,8 @@ export const STOCK_MOVEMENT_TYPES = [
   'RECEIPT', 'ISSUE', 'TRANSFER_OUT', 'TRANSFER_IN', 'ADJUSTMENT_IN', 'ADJUSTMENT_OUT',
   // Phase 32: a void of a document-sourced movement is a NEW row that points at the one it undoes.
   'RECEIPT_REVERSAL', 'ISSUE_REVERSAL',
+  // Phase 35a: value-only pair (qty 0) moving an item's value between GL accounts.
+  'RECLASS_OUT', 'RECLASS_IN',
 ] as const;
 export type StockMovementType = (typeof STOCK_MOVEMENT_TYPES)[number];
 export const STOCK_INBOUND_MOVEMENT_TYPES = ['RECEIPT', 'TRANSFER_IN', 'ADJUSTMENT_IN'] as const;
@@ -273,6 +275,9 @@ export interface StockSummary {
   lowStockItemCount: number;
   expiringLotCount: number;
   locationCount: number;
+  linkedValueCents: number;
+  unlinkedValueCents: number;
+  unlinkedItemCount: number;
 }
 export interface StockLabel {
   kind: StockLabelKind;
@@ -290,4 +295,54 @@ export interface StockLookupMatch {
   itemId: string | null;
   code: string;
   title: string;
+}
+
+/** Phase 35a — GET /inventory/valuation. Differences are GL minus stock subledger, base cents. */
+export interface InventoryValuationLine {
+  journalEntryId: string;
+  entryDate: string;
+  description: string | null;
+  sourceType: string;
+  netDebitCents: number;
+}
+export interface InventoryValuationAccount {
+  accountId: string;
+  code: string;
+  name: string;
+  subledgerCents: number;
+  glCents: number;
+  differenceCents: number;
+  unexplainedLines: InventoryValuationLine[];
+}
+export interface InventoryMisplacedValue {
+  stockItemId: string;
+  itemCode: string;
+  itemName: string;
+  accountId: string;
+  currentAccountId: string;
+  valueCents: number;
+}
+export interface InventoryValuation {
+  asOf: string | null;
+  accounts: InventoryValuationAccount[];
+  totalSubledgerCents: number;
+  totalGlCents: number;
+  totalDifferenceCents: number;
+  misplaced: InventoryMisplacedValue[];
+  unlinkedItemCount: number;
+  unlinkedValueCents: number;
+  tiesOut: boolean;
+}
+export interface InventoryTrueUp {
+  id: string;
+  accountId: string;
+  glBeforeCents: number;
+  subledgerCents: number;
+  differenceCents: number;
+  journalEntryId: string;
+  occurredOn: string;
+}
+export interface LinkAllResult {
+  linkedCount: number;
+  failures: { stockItemId: string; code: string; message: string }[];
 }

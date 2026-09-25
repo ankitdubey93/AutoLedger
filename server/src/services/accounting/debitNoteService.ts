@@ -7,6 +7,7 @@ import { convertToBase } from '../../utils/fxRate.js';
 import * as journalService from './journalService.js';
 import * as billService from './billService.js';
 import { resolveApPostingAccountsOnClient } from './settingsService.js';
+import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { settledCentsOnClient } from './settlementSql.js';
 import {
@@ -523,6 +524,20 @@ async function insertLines(
   );
 }
 
+/** Phase 35a: a debit note credits `expense_account_id` — never an inventory control account (Core model §2). */
+async function assertNoInventoryControlLines(client: PoolClient, orgId: string, totals: LineTotal[]): Promise<void> {
+  const inventoryIds = await resolveInventoryControlAccountIdsOnClient(client, orgId);
+  if (inventoryIds.size === 0) return;
+  totals.forEach((t, i) => {
+    if (inventoryIds.has(t.input.expenseAccountId)) {
+      throw new ApiError(
+        422,
+        `Line ${String(i + 1)} credits an inventory account — returning stock to a vendor is not supported yet; use an expense account`,
+      );
+    }
+  });
+}
+
 function mapWriteError(err: unknown): unknown {
   if (err instanceof ApiError) return err;
   if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
@@ -553,6 +568,7 @@ export async function createDebitNote(
       orgId,
       totals.map((t) => t.input.expenseAccountId),
     );
+    await assertNoInventoryControlLines(client, orgId, totals);
     await assertWithinCaps(client, orgId, bill, totalCents, null);
 
     const fxRate = bill.fx_rate;
@@ -638,6 +654,7 @@ export async function updateDebitNote(
       orgId,
       totals.map((t) => t.input.expenseAccountId),
     );
+    await assertNoInventoryControlLines(client, orgId, totals);
     await assertWithinCaps(client, orgId, bill, totalCents, id);
 
     const baseSubtotalCents = convertToBase(cents(subtotalCents), bill.fx_rate);

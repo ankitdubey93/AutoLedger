@@ -224,6 +224,11 @@ export interface LedgerSettings {
   realizedFxGainAccountId: string | null;
   realizedFxLossAccountId: string | null;
   unrealizedFxAccountId: string | null;
+  /** Phase 35a. `null` falls back to chart codes 1140/5050/5400/3400. */
+  inventoryAccountId: string | null;
+  cogsAccountId: string | null;
+  inventoryAdjustmentAccountId: string | null;
+  stockOpeningAccountId: string | null;
 }
 
 /* ---------------------------------------------------------- Phase 3.5 — dashboard */

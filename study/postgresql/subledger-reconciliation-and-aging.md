@@ -3,7 +3,7 @@
 > An AR/AP aging report buckets open documents by how far past due they are, and its grand total must equal the GL control account's own balance — two independently derived numbers that are supposed to agree by construction, and checking that they actually do is the report's real job.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below. Phase 25 adds per-party accounts (a customer's/vendor's own ledger) and the rule that journals may not post to a control account
+**Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below. Phase 25 adds per-party accounts (a customer's/vendor's own ledger) and the rule that journals may not post to a control account. Phase 35a adds a **third** control account, inventory — with a different subledger shape (a computed set of accounts, not one fixed pair; a movement ledger, not documents) and a different corrective action (a journal true-up, not a document)
 **Verified against:** PostgreSQL 16
 
 ---
@@ -154,6 +154,17 @@ Three decisions are in there:
 
 The *applied* part of a note is handled on the document side instead: each invoice's outstanding subtracts `settledCentsSubquery` (payments **and** ISSUED note allocations). Every note amount is therefore counted exactly once: applied, it reduces its invoice; unapplied, it appears as its own negative item.
 
+### A third control account with a different subledger shape (Phase 35a)
+
+AR and AP's control accounts are each a single, fixed pair per organization (the configured receivable account, or `1120`/`2100` as fallback) and their subledger is a set of **documents** (invoices, bills). Inventory's control accounts are neither of those things, and the reconciliation had to change shape to fit:
+
+- **The set of control accounts is computed, not fixed.** An account qualifies by being *used* — some `INVENTORY` product's own `asset_account_id`, plus (only if some product has no override) the resolved default. Link a product to a new asset account and that account joins the set on its next computation; it was never configured as "the" inventory account the way `1120` is configured as "the" receivable account. `resolveInventoryControlAccountIdsOnClient` recomputes this set from `items` on every check and every guard call — there's no cached list to go stale.
+- **The subledger is a movement ledger, not a set of documents.** AR's subledger-side number comes from summing `invoices.total - allocated` across open documents. Inventory's subledger-side number comes from summing `stock_movements.value_cents` grouped by `gl_account_id` — an append-only event log, not a snapshot of open items. There is no "open" or "closed" state to filter on; every movement ever posted to the account counts, forever (or up to `asOf`, if given).
+- **The corrective action differs by what's structurally impossible.** AR/AP can't have a manual `write-off` journal invented on the spot without it becoming a document (Phase 26's credit/debit notes are the sanctioned way to adjust AR/AP through a document). Inventory's correction, `POST /reconcile/true-up`, is deliberately the opposite: it is *always* a bare journal, never a movement — because the movement ledger is the trusted, append-only side here, symmetric with how AR/AP trusts the *document* side and reconciles the GL against it. Put another way: for AR/AP the subledger-of-record is documents and control-account drift gets fixed by posting the right kind of document; for inventory the subledger-of-record is the movement ledger and drift gets fixed by adjusting the GL to match it. Same shape (reconcile two independently-derived sums, refuse direct posting to the account, provide one sanctioned corrective path), different question of which side is allowed to be corrected.
+- **The guard extends the same function, not a parallel one.** `journalService.assertNotControlAccountsOnClient` already knew AR/AP; Phase 35a adds one more check inside it (`resolveInventoryControlAccountIdsOnClient`) rather than writing a second, inventory-specific guard function — every call site (`createEntry`, `bankMatchService`, `bankRuleService`, `recurringService`) picked up the inventory rule automatically, for free, the moment the shared function grew a new branch.
+
+This is a useful interview story about generalizing an existing pattern to a case that doesn't quite fit the original shape: the *invariant* (Σ subledger = Σ control-account GL balance, integer equality, refuse direct posting, one sanctioned corrective path) survived the move to a computed account set and an event-log subledger; only the *mechanics* of each piece (how the account set is found, what counts as "the subledger," what a correction looks like) had to change.
+
 ---
 
 ## Why we chose it here
@@ -182,6 +193,10 @@ The *applied* part of a note is handled on the document side instead: each invoi
 - `server/src/services/accounting/journalService.ts` — `assertNotControlAccountsOnClient`, called from `createEntry` and `bankMatchService.postJournalForTransaction`, never from `createEntryOnClient`
 - `server/src/__tests__/accounting/partyLedger.test.ts` — `'per customer, ledger closing === open-items outstanding; their sum === ar-aging total === control balance'`; `controlAccountGuard.test.ts` — the 422s, the rollback, and that documents still post
 - `server/src/__tests__/accounting/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
+- `server/src/services/accounting/itemService.ts` (Phase 35a) — `resolveInventoryControlAccountIdsOnClient` (the computed account set)
+- `server/src/services/inventory/valuationService.ts` (Phase 35a) — `getValuation` (the reconciliation report), `trueUp` (the sanctioned corrective journal)
+- `server/src/db/integrity.ts` (Phase 35a) — `inventory_accounts_reconcile_with_gl`, the 7th check, the movement-ledger-vs-GL version of this same "two independently derived sums" pattern
+- `server/src/__tests__/inventory/inventoryValuation.test.ts` (Phase 35a) — `'a legacy manual journal shows as an unexplained difference'`, `'true-up closes the difference'`
 
 ---
 
@@ -195,6 +210,8 @@ The *applied* part of a note is handled on the document side instead: each invoi
 - **Some control-account lines belong to no party — by design.** FX revaluation posts one aggregate AR line (reversed the next day), and legacy manual journals from before the guard exist. Neither appears in any customer's ledger; `reconciles` is what surfaces them.
 - **Guard the manual path, not the shared posting primitive.** Putting the control-account check inside `createEntryOnClient` would have broken invoice issue, payments and FX revaluation, which are *supposed* to post there. The rule is about *who* posts, so it lives at the entry points humans use.
 - **The sign convention has to match the account type, not be hardcoded.** AR sums `debit - credit` (Asset, debit-normal); AP sums `credit - debit` (Liability, credit-normal). Getting this backwards makes `reconciles` false for entirely correct data — a wrong-sign bug looks identical to a real reconciliation break until you check the account type.
+- **A newly-introduced control-account check can fail instantly on old data, and that's correct, not a bug in the check.** The moment `inventory_accounts_reconcile_with_gl` shipped, any organization with a pre-existing manual journal to what is now a computed control account (or a product remapped before the guard existed) started failing it — there was no way to introduce a *whole-account* check without surfacing whatever drift already existed. The fix is a true-up per account, not loosening the check.
+- **The computed account set means "is this a control account" can change answer between two calls in the same request if you're not careful about where you snapshot it.** Every guard call and the valuation report both recompute the set fresh rather than caching it, which is correct but means a test asserting "org B's manual journal to its own inventory account is unaffected by org A's products" is worth having explicitly — the set really is per-organization, not global, but it's *earned* by being recomputed from `org_id`-scoped data every time, not assumed.
 
 ---
 
@@ -239,6 +256,12 @@ A: Write-offs are a document problem — the right fix is a credit note that pos
 **Q: Your aging report filtered `outstanding > 0`. What broke when credit notes arrived, and how did you fix it?**
 A: A credit note against an already-paid invoice has nothing to apply to, so it sits on the customer's account as a credit balance. The GL control account reflected it immediately, but the aging report only listed documents with a positive balance, so the two independently-computed totals disagreed by exactly the note amount and `reconciles` would have gone false. The fix was to make the note an open item in its own right: the unapplied remainder of every issued note is `UNION ALL`-ed into the open-documents CTE as a negative amount in the CURRENT bucket, and the `> 0` filters became `<> 0`. That was safe for existing documents because the database already guarantees they can't be over-settled, so only notes are ever negative.
 
+**Q: You later added inventory as a third control account. What had to change versus just copying the AR/AP pattern?**
+A: Two structural things. First, AR/AP each have one configured account (or one hardcoded fallback); inventory's control-account set is *computed* — every `INVENTORY` product's own asset account, plus the org's default when some product doesn't override it — so the reconciliation has to recompute that set on every check rather than reading one config value. Second, AR/AP's subledger side sums *open documents* (invoices minus their allocations); inventory's subledger side sums an *append-only movement ledger* with no open/closed concept at all — every movement ever posted counts. Everything downstream of "compute two independent sums and assert integer equality" carried over unchanged, including reusing the exact same guard function (`assertNotControlAccountsOnClient`) with one more branch rather than writing a parallel one.
+
+**Q: For AR you fix drift with a credit note (a document); for inventory you fix it with a bare journal, no movement. Why the opposite?**
+A: Because the two subledgers trust different sides. AR/AP's subledger-of-record is the *documents* — an invoice is the fact, the GL posting is derived from it — so correcting AR drift means posting the right kind of document (a credit note), never inventing a bare journal that no document explains. Inventory's subledger-of-record is the *movement ledger* — it's append-only, and an integrity check independently proves the cached balance equals its sum, so it's the one side of this system that's provably reconstructible from source rows. When inventory's GL disagrees with its movements, the movements are essentially always right and the GL is the side that picked up an out-of-band posting, so the fix moves the GL to match the movements — a journal, never a manufactured movement. Same underlying rule (fix drift by restoring the side that's derivable to source, never by faking the source) applied to opposite sides depending on which one is actually the source in each case.
+
 ---
 
 ## Follow-ups they'll dig into
@@ -247,6 +270,7 @@ A: A credit note against an already-paid invoice has nothing to apply to, so it 
 - *"How would this scale to millions of open documents?"* The `open_docs` CTE re-runs the correlated `allocatedCentsSubquery` per document; at scale you'd want to confirm the planner is using `idx_allocations_invoice`/`idx_allocations_bill` (it should be, both exist) or consider a materialized rollup refreshed on a schedule.
 - *"What's the failure mode if reconciliation breaks in production?"* This report is the detection mechanism, not the fix — the fix is a targeted data investigation, possibly a corrective journal entry (never a raw `UPDATE` on an immutable posted row). Phase 5's `verify:integrity` script generalizes this same idea to the whole ledger, not just AR/AP.
 - *"Could you compute both sides in one query instead of two?"* Yes, with a lateral join or a CTE combining both aggregates — but keeping them as genuinely separate queries makes it obvious in the code (and to a reader of the diff) that they're independently derived, which is the property the whole check depends on for its meaning.
+- *"Would you add a fourth control account the same way?"* Yes, and it's the strongest evidence the pattern generalizes: whatever the next subledger is (payroll liabilities, say), the same three questions apply — what set of accounts counts as this control account, what append-only or document-derived source is its subledger, and which side is trustworthy enough to be the one the other gets corrected against.
 
 ---
 
@@ -255,3 +279,4 @@ A: A credit note against an already-paid invoice has nothing to apply to, so it 
 - [derived-vs-stored-state.md](../architecture/derived-vs-stored-state.md) — why settlement (`allocatedCents`) is computed, never stored, which is what this report's subledger side is built from
 - [aggregating-a-ledger.md](aggregating-a-ledger.md) — `FILTER` vs `CASE`, gap-filling with `generate_series`, and the no-summary-table rule this report also follows
 - [deferred-constraint-triggers.md](deferred-constraint-triggers.md) — why overallocation is structurally impossible, which is part of why this reconciliation is expected to hold
+- [../architecture/inventory-valuation-and-perpetual-stock.md](../architecture/inventory-valuation-and-perpetual-stock.md) — the movement ledger that is inventory's control-account subledger, and why its true-up moves the GL, never the movements

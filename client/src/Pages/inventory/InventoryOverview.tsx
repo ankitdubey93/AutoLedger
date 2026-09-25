@@ -1,16 +1,20 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Boxes, AlertTriangle, CalendarClock, ClipboardList, History, MapPin, Wallet } from 'lucide-react';
+import { Boxes, AlertTriangle, CalendarClock, ClipboardList, History, MapPin, Scale, Wallet } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { formatQuantityMilli } from '../../utils/quantity';
+import { formatCents } from '../../utils/money';
 import MetricTile from '../../components/ui/MetricTile';
+import StatTile from '../../components/ui/StatTile';
 import EmptyState from '../../components/ui/EmptyState';
 import { SkeletonCards } from '../../components/ui/Skeleton';
 import {
+  fetchInventoryValuation,
   fetchStockItems,
   fetchStockSettings,
   fetchStockMovements,
   fetchStockSummary,
+  type InventoryValuation,
   type StockItem,
   type StockMovement,
   type StockSummary,
@@ -35,6 +39,7 @@ export default function InventoryOverview() {
   const [summary, setSummary] = useState<StockSummary | null>(null);
   const [lowStockItems, setLowStockItems] = useState<StockItem[]>([]);
   const [recentMovements, setRecentMovements] = useState<StockMovement[]>([]);
+  const [valuation, setValuation] = useState<InventoryValuation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [configured, setConfigured] = useState<boolean | null>(null);
 
@@ -54,6 +59,13 @@ export default function InventoryOverview() {
         setSummary(summaryRes.summary);
         setLowStockItems(itemsRes.items);
         setRecentMovements(movementsRes.movements);
+        // Valuation is a secondary tile — its own request, so a failure there
+        // (e.g. a viewer without access) never blocks the rest of the page.
+        fetchInventoryValuation()
+          .then((valuationRes) => {
+            if (!ignore) setValuation(valuationRes.valuation);
+          })
+          .catch(() => undefined);
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load inventory');
@@ -127,6 +139,16 @@ export default function InventoryOverview() {
           to={null}
           hint={null}
         />
+
+        {valuation !== null && (
+          <StatTile
+            label="General ledger"
+            icon={Scale}
+            tone={valuation.tiesOut ? 'good' : 'bad'}
+            value={valuation.tiesOut ? 'Ties out' : `Differs by ${formatCents(valuation.totalDifferenceCents)} ${currency}`}
+            to="/inventory/valuation"
+          />
+        )}
 
         <StatTileCount
           label="Low stock"

@@ -70,6 +70,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
       { to: '/products', label: 'Products & services', icon: Package, end: false },
       { to: '/inventory/items', label: 'Stock on hand', icon: Boxes, end: false },
       { to: '/inventory/movements', label: 'Stock movements', icon: ArrowRightLeft, end: false },
+      { to: '/inventory/valuation', label: 'Valuation', icon: Scale, end: false },
       { to: '/inventory/locations', label: 'Locations', icon: MapPin, end: false },
       { to: '/inventory/labels', label: 'Labels', icon: Tags, end: false },
       { to: '/inventory/lookup', label: 'Lookup', icon: Search, end: false },

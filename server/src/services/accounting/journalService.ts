@@ -5,6 +5,7 @@ import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
 import { convertToBase, isCurrencyCode, ONE_RATE } from '../../utils/fxRate.js';
 import { assertPeriodOpenOnClient } from './fiscalPeriodService.js';
+import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import type { JournalEntry, LedgerLine } from '../../types/accounting.js';
 
 /**
@@ -394,6 +395,18 @@ export async function assertNotControlAccountsOnClient(
       422,
       `Account ${code} is the payable control account — post to it through a bill or a payment, not a journal entry`,
     );
+  }
+
+  // Phase 35a — inventory control accounts (Core model §2).
+  const inventoryIds = await resolveInventoryControlAccountIdsOnClient(client, orgId);
+  for (const accountId of accountIds) {
+    if (inventoryIds.has(accountId)) {
+      const code = await codeOf(accountId);
+      throw new ApiError(
+        422,
+        `Account ${code} is an inventory control account — its balance comes from stock movements. Record stock through bills, invoices or Inventory, or reconcile it under Inventory → Valuation`,
+      );
+    }
   }
 }
 

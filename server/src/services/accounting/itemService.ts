@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { resolveInventoryPostingAccountsOnClient } from './settingsService.js';
+import * as inventoryAccountingService from './inventoryAccountingService.js';
 import { ITEM_TYPES } from '../../types/accounting.js';
 import type { Item, ItemKind, ItemType } from '../../types/accounting.js';
 
@@ -238,7 +239,7 @@ export async function createItem(orgId: string, createdBy: string, input: Create
   }
 }
 
-export async function updateItem(orgId: string, id: string, input: UpdateItemInput): Promise<Item> {
+export async function updateItem(orgId: string, userId: string, id: string, input: UpdateItemInput): Promise<Item> {
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence. `code`,
   // `kind` and `item_type` are deliberately absent — none is updatable.
@@ -296,12 +297,26 @@ export async function updateItem(orgId: string, id: string, input: UpdateItemInp
 
       if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-      return client.query<ItemRow>(
+      const updated = await client.query<ItemRow>(
         `UPDATE items SET ${assignments.join(', ')}
           WHERE id = $1 AND org_id = $2
           RETURNING ${ITEM_COLUMNS}`,
         values,
       );
+
+      // Phase 35a: a changed inventory account moves the item's stock value
+      // to it in the SAME transaction as the mapping change.
+      if (input.assetAccountId !== undefined && currentType === 'INVENTORY') {
+        await inventoryAccountingService.reclassToCurrentAccountsOnClient(
+          client,
+          orgId,
+          userId,
+          [id],
+          'Product inventory account changed — stock value moved',
+        );
+      }
+
+      return updated;
     });
 
     const row = rows[0];
@@ -430,7 +445,8 @@ export async function resolveStockAccountsOnClient(
     cogs_account_id: string | null;
   }>(
     `SELECT id, code, item_type, asset_account_id, cogs_account_id FROM items
-      WHERE org_id = $1 AND id = ANY($2::uuid[]) AND item_type IN ('INVENTORY', 'FIXED_ASSET')`,
+      WHERE org_id = $1 AND id = ANY($2::uuid[]) AND item_type IN ('INVENTORY', 'FIXED_ASSET')
+      ORDER BY id FOR SHARE`,
     [orgId, unique],
   );
   if (rows.length === 0) return result;
@@ -449,4 +465,54 @@ export async function resolveStockAccountsOnClient(
     result.set(row.id, { itemType: row.item_type, assetAccountId, cogsAccountId });
   }
   return result;
+}
+
+// ------------------------------------------------ GL reconciliation (Phase 35a)
+
+/** Phase 35a — accounts whose balance must equal the stock subledger (Core model §2). */
+export async function resolveInventoryControlAccountIdsOnClient(
+  client: Pick<PoolClient, 'query'>,
+  orgId: string,
+): Promise<Set<string>> {
+  const { rows } = await client.query<{ asset_account_id: string }>(
+    `SELECT DISTINCT asset_account_id FROM items
+      WHERE org_id = $1 AND item_type = 'INVENTORY' AND asset_account_id IS NOT NULL`,
+    [orgId],
+  );
+  const ids = new Set(rows.map((r) => r.asset_account_id));
+
+  const { rows: defaultedRows } = await client.query<{ defaulted: boolean }>(
+    `SELECT EXISTS (SELECT 1 FROM items WHERE org_id = $1 AND item_type = 'INVENTORY' AND asset_account_id IS NULL) AS defaulted`,
+    [orgId],
+  );
+  if (defaultedRows[0]?.defaulted === true) {
+    const defaults = await resolveInventoryPostingAccountsOnClient(client, orgId);
+    if (defaults.inventoryAccountId !== null) ids.add(defaults.inventoryAccountId);
+  }
+  return ids;
+}
+
+/** Locks the given INVENTORY products FOR UPDATE, ORDER BY id. */
+export async function lockInventoryItemsOnClient(client: PoolClient, orgId: string, ledgerItemIds: string[]): Promise<void> {
+  const unique = [...new Set(ledgerItemIds)];
+  if (unique.length === 0) return;
+  await client.query(
+    `SELECT id FROM items WHERE org_id = $1 AND id = ANY($2::uuid[]) ORDER BY id FOR UPDATE`,
+    [orgId, unique],
+  );
+}
+
+/** Locks and returns every INVENTORY product that uses the settings default inventory account (asset_account_id IS NULL), ORDER BY id FOR UPDATE. */
+export async function lockDefaultedInventoryItemsOnClient(client: PoolClient, orgId: string): Promise<string[]> {
+  const { rows } = await client.query<{ id: string }>(
+    `SELECT id FROM items WHERE org_id = $1 AND item_type = 'INVENTORY' AND asset_account_id IS NULL
+      ORDER BY id FOR UPDATE`,
+    [orgId],
+  );
+  return rows.map((r) => r.id);
+}
+
+/** 422 unless the account exists in the org, is type Expense and is postable. */
+export async function assertExpenseAccountOnClient(client: PoolClient, orgId: string, accountId: string): Promise<void> {
+  await assertAccount(client, orgId, accountId, 'Expense');
 }
