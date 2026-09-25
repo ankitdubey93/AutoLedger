@@ -20,6 +20,7 @@ interface ImportSummary {
   duplicateCount: number;
   suggestedCount: number;
   autoMatchableCount: number;
+  ruleMatchedCount: number;
 }
 
 export default function BankImportPage() {
@@ -118,6 +119,7 @@ export default function BankImportPage() {
         duplicateCount: res.duplicateCount,
         suggestedCount: res.suggestedCount,
         autoMatchableCount: res.autoMatchableCount,
+        ruleMatchedCount: res.ruleMatchedCount,
       });
       setContent('');
       setFileName('');
@@ -284,6 +286,7 @@ export default function BankImportPage() {
               {summary.duplicateCount} duplicate{summary.duplicateCount === 1 ? '' : 's'}.{' '}
               {summary.suggestedCount} line{summary.suggestedCount === 1 ? '' : 's'} got a suggested match,{' '}
               {summary.autoMatchableCount} ready for one-click accept.
+              {summary.ruleMatchedCount > 0 && ` ${summary.ruleMatchedCount} settled by bank rules.`}
             </p>
             <Link to="/bank" className="text-sm mt-2 inline-block">
               Review the approval queue →

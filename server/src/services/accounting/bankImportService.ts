@@ -9,6 +9,7 @@ import { parseFlexibleDate, type DateFormat } from '../../utils/dateParse.js';
 import { AUTO_MATCH_THRESHOLD, normalizeForMatching } from '../../utils/matchScore.js';
 import { emitEvent } from '../outboxService.js';
 import * as bankMatchService from './bankMatchService.js';
+import * as bankRuleService from './bankRuleService.js';
 import type { BankStatementImport } from '../../types/accounting.js';
 import { MODULE_TAGS } from '../../config/modules.js';
 
@@ -307,6 +308,8 @@ export interface ImportStatementResult {
   suggestedCount: number;
   /** Newly inserted lines with a suggestion scoring >= AUTO_MATCH_THRESHOLD. */
   autoMatchableCount: number;
+  /** Newly inserted lines settled directly by a bank rule (Phase 34a) — never a line a document suggestion already claimed. */
+  ruleMatchedCount: number;
 }
 
 export async function importStatement(
@@ -441,6 +444,9 @@ export async function importStatement(
     const suggestedCount = Number(summaryRows[0]?.suggested ?? '0');
     const autoMatchableCount = Number(summaryRows[0]?.auto_matchable ?? '0');
 
+    const ruleSettledIds = await bankRuleService.applyRulesOnClient(client, orgId, createdBy, insertedIds);
+    const ruleSettledIdSet = new Set(ruleSettledIds);
+
     // The roadmap's named webhook example — "an unallocated transaction
     // above a configured threshold reaching the ledger". Only rows actually
     // inserted (never a re-imported duplicate) can trigger it, and 0 means
@@ -453,6 +459,7 @@ export async function importStatement(
 
     if (thresholdCents > 0) {
       for (const row of insertedRows) {
+        if (ruleSettledIdSet.has(row.id)) continue;
         const amountCents = parseCents(row.amount_cents);
         // Signed: a large outflow matters as much as a large inflow.
         if (Math.abs(amountCents) >= thresholdCents) {
@@ -478,6 +485,7 @@ export async function importStatement(
       duplicateCount,
       suggestedCount,
       autoMatchableCount,
+      ruleMatchedCount: ruleSettledIds.length,
     };
   } catch (err) {
     await client.query('ROLLBACK');

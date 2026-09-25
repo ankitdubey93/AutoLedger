@@ -203,7 +203,7 @@ server/
 │   │   ├── inventory/              ← itemService, movementService, documentStockService, stockGlService, …
 │   │   └── integrations/           ← Drive connection, folders, sync, dispatcher
 │   ├── queue/                      ← background jobs — Phase 7
-│   │   └── handlers/               ← integrityCheck, outboxDrain, webhookDeliver, captureExtract, integrationDrive*
+│   │   └── handlers/               ← integrityCheck, outboxDrain, webhookDeliver, captureExtract, integrationDrive*, recurringSweep, recurringGenerate (Phase 34b)
 │   ├── schemas/                    ← zod request schemas: accounting/ · capture/ · inventory/ · integrations/
 │   ├── routes/
 │   │   ├── index.ts                ← the /api/v1 router: platform routes, then /inventory, /capture, then accounting at /

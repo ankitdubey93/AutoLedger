@@ -61,6 +61,7 @@ export default function BankTransactionsPage() {
   const [postJournalOpenId, setPostJournalOpenId] = useState<string | null>(null);
   const [postJournalAccountId, setPostJournalAccountId] = useState('');
   const [postJournalDescription, setPostJournalDescription] = useState('');
+  const [postJournalSuccess, setPostJournalSuccess] = useState<{ lineId: string; accountId: string; description: string; amountCents: number } | null>(null);
 
   const status = (params.get('status') ?? '') as BankTransactionStatus | '';
   const q = params.get('q') ?? '';
@@ -154,8 +155,17 @@ export default function BankTransactionsPage() {
         accountId: postJournalAccountId,
         description: postJournalDescription.trim() === '' ? null : postJournalDescription.trim(),
       });
+      setPostJournalSuccess({
+        lineId: txn.id,
+        accountId: postJournalAccountId,
+        description: txn.description,
+        amountCents: txn.amountCents,
+      });
       setPostJournalOpenId(null);
-      setReloadToken((t) => t + 1);
+      setTimeout(() => {
+        setPostJournalSuccess(null);
+        setReloadToken((t) => t + 1);
+      }, 3000);
     } catch (err: unknown) {
       setRowError({ id: txn.id, message: err instanceof Error ? err.message : 'That action failed' });
     } finally {
@@ -282,9 +292,14 @@ export default function BankTransactionsPage() {
                           </button>
                         )}
                         {txn.status === 'MATCHED' && txn.matchedJournalEntryId !== null && (
-                          <Link to={`/journals/${txn.matchedJournalEntryId}`} className="btn btn--ghost no-underline">
-                            View entry
-                          </Link>
+                          <>
+                            {txn.matchedRuleName !== null && (
+                              <span className="text-sm text-[var(--muted)]">Rule: {txn.matchedRuleName}</span>
+                            )}
+                            <Link to={`/journals/${txn.matchedJournalEntryId}`} className="btn btn--ghost no-underline">
+                              View entry
+                            </Link>
+                          </>
                         )}
                         {txn.status === 'MATCHED' && (
                           <button
@@ -310,6 +325,18 @@ export default function BankTransactionsPage() {
 
                     {rowError !== null && rowError.id === txn.id && (
                       <p className="status status--bad px-3 pb-2 m-0">{rowError.message}</p>
+                    )}
+
+                    {postJournalSuccess !== null && postJournalSuccess.lineId === txn.id && (
+                      <div className="status status--good px-3 pb-2 m-0 flex items-center justify-between gap-2">
+                        <span>Journal entry posted</span>
+                        <Link
+                          to={`/bank/rules?memo=${encodeURIComponent(postJournalSuccess.description)}&account=${postJournalSuccess.accountId}&direction=${postJournalSuccess.amountCents > 0 ? 'IN' : 'OUT'}`}
+                          className="btn btn--ghost btn--sm"
+                        >
+                          Create a rule from this line
+                        </Link>
+                      </div>
                     )}
 
                     {postJournalOpenId === txn.id && (

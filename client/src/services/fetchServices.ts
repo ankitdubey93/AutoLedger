@@ -804,6 +804,130 @@ export function updatePaymentTerm(
   return apiFetch(`/payment-terms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
 
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringKind. */
+export const RECURRING_KINDS = ['INVOICE', 'BILL', 'JOURNAL'] as const;
+export type RecurringKind = (typeof RECURRING_KINDS)[number];
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringFrequency. */
+export const RECURRING_FREQUENCIES = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringMode. */
+export const RECURRING_MODES = ['DRAFT', 'POST'] as const;
+export type RecurringMode = (typeof RECURRING_MODES)[number];
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringStatus. */
+export const RECURRING_STATUSES = ['ACTIVE', 'PAUSED', 'ENDED'] as const;
+export type RecurringStatus = (typeof RECURRING_STATUSES)[number];
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringSchedule. */
+export interface RecurringSchedule {
+  id: string;
+  kind: RecurringKind;
+  name: string;
+  sourceId: string;
+  frequency: RecurringFrequency;
+  intervalCount: number;
+  startDate: string;
+  endDate: string | null;
+  nextRunDate: string | null;
+  nextOccurrenceIndex: number;
+  mode: RecurringMode;
+  autoReverse: boolean;
+  status: RecurringStatus;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  lastRunDate: string | null;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringRun. */
+export interface RecurringRun {
+  id: string;
+  runDate: string;
+  occurrenceNumber: number;
+  invoiceId: string | null;
+  billId: string | null;
+  journalEntryId: string | null;
+  reversalEntryId: string | null;
+  createdAt: string;
+}
+
+/** Phase 34b. Mirrors server/src/types/accounting.ts's RecurringScheduleDetail. */
+export interface RecurringScheduleDetail extends RecurringSchedule {
+  runs: RecurringRun[];
+}
+
+/** Phase 34b. */
+export type CreateRecurringScheduleInput = {
+  kind: RecurringKind;
+  sourceId: string;
+  name: string;
+  frequency: RecurringFrequency;
+  intervalCount: number;
+  startDate: string;
+  endDate: string | null;
+  mode: RecurringMode;
+  autoReverse: boolean;
+};
+
+/** GET /recurring-schedules */
+export function listRecurringSchedules(
+  params: { kind?: RecurringKind | null; status?: RecurringStatus | null } = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; schedules: RecurringSchedule[] }> {
+  const query = new URLSearchParams();
+  if (params.kind !== undefined && params.kind !== null) query.set('kind', params.kind);
+  if (params.status !== undefined && params.status !== null) query.set('status', params.status);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/recurring-schedules${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /recurring-schedules/:id */
+export function getRecurringSchedule(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; schedule: RecurringScheduleDetail }> {
+  return apiFetch(`/recurring-schedules/${id}`, { signal: signal ?? null });
+}
+
+/** POST /recurring-schedules */
+export function createRecurringSchedule(
+  body: CreateRecurringScheduleInput,
+): Promise<{ success: boolean; schedule: RecurringSchedule }> {
+  return apiFetch('/recurring-schedules', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /recurring-schedules/:id/pause */
+export function pauseRecurringSchedule(
+  id: string,
+): Promise<{ success: boolean; schedule: RecurringSchedule }> {
+  return apiFetch(`/recurring-schedules/${id}/pause`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /recurring-schedules/:id/resume */
+export function resumeRecurringSchedule(
+  id: string,
+): Promise<{ success: boolean; schedule: RecurringSchedule }> {
+  return apiFetch(`/recurring-schedules/${id}/resume`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /recurring-schedules/:id/end */
+export function endRecurringSchedule(
+  id: string,
+): Promise<{ success: boolean; schedule: RecurringSchedule }> {
+  return apiFetch(`/recurring-schedules/${id}/end`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /recurring-schedules/:id/run */
+export function runRecurringSchedule(
+  id: string,
+): Promise<{ success: boolean; generated: number; lastError: string | null; schedule: RecurringScheduleDetail }> {
+  return apiFetch(`/recurring-schedules/${id}/run`, { method: 'POST', body: JSON.stringify({}) });
+}
+
 /** Mirrors server/src/types/accounting.ts's ItemKind. */
 export type ItemKind = 'SERVICE' | 'GOODS';
 
@@ -1981,6 +2105,9 @@ export interface BankTransaction {
   matchedPaymentId: string | null;
   /** Set instead of matchedPaymentId when the line was settled by a posted journal entry. */
   matchedJournalEntryId: string | null;
+  /** Phase 34a — set when a bank rule posted the journal entry. Always null when matchedJournalEntryId is null. */
+  matchedRuleId: string | null;
+  matchedRuleName: string | null;
   matchedAt: string | null;
   matchedBy: string | null;
   matchedByName: string | null;
@@ -2035,6 +2162,7 @@ export function importBankStatement(body: ImportStatementInput): Promise<{
   duplicateCount: number;
   suggestedCount: number;
   autoMatchableCount: number;
+  ruleMatchedCount: number;
 }> {
   return apiFetch('/bank-imports', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -2170,6 +2298,59 @@ export function getBankReconciliation(
   const query = new URLSearchParams({ accountId });
   if (asOf !== null) query.set('asOf', asOf);
   return apiFetch(`/reports/bank-reconciliation?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** Phase 34a — mirrors server/src/types/accounting.ts's BankRule. */
+export interface BankRule {
+  id: string;
+  name: string;
+  priority: number;
+  direction: 'IN' | 'OUT' | 'ANY';
+  memoContains: string;
+  amountMinCents: number | null;
+  amountMaxCents: number | null;
+  bankAccountId: string | null;
+  targetAccountId: string;
+  targetAccountCode: string;
+  targetAccountName: string;
+  description: string | null;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type BankRuleInput = Omit<BankRule, 'id' | 'createdBy' | 'createdAt' | 'updatedAt' | 'targetAccountCode' | 'targetAccountName' | 'isActive'> & {
+  isActive?: boolean;
+};
+
+/** GET /bank-rules */
+export function listBankRules(
+  includeInactive: boolean = false,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; bankRules: BankRule[] }> {
+  const query = new URLSearchParams();
+  if (includeInactive) query.set('includeInactive', 'true');
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`/bank-rules${suffix}`, { signal: signal ?? null });
+}
+
+/** POST /bank-rules */
+export function createBankRule(body: BankRuleInput): Promise<{ success: boolean; bankRule: BankRule }> {
+  return apiFetch('/bank-rules', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /bank-rules/:id */
+export function updateBankRule(
+  id: string,
+  body: Partial<BankRuleInput> & { isActive?: boolean },
+): Promise<{ success: boolean; bankRule: BankRule }> {
+  return apiFetch(`/bank-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** POST /bank-rules/apply */
+export function applyBankRules(): Promise<{ success: boolean; appliedCount: number }> {
+  return apiFetch('/bank-rules/apply', { method: 'POST', body: JSON.stringify({}) });
 }
 
 /* ------------------------------------------ webhooks & background jobs (Phase 7) */

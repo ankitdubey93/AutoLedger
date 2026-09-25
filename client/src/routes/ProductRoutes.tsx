@@ -41,12 +41,15 @@ import InventoryScanRedirect from '../Pages/inventory/InventoryScanRedirect';
 import BankTransactionsPage from '../Pages/banking/BankTransactionsPage';
 import BankImportPage from '../Pages/banking/BankImportPage';
 import BankReconciliationPage from '../Pages/banking/BankReconciliationPage';
+import BankRulesPage from '../Pages/banking/BankRulesPage';
 // Accounting
 import AccountsPage from '../Pages/accounting/AccountsPage';
 import AccountLedgerPage from '../Pages/accounting/AccountLedgerPage';
 import JournalsPage from '../Pages/accounting/JournalsPage';
 import NewJournalEntryPage from '../Pages/accounting/NewJournalEntryPage';
 import JournalDetailPage from '../Pages/accounting/JournalDetailPage';
+import RecurringSchedulesPage from '../Pages/accounting/RecurringSchedulesPage';
+import RecurringScheduleDetailPage from '../Pages/accounting/RecurringScheduleDetailPage';
 import FiscalPeriodsPage from '../Pages/accounting/FiscalPeriodsPage';
 import FxRatesPage from '../Pages/accounting/FxRatesPage';
 import FxExposurePage from '../Pages/accounting/FxExposurePage';
@@ -152,6 +155,7 @@ export default function ProductRoutes() {
           <Route path="/bank" element={<BankTransactionsPage />} />
           <Route path="/bank/import" element={<BankImportPage />} />
           <Route path="/bank/reconciliation" element={<BankReconciliationPage />} />
+          <Route path="/bank/rules" element={<BankRulesPage />} />
 
           {/* Accounting */}
           <Route path="/accounts" element={<AccountsPage />} />
@@ -159,6 +163,8 @@ export default function ProductRoutes() {
           <Route path="/journals" element={<JournalsPage />} />
           <Route path="/journals/new" element={<NewJournalEntryPage />} />
           <Route path="/journals/:entryId" element={<JournalDetailPage />} />
+          <Route path="/recurring" element={<RecurringSchedulesPage />} />
+          <Route path="/recurring/:scheduleId" element={<RecurringScheduleDetailPage />} />
           <Route path="/fiscal-periods" element={<FiscalPeriodsPage />} />
           <Route path="/fx-rates" element={<FxRatesPage />} />
           <Route path="/fx-exposure" element={<FxExposurePage />} />

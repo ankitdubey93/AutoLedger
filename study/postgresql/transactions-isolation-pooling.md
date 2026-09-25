@@ -3,7 +3,7 @@
 > A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim. Extended Phase 28 — StockLedger's multi-row balance/serial locking: deterministic lock ordering, upsert-then-lock, and a `FULL JOIN` across a derived cache and its source ledger.
+**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim. Extended Phase 28 — StockLedger's multi-row balance/serial locking: deterministic lock ordering, upsert-then-lock, and a `FULL JOIN` across a derived cache and its source ledger. Extended Phase 34a — `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` as per-row error recovery inside a batch bank-rule apply.
 **Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
 
 ---
@@ -207,6 +207,49 @@ FULL JOIN movement_totals m
 
 `COALESCE` substitutes a fixed, never-otherwise-used sentinel UUID whenever `lot_id` is `NULL`, so two lotless rows now compare sentinel-to-sentinel with ordinary equality, which *is* `TRUE` for equal values — turning a join condition that could never match `NULL` against `NULL` into one that can. This is the general fix for joining on a nullable key: `NULL` never participates in `=` truthfully, so any join (or `GROUP BY`, or `DISTINCT`) that needs nullable columns to behave as ordinary comparable values has to substitute a stand-in value first.
 
+### `SAVEPOINT`: a real subtransaction, not just "try again"
+
+The aborted-transaction-state section above (`current transaction is aborted, commands ignored until end of transaction block`) already establishes that one failed statement poisons everything after it in the same transaction. `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` is the mechanism that recovers from that *without* abandoning the whole transaction, and it is worth being precise about what it actually is underneath, because "just try again" undersells it.
+
+`SAVEPOINT name` opens a genuine **subtransaction** inside the current one — Postgres assigns it its own internal subtransaction id (a "subxid"), nested under the top-level transaction's xid. From that point, any statement that fails aborts only the *subtransaction*, not the parent: `ROLLBACK TO SAVEPOINT name` discards every effect since that savepoint (including the failed statement's poisoned state) and returns the session to a healthy, further-statement-accepting condition, still inside the original transaction, with everything committed *before* the savepoint intact. `RELEASE SAVEPOINT name` is the mirror operation for the success path — it forgets the savepoint (you can no longer roll back to it) without touching anything it protected.
+
+```sql
+BEGIN;
+INSERT INTO a ...;                    -- succeeds, stays in place either way
+SAVEPOINT s;
+INSERT INTO b ...;                    -- fails, e.g. a CHECK violation
+ROLLBACK TO SAVEPOINT s;              -- undoes only the failed insert; session usable again
+-- transaction is healthy here; the `a` insert from before the savepoint still stands
+COMMIT;
+```
+
+This is genuinely a nested transaction, not a client-side retry loop pretending to be one — the abort/recover happens entirely inside PostgreSQL's own transaction machinery, visible to `EXPLAIN`/logging as real subtransaction ids, not as separate statements the application re-issued.
+
+**The cost: `pg_subtrans` and the 64-subxid cache.** Each backend keeps a small in-memory cache (in `PGPROC`, sized `PGPROC_MAX_CACHED_SUBXIDS = 64` in the Postgres source) of the current transaction's own subtransaction ids, so that checking "is this row version visible to me" for a row written by one of *my own* earlier subtransactions is a fast in-memory array scan. Once a single transaction has opened more than 64 nested subtransactions (savepoints), that cache overflows, and every subsequent subxid-visibility check has to fall back to `pg_subtrans` — an on-disk (page-cached) lookup structure, mapping subxid → parent xid, one extra I/O-shaped lookup per check instead of an array scan. This doesn't fail or error; it's a **performance cliff**, not a correctness one — a transaction that opens thousands of savepoints in a tight loop gets measurably slower per savepoint once it crosses that 64 threshold, because every visibility check downstream now potentially touches `pg_subtrans`. (This 64-subxid cache and its `pg_subtrans` fallback is documented PostgreSQL internals behavior, verified against the 16.15 build this project runs on the `SELECT version()` output, not something independently re-derived from source for this note — flagging it as a fact to double-check if precision matters more than the general shape of the trade-off.)
+
+The practical implication for this codebase: a `SAVEPOINT` used **once per row in a bounded loop that processes at most a few hundred candidates per call** (bank rules applying to a page of unmatched lines, capped well under 64 in the common case and only occasionally exceeding it on a large batch) is exactly the shape `SAVEPOINT` is good at — occasional, localized error recovery, not a hot path issuing thousands of savepoints per transaction. If a workload genuinely needed thousands of independent per-row recovery points in one transaction, the right fix is usually to *not* do it in one transaction at all (batch into several transactions), rather than accept the `pg_subtrans` fallback cost at scale.
+
+### Why bank rules use one `SAVEPOINT` per line
+
+`bankRuleService.applyRulesOnClient` (Phase 34a) applies a set of active rules to a batch of unmatched bank lines inside one caller-owned transaction (the import's own transaction, or the "apply to unmatched" endpoint's). For each line with a matching rule, it does:
+
+```ts
+await client.query('SAVEPOINT bank_rule_apply');
+try {
+  await bankMatchService.postJournalForTransactionOnClient(client, orgId, userId, line.id, { ... }, matched.id);
+  await client.query('RELEASE SAVEPOINT bank_rule_apply');
+  settledIds.push(line.id);
+} catch (err) {
+  if (err instanceof ApiError || pgErrorCode(err) === 'P0001') {
+    await client.query('ROLLBACK TO SAVEPOINT bank_rule_apply');
+    continue;   // this line stays UNMATCHED; the loop moves on to the next one
+  }
+  throw err;    // an unexpected error still poisons and propagates
+}
+```
+
+The reason a savepoint is needed at all, rather than just catching the error in TypeScript: posting a journal entry can legitimately fail for a single line — the period covering that line's date might be closed, or a database-level trigger might reject the posting (`P0001`) — and that failure, uncaught at the SQL level, would poison the *entire* surrounding transaction per the aborted-transaction-state rule above. Without a savepoint, one bad line would silently prevent every other, otherwise-valid line in the same import from settling, because the whole transaction would already be unusable by the time the loop reached line two. The savepoint scopes the blast radius of one line's failure to exactly that line: `ROLLBACK TO SAVEPOINT` undoes only the attempted posting for that line, and the transaction — and every line already settled before it, whose work sits *before* the savepoint and is untouched by rolling back to it — remains healthy for the next iteration. This is precisely the `SAVEPOINT`-per-row shape the cost discussion above calls out as the right fit: a bounded loop (at most 1000 lines per `applyRulesToUnmatched` call), not an unbounded hot path.
+
 ## Why we chose it here
 
 | Decision | Reasoning |
@@ -219,6 +262,7 @@ FULL JOIN movement_totals m
 | `SERIALIZABLE` + retry for stock movements | Rejected — the read set is already known exactly (computed from the request), so it gets nothing over `FOR UPDATE` except an abort-and-retry loop and a risk of a retry storm under contention |
 | Optimistic (`version` column) concurrency for stock movements | Rejected — two concurrent receipts against the same balance are both supposed to succeed, not conflict; optimistic locking would fail the second one and need an app-level retry to reach the outcome `FOR UPDATE` gives directly |
 | Append-only ledgers over mutable counters | Sidesteps the lost-update class entirely — appending rows never contends the way `UPDATE counter` does. Current quantity is derived |
+| `SAVEPOINT` per line inside `bankRuleService.applyRulesOnClient` | Phase 34a — one line's posting failure (a closed period, a trigger rejection) must not poison every other line's chance to settle in the same import transaction; caught in TypeScript alone wouldn't be enough, since the aborted-transaction state is set at the SQL level regardless of whether the client-side `catch` runs |
 
 That last one is the deepest architectural point: choosing an append-only data model makes a whole category of concurrency bug structurally impossible rather than defended against.
 
@@ -246,6 +290,10 @@ Phase 28:
 - `server/src/__tests__/inventory/movementConcurrency.test.ts` — two opposite-direction transfers fired concurrently, repeatedly, asserting zero `40P01` deadlocks across the run
 - `server/src/db/integrity.ts` — `checkStockBalancesMatchMovements`'s `COALESCE`-guarded `FULL JOIN`
 
+Phase 34a:
+
+- `server/src/services/accounting/bankRuleService.ts` — `applyRulesOnClient`'s per-line `SAVEPOINT bank_rule_apply` / `RELEASE` / `ROLLBACK TO SAVEPOINT`, scoping one bad line's posting failure to itself inside the import's own transaction
+
 ## Gotchas
 
 - **`pool.query` inside a transaction block.** Silent partial commit. The single most damaging bug in this codebase's problem domain.
@@ -258,6 +306,8 @@ Phase 28:
 - **Sorting only *some* of the locked keys.** Deterministic ordering only prevents deadlocks if *every* code path that locks more than one of these rows sorts the same way — a second function that locks the same two balance rows in request-arrival order instead of sorted order reintroduces the exact cycle the sort was meant to close. The discipline has to be centralized in one shared locking helper (`lockBalances`), not re-implemented ad hoc per movement type.
 - **`ON CONFLICT DO NOTHING` seeding a row with zero quantity is not itself the operation.** It only guarantees a lockable row exists; the actual quantity/value change still happens in the subsequent `UPDATE` under the lock. Skipping the seed step (assuming the row already exists because "it usually does") reintroduces the exact race `FOR UPDATE` exists to close, on exactly the first-ever movement for a given key.
 - **`COALESCE`'s sentinel must be a value that can never occur for real.** Using an empty string or `0` as the stand-in for a `NULL` UUID would be wrong if that value could ever legitimately appear in the column; a fixed all-zero UUID works here specifically because `lot_id` only ever holds real generated UUIDs or `NULL`, never the literal zero UUID.
+- **A `SAVEPOINT` inside a loop that runs unbounded times is a latent performance bug, not a correctness one.** Below 64 nested subtransactions per top-level transaction it's essentially free; above that, every downstream visibility check for rows touched by one of your own subtransactions can fall back to an on-disk `pg_subtrans` lookup instead of an in-memory cache hit. A capped batch (bank rules apply to at most 1000 lines per call) stays in the cheap regime almost always; an unbounded per-row savepoint loop wouldn't.
+- **Catching an error in TypeScript does not undo the aborted-transaction state at the SQL level.** A `try/catch` around a failed `client.query()` call stops the *exception* from propagating, but the session is still poisoned until something issues `ROLLBACK` (of the whole transaction) or `ROLLBACK TO SAVEPOINT` (of just the subtransaction) — the next query after a caught-but-unrolled-back failure still gets `current transaction is aborted`.
 
 ## Interview Q&A
 
@@ -294,6 +344,12 @@ A: Seed it first with an idempotent insert — `INSERT ... VALUES (..., 0, 0) ON
 **Q: Why not use SERIALIZABLE isolation for stock movements instead of explicit row locks?**
 A: SERIALIZABLE earns its keep when the set of rows a transaction will touch is hard to know in advance — the database tracks read/write dependencies for you and aborts a transaction that would have caused an anomaly, so you don't have to enumerate what to lock. A stock movement doesn't have that problem: the exact balance rows it will touch are computable directly from the request before any query runs. Given a known key set, pessimistic locking is strictly simpler — no abort-and-retry loop, and the lock scope is provably minimal, exactly the rows this movement needs and nothing else.
 
+**Q: What does `ROLLBACK TO SAVEPOINT` actually roll back, mechanically, and what does it cost?**
+A: `SAVEPOINT` opens a real nested subtransaction with its own internal id, under the surrounding transaction's id. `ROLLBACK TO SAVEPOINT` discards every effect since that point — including whatever put the session into the aborted-transaction state — while leaving everything committed before the savepoint untouched, and leaving the session usable for more statements in the same transaction. It's not a client-side retry pretending to recover; the recovery happens inside Postgres's own transaction machinery. The cost is mostly invisible up to about 64 subtransactions per top-level transaction, because Postgres caches your own recent subtransaction ids in memory for fast visibility checks; past that cache size, checking whether a row your own earlier subtransaction touched is visible to you falls back to an on-disk lookup structure (`pg_subtrans`) instead of an array scan. It's a performance cliff, not a correctness one, and it only matters if you're opening savepoints by the thousands in one transaction rather than dozens.
+
+**Q: When would you reach for `SAVEPOINT` instead of just letting one bad row fail the whole transaction?**
+A: When the unit of "must succeed together" is smaller than the whole transaction — when one row's failure is expected to be a normal, survivable outcome for that one row, and every other row in the same transaction should still get its own independent chance to succeed. A batch bank-rule apply is exactly this shape: fifty lines might be settled in one import transaction, and a closed fiscal period rejecting line 12's posting shouldn't take lines 1 through 11's already-committed work down with it, nor should it prevent lines 13 through 50 from being tried. Wrap each row's risky work in its own savepoint, release it on success, roll back to it (and move on) on an expected failure, and only let a genuinely unexpected error propagate and abort the whole transaction.
+
 ## Follow-ups they'll dig into
 
 - "How do you retry a serialization failure safely?" (Only if the transaction is side-effect-free outside the DB; cap attempts; add jitter. And the retry must re-run the *reads*, not just the writes.)
@@ -302,10 +358,13 @@ A: SERIALIZABLE earns its keep when the set of rows a transaction will touch is 
 - "Why do long transactions cause table bloat?" (An open snapshot pins dead tuples; `VACUUM` can't reclaim rows still visible to any live snapshot.)
 - "What if the set of rows to lock isn't known until you've already locked some of them?" (Deterministic ordering stops working the moment the key set can grow mid-transaction — that scenario needs either `SERIALIZABLE`+retry or a coarser lock covering the whole possible range up front.)
 - "How would you prove your deadlock fix actually works, rather than just being lucky in testing?" (Fire the two opposite-order operations concurrently, repeatedly, under real load — a test that runs them once and passes proves almost nothing, since a deadlock is a race that may not trigger on a given run.)
+- "What's the difference between rolling back to a savepoint and just catching the error in your application code?" (Catching the exception stops it from propagating in your language runtime, but the *database session* is still in the aborted-transaction state until something issues an actual `ROLLBACK` or `ROLLBACK TO SAVEPOINT` — the next query still fails otherwise.)
+- "Could you use a savepoint instead of `ON CONFLICT DO NOTHING` for the slug-allocation retry loop earlier in this note?" (Yes, mechanically — savepoint before each `INSERT` attempt, roll back to it on `23505`, try the next candidate. `ON CONFLICT DO NOTHING` was preferred there because it raises no error at all, so there's nothing to catch or roll back; a savepoint is the right tool when the failure *can't* be avoided by choosing a different value up front, like a business-rule rejection on posting rather than a predictable uniqueness collision.)
 
 ## See also
 
 - [../architecture/multi-tenancy-row-level-scoping.md](../architecture/multi-tenancy-row-level-scoping.md)
+- [../architecture/recurring-schedules-and-exactly-once-jobs.md](../architecture/recurring-schedules-and-exactly-once-jobs.md) — `FOR UPDATE SKIP LOCKED` reused as a single-row schedule claim, and the `DATE`-as-string discipline this note establishes
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md)
 - [../architecture/inventory-valuation-and-perpetual-stock.md](../architecture/inventory-valuation-and-perpetual-stock.md) — the append-only ledger + derived-cache design these locks protect
 - [gapless-numbering-and-counters.md](gapless-numbering-and-counters.md) — the `ON CONFLICT DO NOTHING` lazy-seed idiom, first used for a counter row, reused here to seed a lockable balance row

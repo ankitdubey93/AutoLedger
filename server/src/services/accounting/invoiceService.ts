@@ -521,89 +521,107 @@ async function insertInvoiceLines(
   );
 }
 
-export async function createInvoice(
+/**
+ * Phase 34b — the core of `createInvoice`, runnable on a caller's own
+ * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
+ * BEGIN/COMMIT/ROLLBACK and maps no errors (rule 5) — the caller owns both.
+ * Includes `validateInvoiceInput`/`computeLineTotals` so a caller cannot skip
+ * validation. Returns the new invoice's id.
+ */
+export async function createInvoiceOnClient(
+  client: PoolClient,
   orgId: string,
   createdBy: string,
   input: CreateInvoiceInput,
-): Promise<Invoice> {
+): Promise<string> {
   validateInvoiceInput(input);
   const totals = computeLineTotals(input.lines);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
 
+  const { rows: orgRows } = await client.query<{ base_currency: string }>(
+    'SELECT base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const baseCurrency = orgRows[0]?.base_currency.trim();
+  if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
+  const currencyCode = input.currencyCode ?? baseCurrency;
+
+  const { rows: customerRows } = await client.query<{
+    name: string;
+    billing_address: string | null;
+    tax_number: string | null;
+  }>(
+    'SELECT name, billing_address, tax_number FROM customers WHERE id = $1 AND org_id = $2 AND is_active = true',
+    [input.customerId, orgId],
+  );
+  const customer = customerRows[0];
+  if (customer === undefined) throw new ApiError(422, 'Customer not found');
+
+  const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
+
+  await assertRevenueAccounts(
+    client,
+    orgId,
+    totals.map((t) => t.input.revenueAccountId),
+  );
+
+  // Resolved on every draft save so the draft always displays an honest
+  // base-currency total; frozen for good at issueInvoice.
+  const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
+  const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
+  const baseTaxCents = convertToBase(taxCents, fxRate);
+  const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
+  const { rows: invoiceRows } = await client.query<{ id: string }>(
+    `INSERT INTO invoices
+       (org_id, customer_id, issue_date, due_date, currency_code,
+        customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
+        notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
+        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+     RETURNING id`,
+    [
+      orgId,
+      input.customerId,
+      input.issueDate,
+      resolvedDue.dueDate,
+      currencyCode,
+      customer.name,
+      customer.billing_address,
+      customer.tax_number,
+      input.notes,
+      resolvedDue.paymentTerms,
+      resolvedDue.paymentTermsCode,
+      subtotalCents,
+      taxCents,
+      totalCents,
+      fxRate,
+      baseSubtotalCents,
+      baseTaxCents,
+      baseTotalCents,
+      createdBy,
+    ],
+  );
+  const invoiceId = invoiceRows[0]?.id;
+  if (invoiceId === undefined) throw new Error('INSERT ... RETURNING produced no row');
+
+  await insertInvoiceLines(client, orgId, invoiceId, totals);
+
+  return invoiceId;
+}
+
+export async function createInvoice(
+  orgId: string,
+  createdBy: string,
+  input: CreateInvoiceInput,
+): Promise<Invoice> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
-      [orgId],
-    );
-    const baseCurrency = orgRows[0]?.base_currency.trim();
-    if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-    const currencyCode = input.currencyCode ?? baseCurrency;
-
-    const { rows: customerRows } = await client.query<{
-      name: string;
-      billing_address: string | null;
-      tax_number: string | null;
-    }>(
-      'SELECT name, billing_address, tax_number FROM customers WHERE id = $1 AND org_id = $2 AND is_active = true',
-      [input.customerId, orgId],
-    );
-    const customer = customerRows[0];
-    if (customer === undefined) throw new ApiError(422, 'Customer not found');
-
-    const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
-
-    await assertRevenueAccounts(
-      client,
-      orgId,
-      totals.map((t) => t.input.revenueAccountId),
-    );
-
-    // Resolved on every draft save so the draft always displays an honest
-    // base-currency total; frozen for good at issueInvoice.
-    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
-    const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
-    const baseTaxCents = convertToBase(taxCents, fxRate);
-    const baseTotalCents = baseSubtotalCents + baseTaxCents;
-
-    const { rows: invoiceRows } = await client.query<{ id: string }>(
-      `INSERT INTO invoices
-         (org_id, customer_id, issue_date, due_date, currency_code,
-          customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
-          notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
-          fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-       RETURNING id`,
-      [
-        orgId,
-        input.customerId,
-        input.issueDate,
-        resolvedDue.dueDate,
-        currencyCode,
-        customer.name,
-        customer.billing_address,
-        customer.tax_number,
-        input.notes,
-        resolvedDue.paymentTerms,
-        resolvedDue.paymentTermsCode,
-        subtotalCents,
-        taxCents,
-        totalCents,
-        fxRate,
-        baseSubtotalCents,
-        baseTaxCents,
-        baseTotalCents,
-        createdBy,
-      ],
-    );
-    const invoiceId = invoiceRows[0]?.id;
-    if (invoiceId === undefined) throw new Error('INSERT ... RETURNING produced no row');
-
-    await insertInvoiceLines(client, orgId, invoiceId, totals);
+    const invoiceId = await createInvoiceOnClient(client, orgId, createdBy, input);
 
     await client.query('COMMIT');
     return await getInvoiceById(orgId, invoiceId);
@@ -798,16 +816,18 @@ export async function resolvePostingAccounts(
   return { receivableAccountId, taxAccountId };
 }
 
-export async function issueInvoice(
+/**
+ * Phase 34b — the core of `issueInvoice`, runnable on a caller's own
+ * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
+ * BEGIN/COMMIT/ROLLBACK and maps no errors (rule 5) — the caller owns both.
+ */
+export async function issueInvoiceOnClient(
+  client: PoolClient,
   orgId: string,
   userId: string,
   id: string,
   entryDate: string | null,
-): Promise<Invoice> {
-  const client = await pool.connect();
-  try {
-    await beginTransaction(client);
-
+): Promise<void> {
     const { rows: invoiceRows } = await client.query<{
       id: string;
       status: string;
@@ -999,7 +1019,18 @@ export async function issueInvoice(
       baseTotalCents,
       journalEntryId,
     });
+}
 
+export async function issueInvoice(
+  orgId: string,
+  userId: string,
+  id: string,
+  entryDate: string | null,
+): Promise<Invoice> {
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+    await issueInvoiceOnClient(client, orgId, userId, id, entryDate);
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);
   } catch (err) {

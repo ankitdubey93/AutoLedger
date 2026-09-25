@@ -289,6 +289,19 @@ export const GOOGLE_REVOKE_URL = 'https://oauth2.googleapis.com/revoke';
 export const GOOGLE_DRIVE_API_BASE = 'https://www.googleapis.com/drive/v3';
 export const GOOGLE_HTTP_TIMEOUT_MS = 30_000;
 
+// ------------------------------------------------- recurring schedules (34b)
+
+/** How often the recurring sweep checks every ACTIVE schedule for a due occurrence. */
+export const RECURRING_SWEEP_INTERVAL_MS = 15 * 60 * 1000;
+
+/**
+ * Ceiling on occurrences `runDueOccurrences` generates per call — bounds how
+ * far a schedule that missed several ticks (the worker was down, or a
+ * closed period blocked it) catches up in one pass rather than flooding the
+ * ledger with a long backlog at once.
+ */
+export const RECURRING_MAX_CATCHUP_PER_RUN = 12;
+
 // -------------------------------------------------- invoice templates (30)
 
 /** Template choices for Accounting invoices — code-defined layouts, not user markup. */

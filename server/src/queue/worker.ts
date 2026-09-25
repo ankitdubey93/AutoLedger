@@ -7,12 +7,15 @@ import { handleWebhookDeliver } from './handlers/webhookDeliverHandler.js';
 import { handleCaptureExtract } from './handlers/captureExtractHandler.js';
 import { handleIntegrationDriveSweep } from './handlers/integrationDriveSweepHandler.js';
 import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandler.js';
+import { handleRecurringSweep } from './handlers/recurringSweepHandler.js';
+import { handleRecurringGenerate } from './handlers/recurringGenerateHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   INTEGRATION_DRIVE_POLL_INTERVAL_MS,
   INTEGRITY_CHECK_CRON,
   JOB_ATTEMPTS,
   OUTBOX_DRAIN_INTERVAL_MS,
+  RECURRING_SWEEP_INTERVAL_MS,
   WEBHOOK_ERROR_SNIPPET_CHARS,
 } from '../config/constants.js';
 import type { JobPayloads, QueueName } from '../types/jobs.js';
@@ -30,6 +33,8 @@ const HANDLERS: {
   'capture-extract': handleCaptureExtract,
   'integration-drive-sweep': handleIntegrationDriveSweep,
   'integration-drive-sync': handleIntegrationDriveSync,
+  'recurring-sweep': handleRecurringSweep,
+  'recurring-generate': handleRecurringGenerate,
 };
 
 let workers: Worker[] = [];
@@ -113,6 +118,17 @@ export async function startWorkers(): Promise<void> {
     'integration-drive-sweep-tick',
     { every: INTEGRATION_DRIVE_POLL_INTERVAL_MS },
     { name: 'integration-drive-sweep', data: {}, opts: { attempts: 1 } },
+  );
+
+  // Phase 34b — the recurring schedules sweep. attempts: 1 for the same
+  // reason as the drive sweep: the sweep itself is idempotent and the next
+  // tick will re-check anyway. The generate job keeps the default retries,
+  // because runDueOccurrences rethrows only unexpected errors, after a full
+  // rollback.
+  await queues['recurring-sweep'].upsertJobScheduler(
+    'recurring-sweep-tick',
+    { every: RECURRING_SWEEP_INTERVAL_MS },
+    { name: 'recurring-sweep', data: {}, opts: { attempts: 1 } },
   );
 
   // Phase 19.3 — 19.2's scheduler lives in Redis independently of this code,

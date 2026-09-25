@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ApiRequestError,
   approveBill,
@@ -19,6 +19,7 @@ import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import PaymentDialog from '../sales/PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
+import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 
 /**
  * One bill, in full. Approve and Void are both gated by a confirmation
@@ -39,6 +40,7 @@ function statusLabel(status: Bill['status']): string {
 
 export default function BillDetailPage() {
   const { billId } = useParams<{ billId: string }>();
+  const navigate = useNavigate();
   const auth = useAuth();
   const role = auth.status === 'authenticated' ? auth.role : null;
   const ledgerSettings = useLedgerSettings();
@@ -48,6 +50,7 @@ export default function BillDetailPage() {
   const [debitNotes, setDebitNotes] = useState<DebitNote[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'void' | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
@@ -179,6 +182,16 @@ export default function BillDetailPage() {
               className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
             >
               Submit for review
+            </button>
+          )}
+          {bill.status === 'DRAFT' && (
+            <button
+              type="button"
+              onClick={() => setShowMakeRecurringDialog(true)}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+            >
+              Make recurring
             </button>
           )}
           {bill.status === 'AWAITING_APPROVAL' && canApprove && (
@@ -450,6 +463,18 @@ export default function BillDetailPage() {
           onRecorded={() => {
             setShowPaymentDialog(false);
             setReloadToken((t) => t + 1);
+          }}
+        />
+      )}
+      {showMakeRecurringDialog && (
+        <MakeRecurringDialog
+          kind="BILL"
+          sourceId={bill.id}
+          defaultName={`Bill from ${bill.vendorNameSnapshot}`}
+          onClose={() => setShowMakeRecurringDialog(false)}
+          onCreated={(scheduleId) => {
+            setShowMakeRecurringDialog(false);
+            navigate(`/recurring/${scheduleId}`);
           }}
         />
       )}

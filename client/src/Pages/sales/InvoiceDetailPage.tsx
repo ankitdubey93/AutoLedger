@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Printer } from 'lucide-react';
 import {
   ApiRequestError,
@@ -25,6 +25,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import PaymentDialog from './PaymentDialog';
 import InvoiceDocument from './InvoiceDocument';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
+import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 
 /**
  * One invoice, in full — its own printable document, honouring the
@@ -45,6 +46,7 @@ function statusLabel(status: Invoice['status']): string {
 
 export default function InvoiceDetailPage() {
   const { invoiceId } = useParams<{ invoiceId: string }>();
+  const navigate = useNavigate();
   const { organization } = useOrg();
   const ledgerSettings = useLedgerSettings();
 
@@ -58,6 +60,7 @@ export default function InvoiceDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'issue' | 'void' | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const logoSrc = useDocumentObjectUrl(profile?.logoDocumentId ?? null);
 
@@ -218,6 +221,16 @@ export default function InvoiceDetailPage() {
               Void
             </button>
           )}
+          {invoice.status === 'DRAFT' && (
+            <button
+              type="button"
+              onClick={() => setShowMakeRecurringDialog(true)}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+            >
+              Make recurring
+            </button>
+          )}
           <button
             type="button"
             onClick={() => window.print()}
@@ -371,6 +384,18 @@ export default function InvoiceDetailPage() {
           onRecorded={() => {
             setShowPaymentDialog(false);
             setReloadToken((t) => t + 1);
+          }}
+        />
+      )}
+      {showMakeRecurringDialog && (
+        <MakeRecurringDialog
+          kind="INVOICE"
+          sourceId={invoice.id}
+          defaultName={`Invoice for ${invoice.customerNameSnapshot}`}
+          onClose={() => setShowMakeRecurringDialog(false)}
+          onCreated={(scheduleId) => {
+            setShowMakeRecurringDialog(false);
+            navigate(`/recurring/${scheduleId}`);
           }}
         />
       )}

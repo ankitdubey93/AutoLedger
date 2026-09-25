@@ -639,35 +639,53 @@ async function insertBillOnClient(
   return billId;
 }
 
+/**
+ * Phase 34b — the core of `createBill`, runnable on a caller's own
+ * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
+ * BEGIN/COMMIT/ROLLBACK and maps no errors (rule 5) — the caller owns both.
+ * Includes `validateBillInput`/`computeLineTotals` so a caller cannot skip
+ * validation. Returns the new bill's id.
+ */
+export async function createBillOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  input: CreateBillInput,
+): Promise<string> {
+  validateBillInput(input);
+  const totals = computeLineTotals(input.lines);
+
+  const resolvedDue = await resolveBillDueDate(client, orgId, input);
+  const billId = await insertBillOnClient(
+    client,
+    orgId,
+    createdBy,
+    {
+      vendorId: input.vendorId,
+      vendorReference: input.vendorReference,
+      billDate: input.billDate,
+      dueDate: resolvedDue.dueDate,
+      currencyCode: input.currencyCode,
+      notes: input.notes,
+      paymentTerms: resolvedDue.paymentTerms,
+      paymentTermsCode: resolvedDue.paymentTermsCode,
+    },
+    totals,
+  );
+
+  return billId;
+}
+
 export async function createBill(
   orgId: string,
   createdBy: string,
   input: CreateBillInput,
 ): Promise<Bill> {
-  validateBillInput(input);
-  const totals = computeLineTotals(input.lines);
-
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    const resolvedDue = await resolveBillDueDate(client, orgId, input);
-    const billId = await insertBillOnClient(
-      client,
-      orgId,
-      createdBy,
-      {
-        vendorId: input.vendorId,
-        vendorReference: input.vendorReference,
-        billDate: input.billDate,
-        dueDate: resolvedDue.dueDate,
-        currencyCode: input.currencyCode,
-        notes: input.notes,
-        paymentTerms: resolvedDue.paymentTerms,
-        paymentTermsCode: resolvedDue.paymentTermsCode,
-      },
-      totals,
-    );
+    const billId = await createBillOnClient(client, orgId, createdBy, input);
 
     await client.query('COMMIT');
     return await getBillById(orgId, billId);

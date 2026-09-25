@@ -9,6 +9,7 @@ import {
   FileBarChart,
   FileMinus,
   FileText,
+  Filter,
   FolderOpen,
   GitCompareArrows,
   Inbox,
@@ -20,6 +21,7 @@ import {
   Package,
   ReceiptText,
   RefreshCw,
+  Repeat,
   Scale,
   Search,
   Settings as SettingsIcon,
@@ -79,6 +81,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
       { to: '/bank', label: 'Bank lines', icon: Landmark, end: true },
       { to: '/bank/import', label: 'Import statement', icon: Upload, end: false },
       { to: '/bank/reconciliation', label: 'Reconciliation', icon: GitCompareArrows, end: false },
+      { to: '/bank/rules', label: 'Bank rules', icon: Filter, end: false },
     ],
   },
   {
@@ -86,6 +89,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     items: [
       { to: '/accounts', label: 'Chart of accounts', icon: ListTree, end: false },
       { to: '/journals', label: 'Journal entries', icon: BookOpen, end: false },
+      { to: '/recurring', label: 'Recurring', icon: Repeat, end: false },
       { to: '/fiscal-periods', label: 'Fiscal periods', icon: CalendarCheck, end: false },
       { to: '/fx-rates', label: 'Exchange rates', icon: Coins, end: false },
       { to: '/fx-exposure', label: 'FX exposure', icon: GitCompareArrows, end: false },

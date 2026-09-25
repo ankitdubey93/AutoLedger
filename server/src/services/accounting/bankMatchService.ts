@@ -299,6 +299,8 @@ interface BankTxnRow {
   matched_at: Date | null;
   matched_by: string | null;
   matched_by_name: string | null;
+  matched_rule_id: string | null;
+  matched_rule_name: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -306,10 +308,12 @@ interface BankTxnRow {
 const BANK_TXN_SELECT = `SELECT bt.id, bt.import_id, bt.account_id, a.code AS account_code, a.name AS account_name,
                                  bt.txn_date, bt.description, bt.external_reference, bt.currency_code, bt.amount_cents,
                                  bt.status, bt.matched_payment_id, bt.matched_journal_entry_id, bt.matched_at, bt.matched_by,
-                                 u.name AS matched_by_name, bt.created_at, bt.updated_at
+                                 u.name AS matched_by_name, bt.matched_rule_id, r.name AS matched_rule_name,
+                                 bt.created_at, bt.updated_at
                             FROM bank_transactions bt
                             JOIN accounts a ON a.id = bt.account_id AND a.org_id = bt.org_id
-                            LEFT JOIN users u ON u.id = bt.matched_by`;
+                            LEFT JOIN users u ON u.id = bt.matched_by
+                            LEFT JOIN bank_rules r ON r.org_id = bt.org_id AND r.id = bt.matched_rule_id`;
 
 interface SuggestionRow {
   id: string;
@@ -404,6 +408,8 @@ function toBankTransaction(row: BankTxnRow, suggestions: BankMatchSuggestion[]):
     matchedAt: row.matched_at === null ? null : row.matched_at.toISOString(),
     matchedBy: row.matched_by,
     matchedByName: row.matched_by_name,
+    matchedRuleId: row.matched_rule_id,
+    matchedRuleName: row.matched_rule_name,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     suggestions,
@@ -739,75 +745,7 @@ export async function postJournalForTransaction(
   const client = await pool.connect();
   try {
     await beginTransaction(client);
-
-    const { rows: lineRows } = await client.query<{
-      id: string;
-      status: string;
-      txn_date: string;
-      description: string;
-      amount_cents: string;
-      account_id: string;
-    }>(
-      `SELECT id, status, txn_date, description, amount_cents, account_id
-         FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
-      [id, orgId],
-    );
-    const line = lineRows[0];
-    if (line === undefined) throw new ApiError(404, 'Bank transaction not found');
-    if (!isBankTransactionStatus(line.status)) {
-      throw new Error(`Unknown bank transaction status "${line.status}" on transaction ${id}`);
-    }
-    if (!canTransitionBankTransaction(line.status, 'MATCHED')) {
-      throw new ApiError(
-        409,
-        line.status === 'MATCHED'
-          ? 'This bank line is already matched'
-          : 'This bank line is ignored — un-ignore it first',
-      );
-    }
-
-    if (input.accountId === line.account_id) {
-      throw new ApiError(422, 'The journal entry cannot post back to the same bank account');
-    }
-    await journalService.assertNotControlAccountsOnClient(client, orgId, [input.accountId]);
-
-    const amountCents = parseCents(line.amount_cents);
-    const absAmount = Math.abs(amountCents);
-
-    // Money in: debit the bank account, credit the chosen account. Money
-    // out: the reverse. Exactly one side per line (guardrails rule 7).
-    const lines =
-      amountCents > 0
-        ? [
-            { accountId: line.account_id, debitCents: absAmount, creditCents: 0 },
-            { accountId: input.accountId, debitCents: 0, creditCents: absAmount },
-          ]
-        : [
-            { accountId: input.accountId, debitCents: absAmount, creditCents: 0 },
-            { accountId: line.account_id, debitCents: 0, creditCents: absAmount },
-          ];
-
-    const entryId = await journalService.createEntryOnClient(client, orgId, userId, {
-      entryDate: line.txn_date,
-      description: input.description ?? line.description,
-      sourceType: 'bank_line',
-      sourceId: id,
-      lines,
-    });
-
-    await client.query(
-      `UPDATE bank_transactions
-          SET status = 'MATCHED', matched_journal_entry_id = $1, matched_at = now(), matched_by = $2
-        WHERE id = $3 AND org_id = $4`,
-      [entryId, userId, id, orgId],
-    );
-
-    // Spent suggestions are derived data and are not kept.
-    await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = $2', [
-      orgId,
-      id,
-    ]);
-
+    await postJournalForTransactionOnClient(client, orgId, userId, id, input, null);
     await client.query('COMMIT');
     return await getTransactionById(orgId, id);
   } catch (err) {
@@ -820,6 +758,91 @@ export async function postJournalForTransaction(
   } finally {
     client.release();
   }
+}
+
+/**
+ * The transaction core of postJournalForTransaction. Runs no
+ * BEGIN/COMMIT/ROLLBACK and maps no errors — the caller owns both
+ * (guardrails rule 5). `ruleId` is non-null only when a bank rule
+ * (Phase 34a) drove the posting; postJournalForTransaction itself always
+ * passes null.
+ */
+export async function postJournalForTransactionOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  id: string,
+  input: PostJournalInput,
+  ruleId: string | null,
+): Promise<void> {
+  const { rows: lineRows } = await client.query<{
+    id: string;
+    status: string;
+    txn_date: string;
+    description: string;
+    amount_cents: string;
+    account_id: string;
+  }>(
+    `SELECT id, status, txn_date, description, amount_cents, account_id
+       FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
+    [id, orgId],
+  );
+  const line = lineRows[0];
+  if (line === undefined) throw new ApiError(404, 'Bank transaction not found');
+  if (!isBankTransactionStatus(line.status)) {
+    throw new Error(`Unknown bank transaction status "${line.status}" on transaction ${id}`);
+  }
+  if (!canTransitionBankTransaction(line.status, 'MATCHED')) {
+    throw new ApiError(
+      409,
+      line.status === 'MATCHED'
+        ? 'This bank line is already matched'
+        : 'This bank line is ignored — un-ignore it first',
+    );
+  }
+
+  if (input.accountId === line.account_id) {
+    throw new ApiError(422, 'The journal entry cannot post back to the same bank account');
+  }
+  await journalService.assertNotControlAccountsOnClient(client, orgId, [input.accountId]);
+
+  const amountCents = parseCents(line.amount_cents);
+  const absAmount = Math.abs(amountCents);
+
+  // Money in: debit the bank account, credit the chosen account. Money
+  // out: the reverse. Exactly one side per line (guardrails rule 7).
+  const lines =
+    amountCents > 0
+      ? [
+          { accountId: line.account_id, debitCents: absAmount, creditCents: 0 },
+          { accountId: input.accountId, debitCents: 0, creditCents: absAmount },
+        ]
+      : [
+          { accountId: input.accountId, debitCents: absAmount, creditCents: 0 },
+          { accountId: line.account_id, debitCents: 0, creditCents: absAmount },
+        ];
+
+  const entryId = await journalService.createEntryOnClient(client, orgId, userId, {
+    entryDate: line.txn_date,
+    description: input.description ?? line.description,
+    sourceType: 'bank_line',
+    sourceId: id,
+    lines,
+  });
+
+  await client.query(
+    `UPDATE bank_transactions
+        SET status = 'MATCHED', matched_journal_entry_id = $1, matched_at = now(), matched_by = $2,
+            matched_rule_id = $3
+      WHERE id = $4 AND org_id = $5`,
+    [entryId, userId, ruleId, id, orgId],
+  );
+
+  // Spent suggestions are derived data and are not kept.
+  await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = $2', [
+    orgId,
+    id,
+  ]);
 }
 
 export async function unmatchTransaction(orgId: string, userId: string, id: string): Promise<BankTransaction> {
@@ -869,7 +892,7 @@ export async function unmatchTransaction(orgId: string, userId: string, id: stri
     await client.query(
       `UPDATE bank_transactions
           SET status = 'UNMATCHED', matched_payment_id = NULL, matched_journal_entry_id = NULL,
-              matched_at = NULL, matched_by = NULL
+              matched_at = NULL, matched_by = NULL, matched_rule_id = NULL
         WHERE id = $1 AND org_id = $2`,
       [id, orgId],
     );

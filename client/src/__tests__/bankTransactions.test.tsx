@@ -49,6 +49,8 @@ function transaction(overrides: Partial<BankTransaction> = {}): BankTransaction 
     status: 'UNMATCHED',
     matchedPaymentId: null,
     matchedJournalEntryId: null,
+    matchedRuleId: null,
+    matchedRuleName: null,
     matchedAt: null,
     matchedBy: null,
     matchedByName: null,
@@ -268,5 +270,22 @@ describe('BankTransactionsPage', () => {
     await screen.findByText('PAYMENT RECEIVED INV-0001');
     const link = screen.getByRole('link', { name: 'View entry' });
     expect(link.getAttribute('href')).toContain('je-1');
+  });
+
+  it('a rule-settled line shows its rule name', async () => {
+    mockListRoutes([
+      transaction({
+        status: 'MATCHED',
+        matchedPaymentId: null,
+        matchedJournalEntryId: 'je-1',
+        matchedRuleId: 'rule-1',
+        matchedRuleName: 'Service Charges',
+        suggestions: [],
+      }),
+    ]);
+    renderPage();
+
+    await screen.findByText('PAYMENT RECEIVED INV-0001');
+    expect(screen.getByText('Rule: Service Charges')).toBeInTheDocument();
   });
 });

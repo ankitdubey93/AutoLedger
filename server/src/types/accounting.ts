@@ -1063,6 +1063,9 @@ export interface BankTransaction {
   matchedPaymentId: string | null;
   /** Set instead of matchedPaymentId when the line was settled by a posted journal entry. */
   matchedJournalEntryId: string | null;
+  /** Phase 34a — set when a bank rule posted the journal entry. Always null when matchedJournalEntryId is null. */
+  matchedRuleId: string | null;
+  matchedRuleName: string | null;
   matchedAt: string | null;
   matchedBy: string | null;
   matchedByName: string | null;
@@ -1070,6 +1073,37 @@ export interface BankTransaction {
   updatedAt: string;
   /** Empty for a MATCHED or IGNORED line. Ordered score DESC. */
   suggestions: BankMatchSuggestion[];
+}
+
+export const BANK_RULE_DIRECTIONS = ['IN', 'OUT', 'ANY'] as const;
+export type BankRuleDirection = (typeof BANK_RULE_DIRECTIONS)[number];
+export function isBankRuleDirection(value: string): value is BankRuleDirection {
+  return (BANK_RULE_DIRECTIONS as readonly string[]).includes(value);
+}
+
+/** Phase 34a — a saved pattern that settles matching bank lines by posting a journal entry. */
+export interface BankRule {
+  id: string;
+  name: string;
+  /** Lower runs first; ties break on createdAt ascending. */
+  priority: number;
+  direction: BankRuleDirection;
+  /** Case-insensitive substring of the bank line's description. */
+  memoContains: string;
+  /** Compared against the line's absolute amount, inclusive. null = unbounded. */
+  amountMinCents: number | null;
+  amountMaxCents: number | null;
+  /** null = applies to every bank account. */
+  bankAccountId: string | null;
+  targetAccountId: string;
+  targetAccountCode: string;
+  targetAccountName: string;
+  /** Journal entry description; null = the bank line's own description. */
+  description: string | null;
+  isActive: boolean;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface BankReconciliationReport {
@@ -1387,4 +1421,51 @@ export interface PartyOpenItems {
   outstandingCents: number;
   overdueCents: number;
   items: PartyOpenItem[];
+}
+
+// --------------------------------- Phase 34b — recurring documents (invoices, bills, journals)
+
+export const RECURRING_KINDS = ['INVOICE', 'BILL', 'JOURNAL'] as const;
+export type RecurringKind = (typeof RECURRING_KINDS)[number];
+export const RECURRING_FREQUENCIES = ['WEEKLY', 'MONTHLY', 'QUARTERLY', 'YEARLY'] as const;
+export type RecurringFrequency = (typeof RECURRING_FREQUENCIES)[number];
+export const RECURRING_MODES = ['DRAFT', 'POST'] as const;
+export type RecurringMode = (typeof RECURRING_MODES)[number];
+export const RECURRING_STATUSES = ['ACTIVE', 'PAUSED', 'ENDED'] as const;
+export type RecurringStatus = (typeof RECURRING_STATUSES)[number];
+export const RECURRING_STATUS_TRANSITIONS = {
+  ACTIVE: ['PAUSED', 'ENDED'],
+  PAUSED: ['ACTIVE', 'ENDED'],
+  ENDED: [],
+} as const satisfies Record<RecurringStatus, readonly RecurringStatus[]>;
+export function isRecurringStatus(value: string): value is RecurringStatus {
+  return (RECURRING_STATUSES as readonly string[]).includes(value);
+}
+export function canTransitionRecurring(from: RecurringStatus, to: RecurringStatus): boolean {
+  return (RECURRING_STATUS_TRANSITIONS[from] as readonly RecurringStatus[]).includes(to);
+}
+
+export interface RecurringSchedule {
+  id: string; kind: RecurringKind; name: string;
+  /** The template document: an invoice, bill or journal entry id, per `kind`. */
+  sourceId: string;
+  frequency: RecurringFrequency; intervalCount: number;
+  startDate: string; endDate: string | null;
+  /** null once ENDED. */
+  nextRunDate: string | null; nextOccurrenceIndex: number;
+  mode: RecurringMode; autoReverse: boolean; status: RecurringStatus;
+  lastError: string | null; lastErrorAt: string | null;
+  /** Latest recurring_runs.run_date, null before the first run. */
+  lastRunDate: string | null;
+  createdBy: string; createdAt: string; updatedAt: string;
+}
+export interface RecurringRun {
+  id: string; runDate: string; occurrenceNumber: number;
+  invoiceId: string | null; billId: string | null;
+  journalEntryId: string | null; reversalEntryId: string | null;
+  createdAt: string;
+}
+export interface RecurringScheduleDetail extends RecurringSchedule {
+  /** Newest first, at most 50. */
+  runs: RecurringRun[];
 }

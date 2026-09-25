@@ -11,6 +11,7 @@ import { formatCents } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
+import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 
 /**
  * One journal entry, in full: every field, both totals, and every line.
@@ -38,6 +39,7 @@ export default function JournalDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
 
   useEffect(() => {
     if (entryId === undefined) return;
@@ -115,6 +117,16 @@ export default function JournalDetailPage() {
             className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] rounded-md cursor-pointer px-3 py-1.5 disabled:opacity-40"
           >
             <RotateCcw size={14} /> {busy ? 'Reversing…' : 'Reverse'}
+          </button>
+        )}
+        {entry.sourceType === 'manual' && entry.reversesEntryId === null && (
+          <button
+            type="button"
+            onClick={() => setShowMakeRecurringDialog(true)}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+          >
+            Make recurring
           </button>
         )}
       </header>
@@ -227,6 +239,18 @@ export default function JournalDetailPage() {
             void handleReverse();
           }}
           onCancel={() => setConfirming(false)}
+        />
+      )}
+      {showMakeRecurringDialog && (
+        <MakeRecurringDialog
+          kind="JOURNAL"
+          sourceId={entry.id}
+          defaultName={entry.description || 'Recurring journal'}
+          onClose={() => setShowMakeRecurringDialog(false)}
+          onCreated={(scheduleId) => {
+            setShowMakeRecurringDialog(false);
+            navigate(`/recurring/${scheduleId}`);
+          }}
         />
       )}
     </section>
