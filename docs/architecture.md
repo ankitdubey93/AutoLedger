@@ -78,8 +78,8 @@ server/
   src/
     app.ts index.ts worker.ts
     config/                env, constants, modules.ts (provenance tags), industry profiles, AI pricing
-    db/                    connect, transaction, integrity, migrate, reset + migrations/ (001–076)
-    middleware/            auth, rbac, rateLimit, requestContext, upload, errorHandler
+    db/                    connect, transaction, integrity, migrate, reset + migrations/ (001–077)
+    middleware/            auth, rbac, rateLimit, requestContext (request ids), originCheck, upload, errorHandler
     routes/ controllers/ schemas/ services/
                            each: platform files at the root, then accounting/, capture/,
                            inventory/, integrations/

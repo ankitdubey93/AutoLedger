@@ -4,6 +4,8 @@ import { NAV_GROUPS } from '../components/layout/nav';
 const EXACT_TITLES: Record<string, string> = {
   '/login': 'Sign in',
   '/register': 'Create account',
+  '/forgot-password': 'Reset password',
+  '/reset-password': 'Choose a new password',
   '/onboarding': 'Set up',
   '/account': 'Account',
   '/invoices/new': 'New invoice',

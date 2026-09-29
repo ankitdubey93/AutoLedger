@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { ApiError } from '../utils/apiError.js';
 import { env } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
 /** Terminal 404: reached only when no earlier route matched. Mount last. */
 export const notFoundHandler: RequestHandler = (req, _res, next) => {
@@ -21,8 +22,9 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
     return;
   }
 
-  // Unexpected: log the real thing server-side, tell the client nothing.
-  console.error('[error] unhandled:', err);
+  // Unexpected: log the real thing server-side, tell the client nothing but
+  // the request id (already on the response header) to quote back.
+  logger.error({ err }, 'unhandled error');
   res.status(500).json({
     success: false,
     error: 'Internal server error',

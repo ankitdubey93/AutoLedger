@@ -19,6 +19,7 @@ import {
   WEBHOOK_ERROR_SNIPPET_CHARS,
 } from '../config/constants.js';
 import type { JobPayloads, QueueName } from '../types/jobs.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * One BullMQ Worker per queue name, except 'dead-letter' — nothing consumes
@@ -78,7 +79,7 @@ async function onTerminalFailure(
   } catch (dlqErr) {
     // A dead-letter enqueue that itself fails must never re-enter the
     // failure path — log and stop.
-    console.error('[worker] failed to dead-letter a job:', dlqErr);
+    logger.error({ err: dlqErr }, '[worker] failed to dead-letter a job');
   }
 }
 

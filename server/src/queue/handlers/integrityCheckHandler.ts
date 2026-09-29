@@ -1,4 +1,5 @@
 import { runIntegrityChecks } from '../../db/integrity.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Pays the debt docs/roadmap.md records against Phase 5: "No
@@ -20,7 +21,7 @@ export async function handleIntegrityCheck(): Promise<void> {
   const report = await runIntegrityChecks();
 
   if (report.passed) {
-    console.log('[worker] integrity-check passed');
+    logger.info('[worker] integrity-check passed');
     return;
   }
 

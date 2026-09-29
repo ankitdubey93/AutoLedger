@@ -61,6 +61,27 @@ export const login: RequestHandler = async (req, res) => {
   res.json({ success: true, ...session });
 };
 
+/**
+ * POST /auth/forgot-password — always 202 with the same body, whether or not
+ * the email has an account (see authService.requestPasswordReset). Not
+ * `requireEmail`: a format error would still be a different answer.
+ */
+export const forgotPassword: RequestHandler = async (req, res) => {
+  const body = requireBodyObject(req.body);
+  const email = requireString(body, 'email', { max: 254 });
+  await authService.requestPasswordReset(email);
+  res.status(202).json({ success: true, message: 'If an account exists for that email, a reset link has been sent.' });
+};
+
+/** POST /auth/reset-password — `{ token, password }`; the password obeys the same rules as registration. */
+export const resetPassword: RequestHandler = async (req, res) => {
+  const body = requireBodyObject(req.body);
+  const token = requireString(body, 'token', { max: 128 });
+  const password = requirePassword(body);
+  await authService.resetPassword(token, password);
+  res.json({ success: true });
+};
+
 /** GET /auth/check — requires `authenticate`. */
 export const check: RequestHandler = async (req, res) => {
   const user = requireUser(req);

@@ -1,9 +1,11 @@
 import express, { type Express } from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
+import helmet from 'helmet';
 import apiRouter from './routes/index.js';
 import { errorHandler, notFoundHandler } from './middleware/errorHandler.js';
 import { attachRequestContext } from './middleware/requestContext.js';
+import { requireTrustedOrigin } from './middleware/originCheck.js';
 import { env } from './config/env.js';
 import { API_BASE_PATH, JSON_BODY_LIMIT } from './config/constants.js';
 
@@ -23,9 +25,20 @@ export function createApp(): Express {
   // rejection is still a request with a context waiting for it.
   app.use(attachRequestContext);
 
+  // Security headers (2026-09-29): HSTS, X-Content-Type-Options: nosniff,
+  // X-Frame-Options, Referrer-Policy: no-referrer (a reset link's token must
+  // not leak through Referer), a restrictive Content-Security-Policy and the
+  // cross-origin isolation headers. Defaults are right for a JSON API whose
+  // browser client reads every response through CORS-mode fetch.
+  app.use(helmet());
+
   // `credentials: true` is required for the httpOnly refresh cookie in Phase 1,
   // and it forbids a wildcard origin, so FRONTEND_URL is mandatory.
-  app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+  // `X-Request-Id` is exposed so the client can quote it when reporting a problem.
+  app.use(cors({ origin: env.FRONTEND_URL, credentials: true, exposedHeaders: ['X-Request-Id'] }));
+
+  // After CORS (which answers preflights), before any route that changes state.
+  app.use(requireTrustedOrigin);
 
   // Populates `req.cookies`, which the auth middleware reads the access token
   // from. Must run before any route that authenticates. Unsigned: the tokens

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import bcrypt from 'bcrypt';
 import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
@@ -13,7 +14,9 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from '../utils/jwt.js';
-import { BCRYPT_COST, REFRESH_TOKEN_TTL_MS } from '../config/constants.js';
+import { BCRYPT_COST, PASSWORD_RESET_TOKEN_TTL_MS, REFRESH_TOKEN_TTL_MS } from '../config/constants.js';
+import { env } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 import {
   isRole,
   type IssuedSession,
@@ -498,4 +501,113 @@ export async function logout(refreshToken: string | null): Promise<void> {
 /** GET /auth/check — the session as the client sees it. */
 export async function getSession(userId: string, orgId: string): Promise<SessionPayload> {
   return buildSession(pool, userId, orgId);
+}
+
+/* ----------------------------------------------------------- password reset */
+
+/**
+ * POST /auth/forgot-password (2026-09-29). Issues a single-use reset token
+ * for the account with this email, if there is one, and delivers the link.
+ *
+ * Returns nothing either way, and the controller answers 202 either way: the
+ * response must not reveal whether an email has an account. (The two paths
+ * are not perfectly equal in time — one writes a row — which is an accepted,
+ * stated limitation; the login path equalises bcrypt cost because that gap
+ * is hundreds of milliseconds, this one is a single indexed insert.)
+ *
+ * Issuing a token deletes the user's earlier ones, so only the newest link
+ * works. The token itself is 256 random bits; only its SHA-256 is stored,
+ * exactly as refresh tokens are (utils/jwt.ts's hashRefreshToken).
+ *
+ * **Delivery is a log line, not an email** — there is no mail transport in
+ * this codebase. Outside production the link is logged at `info` so a
+ * developer can use it; in production only the fact of the request is logged.
+ * A real mailer would be a queued job written in this same transaction
+ * (rule 5: no follow-up work after COMMIT), not a call made here.
+ */
+export async function requestPasswordReset(email: string): Promise<void> {
+  const token = randomBytes(32).toString('base64url');
+  const client = await pool.connect();
+  let userId: string | null = null;
+
+  try {
+    await beginTransaction(client);
+    const { rows } = await client.query<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
+    userId = rows[0]?.id ?? null;
+    if (userId !== null) {
+      await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+      await client.query('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)', [
+        userId,
+        hashRefreshToken(token),
+        new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS),
+      ]);
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  if (userId === null) return;
+  if (env.isProduction) {
+    logger.warn({ userId }, 'password reset requested, but no mail transport is configured to deliver it');
+  } else {
+    const resetUrl = `${new URL(env.FRONTEND_URL).origin}/reset-password?token=${token}`;
+    logger.info({ userId, resetUrl }, 'password reset link (development only — no mail transport)');
+  }
+}
+
+/**
+ * POST /auth/reset-password (2026-09-29). Consumes a reset token and sets a
+ * new password, in one transaction:
+ *
+ * - the token is claimed with `DELETE ... RETURNING`, so two concurrent uses
+ *   cannot both succeed (the same atomic claim `rotateRefreshToken` uses);
+ * - an expired token is refused — its row is already gone, so it is never
+ *   retried;
+ * - every other reset token of the user is deleted, and so is every refresh
+ *   token: whoever knew the old password is signed out everywhere.
+ *
+ * bcrypt runs before BEGIN so the transaction never holds a connection for
+ * the hash's ~100ms.
+ */
+export async function resetPassword(token: string, newPassword: string): Promise<void> {
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+  const client = await pool.connect();
+  let outcome: 'reset' | 'expired';
+
+  try {
+    await beginTransaction(client);
+    const { rows } = await client.query<{ user_id: string; expires_at: Date }>(
+      'DELETE FROM password_reset_tokens WHERE token_hash = $1 RETURNING user_id, expires_at',
+      [hashRefreshToken(token)],
+    );
+    const row = rows[0];
+    if (row === undefined) {
+      throw new ApiError(400, 'This reset link is invalid or has already been used');
+    }
+
+    if (row.expires_at.getTime() <= Date.now()) {
+      // Still commit: the delete above is wanted, so an expired token can
+      // never be tried again. The error is raised after the transaction ends.
+      outcome = 'expired';
+    } else {
+      await client.query('UPDATE users SET password = $2 WHERE id = $1', [row.user_id, passwordHash]);
+      await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [row.user_id]);
+      await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [row.user_id]);
+      outcome = 'reset';
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+
+  if (outcome === 'expired') {
+    throw new ApiError(400, 'This reset link has expired — request a new one');
+  }
 }

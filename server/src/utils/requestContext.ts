@@ -15,6 +15,11 @@ import { AsyncLocalStorage } from 'node:async_hooks';
  * introduces no new dependency (guardrails rule 14).
  */
 export interface RequestContext {
+  /**
+   * 2026-09-29 — correlates every log line of one request, and is echoed to
+   * the client as `X-Request-Id`. Null only outside an HTTP request.
+   */
+  requestId: string | null;
   /** Express's resolved client IP, truncated to fit `audit_logs.client_ip`, or null. */
   ip: string | null;
   /** Set by `authenticate` once the access token verifies. Null before that, and forever on an unauthenticated route. */

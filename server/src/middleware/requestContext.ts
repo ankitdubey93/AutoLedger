@@ -1,5 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { runWithRequestContext, type RequestContext } from '../utils/requestContext.js';
+import { logger } from '../utils/logger.js';
+
+/**
+ * An incoming `X-Request-Id` (set by a proxy or a calling service) is kept so
+ * one id follows a request across systems — but only if it looks like an id.
+ * It is written into every log line, so an arbitrary client-supplied string
+ * (newlines, a megabyte of text) must not be.
+ */
+const INCOMING_REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 /**
  * Opens the per-request `AsyncLocalStorage` context that Phase 5's audit
@@ -19,12 +29,36 @@ import { runWithRequestContext, type RequestContext } from '../utils/requestCont
  * `userId`/`orgId` start null here — `authenticate` fills them in once the
  * access token verifies, on this same context object.
  */
-export const attachRequestContext: RequestHandler = (req, _res, next) => {
+export const attachRequestContext: RequestHandler = (req, res, next) => {
+  const incoming = req.get('x-request-id');
   const context: RequestContext = {
+    requestId: incoming !== undefined && INCOMING_REQUEST_ID.test(incoming) ? incoming : randomUUID(),
     ip: typeof req.ip === 'string' && req.ip !== '' ? req.ip.slice(0, 45) : null,
     userId: null,
     orgId: null,
   };
+  res.setHeader('X-Request-Id', context.requestId ?? '');
+
+  // One line per completed request. Built from `context` directly, not the
+  // AsyncLocalStorage mixin: a 'finish' listener runs wherever the socket
+  // emits it, which is not guaranteed to be inside this request's context.
+  // `originalUrl` without the query string — a query can carry search terms
+  // or a reset token, neither of which belongs in a log.
+  const startedAt = process.hrtime.bigint();
+  res.on('finish', () => {
+    logger.info(
+      {
+        requestId: context.requestId,
+        userId: context.userId ?? undefined,
+        orgId: context.orgId ?? undefined,
+        method: req.method,
+        path: req.originalUrl.split('?')[0],
+        status: res.statusCode,
+        durationMs: Number((process.hrtime.bigint() - startedAt) / 1_000_000n),
+      },
+      'request completed',
+    );
+  });
 
   runWithRequestContext(context, next);
 };

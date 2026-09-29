@@ -87,6 +87,17 @@ Even so, the threadpool is a bounded resource: more concurrent hashes than threa
 
 ---
 
+### Password reset tokens (2026-09-29)
+
+`POST /auth/forgot-password` and `POST /auth/reset-password` follow the same principles as the rest of this note, applied to a token instead of a password:
+
+- **The token is 256 random bits** (`randomBytes(32)`, base64url), and the database stores only its **SHA-256**. SHA-256 is correct here and wrong for passwords for one reason: entropy. A human password is guessable, so its hash must be slow; a 256-bit random token cannot be guessed, so a fast hash loses nothing and a stolen table yields no usable link. Refresh tokens are stored the same way.
+- **Single use via an atomic claim.** Redemption is `DELETE ... RETURNING` on the token hash, so two concurrent submissions of one link cannot both succeed. An expired token is deleted in the same statement and the transaction still commits, so it can never be retried.
+- **A reset ends every session.** The same transaction deletes the user's other reset tokens and all their refresh tokens. If the password was reset because someone else knew it, their sessions die with it.
+- **No account enumeration.** `forgot-password` answers `202` with the same body whether or not the email exists, and doesn't even validate the email format (a format error would be a different answer). The response time is *not* perfectly equal: a real account costs one extra indexed insert. That's a stated, accepted gap, unlike login, where the unequal path would be a whole bcrypt comparison (hundreds of milliseconds) and is equalised with a dummy hash.
+- **30-minute expiry, newest link only.** Issuing a token deletes the user's older ones.
+- **No mail transport.** Outside production the link is logged, and the request log records paths without query strings, so the token never lands there. A real mailer would be a job queued in the same transaction (rule 5), never a call made after `COMMIT`.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -108,6 +119,8 @@ export const BCRYPT_COST = env.isTest ? 4 : 12;
 At cost 12 every test fixture that registers a user costs 250ms, and the suite creates dozens. Cost 4 makes that ~2ms. Not exposed as an env var deliberately — a mistyped production value would be a silent security regression, whereas `isTest` cannot be set by accident in production.
 
 ## Where it lives in this codebase
+
+- `server/src/services/authService.ts` — `requestPasswordReset` / `resetPassword` (2026-09-29); `db/migrations/077_platform_password_reset_tokens.sql`; `__tests__/passwordReset.test.ts`
 
 - `server/src/services/authService.ts` — `DUMMY_PASSWORD_HASH`, `register`, `login`
 - `server/src/config/constants.ts` — `BCRYPT_COST`, `MAX_PASSWORD_BYTES`, `MIN_PASSWORD_LENGTH`
@@ -143,6 +156,9 @@ A: It depends which bcrypt. The native binding runs the async form on the libuv 
 
 **Q: How would you handle a password-hash upgrade — say bcrypt to Argon2?**
 A: You can't rehash without the plaintext, so it's opportunistic. Store an algorithm marker with each hash — bcrypt's `$2b$` prefix already gives you one. On successful login, verify with the old algorithm, then immediately rehash with the new one and overwrite the row. Over time the population migrates; you set a deadline after which remaining old-algorithm accounts are forced through a reset.
+
+**Q: Walk me through how you'd design a password reset.**
+A: Generate a long random token (I use 256 bits) and store only its SHA-256. A fast hash is fine here because the token has far too much entropy to guess, unlike a password, and it means a leaked database gives no working links. The link expires in 30 minutes, and issuing a new one deletes the older ones. Redeeming it is a single `DELETE ... RETURNING` on the hash inside a transaction, so the link is single-use even under a double-click race. The same transaction sets the new bcrypt hash and deletes every refresh token for the user, so any session opened with the old password ends. The forgot-password endpoint answers identically whether or not the account exists, so it can't be used to discover who's registered. And the link's token never appears in logs, and `Referrer-Policy: no-referrer` keeps it out of `Referer` headers.
 
 ## Follow-ups they'll dig into
 

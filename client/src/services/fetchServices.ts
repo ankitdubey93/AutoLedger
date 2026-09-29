@@ -170,6 +170,19 @@ export function login(email: string, password: string): Promise<SessionResponse>
 }
 
 /**
+ * POST /auth/forgot-password — always resolves the same way whether or not the
+ * email has an account; the server never says which.
+ */
+export function requestPasswordReset(email: string): Promise<{ success: boolean; message: string }> {
+  return apiFetch('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) }, NO_AUTO_REFRESH);
+}
+
+/** POST /auth/reset-password — consumes the emailed token; every existing session is signed out. */
+export function resetPassword(token: string, password: string): Promise<{ success: boolean }> {
+  return apiFetch('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, password }) }, NO_AUTO_REFRESH);
+}
+
+/**
  * GET /auth/check — the session-restore call on page load.
  *
  * Auto-refresh stays ON here, and that is what makes a reload after the access

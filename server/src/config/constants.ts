@@ -35,6 +35,12 @@ export const REFRESH_TOKEN_TTL = '7d' as const;
 export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
+ * 2026-09-29 — how long a password-reset link stays valid. Short, because a
+ * reset link is a bearer credential for the whole account sitting in a mailbox.
+ */
+export const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
+
+/**
  * Cookies are keyed by name + domain + path and **ignore the port**, so every
  * app on localhost shares one jar. A generic `access_token` would be clobbered
  * by any other project you run; the prefix makes collisions impossible.

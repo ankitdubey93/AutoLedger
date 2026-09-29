@@ -92,6 +92,16 @@ Note the asymmetry: the port is irrelevant for *cookies* and for *same-site*, bu
 
 ---
 
+### A fourth layer: an Origin check on state-changing requests (2026-09-29)
+
+`middleware/originCheck.ts` refuses any `POST`/`PUT`/`PATCH`/`DELETE` whose `Origin` header is present and is not `FRONTEND_URL`'s origin. The mechanism it leans on: browsers set `Origin` themselves on every CORS request and on every request whose method is not `GET` or `HEAD`, and page script cannot override it (it is a forbidden request header). So a hostile page can make the browser *send* a POST with the victim's cookies, but it cannot make that POST claim to come from the app. `Origin: null` — which sandboxed iframes, `file:` pages and some cross-origin redirects send — is refused too, because it is not the trusted origin.
+
+A request with **no** `Origin` is let through. That is a non-browser client (curl, a server-to-server integration, the test suite, the demo seeder's `fetch`), which carries no victim's cookie jar, so there is nothing for CSRF to hijack. Refusing it would break every legitimate non-browser caller for no gain.
+
+Why add it when `SameSite=Lax` already blocks cross-site POSTs? Because Lax is a *site* boundary, not an *origin* boundary: a page on another subdomain or port of the same registrable domain is same-site, gets the cookies, and Lax does nothing. It is also a browser policy the server merely hopes is in force. The Origin check is the server enforcing its own rule, and it is the check OWASP lists first for exactly this reason. CORS does not cover the gap: CORS stops a foreign page *reading* a response, but a simple cross-origin POST still reaches the handler and takes effect.
+
+`helmet` arrived in the same change and closes adjacent holes rather than CSRF itself: `Referrer-Policy: no-referrer` (so a password-reset link's token never leaks through a `Referer` header), `X-Content-Type-Options: nosniff`, `X-Frame-Options`/`frame-ancestors` against clickjacking, HSTS, and a restrictive CSP on API responses.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -100,9 +110,13 @@ Note the asymmetry: the port is irrelevant for *cookies* and for *same-site*, bu
 | `SameSite=Strict` | Strongest; an inbound link lands logged out | Rejected — bad UX for no gain given Lax already blocks cross-site POST |
 | `SameSite=None; Secure` | Needed only for genuine cross-site use | Rejected — unnecessary here, and strictly weaker |
 | **`httpOnly` + `SameSite=Lax` + pinned CORS** | Needs the same-site reasoning to be correct | **Chosen** |
+| + **Origin check** on unsafe methods (2026-09-29) | A few lines; must allow origin-less non-browser callers | **Added** — server-enforced, and covers same-site-but-different-origin pages Lax cannot |
+| Synchronizer / double-submit CSRF token | Classic; needs token plumbing through every form and fetch | Not needed — JSON-only API, Lax, and the Origin check already close it |
 | Vite proxy (`/api` → :5000, same origin) | Sidesteps CORS entirely | Rejected — hides a real cross-origin setup behind dev-only config; better to configure CORS honestly and match production |
 
 ## Where it lives in this codebase
+
+- `server/src/middleware/originCheck.ts` — the Origin check (2026-09-29); `server/src/app.ts` mounts it after CORS and after `helmet()`; `__tests__/securityMiddleware.test.ts` covers foreign, `null`, trusted and missing origins
 
 - `server/src/utils/cookies.ts` — the only module that sets or clears auth cookies
 - `server/src/config/constants.ts` — cookie names, `REFRESH_COOKIE_PATH`, TTLs
@@ -118,6 +132,8 @@ Note the asymmetry: the port is irrelevant for *cookies* and for *same-site*, bu
 - **`__Host-` prefix** enforces `Secure` + `Path=/` + no `Domain`. Good production hardening, but it conflicts with the path-scoped refresh cookie and behaves inconsistently on plain-http localhost. Deferred.
 - **A CORS error and a missing cookie look nothing alike.** CORS failures shout in the console; a `SameSite` mismatch is silent and surfaces as a 401.
 
+- **`Origin: null` from your own page, if it is ever same-origin.** Per the Fetch spec, a *cross-origin* request always carries the page's real origin. A *same-origin* POST carries it too, unless the page's own `Referrer-Policy` is `no-referrer`, in which case the browser sends `Origin: null` and the Origin check would refuse the app's own requests. Today the client is always a different origin from the API (5173→5000, 8080→5100) and the SPA's HTML sets no such policy (helmet's `no-referrer` is on API responses only), so this cannot happen. A future deployment that serves the SPA and API from one origin must keep the page's referrer policy at the default. *(From the Fetch spec's "append a request Origin header" algorithm; not exercised by a test here.)*
+
 ## Interview Q&A
 
 **Q: Your frontend is on port 5173 and your API on 5000. Do SameSite cookies work?**
@@ -127,7 +143,10 @@ A: Yes, and the reason is the origin/site distinction. Origin includes the port,
 A: httpOnly cookies, and it's explicitly choosing which attack to be exposed to. localStorage is readable by any JavaScript, so a single XSS — one compromised dependency — exfiltrates a working token the attacker replays from anywhere. httpOnly means XSS can still act as the user while the page is open, but can't steal a portable credential. The cost is that cookies are attached automatically, which creates CSRF exposure — and `SameSite=Lax` plus pinned CORS handles that. XSS is the more common attack today, so I'd rather be resistant to it.
 
 **Q: Explain CSRF and how you're mitigating it.**
-A: The browser attaches cookies to requests the destination didn't initiate, so a form on `evil.example` posting to your API arrives fully authenticated — the attacker never reads the response, they just want the side effect. Three layers here: `SameSite=Lax` blocks cross-site POST and fetch outright; CORS is pinned to one origin with `credentials: true`, which also forbids a wildcard; and every endpoint takes JSON, which an HTML form can't send without a preflight it will fail. No csurf — it's deprecated, and Lax being the browser default has moved the risk profile a long way.
+A: The browser attaches cookies to requests the destination didn't initiate, so a form on `evil.example` posting to your API arrives fully authenticated — the attacker never reads the response, they just want the side effect. Four layers here. `SameSite=Lax` blocks cross-site POST and fetch outright. CORS is pinned to one origin with `credentials: true`, which also forbids a wildcard. Every endpoint takes JSON, which an HTML form can't send without a preflight it will fail. And since 2026-09-29 the server checks `Origin` on every state-changing request and refuses a foreign one, which also covers a same-site page on another subdomain that Lax would let through. No csurf: it's deprecated, and Lax being the browser default has moved the risk profile a long way.
+
+**Q: Your Origin check lets through a POST with no Origin header at all. Isn't that a hole?**
+A: No, because CSRF needs a victim's browser. The attack is a hostile page making the victim's browser send an authenticated request, and a browser always attaches `Origin` to a cross-origin request and to any non-GET request; page script can't remove or change it. So a request with no `Origin` isn't coming from a hijacked browser page. It's curl, another server, or my own test suite and demo seeder, and none of those carry the victim's cookies. Refusing them would break legitimate callers without stopping any attack. What I do refuse is a *wrong* origin, including the literal `null` that sandboxed iframes send.
 
 **Q: You changed refresh from GET to POST. Why does that matter?**
 A: Because `SameSite=Lax` deliberately still sends cookies on top-level cross-site *navigations*. As a GET, `/auth/refresh` was reachable from an `<img>` tag or a plain link on any site — that rotates the victim's refresh token, so their own tab then presents a spent token, trips reuse detection, and they get logged out everywhere. A CSRF logout from an image tag. POST isn't sent cross-site under Lax. A state-changing GET is wrong on HTTP semantics anyway; the CSRF angle made it urgent.

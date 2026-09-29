@@ -54,6 +54,11 @@ Constraint: `UNIQUE (org_id, user_id)`. Index `idx_org_members_user_id` on `user
 `id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token_hash` TEXT UNIQUE NOT NULL · `org_id` UUID FK → `organizations` ON DELETE CASCADE (nullable) · `expires_at` TIMESTAMPTZ NOT NULL · `created_at`
 Indexes: `idx_refresh_tokens_user_id`, `idx_refresh_tokens_expires_at`.
 
+**`password_reset_tokens`** — migration `077_platform_password_reset_tokens.sql`, 2026-09-29 (pre-showcase polish) — applied
+`id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token_hash` TEXT NOT NULL (SHA-256 hex of the emailed token) · `expires_at` TIMESTAMPTZ NOT NULL · `created_at` TIMESTAMPTZ NOT NULL DEFAULT now()
+Constraints: `ux_password_reset_tokens_token_hash UNIQUE (token_hash)`, `ck_password_reset_tokens_expires_after_created CHECK (expires_at > created_at)`. Indexes: `idx_password_reset_tokens_user_id`, `idx_password_reset_tokens_expires_at`.
+Org-less like `users`/`refresh_tokens` — a password belongs to an identity, not an organization. No `used_at`: a token is consumed with `DELETE ... RETURNING`, so a row existing *is* "unused". Not audited, for the same reason `users` and `refresh_tokens` are not (see `018_platform_audit_triggers.sql` below): the audit table would hold credential material nobody may delete.
+
 Two deliberate differences from the original plan:
 
 - **`token_hash`, not `token`.** The column stores a SHA-256 digest, so a database dump yields no usable sessions. A fast hash is correct here — the token is a 200+ bit random value, and bcrypt exists to slow down guessing of *low*-entropy human passwords.

@@ -18,6 +18,7 @@ import { getServiceAccountAccessToken } from './googleServiceAccount.js';
 import type { ServiceAccountConfig } from './googleServiceAccount.js';
 import { canTransitionDriveConnection } from '../../types/integrations.js';
 import type { DriveAuthMode, DriveConnection, DriveConnectionStatus } from '../../types/integrations.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Google Drive connection lifecycle — Phase 19.3. A connection is one per
@@ -381,7 +382,7 @@ export async function disconnect(orgId: string, deps?: DriveServiceDeps): Promis
       const token = decryptSecret(deleted.refresh_token_ciphertext, key);
       await revokeToken(token, deps?.fetchImpl);
     } catch (err) {
-      console.error('[integrations-drive] failed to revoke a refresh token:', err);
+      logger.error({ err }, '[integrations-drive] failed to revoke a refresh token');
     }
   }
 }

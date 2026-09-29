@@ -11,6 +11,7 @@ import type {
   AiUsageTotals,
   ModelCallRecord,
 } from '../types/aiUsage.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * Phase 19.1's AI token/cost metering — platform-level, like `auditService`.
@@ -137,7 +138,7 @@ export async function recordCall(orgId: string, record: ModelCallRecord): Promis
       ),
     );
   } catch (err) {
-    console.error('[ai-usage] failed to record a model call:', err);
+    logger.error({ err }, '[ai-usage] failed to record a model call');
   }
 }
 

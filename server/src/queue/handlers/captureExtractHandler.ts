@@ -11,6 +11,7 @@ import type { ClassificationClient } from '../../services/capture/mappingService
 import type { StructuredModelClient } from '../../services/capture/modelClient.js';
 import type { JobPayloads } from '../../types/jobs.js';
 import type { RedactedRegion } from '../../types/capture.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * The Capture capture pipeline's job handler (Phase 10). Runs in the
@@ -43,7 +44,7 @@ export async function handleCaptureExtract(
   const doc = await captureDocumentService.loadForProcessing(orgId, captureDocumentId);
   if (doc === null) {
     // The document was deleted; retrying is pointless.
-    console.warn(`[worker] capture-extract: document ${captureDocumentId} no longer exists`);
+    logger.warn(`[worker] capture-extract: document ${captureDocumentId} no longer exists`);
     return;
   }
 

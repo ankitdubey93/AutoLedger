@@ -17,6 +17,7 @@ import {
 } from './modelClient.js';
 import type { OnModelCall } from './extractionService.js';
 import { MODULE_TAGS } from '../../config/modules.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Capture's account classification (Phase 11) — GL coding inferred in a
@@ -228,7 +229,7 @@ async function classifyWithModel(
   } else if (isModelConfigured()) {
     effectiveClient = resolveModelClient('classify');
   } else {
-    console.warn('[capture] account classification unavailable: no AI provider key is configured');
+    logger.warn('[capture] account classification unavailable: no AI provider key is configured');
     return results;
   }
 
@@ -295,7 +296,7 @@ async function classifyWithModel(
       createdBy: null,
     });
     const message = err instanceof Error ? err.message : 'unknown error';
-    console.warn(`[capture] account classification unavailable: ${message}`);
+    logger.warn(`[capture] account classification unavailable: ${message}`);
   }
 
   return results;

@@ -1,5 +1,6 @@
 import { Pool, types } from 'pg';
 import { env } from '../config/env.js';
+import { logger } from '../utils/logger.js';
 
 /**
  * PostgreSQL `DATE` (OID 1082) is returned as a plain string, not a JS `Date`.
@@ -45,7 +46,7 @@ export const pool = new Pool({
  * broken client on its own; all we owe it is a handler.
  */
 pool.on('error', (err: Error) => {
-  console.error('[db] idle client error — client discarded from pool:', err.message);
+  logger.error({ err }, '[db] idle client error — client discarded from pool');
 });
 
 export async function closePool(): Promise<void> {

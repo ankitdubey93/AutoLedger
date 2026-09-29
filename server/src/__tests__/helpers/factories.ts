@@ -27,7 +27,7 @@ import type { Role } from '../../types/auth.js';
  */
 export async function resetTables(): Promise<void> {
   await pool.query(
-    `TRUNCATE organizations, users, organization_members, refresh_tokens, accounts,
+    `TRUNCATE organizations, users, organization_members, refresh_tokens, password_reset_tokens, accounts,
               ledger_settings, ledger_invoice_settings, customers, invoices, invoice_lines,
               vendors, bills, bill_lines, payment_terms, items, payments, payment_allocations,
               credit_notes, credit_note_lines, credit_note_allocations,

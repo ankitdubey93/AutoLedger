@@ -8,6 +8,8 @@ import ProductRoutes from './routes/ProductRoutes';
 import LegacyAppRedirect from './routes/LegacyAppRedirect';
 import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
+import ForgotPasswordPage from './Pages/auth/ForgotPasswordPage';
+import ResetPasswordPage from './Pages/auth/ResetPasswordPage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
@@ -37,6 +39,8 @@ export default function App() {
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />
+            <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            <Route path="/reset-password" element={<ResetPasswordPage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>

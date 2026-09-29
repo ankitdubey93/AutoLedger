@@ -116,6 +116,14 @@ const parsed = {
   // Background jobs and the webhook dispatcher (Phase 7). All optional — a
   // developer with default Docker settings must still boot with none of
   // these set.
+  // 2026-09-29 — pino's minimum level. Defaults to silent under test so a
+  // suite run prints nothing but test output; `info` otherwise.
+  LOG_LEVEL: oneOf(
+    'LOG_LEVEL',
+    ['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent'] as const,
+    process.env.NODE_ENV === 'test' ? 'silent' : 'info',
+  ),
+
   REDIS_HOST: optional('REDIS_HOST', 'localhost'),
   REDIS_PORT: integer('REDIS_PORT', 6379),
   REDIS_DB: nonNegativeInteger('REDIS_DB', 0),

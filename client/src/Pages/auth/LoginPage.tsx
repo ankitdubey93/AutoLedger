@@ -97,7 +97,12 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
         />
 
-        <label htmlFor="password">Password</label>
+        <span className="flex items-baseline justify-between">
+          <label htmlFor="password">Password</label>
+          <Link to="/forgot-password" className="text-xs">
+            Forgot password?
+          </Link>
+        </span>
         <input
           id="password"
           type="password"

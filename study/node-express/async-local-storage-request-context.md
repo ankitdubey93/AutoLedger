@@ -56,6 +56,12 @@ Every later `await` in the request sees the identity once it exists, because the
 
 ---
 
+### Request ids and structured logging on the same context (2026-09-29)
+
+The context gained a `requestId`, which `attachRequestContext` sets on every request and echoes as `X-Request-Id` (it keeps an incoming id only if it matches a strict pattern, since it is written into every log line). The logger is `pino`, and its `mixin()` hook, called for every log line, reads the current context and adds `requestId`, `userId` and `orgId`. So a `logger.info(...)` deep inside a service, with no request object in scope, still comes out tagged with the request that caused it. That's the same trick the audit trigger uses to learn the actor, applied to logs.
+
+One deliberate exception: the per-request "request completed" line is written from `res.on('finish')`, and it builds its fields from the context object captured in the middleware's closure rather than from the mixin. An EventEmitter listener runs in whatever async context `emit()` happens to be called from, not the one it was registered in, so reading AsyncLocalStorage there is not something to rely on. Capturing the object directly also means that line sees `userId` once `authenticate` has filled it in, because it is the same mutable object.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -71,6 +77,8 @@ The actual driver was Phase 5's constraint: the audit trigger needs the actor id
 ---
 
 ## Where it lives in this codebase
+
+- `server/src/utils/logger.ts` — pino with a `mixin` reading this context (2026-09-29); `middleware/requestContext.ts` sets `requestId` and logs each completed request
 
 - `server/src/utils/requestContext.ts` — `RequestContext`, `requestContextStorage`, `getRequestContext()`, `runWithRequestContext()`
 - `server/src/middleware/requestContext.ts` — `attachRequestContext`, mounted first in `app.ts`, before `cors`
@@ -102,6 +110,9 @@ A: The context has to exist from the very first middleware — before `cors`, be
 
 **Q: What happens to a write that has no request context at all — a script, a test calling a service directly?**
 A: `getStore()` returns `undefined`, and every consumer has to handle that explicitly. In my case, `applyAuditContext` does `ctx?.userId ?? ''` — an unset context degrades to an empty string, which the SQL side treats as a NULL actor. That's the correct outcome, not a bug: nobody made that write through the API, so there's no actor to record.
+
+**Q: How do you correlate log lines from one request across your code?**
+A: Every request gets an ID when it arrives: I keep a well-formed incoming `X-Request-Id` from a proxy, otherwise I generate a UUID. I return it on the response too. The ID lives in the same AsyncLocalStorage context that already carries the user and org for the audit trail. The logger is pino with a `mixin` function, which pino calls for every line; it reads the current context and adds the request ID, user and org. So any log line anywhere in a request's async call chain is tagged automatically, with nothing passed through function signatures. The one place I don't rely on it is the response-finished log line, because an event listener runs in the context of whoever emits the event. There I use the context object captured when the request started.
 
 **Q: Tell me about a bug or non-obvious behavior you hit using this.**
 A: The mutation timing. My first instinct was to create the context once, fully populated, in one place — but the middleware order genuinely doesn't allow that, since `attachRequestContext` has to run before `authenticate` to guarantee every code path has a context, including ones that error out before authentication succeeds. I had to explicitly design the object as something that starts partially filled and gets completed in place, rather than something constructed once and handed down — which is a different mental model from how I'd normally think about passing data through a request, closer to a mutable accumulator than an immutable value.

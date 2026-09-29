@@ -14,6 +14,8 @@
 - `404`, never `403`, for a resource that exists in another organization. A `403` confirms the id is real.
 - Financial mutations require an `Idempotency-Key` header from Phase 17 (QuickBooks sync) onward, where a retried request must not double-post.
 - Posted documents expose `POST /:id/reverse`, never `PUT` or `DELETE`.
+- **Every response carries `X-Request-Id`** (2026-09-29) — a UUID generated per request, or a well-formed incoming `X-Request-Id` (8–64 of `A-Z a-z 0-9 . _ -`) kept as-is. It is exposed through CORS and stamped on every server log line for that request; quote it when reporting a problem.
+- **A state-changing request (`POST`/`PUT`/`PATCH`/`DELETE`) from a foreign origin is refused with `403 Cross-origin request refused`** (2026-09-29, `middleware/originCheck.ts`) before it reaches any route — a present `Origin` header must equal `FRONTEND_URL`'s origin (`Origin: null` is refused). A request with no `Origin` (a non-browser client) is allowed. Responses also carry `helmet`'s security headers (`nosniff`, `Referrer-Policy: no-referrer`, HSTS, a restrictive CSP, frame denial).
 
 ### Error response shape
 
@@ -84,6 +86,8 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 | POST | `/logout` | none | Clear cookies + delete the refresh token row |
 | GET | `/check` | access cookie | Verify session; return user, active org, role, memberships |
 | POST | `/switch-org` | access cookie | Re-issue the session scoped to another org the user belongs to |
+| POST | `/forgot-password` | none | 2026-09-29. `{ email }` → always `202 { success, message }`, whether or not the account exists. Issues a single-use reset token (30 minutes, newest only) — see below |
+| POST | `/reset-password` | none | 2026-09-29. `{ token, password }` → `200`. Sets the password and signs the user out everywhere. `400` for an invalid, used or expired token, or a password failing the registration rules |
 
 **`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
 
@@ -92,6 +96,8 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 **`/register` and `/login` are rate limited** — 10 failed attempts per 15 minutes per IP, returning `429` in the standard error envelope. Successful logins are not counted, so a shared office NAT cannot lock colleagues out. `/refresh` and `/logout` are deliberately **not** limited: a legitimate client refreshes on a schedule, and the one moment you most want to clear cookies is the moment you must be able to.
 
 `/logout` is public on purpose: clearing cookies must work even when the access token has already expired.
+
+**Password reset (2026-09-29).** `/forgot-password` never reveals whether an email has an account: the status and body are identical either way, and the email's format is not validated (a format error would be a different answer). The token is 256 random bits; only its SHA-256 is stored (`password_reset_tokens`, migration `077`). `/reset-password` consumes it with an atomic `DELETE ... RETURNING` — so a link works once — then sets the new bcrypt hash and deletes every one of the user's reset and refresh tokens in the same transaction. **Delivery is a log line, not an email:** there is no mail transport. Outside production the link (`<FRONTEND_URL origin>/reset-password?token=…`) is logged at `info`; in production only a warning that a reset was requested. Both endpoints are rate limited like `/login`.
 
 #### Session body
 

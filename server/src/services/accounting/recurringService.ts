@@ -21,6 +21,7 @@ import {
   type RecurringScheduleDetail,
   type RecurringStatus,
 } from '../../types/accounting.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Accounting recurring documents (Phase 34b) — an invoice, bill or manual
@@ -726,7 +727,7 @@ export async function runDueOccurrences(
       const isKnown = err instanceof ApiError || pgErrorCode(err) === PG_RAISE_EXCEPTION;
       const rawMessage = err instanceof ApiError ? err.message : pgErrorMessage(err);
       const message = isKnown ? rawMessage : 'Unexpected error generating this occurrence';
-      console.error(`[recurring] schedule ${scheduleId} occurrence generation failed:`, err);
+      logger.error({ err }, `[recurring] schedule ${scheduleId} occurrence generation failed`);
 
       // A new, independent statement recording the failure — not follow-up
       // work to the transaction that just rolled back (guardrails rule 5).
@@ -736,7 +737,7 @@ export async function runDueOccurrences(
           [scheduleId, orgId, message.slice(0, 500)],
         );
       } catch (recordErr) {
-        console.error('[recurring] failed to record last_error:', recordErr);
+        logger.error({ err: recordErr }, '[recurring] failed to record last_error');
       }
 
       if (isKnown) {

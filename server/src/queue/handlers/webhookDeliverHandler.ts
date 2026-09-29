@@ -2,6 +2,7 @@ import { getDeliveryForSend, markDelivered, recordAttempt } from '../../services
 import { signWebhookBody } from '../../utils/webhookSignature.js';
 import { WEBHOOK_ERROR_SNIPPET_CHARS, WEBHOOK_TIMEOUT_MS } from '../../config/constants.js';
 import type { JobPayloads } from '../../types/jobs.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Sends one webhook delivery attempt. Marking FAILED (the terminal state)
@@ -14,7 +15,7 @@ export async function handleWebhookDeliver(payload: JobPayloads['webhook-deliver
   if (delivery === null) {
     // The endpoint was deleted and its deliveries cascaded away; retrying
     // is pointless.
-    console.warn(`[worker] webhook-deliver: delivery ${payload.deliveryId} no longer exists`);
+    logger.warn(`[worker] webhook-deliver: delivery ${payload.deliveryId} no longer exists`);
     return;
   }
 

@@ -6,6 +6,7 @@ import * as captureDocumentService from './captureDocumentService.js';
 import * as postingService from './postingService.js';
 import { CAPTURE_AUTO_POST_DEFAULTS } from '../../types/capture.js';
 import type { CaptureAutoPostBlocker, CaptureSettings } from '../../types/capture.js';
+import { logger } from '../../utils/logger.js';
 
 /**
  * Capture's auto-post settings and the straight-through attempt itself
@@ -120,7 +121,7 @@ export async function attemptAutoPost(orgId: string, captureDocumentId: string):
         : [{ code: 'POSTING_REJECTED', message: 'Posting failed unexpectedly — post it manually from the review queue' }];
 
     if (!(err instanceof ApiError && (err.status === 409 || err.status === 422))) {
-      console.error('[capture] auto-post failed unexpectedly:', err);
+      logger.error({ err }, '[capture] auto-post failed unexpectedly');
     }
 
     await recordBlockersSafely(orgId, captureDocumentId, rejection);
@@ -133,6 +134,6 @@ async function recordBlockersSafely(orgId: string, id: string, blockers: Capture
   try {
     await captureDocumentService.recordAutoPostBlockers(orgId, id, blockers);
   } catch (err) {
-    console.error('[capture] failed to record auto-post blockers:', err);
+    logger.error({ err }, '[capture] failed to record auto-post blockers');
   }
 }

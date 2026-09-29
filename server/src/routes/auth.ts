@@ -16,6 +16,12 @@ const router = Router();
 router.post('/register', authLimiter, authController.register);
 router.post('/login', authLimiter, authController.login);
 
+// 2026-09-29 — password reset. Throttled like login: forgot-password could be
+// used to spam an address, reset-password to guess tokens (hopeless at 256
+// bits, but the limiter costs nothing).
+router.post('/forgot-password', authLimiter, authController.forgotPassword);
+router.post('/reset-password', authLimiter, authController.resetPassword);
+
 // POST rather than GET — it rotates the refresh token, and a state-changing
 // GET is reachable by a cross-site top-level navigation under SameSite=Lax.
 router.post('/refresh', authController.refresh);
