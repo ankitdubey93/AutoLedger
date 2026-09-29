@@ -14,6 +14,7 @@ import {
   type StockItemType,
   type StockTrackingMode,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 const PAGE_SIZE = 20;
@@ -147,7 +148,7 @@ export default function InventoryItemsPage() {
           <option value="">All types</option>
           {STOCK_ITEM_TYPES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {humanizeEnum(t)}
             </option>
           ))}
         </select>
@@ -163,7 +164,7 @@ export default function InventoryItemsPage() {
           <option value="">All tracking</option>
           {STOCK_TRACKING_MODES.map((t) => (
             <option key={t} value={t}>
-              {t}
+              {humanizeEnum(t)}
             </option>
           ))}
         </select>
@@ -231,7 +232,7 @@ export default function InventoryItemsPage() {
               </td>
               <td className="pr-3 py-1 text-[var(--text)]">{item.name}</td>
               <td className="pr-3 py-1 text-[var(--muted)]">{item.categoryName}</td>
-              <td className="pr-3 py-1 text-[var(--muted)]">{item.tracking}</td>
+              <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(item.tracking)}</td>
               <td className="pr-3 py-1 text-[var(--text)]">
                 {formatQuantityMilli(item.onHandQuantityMilli)} {item.uomCode}
               </td>

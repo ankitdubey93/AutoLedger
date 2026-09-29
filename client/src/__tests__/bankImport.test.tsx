@@ -149,7 +149,7 @@ describe('BankImportPage', () => {
     const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
     await user.upload(fileInput, makeCsvFile());
     await waitFor(() => expect(fileInput.files?.length).toBe(1));
-    await user.type(screen.getByLabelText('Statement closing balance (optional)'), '1,250');
+    await user.type(screen.getByLabelText('Statement closing balance (optional)'), '12.345');
     await user.click(screen.getByRole('button', { name: 'Import statement' }));
 
     expect(await screen.findByText('Enter the closing balance like 1250.00 or -80.50')).toBeInTheDocument();

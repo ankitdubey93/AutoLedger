@@ -9,12 +9,34 @@
  * independently — so this is a deliberate, small duplication of the same rule.
  */
 
-/** 45000 → "450.00". No currency symbol; the caller adds one if it wants. */
+/** Inserts a comma every three digits from the right: "1234567" → "1,234,567". String work, no float. */
+function groupThousands(digits: string): string {
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/**
+ * 123456789 → "1,234,567.89". No currency symbol; the caller adds one if it wants.
+ *
+ * Grouped for reading, and still safe to pre-fill an input with:
+ * `parseCentsInput` accepts exactly this grouping back.
+ */
 export function formatCents(value: number): string {
+  const [sign, major, minor] = splitCents(value);
+  return `${sign}${groupThousands(major)}.${minor}`;
+}
+
+/**
+ * 123456789 → "1234567.89" — ungrouped, for machine-read output (a CSV the
+ * server parses). Display text uses formatCents.
+ */
+export function formatCentsPlain(value: number): string {
+  const [sign, major, minor] = splitCents(value);
+  return `${sign}${major}.${minor}`;
+}
+
+function splitCents(value: number): [sign: string, major: string, minor: string] {
   const magnitude = Math.abs(value);
-  const major = Math.trunc(magnitude / 100);
-  const minor = magnitude % 100;
-  return `${value < 0 ? '-' : ''}${String(major)}.${String(minor).padStart(2, '0')}`;
+  return [value < 0 ? '-' : '', String(Math.trunc(magnitude / 100)), String(magnitude % 100).padStart(2, '0')];
 }
 
 /**
@@ -38,8 +60,13 @@ export function formatMicroUsd(value: number): string {
  * half toward +∞ and would treat the two signs differently.
  */
 export function parseCentsInput(raw: string): number | null {
-  const trimmed = raw.trim();
-  if (trimmed === '') return 0;
+  const typed = raw.trim();
+  if (typed === '') return 0;
+  // Thousands separators are accepted only when correctly grouped ("1,234.50"),
+  // which is exactly what formatCents prints. "1,25" is refused rather than
+  // guessed at — in much of the world that comma is the decimal point.
+  if (typed.includes(',') && !/^\d{1,3}(,\d{3})+(\.\d*)?$/.test(typed)) return null;
+  const trimmed = typed.replaceAll(',', '');
   // At most two decimal places — a third would be silently rounded away, and
   // silently changing someone's number is worse than rejecting it.
   if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;

@@ -9,6 +9,7 @@ import {
   type StockIndustryProfileSummary,
   type StockSettings,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 /**
  * Inventory setup: choose an industry, preview what it seeds, apply it.
@@ -195,7 +196,7 @@ export default function InventorySetupPage() {
                 <tr key={category.code} className="border-t border-[var(--border)]">
                   <td className="pr-3 py-1 text-[var(--text)]">{category.code}</td>
                   <td className="pr-3 py-1 text-[var(--text)]">{category.name}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{category.itemType}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(category.itemType)}</td>
                   <td className="pr-3 py-1 text-[var(--muted)]">{category.defaultTracking}</td>
                   <td className="pr-3 py-1 text-[var(--muted)]">
                     {category.attributes.map((a) => a.label).join(', ') || '—'}

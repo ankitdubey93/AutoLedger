@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import ProductRoutes from '../routes/ProductRoutes';
+import { formatDate } from '../utils/date';
 
 /**
  * Regression coverage for the relative-navigation bug: sidebar links used to
@@ -323,7 +324,7 @@ describe('Sidebar navigation', () => {
   it("the dashboard's recent-entry link points at the journals page", async () => {
     renderAt('/', onboarded);
 
-    const entryLink = await screen.findByRole('link', { name: '2026-01-10' });
+    const entryLink = await screen.findByRole('link', { name: formatDate('2026-01-10') });
     expect(entryLink).toHaveAttribute('href', '/journals');
   });
 

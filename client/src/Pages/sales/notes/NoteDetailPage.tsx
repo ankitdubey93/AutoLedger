@@ -6,6 +6,7 @@ import BackLink from '../../../components/BackLink';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import { noteStatusPill } from './NoteListPage';
 import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } from './noteKinds';
+import { formatDate } from '../../../utils/date';
 
 /**
  * One credit or debit note (Phase 26). A DRAFT can be edited, deleted or
@@ -106,7 +107,7 @@ function ApplyDialog({
               <select value={targetId} onChange={(e) => chooseTarget(e.target.value)} className={inputClass}>
                 {targets.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.label} · {t.date} · due {formatCents(t.amountDueCents)}
+                    {t.label} · {formatDate(t.date)} · due {formatCents(t.amountDueCents)}
                   </option>
                 ))}
               </select>
@@ -254,7 +255,7 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Date</dt>
-            <dd className="m-0 tabular-nums">{note.issueDate}</dd>
+            <dd className="m-0 tabular-nums">{formatDate(note.issueDate)}</dd>
           </div>
           <div>
             <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Reason</dt>
@@ -372,7 +373,7 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
                     <td className="p-2 font-mono text-xs">
                       <Link to={`/${config.originalPath}/${a.documentId}`}>{a.documentLabel}</Link>
                     </td>
-                    <td className="p-2 tabular-nums">{a.allocationDate}</td>
+                    <td className="p-2 tabular-nums">{formatDate(a.allocationDate)}</td>
                     <td className="p-2 text-right tabular-nums">{formatCents(a.amountCents)}</td>
                   </tr>
                 ))}

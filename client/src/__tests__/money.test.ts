@@ -36,8 +36,19 @@ describe('parseCentsInput', () => {
     expect(parseCentsInput('-450')).toBeNull();
     expect(parseCentsInput('45o')).toBeNull();
     expect(parseCentsInput('$450')).toBeNull();
-    expect(parseCentsInput('1,000')).toBeNull();
     expect(parseCentsInput('1e5')).toBeNull();
+  });
+
+  it('accepts correctly grouped thousands separators, and nothing looser', () => {
+    // formatCents prints "1,234.50", and pre-filled inputs must parse back.
+    expect(parseCentsInput('1,000')).toBe(100000);
+    expect(parseCentsInput('1,234,567.89')).toBe(123456789);
+    // Ambiguous or misplaced commas are refused, never guessed at.
+    expect(parseCentsInput('1,25')).toBeNull();
+    expect(parseCentsInput('1,2345')).toBeNull();
+    expect(parseCentsInput(',100')).toBeNull();
+    expect(parseCentsInput('1,000,00')).toBeNull();
+    expect(parseCentsInput('1,000.005')).toBeNull();
   });
 
   it('absorbs float representation error', () => {
@@ -54,6 +65,13 @@ describe('formatCents', () => {
     expect(formatCents(0)).toBe('0.00');
   });
 
+  it('groups thousands', () => {
+    expect(formatCents(100000)).toBe('1,000.00');
+    expect(formatCents(99999)).toBe('999.99');
+    expect(formatCents(123456789)).toBe('1,234,567.89');
+    expect(formatCents(-123456789)).toBe('-1,234,567.89');
+  });
+
   it('formats a negative balance with one leading minus', () => {
     // A type-aware net balance can legitimately be negative — a contra account,
     // or an expense account carrying a credit.
@@ -62,7 +80,7 @@ describe('formatCents', () => {
   });
 
   it('round-trips against parseCentsInput', () => {
-    for (const raw of ['0.00', '0.01', '9.99', '1234.56']) {
+    for (const raw of ['0.00', '0.01', '9.99', '1,234.56', '12,345,678.90']) {
       const parsed = parseCentsInput(raw);
       expect(parsed).not.toBeNull();
       expect(formatCents(parsed as number)).toBe(raw);

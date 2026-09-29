@@ -9,6 +9,7 @@ import {
   type SettlementStatus,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import { formatDate } from '../../utils/date';
 
 /**
  * The invoice register — every sales invoice, filterable and paginated.
@@ -258,8 +259,8 @@ export default function InvoicesPage() {
                           <span className="text-[var(--muted)] uppercase tracking-wide">Draft</span>
                         )}
                       </td>
-                      <td className="p-3 tabular-nums whitespace-nowrap">{invoice.issueDate}</td>
-                      <td className="p-3 tabular-nums whitespace-nowrap">{invoice.dueDate}</td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(invoice.issueDate)}</td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(invoice.dueDate)}</td>
                       <td className="p-3">{invoice.customerNameSnapshot}</td>
                       <td className="p-3">
                         <div className="flex flex-col gap-1">

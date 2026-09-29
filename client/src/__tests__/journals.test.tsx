@@ -6,6 +6,7 @@ import JournalsPage from '../Pages/accounting/JournalsPage';
 import JournalDetailPage from '../Pages/accounting/JournalDetailPage';
 import NewJournalEntryPage from '../Pages/accounting/NewJournalEntryPage';
 import type { Account, JournalEntry } from '../services/fetchServices';
+import { formatDate } from '../utils/date';
 
 /**
  * The journal register (JournalsPage) and entry detail page (JournalDetailPage).
@@ -192,7 +193,7 @@ describe('JournalsPage', () => {
     mockRegisterRoutes([baseEntry()]);
     renderJournalsPage();
 
-    expect(await screen.findByText('2026-08-15')).toBeInTheDocument();
+    expect(await screen.findByText(formatDate('2026-08-15'))).toBeInTheDocument();
     expect(screen.getByText('entry-11')).toBeInTheDocument();
     expect(screen.getByText('AWS August')).toBeInTheDocument();
     expect(screen.getByText('Alice')).toBeInTheDocument();

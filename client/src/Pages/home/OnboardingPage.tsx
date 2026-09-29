@@ -12,6 +12,7 @@ import {
 } from '../../services/fetchServices';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
+import { formatDate } from '../../utils/date';
 
 /**
  * Accounting's first-run wizard. Collected once per organization and never
@@ -315,8 +316,8 @@ export default function OnboardingPage() {
           </div>
 
           <p className="text-sm text-[var(--muted)] m-0">
-            This fiscal year runs <strong>{derivedFiscalYear.startDate}</strong> to{' '}
-            <strong>{derivedFiscalYear.endDate}</strong> ({derivedFiscalYear.label}).
+            This fiscal year runs <strong>{formatDate(derivedFiscalYear.startDate)}</strong> to{' '}
+            <strong>{formatDate(derivedFiscalYear.endDate)}</strong> ({derivedFiscalYear.label}).
           </p>
 
           <label className="flex flex-col gap-1 text-sm">
@@ -372,7 +373,7 @@ export default function OnboardingPage() {
             <dd className="m-0">{baseCurrency}</dd>
             <dt className="text-[var(--muted)]">Fiscal year</dt>
             <dd className="m-0">
-              {derivedFiscalYear.startDate} – {derivedFiscalYear.endDate} ({derivedFiscalYear.label})
+              {formatDate(derivedFiscalYear.startDate)} – {formatDate(derivedFiscalYear.endDate)} ({derivedFiscalYear.label})
             </dd>
             <dt className="text-[var(--muted)]">Books start date</dt>
             <dd className="m-0">{booksStartDate}</dd>

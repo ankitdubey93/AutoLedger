@@ -10,7 +10,7 @@ import {
   type Account,
   type InvoiceSettings,
 } from '../../services/fetchServices';
-import { formatCents, parseCentsInput } from '../../utils/money';
+import { formatCents, formatCentsPlain, parseCentsInput } from '../../utils/money';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { IMPORT_TEMPLATES, csvField } from '../accounting/importTemplates';
 import SettingsTabs from './SettingsTabs';
@@ -29,10 +29,11 @@ import { inputClass, primaryButtonClass } from '../../components/ui/formClasses'
  *
  * The money bridge (rule 3): the grid holds every amount as integer cents,
  * produced only by `parseCentsInput` on typed text. Each CSV cell is built
- * with `formatCents(cents)`, which yields a decimal string like "500.00" —
- * the shape the server's `parseMoneyText` expects for this column. The two
- * functions are exact inverses at the string boundary
- * (`formatCents(50000) === '500.00'`, and `parseMoneyText('500.00')` is
+ * with `formatCentsPlain(cents)`, which yields an ungrouped decimal string
+ * like "5000.00" — the shape the server's `parseMoneyText` expects for this
+ * column (never display-grouped "5,000.00"). The two functions are exact
+ * inverses at the string boundary
+ * (`formatCentsPlain(50000) === '500.00'`, and `parseMoneyText('500.00')` is
  * 50000 cents again) — never `String(cents)`, which would hand the server a
  * raw integer-cents string and desync the amount by two orders of magnitude.
  *
@@ -230,7 +231,7 @@ export default function ConversionBalancesPage() {
         if (parsed.malformed || (parsed.debit === 0 && parsed.credit === 0)) continue;
         const code = accountsById.get(row.accountId)?.code ?? '';
         csvRows.push(
-          [csvField(code), csvField(formatCents(parsed.debit)), csvField(formatCents(parsed.credit))].join(','),
+          [csvField(code), csvField(formatCentsPlain(parsed.debit)), csvField(formatCentsPlain(parsed.credit))].join(','),
         );
       }
       const content = `${header}\n${csvRows.join('\n')}\n`;

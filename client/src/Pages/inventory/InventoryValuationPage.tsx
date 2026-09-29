@@ -14,6 +14,7 @@ import {
   type InventoryValuationAccount,
   type LinkAllResult,
 } from '../../services/fetchServices';
+import { formatDate } from '../../utils/date';
 
 /**
  * Phase 35a — inventory's reconciliation report: every control account's
@@ -197,7 +198,7 @@ export default function InventoryValuationPage() {
                             <ul className="m-0 pl-0 list-none space-y-1">
                               {account.unexplainedLines.map((line) => (
                                 <li key={line.journalEntryId} className="text-sm flex flex-wrap items-center gap-2">
-                                  <Link to={`/journals/${line.journalEntryId}`}>{line.entryDate}</Link>
+                                  <Link to={`/journals/${line.journalEntryId}`}>{formatDate(line.entryDate)}</Link>
                                   <span className="text-[var(--text)]">{line.description ?? '(no description)'}</span>
                                   <span className="text-[var(--muted)]">{line.sourceType}</span>
                                   <span className="font-mono">

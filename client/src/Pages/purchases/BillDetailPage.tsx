@@ -20,6 +20,7 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import PaymentDialog from '../sales/PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
+import { formatDate } from '../../utils/date';
 
 /**
  * One bill, in full. Approve and Void are both gated by a confirmation
@@ -264,8 +265,8 @@ export default function BillDetailPage() {
           </div>
           <div className="text-right">
             <p className="text-lg font-semibold m-0">{bill.vendorReference}</p>
-            <p className="text-sm text-[var(--muted)] m-0">Expense date {bill.billDate}</p>
-            <p className="text-sm text-[var(--muted)] m-0">Due {bill.dueDate}</p>
+            <p className="text-sm text-[var(--muted)] m-0">Expense date {formatDate(bill.billDate)}</p>
+            <p className="text-sm text-[var(--muted)] m-0">Due {formatDate(bill.dueDate)}</p>
           </div>
         </div>
 
@@ -386,7 +387,7 @@ export default function BillDetailPage() {
               <tbody>
                 {payments.map((payment) => (
                   <tr key={payment.id} className="border-t border-[var(--border)]">
-                    <td className="p-2 tabular-nums">{payment.paymentDate}</td>
+                    <td className="p-2 tabular-nums">{formatDate(payment.paymentDate)}</td>
                     <td className="p-2">{payment.status === 'VOID' ? 'Void' : 'Posted'}</td>
                     <td className="p-2 text-right tabular-nums">
                       {formatCents(
@@ -420,7 +421,7 @@ export default function BillDetailPage() {
                     <td className="p-2 font-mono text-xs">
                       <Link to={`/debit-notes/${note.id}`}>{note.debitNoteNumber ?? 'Draft'}</Link>
                     </td>
-                    <td className="p-2 tabular-nums">{note.issueDate}</td>
+                    <td className="p-2 tabular-nums">{formatDate(note.issueDate)}</td>
                     <td className="p-2">{note.status === 'DRAFT' ? 'Draft' : note.status === 'ISSUED' ? 'Issued' : 'Void'}</td>
                     <td className="p-2 text-right tabular-nums">{formatCents(note.totalCents)}</td>
                   </tr>

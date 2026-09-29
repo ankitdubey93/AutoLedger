@@ -31,6 +31,7 @@ import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';
 import BarChart from './BarChart';
 import PageHeader from '../../components/ui/PageHeader';
+import { formatDate } from '../../utils/date';
 
 /**
  * Accounting's home page. Every figure is aggregated from raw `ledger_lines`
@@ -135,7 +136,7 @@ export default function DashboardPage() {
 
       {!position.equationHolds && (
         <p className="status status--bad">
-          Assets do not equal Liabilities + Equity + current earnings — this should be impossible.
+          Your balance sheet does not balance: assets differ from liabilities plus equity. Run the integrity check or contact support.
         </p>
       )}
 
@@ -391,7 +392,7 @@ export default function DashboardPage() {
                   <tr key={entry.id} className="border-t border-[var(--border)]">
                     <td className="p-3">
                       <Link to="/journals" className="text-[var(--text)]">
-                        {entry.entryDate}
+                        {formatDate(entry.entryDate)}
                       </Link>
                     </td>
                     <td className="p-3">{entry.description ?? '—'}</td>

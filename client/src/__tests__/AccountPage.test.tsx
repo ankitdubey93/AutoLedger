@@ -113,9 +113,9 @@ describe('AccountPage', () => {
     renderAccount();
 
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Organisation', 'Members', 'Session', 'System']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Organisation', 'Members', 'Session', 'Status']);
     expect(screen.getByRole('tab', { name: 'Organisation' })).toHaveAttribute('aria-selected', 'true');
-    for (const name of ['Members', 'Session', 'System']) {
+    for (const name of ['Members', 'Session', 'Status']) {
       expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false');
     }
     // Default tab: the Organisation panels, not the others.

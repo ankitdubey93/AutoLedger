@@ -155,4 +155,4 @@ Go to **Data migration → Imports → New import**. Kind **Vendors**, upload `v
 
 ## You're done
 
-Four months entered, four statements reconciled, four months of financial statements that tie back to a hand-typed source document for every dollar — including three corrections made the way an auditor expects them, by separate documents that leave the originals untouched. If you want to see the same scenario built a different way, `sandbox/` runs a 24-month version of a different business through the seeder instead of by hand — see `sandbox/README.md`.
+Four months entered, four statements reconciled, four months of financial statements that tie back to a hand-typed source document for every dollar — including three corrections made the way an auditor expects them, by separate documents that leave the originals untouched. If you want to see the finished books without typing them, `npm run seed:demo` (in `server/`) replays this exact scenario through the API into a demo organization — see `docs/development.md`.

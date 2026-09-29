@@ -25,6 +25,8 @@ import {
   type StockSerial,
   type StockSerialStatus,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
+import { formatDate } from '../../utils/date';
 
 /**
  * One item, in full: its custom fields (editable), where it's on hand,
@@ -186,7 +188,7 @@ export default function InventoryItemDetailPage() {
             {item.code} — {item.name}
           </h1>
           <p className="text-sm text-[var(--muted)]">
-            {item.itemType} · {item.tracking}
+            {humanizeEnum(item.itemType)} · {humanizeEnum(item.tracking)}
             {item.barcode !== null ? ` · ${item.barcode}` : ''}
           </p>
         </div>
@@ -330,7 +332,7 @@ export default function InventoryItemDetailPage() {
                     />
                   </td>
                   <td className="pr-3 py-1 text-[var(--text)]">{serial.serialNumber}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{serial.status}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(serial.status)}</td>
                   <td className="pr-3 py-1 text-[var(--muted)]">{serial.locationCode ?? '—'}</td>
                   <td className="pr-3 py-1 text-[var(--text)]">{formatCents(serial.costCents)}</td>
                   <td className="pr-3 py-1 text-[var(--muted)]">
@@ -387,8 +389,8 @@ export default function InventoryItemDetailPage() {
           <tbody>
             {movements.map((m) => (
               <tr key={m.id} className="border-t border-[var(--border)]">
-                <td className="pr-3 py-1 text-[var(--muted)]">{m.occurredOn}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{m.movementType}</td>
+                <td className="pr-3 py-1 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
+                <td className="pr-3 py-1 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
                 <td className="pr-3 py-1 text-[var(--muted)]">{m.locationCode}</td>
                 <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
                 <td className="pr-3 py-1 text-[var(--muted)]">{formatQuantityMilli(m.runningLocationQuantityMilli)}</td>

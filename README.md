@@ -26,7 +26,7 @@ One product since Phase 33 (2026-09-25). It was built as three separately chosen
 | Bill inbox: local OCR, PII pixel masking, Claude or Gemini extraction, history-first GL coding, review queue, confidence-gated auto-post, Google Drive intake | PDF/XLSX export, emailed documents |
 | Inventory: perpetual valuation posting to the GL, templates, item codes, QR labels | Statutory tax engine (GST/VAT returns) |
 | CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | Deployment (no Dockerfiles yet) |
-| 1610 server tests, 428 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
+| 1708 server tests (2 skipped), 470 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
 Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
 
@@ -49,6 +49,14 @@ cp client/.env.example client/.env
 ```
 
 Open http://localhost:5173 — register an organization and the setup wizard takes you to the dashboard.
+
+**Or explore a populated demo company** — four months of invoices, bills, reconciled bank statements and inventory for *Harbor Point Fabrication*, entered through the real API:
+
+```bash
+(cd server && npm run seed:demo)      # prints the demo login; ~10 seconds
+```
+
+Set `VITE_DEMO_EMAIL` / `VITE_DEMO_PASSWORD` in `client/.env` (see `.env.example`) and the sign-in page gets a one-click **Open the demo** button.
 
 Setting up a machine from scratch — installing Node and Docker, generating the token secrets, restoring data? [SETUP.md](SETUP.md) walks through the whole thing.
 
@@ -78,8 +86,8 @@ server/     Express + TypeScript API — controllers / services / routes / middl
             module's code nests under accounting/, capture/ or inventory/ in every layer
 client/     React + Vite frontend — one shell, one route table (src/routes/),
             pages grouped by sidebar section under Pages/
-walkthrough/ Phase 6.1's demo scenario — human-readable JSON/CSV, manually enterable;
-            used to verify the real services end-to-end
+walkthrough/ Phase 6.1's demo scenario — human-readable CSV/markdown, manually enterable;
+            replayed through the API by the answer-key test and by `npm run seed:demo`
 docs/       Architecture, schema, API, guardrails, roadmap
 study/      Interview-prep notes generated from this project's decisions
 ```

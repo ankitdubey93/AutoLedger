@@ -25,6 +25,15 @@ const ENTITY_TYPES_BY_MODULE: Record<string, readonly string[]> = {
   'ledger-core': ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
   'ap-flow': ['ap_flow_document'],
 };
+const ENTITY_TYPE_LABELS: Record<string, string> = {
+  invoice: 'Invoices',
+  bill: 'Expenses',
+  journal_entry: 'Journal entries',
+  payment: 'Payments',
+  customer: 'Customers',
+  vendor: 'Vendors',
+  ap_flow_document: 'Captured bills',
+};
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${String(bytes)} B`;
@@ -161,7 +170,7 @@ export default function DocumentsPage() {
             <option value="">All record types</option>
             {entityTypeOptions.map((type) => (
               <option key={type} value={type}>
-                {type}
+                {ENTITY_TYPE_LABELS[type] ?? type}
               </option>
             ))}
           </select>

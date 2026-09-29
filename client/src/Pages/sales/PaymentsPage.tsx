@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { listPayments, voidPayment, type Payment, type PaymentDirection } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { formatDate } from '../../utils/date';
 
 /**
  * The payment register — every receipt and every vendor payment, across both
@@ -142,7 +143,7 @@ export default function PaymentsPage() {
                 <tbody>
                   {payments.map((payment) => (
                     <tr key={payment.id} className="border-t border-[var(--border)]">
-                      <td className="p-3 tabular-nums whitespace-nowrap">{payment.paymentDate}</td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(payment.paymentDate)}</td>
                       <td className="p-3">{directionLabel(payment.direction)}</td>
                       <td className="p-3">{payment.counterpartyName}</td>
                       <td className="p-3">

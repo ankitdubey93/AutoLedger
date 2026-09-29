@@ -11,6 +11,7 @@ import RegisterPage from './Pages/auth/RegisterPage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
+import DocumentTitle from './components/DocumentTitle';
 
 /**
  * Provider composition, outermost first:
@@ -32,6 +33,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <OrgProvider>
+          <DocumentTitle />
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route path="/register" element={<RegisterPage />} />

@@ -16,6 +16,7 @@
     "db:reset": "tsx src/db/reset.ts",
     "verify:integrity": "tsx src/scripts/verifyIntegrity.ts",
     "walkthrough": "tsx src/scripts/generateWalkthrough.ts",
+    "seed:demo": "tsx src/scripts/seedDemo.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

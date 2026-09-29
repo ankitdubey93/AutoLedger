@@ -2,6 +2,7 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { INVENTORY_BASE } from '../../routes/paths';
 import { lookupStock, type StockLookupMatch } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
@@ -85,7 +86,7 @@ export default function InventoryLookupPage() {
             {matches.map((m) => (
               <li key={`${m.kind}-${m.id}`}>
                 <button type="button" onClick={() => navigateToMatch(m)} className="text-sm text-[var(--text)]">
-                  {m.kind}: {m.code} — {m.title}
+                  {humanizeEnum(m.kind)}: {m.code} — {m.title}
                 </button>
               </li>
             ))}

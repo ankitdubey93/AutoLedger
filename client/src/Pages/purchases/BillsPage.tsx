@@ -9,6 +9,7 @@ import {
   type SettlementStatus,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import { formatDate } from '../../utils/date';
 
 /**
  * The bill register — every accounts-payable document, filterable and
@@ -233,8 +234,8 @@ export default function BillsPage() {
                       <tr key={bill.id} className="border-t border-[var(--border)]">
                         <td className="p-3">{bill.vendorNameSnapshot}</td>
                         <td className="p-3 font-mono text-xs">{bill.vendorReference}</td>
-                        <td className="p-3 tabular-nums whitespace-nowrap">{bill.billDate}</td>
-                        <td className="p-3 tabular-nums whitespace-nowrap">{bill.dueDate}</td>
+                        <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(bill.billDate)}</td>
+                        <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(bill.dueDate)}</td>
                         <td className="p-3">
                           <div className="flex flex-col gap-1">
                             {statusPill(bill.status)}

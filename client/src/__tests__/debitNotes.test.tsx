@@ -175,7 +175,7 @@ describe('DebitNotesPage', () => {
     expect(screen.getByRole('link', { name: 'INV-IC-9120' })).toHaveAttribute('href', '/expenses/bill-12');
     const row = number.closest('tr');
     if (row === null) throw new Error('no row');
-    expect(within(row).getAllByText('1500.00')).toHaveLength(2);
+    expect(within(row).getAllByText('1,500.00')).toHaveLength(2);
   });
 });
 
@@ -253,7 +253,7 @@ describe('DebitNoteDetailPage', () => {
 
     expect(await screen.findByText('IC-CR-0231')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Apply credit' }));
-    expect(await screen.findByLabelText('Amount to apply')).toHaveValue('1000.00');
+    expect(await screen.findByLabelText('Amount to apply')).toHaveValue('1,000.00');
     await user.click(screen.getByRole('button', { name: 'Apply' }));
 
     await waitFor(() => expect(screen.getByTestId('unapplied')).toHaveTextContent('500.00'));

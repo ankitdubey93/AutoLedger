@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { buildStockLabels, lookupStock, type StockLabel, type StockLabelKind, type StockLookupMatch } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 
@@ -100,7 +101,7 @@ export default function InventoryLabelsPage() {
               {searchResults.map((m) => (
                 <li key={`${m.kind}-${m.id}`}>
                   <button type="button" onClick={() => addTarget(m)} className="w-full text-left px-2.5 py-1.5 text-sm text-[var(--text)]">
-                    {m.kind}: {m.code} — {m.title}
+                    {humanizeEnum(m.kind)}: {m.code} — {m.title}
                   </button>
                 </li>
               ))}
@@ -112,7 +113,7 @@ export default function InventoryLabelsPage() {
           {targets.map((t, i) => (
             <li key={`${t.kind}-${t.id}`} className="flex items-center gap-2 text-sm">
               <span className="text-[var(--text)]">
-                {t.kind}: {t.displayLabel}
+                {humanizeEnum(t.kind)}: {t.displayLabel}
               </span>
               <label className="text-sm text-[var(--text)]">
                 Copies

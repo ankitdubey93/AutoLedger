@@ -16,6 +16,7 @@ import {
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import MatchScoreBadge from './MatchScoreBadge';
+import { formatDate } from '../../utils/date';
 
 /**
  * The bank-line approval queue. Every unmatched line's top candidates are
@@ -240,7 +241,7 @@ export default function BankTransactionsPage() {
                 return (
                   <div key={txn.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)]">
                     <div className="flex items-center gap-3 p-3 flex-wrap">
-                      <span className="tabular-nums text-sm whitespace-nowrap">{txn.txnDate}</span>
+                      <span className="tabular-nums text-sm whitespace-nowrap">{formatDate(txn.txnDate)}</span>
                       <span className="text-sm flex-1 min-w-40">{txn.description}</span>
                       <span
                         className={`tabular-nums text-sm ${txn.amountCents > 0 ? 'text-[var(--good)]' : ''}`}

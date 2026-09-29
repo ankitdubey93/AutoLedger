@@ -126,7 +126,7 @@ describe('ProfitAndLossPage', () => {
     expect(screen.getByText('Gross profit')).toBeInTheDocument();
     const netIncomeRow = screen.getByText('Net income').closest('tr');
     expect(netIncomeRow).not.toBeNull();
-    expect(netIncomeRow).toHaveTextContent('1800.00');
+    expect(netIncomeRow).toHaveTextContent('1,800.00');
   });
 
   it('refetches with the new date when "to" changes', async () => {

@@ -12,6 +12,7 @@ import {
   type StockLocation,
   type StockLocationKind,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 const NESTED_KINDS: readonly StockLocationKind[] = ['ZONE', 'BIN'];
@@ -141,7 +142,7 @@ export default function InventoryLocationsPage() {
             style={{ paddingLeft: `${(location.depth - 1) * 16}px` }}
           >
             <span title={location.path} className={location.isActive ? 'text-[var(--text)]' : 'text-[var(--muted)] line-through'}>
-              {location.code} — {location.name} ({location.kind})
+              {location.code} — {location.name} ({humanizeEnum(location.kind)})
             </span>
             <span className="flex gap-2">
               <button type="button" onClick={() => handlePrintLabel(location)} className="text-xs text-[var(--muted)]">

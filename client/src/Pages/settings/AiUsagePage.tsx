@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { getAiUsage, type AiUsageSummary } from '../../services/fetchServices';
 import { formatMicroUsd } from '../../utils/money';
 import BackLink from '../../components/BackLink';
+import { formatDate } from '../../utils/date';
 
 /**
  * Capture's AI usage report (Phase 19.1) — every metered token/cost call
@@ -185,7 +186,7 @@ export default function AiUsagePage() {
               <tbody>
                 {usage.byDay.map((row) => (
                   <tr key={row.date}>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.date}</td>
+                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{formatDate(row.date)}</td>
                     <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
                     <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
                       ${formatMicroUsd(row.costMicroUsd)}

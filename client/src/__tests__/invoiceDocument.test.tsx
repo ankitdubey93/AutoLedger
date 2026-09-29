@@ -6,6 +6,7 @@ import { OrgProvider } from '../context/OrgContext';
 import { LedgerSettingsProvider } from '../context/LedgerSettingsContext';
 import InvoiceDetailPage from '../Pages/sales/InvoiceDetailPage';
 import type { Invoice, InvoiceSettings } from '../services/fetchServices';
+import { formatDate } from '../utils/date';
 
 /**
  * Characterisation of the PRINTED invoice document (Phase 30, Step 11).
@@ -257,8 +258,8 @@ describe('printed invoice document (characterisation)', () => {
   it('renders the issue and due dates', async () => {
     await renderDocument();
     const panel = within(documentPanel());
-    expect(panel.getByText('Issued 2026-06-01')).toBeInTheDocument();
-    expect(panel.getByText('Due 2026-06-30')).toBeInTheDocument();
+    expect(panel.getByText(`Issued ${formatDate('2026-06-01')}`)).toBeInTheDocument();
+    expect(panel.getByText(`Due ${formatDate('2026-06-30')}`)).toBeInTheDocument();
   });
 
   it('renders the customer snapshot: name, address and tax number', async () => {

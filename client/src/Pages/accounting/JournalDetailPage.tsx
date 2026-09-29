@@ -12,6 +12,7 @@ import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
+import { formatDate } from '../../utils/date';
 
 /**
  * One journal entry, in full: every field, both totals, and every line.
@@ -118,7 +119,7 @@ export default function JournalDetailPage() {
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold m-0">{entry.description ?? 'Journal entry'}</h2>
-          <p className="text-sm text-[var(--muted)] m-0 mt-1">{entry.entryDate}</p>
+          <p className="text-sm text-[var(--muted)] m-0 mt-1">{formatDate(entry.entryDate)}</p>
         </div>
         {canReverse && (
           <button
@@ -145,7 +146,7 @@ export default function JournalDetailPage() {
       {error !== null && <p className="status status--bad">{error}</p>}
 
       <dl className="grid grid-cols-2 sm:grid-cols-3 gap-4 m-0">
-        <DetailRow label="Date">{entry.entryDate}</DetailRow>
+        <DetailRow label="Date">{formatDate(entry.entryDate)}</DetailRow>
         <DetailRow label="Reference">
           <span className="font-mono select-all">{entry.id}</span>
         </DetailRow>
@@ -238,7 +239,7 @@ export default function JournalDetailPage() {
           title="Reverse this entry?"
           body={
             <>
-              This posts a new offsetting entry dated {entry.entryDate}. The original entry is
+              This posts a new offsetting entry dated {formatDate(entry.entryDate)}. The original entry is
               never changed or deleted. This cannot be undone.
             </>
           }

@@ -6,6 +6,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import ProductRoutes from '../routes/ProductRoutes';
 import ProtectedRoute from '../components/ProtectedRoute';
+import { formatDate } from '../utils/date';
 
 /**
  * The onboarding gate and wizard. Renders the real `ProductRoutes` tree —
@@ -217,7 +218,7 @@ describe('the wizard', () => {
 
     await user.selectOptions(await screen.findByLabelText(/fiscal year starts in/i), 'April');
 
-    expect(await screen.findByText('2027-03-31', { exact: false })).toBeInTheDocument();
+    expect(await screen.findByText(formatDate('2027-03-31'), { exact: false })).toBeInTheDocument();
   });
 
   it('submits the expected onboarding payload on Finish', async () => {

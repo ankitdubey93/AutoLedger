@@ -213,7 +213,7 @@ describe('NewCreditNotePage', () => {
     expect(await screen.findByLabelText('Line 1 description')).toHaveValue('Bracket kits');
     expect(screen.getByLabelText('Line 1 quantity')).toHaveValue('20');
     expect(screen.getByLabelText('Line 1 account')).toHaveValue('acc-4800');
-    expect(screen.getByTestId('note-total')).toHaveTextContent('12000.00 USD');
+    expect(screen.getByTestId('note-total')).toHaveTextContent('12,000.00 USD');
   });
 
   it('refuses to draft against an invoice that is not issued', async () => {

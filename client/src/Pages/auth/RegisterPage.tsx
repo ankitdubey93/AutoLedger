@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
+import AuthLayout from './AuthLayout';
 
 /**
  * Creates a user, their organization, and the OWNER membership binding them —
@@ -38,11 +39,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <main className="shell shell--narrow">
-      <header>
-        <h1>Create your organization</h1>
-        <p className="subtitle">You will be its owner.</p>
-      </header>
+    <AuthLayout title="Create your organization" subtitle="You will be its owner. Setup takes about two minutes.">
 
       <form className="card form" onSubmit={(e) => void onSubmit(e)}>
         <label htmlFor="organizationName">Organization name</label>
@@ -96,9 +93,9 @@ export default function RegisterPage() {
         </button>
       </form>
 
-      <p className="muted">
+      <p className="muted m-0">
         Already have an account? <Link to="/login">Sign in</Link>
       </p>
-    </main>
+    </AuthLayout>
   );
 }

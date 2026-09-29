@@ -4,6 +4,7 @@ import { ApiRequestError, getAccountLedger, type AccountLedger } from '../../ser
 import { formatCents } from '../../utils/money';
 import { TYPE_STYLES } from './AccountsPage';
 import BackLink from '../../components/BackLink';
+import { formatDate } from '../../utils/date';
 
 /**
  * One postable account's ledger — opening balance, every posted line with a
@@ -223,7 +224,7 @@ export default function AccountLedgerPage() {
             )}
             {ledger.rows.map((row) => (
               <tr key={row.lineId} className="border-t border-[var(--border)]">
-                <td className="p-3 tabular-nums whitespace-nowrap">{row.entryDate}</td>
+                <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(row.entryDate)}</td>
                 <td className="p-3">
                   <Link to={`/journals/${row.entryId}`}>{row.description ?? '—'}</Link>
                 </td>

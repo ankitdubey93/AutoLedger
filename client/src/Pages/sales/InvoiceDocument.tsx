@@ -2,6 +2,7 @@ import type { CSSProperties, ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import type { Invoice, InvoiceSettings, OrganizationProfile } from '../../services/fetchServices';
 import { formatCents, formatQuantity, formatRate } from '../../utils/money';
+import { formatDate } from '../../utils/date';
 
 /**
  * The printable invoice document — ONE component, rendered by both the real
@@ -252,8 +253,8 @@ function ClassicLayout(props: InvoiceDocumentProps): ReactElement {
             </p>
           )}
           <p className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'DRAFT'}</p>
-          <p className="text-sm text-[var(--muted)] m-0">Issued {invoice.issueDate}</p>
-          {showsDueDate(settings) && <p className="text-sm text-[var(--muted)] m-0">Due {invoice.dueDate}</p>}
+          <p className="text-sm text-[var(--muted)] m-0">Issued {formatDate(invoice.issueDate)}</p>
+          {showsDueDate(settings) && <p className="text-sm text-[var(--muted)] m-0">Due {formatDate(invoice.dueDate)}</p>}
         </div>
       </div>
 
@@ -326,8 +327,8 @@ function ModernLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings 
             <p className="text-lg font-semibold m-0" style={{ color: accent }}>
               {invoice.invoiceNumber ?? 'DRAFT'}
             </p>
-            <p className="text-sm text-[var(--muted)] m-0">Issued {invoice.issueDate}</p>
-            {showsDueDate(settings) && <p className="text-sm text-[var(--muted)] m-0">Due {invoice.dueDate}</p>}
+            <p className="text-sm text-[var(--muted)] m-0">Issued {formatDate(invoice.issueDate)}</p>
+            {showsDueDate(settings) && <p className="text-sm text-[var(--muted)] m-0">Due {formatDate(invoice.dueDate)}</p>}
           </div>
         </div>
 
@@ -399,8 +400,8 @@ function CompactLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings
         <div className="text-right ml-auto">
           <p className="text-sm font-semibold uppercase tracking-wide m-0">{settings.documentTitle}</p>
           <p className="font-semibold m-0">{invoice.invoiceNumber ?? 'DRAFT'}</p>
-          <p className="text-[var(--muted)] m-0">Issued {invoice.issueDate}</p>
-          {showsDueDate(settings) && <p className="text-[var(--muted)] m-0">Due {invoice.dueDate}</p>}
+          <p className="text-[var(--muted)] m-0">Issued {formatDate(invoice.issueDate)}</p>
+          {showsDueDate(settings) && <p className="text-[var(--muted)] m-0">Due {formatDate(invoice.dueDate)}</p>}
         </div>
       </div>
 

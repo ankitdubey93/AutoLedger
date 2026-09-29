@@ -21,7 +21,7 @@ export default function AccountTabs({ active, onChange }: AccountTabsProps) {
         { id: 'organization', label: 'Organisation', icon: Building2 },
         { id: 'members', label: 'Members', icon: Users },
         { id: 'session', label: 'Session', icon: KeyRound },
-        { id: 'system', label: 'System', icon: Server },
+        { id: 'system', label: 'Status', icon: Server },
       ]}
     />
   );

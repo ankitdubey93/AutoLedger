@@ -221,7 +221,7 @@ describe('MigrationImportDetailPage', () => {
 
     const preview = await screen.findByText(/will be posted to/);
     expect(preview.textContent).toContain('3400');
-    expect(preview.textContent).toContain('3000.00');
+    expect(preview.textContent).toContain('3,000.00');
   });
 
   it('opens the confirm dialog before posting, and posts only after confirming', async () => {

@@ -19,6 +19,8 @@ import {
   type StockMovement,
   type StockSummary,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
+import { formatDate } from '../../utils/date';
 
 /**
  * The inventory section of the dashboard: summary tiles, a low-stock table
@@ -223,8 +225,8 @@ export default function InventoryOverview() {
                 <tbody>
                   {recentMovements.map((m) => (
                     <tr key={m.id}>
-                      <td className="px-3 py-2 text-[var(--muted)]">{m.occurredOn}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">{m.movementType}</td>
+                      <td className="px-3 py-2 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
+                      <td className="px-3 py-2 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
                       <td className="px-3 py-2 text-[var(--text)]">{m.itemCode}</td>
                       <td className="px-3 py-2 text-[var(--muted)]">{m.locationCode}</td>
                       <td className="px-3 py-2 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>

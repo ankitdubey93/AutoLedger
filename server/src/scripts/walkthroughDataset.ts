@@ -8,15 +8,14 @@ import type { WalkthroughMonth } from './walkthroughDates.js';
  * note), and a price allowance on an already-paid invoice that sits as
  * unapplied credit until it is applied to the customer's next invoice.
  *
- * Unlike `sandbox/` (replayed through services by a seeder, its bank
- * statement generated from payments the seeder itself created), this data
- * is typed in by a human, so every amount and every date is fixed here, not
- * derived at load time. See `sandbox/README.md`'s note distinguishing the
- * two.
+ * This data is meant to be typed in by a human, so every amount and every
+ * date is fixed here, not derived at load time. (It is also replayed through
+ * the API by `walkthroughReplay.ts`, for the answer-key test and for
+ * `npm run seed:demo` — the same fixed data either way.)
  *
  * Money is a decimal string (`"14500.00"`), parsed through `parseMoneyText`
- * wherever it is used — never a float, matching the file-boundary discipline
- * `sandbox/README.md` documents for its own fixtures (guardrails rule 3).
+ * wherever it is used — never a float; rule 3's discipline applied at a file
+ * boundary.
  *
  * Every document is tax-exempt (no `taxRateBp` field — the schema's default
  * is 0) so the arithmetic in `07-expected-results.md` stays checkable by

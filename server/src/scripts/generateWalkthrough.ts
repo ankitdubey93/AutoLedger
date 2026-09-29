@@ -19,14 +19,12 @@ import { parseMoneyText } from '../utils/money.js';
  * Deliberately not `fixtures/` and not seeded through the API here — this
  * folder is meant to be worked through by a human in the AutoLedger UI
  * (typing a bill or invoice in by hand, uploading a CSV through the
- * importer screens), and is committed as plain, reviewable files. Contrast
- * `sandbox/`, which is replayed through services by a seeder (see
- * `walkthrough/README.md` and `sandbox/README.md`, which cross-reference
- * each other).
+ * importer screens), and is committed as plain, reviewable files. The same
+ * dataset is also replayed through the API by `walkthroughReplay.ts` — by the
+ * answer-key test, and by `npm run seed:demo` to build the demo organization.
  */
 
-// process.cwd() === server/ for every npm script, the same convention
-// sandboxManifest.ts's SANDBOX_ROOT relies on.
+// process.cwd() === server/ for every npm script, so the repo root is one level up.
 const WALKTHROUGH_ROOT = path.resolve(process.cwd(), '..', 'walkthrough');
 
 function outPath(...segments: string[]): string {
@@ -451,9 +449,9 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `## You're done\n\n` +
     `Four months entered, four statements reconciled, four months of financial statements that tie back to ` +
     `a hand-typed source document for every dollar — including three corrections made the way an auditor ` +
-    `expects them, by separate documents that leave the originals untouched. If you want to see the same scenario built a different ` +
-    `way, \`sandbox/\` runs a 24-month version of a different business through the seeder instead of by hand — ` +
-    `see \`sandbox/README.md\`.\n`;
+    `expects them, by separate documents that leave the originals untouched. If you want to see the finished books ` +
+    `without typing them, \`npm run seed:demo\` (in \`server/\`) replays this exact scenario through the API into a ` +
+    `demo organization — see \`docs/development.md\`.\n`;
 
   return out;
 }

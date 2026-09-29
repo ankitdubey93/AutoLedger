@@ -11,6 +11,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { formatDate } from '../../utils/date';
 
 /**
  * The journal register — every posted entry, filterable and paginated.
@@ -242,7 +243,7 @@ export default function JournalsPage() {
                 <tbody>
                   {entries.map((entry) => (
                     <tr key={entry.id} className="border-t border-[var(--border)]">
-                      <td className="p-3 tabular-nums whitespace-nowrap">{entry.entryDate}</td>
+                      <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(entry.entryDate)}</td>
                       <td className="p-3 font-mono text-xs text-[var(--muted)]">
                         {entry.id.slice(0, 8)}
                       </td>
@@ -333,7 +334,7 @@ export default function JournalsPage() {
           title="Reverse this entry?"
           body={
             <>
-              This posts a new offsetting entry dated {confirmEntry.entryDate}. The original entry
+              This posts a new offsetting entry dated {formatDate(confirmEntry.entryDate)}. The original entry
               is never changed or deleted. This cannot be undone.
             </>
           }

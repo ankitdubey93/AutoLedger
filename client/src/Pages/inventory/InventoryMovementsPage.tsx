@@ -21,6 +21,7 @@ import {
   type StockLot,
   type StockSerial,
 } from '../../services/fetchServices';
+import { humanizeEnum } from '../../utils/enumLabel';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 
@@ -313,7 +314,7 @@ export default function InventoryMovementsPage() {
       ) : null}
       {result !== null ? (
         <p className="text-sm text-[var(--good)]">
-          Posted {result.count} movements (group {result.movementGroupId})
+          Posted {result.count} {result.count === 1 ? 'movement' : 'movements'}.
         </p>
       ) : null}
 
@@ -485,7 +486,7 @@ export default function InventoryMovementsPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-[var(--text)]">
-                    {line.item.code} — {line.item.name} ({line.item.tracking})
+                    {line.item.code} — {line.item.name} ({humanizeEnum(line.item.tracking)})
                   </span>
                   <button type="button" onClick={() => updateLine(line.key, { item: null })} className="text-xs text-[var(--muted)]">
                     Change

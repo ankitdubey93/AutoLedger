@@ -1,4 +1,4 @@
-import { Layers, LogOut, Menu as MenuIcon, Monitor, Moon, Search, Sun, UserCog } from 'lucide-react';
+import { LogOut, Menu as MenuIcon, Monitor, Moon, Search, Sun, UserCog } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
 import { useOrg } from '../../context/OrgContext';
@@ -7,6 +7,7 @@ import { useShell } from './ShellContext';
 import OrgSwitcher from './OrgSwitcher';
 import Menu from '../ui/Menu';
 import { initials } from '../../utils/initials';
+import BrandMark from '../BrandMark';
 
 const THEME_OPTIONS: Array<{ id: Theme; label: string; icon: typeof Sun }> = [
   { id: 'light', label: 'Light', icon: Sun },
@@ -47,10 +48,7 @@ export default function AppTopBar() {
         title="Dashboard"
         className="flex items-center gap-1.5 shrink-0 no-underline text-[var(--text)]"
       >
-        <span className="flex size-6 items-center justify-center rounded-md bg-gradient-to-br from-[var(--accent)] to-[var(--accent-hover)] text-white">
-          <Layers size={13} aria-hidden="true" />
-        </span>
-        <span className="hidden sm:inline text-sm font-semibold tracking-wide">AutoLedger</span>
+        <BrandMark nameClassName="hidden sm:inline" />
       </Link>
 
 

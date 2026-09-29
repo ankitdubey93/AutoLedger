@@ -18,6 +18,7 @@ import { useOrg } from '../../context/OrgContext';
 import { formatCents } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import MetricTile from '../../components/ui/MetricTile';
+import { formatDate } from '../../utils/date';
 
 /**
  * A customer's or vendor's account (Phase 25) — the party's subsidiary ledger
@@ -264,7 +265,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
                   {documentLink(item.documentId, item.documentNumber, notePath(item.documentKind))}
                 </td>
                 <td className="p-3 tabular-nums whitespace-nowrap">{item.documentDate}</td>
-                <td className="p-3 tabular-nums whitespace-nowrap">{item.dueDate}</td>
+                <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(item.dueDate)}</td>
                 <td className="p-3 text-right tabular-nums">
                   {item.daysOverdue > 0 ? item.daysOverdue : '—'}
                 </td>
@@ -331,7 +332,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
             {ledger.rows.map((row) => (
               <tr key={`${row.journalEntryId}-${row.documentId}`} className="border-t border-[var(--border)]">
                 <td className="p-3 tabular-nums whitespace-nowrap">
-                  <Link to={`/journals/${row.journalEntryId}`}>{row.entryDate}</Link>
+                  <Link to={`/journals/${row.journalEntryId}`}>{formatDate(row.entryDate)}</Link>
                 </td>
                 <td className="p-3">{KIND_LABELS[row.kind]}</td>
                 <td className="p-3 text-xs">{referenceCell(row)}</td>

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import type { NoteStatus } from '../../../services/fetchServices';
 import { formatCents } from '../../../utils/money';
 import { REASON_LABELS, type NoteKindConfig, type NoteView } from './noteKinds';
+import { formatDate } from '../../../utils/date';
 
 /**
  * The credit-note or debit-note register (Phase 26). There is deliberately no
@@ -142,7 +143,7 @@ export default function NoteListPage({ config }: { config: NoteKindConfig }) {
                     <td className="p-3 font-mono text-xs">
                       <Link to={`/${config.path}/${note.id}`}>{note.number ?? 'Draft'}</Link>
                     </td>
-                    <td className="p-3 tabular-nums whitespace-nowrap">{note.issueDate}</td>
+                    <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(note.issueDate)}</td>
                     <td className="p-3">{note.partyName}</td>
                     <td className="p-3 font-mono text-xs">
                       <Link to={`/${config.originalPath}/${note.originalId}`}>{note.originalLabel}</Link>

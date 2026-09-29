@@ -239,6 +239,15 @@ function SessionPanel({ expiresAt }: { expiresAt: string }) {
   );
 }
 
+/** 93784 → "1d 2h 3m"; under a minute reads "just started". */
+function formatUptime(totalSeconds: number): string {
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const parts = [days > 0 ? `${String(days)}d` : '', hours > 0 ? `${String(hours)}h` : '', minutes > 0 ? `${String(minutes)}m` : ''].filter(Boolean);
+  return parts.length === 0 ? 'just started' : parts.join(' ');
+}
+
 function HealthPanel() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -261,25 +270,25 @@ function HealthPanel() {
 
   return (
     <section className="card">
-      <h2>System</h2>
+      <h2>Service status</h2>
 
-      {error !== null && <p className="status status--bad">{error}</p>}
+      {error !== null && <p className="status status--bad">Could not reach the service: {error}</p>}
       {health === null && error === null && <p className="muted">Checking…</p>}
 
       {health !== null && (
         <dl>
-          <dt>API</dt>
+          <dt>Status</dt>
           <dd>
-            {health.service} · {health.apiVersion} · {health.environment}
+            <span className={`status ${health.status === 'ok' ? 'status--good' : 'status--bad'}`}>
+              {health.status === 'ok' ? 'All systems operational' : 'Degraded'}
+            </span>
           </dd>
-          <dt>PostgreSQL</dt>
-          <dd>
-            {health.db.connected
-              ? `reachable (${String(health.db.latencyMs)}ms)`
-              : 'unreachable'}
-          </dd>
-          <dt>Uptime</dt>
-          <dd>{health.uptimeSeconds}s</dd>
+          <dt>Database</dt>
+          <dd>{health.db.connected ? `Connected (${String(health.db.latencyMs)} ms)` : 'Unavailable'}</dd>
+          <dt>Up for</dt>
+          <dd>{formatUptime(health.uptimeSeconds)}</dd>
+          <dt>Version</dt>
+          <dd>API {health.apiVersion}</dd>
         </dl>
       )}
     </section>
@@ -331,8 +340,8 @@ export default function AccountPage() {
               {auth.user.emailVerified ? (
                 'yes'
               ) : (
-                // Honest about scope rather than showing a button that does nothing.
-                <span className="muted">not verified — verification arrives in a later phase</span>
+                // No verify button: email verification is not built, and a button that does nothing is worse.
+                <span className="muted">Not verified</span>
               )}
             </dd>
             <dt>Account created</dt>

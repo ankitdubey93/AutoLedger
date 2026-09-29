@@ -12,6 +12,7 @@ import {
 } from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { formatDate } from '../../utils/date';
 
 /**
  * Phase 34b — one recurring schedule detail. Shows the template, runs,
@@ -249,7 +250,7 @@ export default function RecurringScheduleDetailPage() {
         </div>
         <div className="flex flex-col gap-0.5">
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Start date</dt>
-          <dd className="m-0 text-sm">{schedule.startDate}</dd>
+          <dd className="m-0 text-sm">{formatDate(schedule.startDate)}</dd>
         </div>
         <div className="flex flex-col gap-0.5">
           <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">End date</dt>
