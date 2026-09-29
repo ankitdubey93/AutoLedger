@@ -117,84 +117,90 @@ export default function AiUsagePage() {
 
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium m-0">By model</p>
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Provider</th>
-                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Model</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Input</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Output</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.byModel.map((row) => (
-                  <tr key={row.key}>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.provider}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.key}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                      {row.inputTokens.toLocaleString()}
-                    </td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                      {row.outputTokens.toLocaleString()}
-                    </td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                      ${formatMicroUsd(row.costMicroUsd)}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Provider</th>
+                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Model</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Input</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Output</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {usage.byModel.map((row) => (
+                    <tr key={row.key}>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.provider}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.key}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                        {row.inputTokens.toLocaleString()}
+                      </td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                        {row.outputTokens.toLocaleString()}
+                      </td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                        ${formatMicroUsd(row.costMicroUsd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium m-0">By purpose</p>
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Purpose</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.byPurpose.map((row) => (
-                  <tr key={row.key}>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.key}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                      ${formatMicroUsd(row.costMicroUsd)}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Purpose</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {usage.byPurpose.map((row) => (
+                    <tr key={row.key}>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.key}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                        ${formatMicroUsd(row.costMicroUsd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="flex flex-col gap-2">
             <p className="text-sm font-medium m-0">By day</p>
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Date</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
-                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usage.byDay.map((row) => (
-                  <tr key={row.date}>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{formatDate(row.date)}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
-                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                      ${formatMicroUsd(row.costMicroUsd)}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr>
+                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Date</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Calls</th>
+                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {usage.byDay.map((row) => (
+                    <tr key={row.date}>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)]">{formatDate(row.date)}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{row.callCount}</td>
+                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                        ${formatMicroUsd(row.costMicroUsd)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <p className="text-xs text-[var(--muted)] m-0">Prices as of {usage.pricingVersion}.</p>

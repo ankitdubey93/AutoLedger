@@ -9,6 +9,7 @@ import {
   type Vendor,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The vendor list — the parties bills are entered against.
@@ -160,6 +161,7 @@ export default function VendorsPage() {
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, setSearch);
 
   useEffect(() => {
     let ignore = false;
@@ -229,7 +231,7 @@ export default function VendorsPage() {
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">
         <span className="text-[var(--muted)]">Search</span>
-        <input type="text" value={q} onChange={(e) => setSearch(e.target.value)} className={inputClass} />
+        <input type="text" value={qDraft} onChange={(e) => setQDraft(e.target.value)} className={inputClass} />
       </label>
 
       {error !== null && <p className="status status--bad">{error}</p>}

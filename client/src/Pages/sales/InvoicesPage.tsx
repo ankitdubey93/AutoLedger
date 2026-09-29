@@ -10,6 +10,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The invoice register — every sales invoice, filterable and paginated.
@@ -77,6 +78,7 @@ export default function InvoicesPage() {
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, (v) => setFilter('q', v));
   const page = Number(params.get('page') ?? '1');
   const anyFilterSet = status !== '' || settlement !== '' || from !== '' || to !== '' || q !== '';
   const activeTab = TABS.find((t) => t.status === status && t.settlement === settlement)?.key ?? 'all';
@@ -207,8 +209,8 @@ export default function InvoicesPage() {
           <span className="text-[var(--muted)]">Search</span>
           <input
             type="text"
-            value={q}
-            onChange={(e) => setFilter('q', e.target.value)}
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
             placeholder="Invoice number or customer"
             className={inputClass}
           />

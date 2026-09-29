@@ -89,30 +89,32 @@ export default function FxRevaluationsPage() {
                   {expandedId === rev.id && (
                     <tr className="border-t border-[var(--border)] bg-[var(--bg)]">
                       <td colSpan={5} className="p-3">
-                        <table className="w-full border-collapse text-xs">
-                          <thead>
-                            <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
-                              <th className="p-2 font-medium">Document</th>
-                              <th className="p-2 font-medium">Counterparty</th>
-                              <th className="p-2 font-medium">Currency</th>
-                              <th className="p-2 font-medium text-right">Outstanding</th>
-                              <th className="p-2 font-medium text-right">Delta</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {rev.lines.map((line) => (
-                              <tr key={line.id} className="border-t border-[var(--border)]">
-                                <td className="p-2">
-                                  {line.documentType === 'INVOICE' ? 'Invoice' : 'Bill'} {line.documentNumber ?? ''}
-                                </td>
-                                <td className="p-2">{line.counterpartyName}</td>
-                                <td className="p-2">{line.currencyCode}</td>
-                                <td className="p-2 text-right font-mono">{formatCents(line.outstandingCents)}</td>
-                                <td className="p-2 text-right font-mono">{formatCents(line.deltaCents)}</td>
+                        <div className="overflow-x-auto">
+                          <table className="w-full border-collapse text-xs">
+                            <thead>
+                              <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
+                                <th className="p-2 font-medium">Document</th>
+                                <th className="p-2 font-medium">Counterparty</th>
+                                <th className="p-2 font-medium">Currency</th>
+                                <th className="p-2 font-medium text-right">Outstanding</th>
+                                <th className="p-2 font-medium text-right">Delta</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {rev.lines.map((line) => (
+                                <tr key={line.id} className="border-t border-[var(--border)]">
+                                  <td className="p-2">
+                                    {line.documentType === 'INVOICE' ? 'Invoice' : 'Bill'} {line.documentNumber ?? ''}
+                                  </td>
+                                  <td className="p-2">{line.counterpartyName}</td>
+                                  <td className="p-2">{line.currencyCode}</td>
+                                  <td className="p-2 text-right font-mono">{formatCents(line.outstandingCents)}</td>
+                                  <td className="p-2 text-right font-mono">{formatCents(line.deltaCents)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </td>
                     </tr>
                   )}

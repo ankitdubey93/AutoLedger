@@ -9,6 +9,7 @@ import {
   type Customer,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The customer list — the parties sales invoices are issued to.
@@ -147,6 +148,7 @@ export default function CustomersPage() {
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, setSearch);
 
   useEffect(() => {
     let ignore = false;
@@ -220,8 +222,8 @@ export default function CustomersPage() {
         <span className="text-[var(--muted)]">Search</span>
         <input
           type="text"
-          value={q}
-          onChange={(e) => setSearch(e.target.value)}
+          value={qDraft}
+          onChange={(e) => setQDraft(e.target.value)}
           className={inputClass}
         />
       </label>

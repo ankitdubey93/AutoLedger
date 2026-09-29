@@ -27,7 +27,7 @@ One product since Phase 33 (2026-09-25). It was built as three separately chosen
 | Inventory: perpetual valuation posting to the GL, templates, item codes, QR labels | Statutory tax engine (GST/VAT returns) |
 | CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | A hosted deployment (images exist; nothing is deployed) |
 | Production Docker images, CI (typecheck, lint, tests on real Postgres/Redis, image builds), a one-command demo company | Multi-user invites, password reset, email verification |
-| 1708 server tests (2 skipped), 470 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
+| 1708 server tests (2 skipped), 474 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
 Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
 

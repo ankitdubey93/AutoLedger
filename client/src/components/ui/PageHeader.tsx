@@ -15,6 +15,8 @@ export interface PageHeaderProps {
  * and a right-aligned actions slot. It does not own heading level (`as`
  * defaults to 'h1' but every Accounting list/detail page currently uses
  * `h2`), so adopting it never changes a page's outline for assistive tech.
+ * The title always carries its own classes: a bare `<h2>` is styled as a small
+ * section label (index.css), which is not what a page title should look like.
  */
 export default function PageHeader({ icon: Icon, title, subtitle, actions, as = 'h1' }: PageHeaderProps) {
   const Heading = as;
@@ -30,7 +32,7 @@ export default function PageHeader({ icon: Icon, title, subtitle, actions, as = 
           </span>
         )}
         <div>
-          <Heading>{title}</Heading>
+          <Heading className="text-lg font-semibold m-0">{title}</Heading>
           {subtitle !== undefined && <p className="subtitle">{subtitle}</p>}
         </div>
       </div>

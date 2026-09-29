@@ -17,6 +17,7 @@ import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import MatchScoreBadge from './MatchScoreBadge';
 import { formatDate } from '../../utils/date';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The bank-line approval queue. Every unmatched line's top candidates are
@@ -66,6 +67,7 @@ export default function BankTransactionsPage() {
 
   const status = (params.get('status') ?? '') as BankTransactionStatus | '';
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, (v) => setFilter('q', v));
   const page = Number(params.get('page') ?? '1');
 
   useEffect(() => {
@@ -216,8 +218,8 @@ export default function BankTransactionsPage() {
           <span className="text-[var(--muted)]">Search</span>
           <input
             type="text"
-            value={q}
-            onChange={(e) => setFilter('q', e.target.value)}
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
             placeholder="Description or reference"
             className={inputClass}
           />

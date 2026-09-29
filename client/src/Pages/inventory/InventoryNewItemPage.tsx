@@ -19,6 +19,8 @@ import {
   type StockTrackingMode,
   type StockUom,
 } from '../../services/fetchServices';
+import { Boxes } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
 
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
@@ -175,7 +177,7 @@ export default function InventoryNewItemPage() {
 
   return (
     <form onSubmit={(e) => void handleSubmit(e)} className="max-w-xl space-y-6">
-      <h1 className="text-lg font-semibold text-[var(--text)]">New item</h1>
+      <PageHeader as="h2" icon={Boxes} title="New stock item" />
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">

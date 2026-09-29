@@ -141,20 +141,6 @@ body {
   gap: 1.75rem;
 }
 
-h1 {
-  margin: 0;
-  font-size: 1.75rem;
-  letter-spacing: -0.02em;
-}
-
-h2 {
-  margin: 0 0 0.75rem;
-  font-size: 0.8125rem;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--muted);
-}
-
 .subtitle {
   margin: 0.375rem 0 0;
   color: var(--muted);
@@ -500,6 +486,30 @@ select:hover {
   here too, scoped to `tbody tr` so header rows never pick up a hover background.
 */
 @layer base {
+  /*
+    Headings, moved here 2026-09-29 for the reason above: unlayered, `h1`/`h2`
+    beat every utility, so the 48 page titles written `text-lg font-semibold`
+    rendered as the small grey uppercase section label instead. The label look
+    now applies only to a bare `<h2>` (a card's section heading); an `h2` that
+    carries classes is styling itself and gets only the margin reset.
+  */
+  h1 {
+    margin: 0;
+    font-size: 1.75rem;
+    letter-spacing: -0.02em;
+  }
+
+  h2 {
+    margin: 0 0 0.75rem;
+  }
+
+  h2:not([class]) {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
   table {
     width: 100%;
     border-collapse: collapse;

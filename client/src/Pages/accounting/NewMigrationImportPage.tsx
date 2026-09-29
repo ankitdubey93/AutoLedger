@@ -115,24 +115,26 @@ export default function NewMigrationImportPage() {
               <Download size={14} aria-hidden="true" /> Download template CSV
             </button>
           </div>
-          <table className="w-full border-collapse text-xs">
-            <thead>
-              <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
-                <th className="py-1 pr-3 font-medium">Column</th>
-                <th className="py-1 pr-3 font-medium">Required</th>
-                <th className="py-1 font-medium">Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {template.columns.map((column) => (
-                <tr key={column.header} className="border-t border-[var(--border)]">
-                  <td className="py-1 pr-3">{column.header}</td>
-                  <td className="py-1 pr-3">{column.required ? 'Yes' : 'No'}</td>
-                  <td className="py-1 text-[var(--muted)]">{column.note}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-xs">
+              <thead>
+                <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
+                  <th className="py-1 pr-3 font-medium">Column</th>
+                  <th className="py-1 pr-3 font-medium">Required</th>
+                  <th className="py-1 font-medium">Notes</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {template.columns.map((column) => (
+                  <tr key={column.header} className="border-t border-[var(--border)]">
+                    <td className="py-1 pr-3">{column.header}</td>
+                    <td className="py-1 pr-3">{column.required ? 'Yes' : 'No'}</td>
+                    <td className="py-1 text-[var(--muted)]">{column.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <label className="flex flex-col gap-1 text-sm">

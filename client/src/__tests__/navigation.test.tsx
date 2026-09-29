@@ -288,7 +288,7 @@ describe('Sidebar navigation', () => {
     renderAt('/nope/deeper', onboarded);
 
     expect(await screen.findByText('Chart of accounts')).toBeInTheDocument();
-    expect(await screen.findByRole('heading', { name: 'Not found' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
     expect(pathname()).toBe('/nope/deeper');
   });
 

@@ -58,6 +58,13 @@ Three things worth naming precisely:
 - **The preview calls a dedicated, side-effect-free endpoint** (`previewStockCodePattern`, backed by `codeSchemeService.ts`'s `previewPattern`, which calls the same pure `parseCodePattern`/`renderCode` functions `discriminated-unions-and-parsers.md` documents) — it never touches the counter table, never allocates a real sequence value, and is safe to call an unbounded number of times with no side effect on the eventually-generated real code.
 - **`.catch(() => undefined)`** deliberately swallows a preview failure rather than surfacing an error banner — a transient network hiccup on a preview that re-fires every keystroke shouldn't interrupt the user filling out a form; the *real* validation error, if any, surfaces properly when they actually submit.
 
+### Debouncing a value that is committed to the URL (2026-09-29)
+
+The "third debounced use case" the alternatives table below anticipated arrived all at once: seven list pages (invoices, expenses, customers, vendors, products, journals, bank lines) kept their search term in the URL (`?q=`, so a filtered list is linkable), and wrote it there on every keystroke — each write re-ran the page's fetch. Two hooks came out of it. `useDebouncedValue(value, ms)` is the effect-cleanup pattern above, lifted into a hook. `useDebouncedInput(committed, commit)` is the interesting one: the input binds to a local draft, and the draft is committed to the URL once typing pauses.
+
+The obvious rule, "commit when the debounced value equals the draft and differs from the URL", **has a race that an existing test caught**. When the user presses *Clear filters*, the URL's `q` becomes empty and an effect resets the draft to `''` — but that `setDraft` has not re-rendered yet, so in the *same* render the commit effect still sees the old draft (`'aws'`) and the old debounced value (`'aws'`). They are equal to each other and different from the now-empty URL, so the obvious rule writes `aws` straight back and the filter never clears. The fix is to commit only on a **transition** of the debounced value (tracked with a ref holding the previous value): an outside change to the URL never counts as "the user has stopped typing". The hook's own unit test for this exact sequence was confirmed to fail against the first version before the fix went in.
+
+
 ### `@media print`, `@page`, and physical units for a label sheet
 
 Everything on screen in this codebase is laid out in CSS pixels via Tailwind's utility classes. A label sheet is different in kind, not just styling — it's explicitly meant to be printed onto physical label stock at an exact physical size, so the sizing has to be expressed in physical units the browser's print engine understands directly:
@@ -86,19 +93,20 @@ This whole stylesheet lives alongside, but conceptually separate from, this code
 |---|---|---|
 | A hardcoded form component per industry/category | Simple JSX, no runtime data shape to reason about | Rejected — the whole premise of per-org custom fields is that the field set isn't known until an org configures it; a hardcoded component can't represent that |
 | Parse a `NUMBER` field's input to a JS `number` for a "nicer" state shape | Slightly more ergonomic in-component arithmetic if ever needed | Rejected — risks float-precision loss on the client exactly as it would on the server; string-in, string-out end to end avoids the question entirely |
-| A generic debounce utility/hook shared across the codebase | Reusable, less inline `setTimeout` | Not built — the plain `useEffect` cleanup pattern is the idiomatic React primitive for this and needs no dependency; a shared hook would be a reasonable extraction once a third debounced-preview use case appears |
+| A generic debounce utility/hook shared across the codebase | Reusable, less inline `setTimeout` | Not built at first — the plain `useEffect` cleanup pattern needed no abstraction for one preview. **Built 2026-09-29** when seven URL-backed searches needed it: `utils/useDebouncedValue.ts` and `utils/useDebouncedInput.ts` |
 | Sizing label print CSS in `px`/`rem` | Consistent with every other stylesheet in the app | Rejected — a screen pixel unit does not correspond to a fixed physical size when printed; `mm` is what makes a "50mm × 30mm" label preset actually print at 50mm × 30mm |
 | Inline QR SVG via `dangerouslySetInnerHTML` | Slightly simpler than a data-URI `<img>` | Rejected — see `barcodes-and-qr-codes.md`; an `<img src="data:...">` never lets the DOM parse the string as live markup |
 
 ## Where it lives in this codebase
 
-- `client/src/Pages/stock/AttributeFields.tsx` — the schema-driven field renderer
-- `client/src/Pages/stock/StockNewItemPage.tsx` — the debounced live code-pattern preview effect
-- `client/src/Pages/stock/StockLabelsPage.tsx` — renders the generated labels, including the size-preset class switch
+- `client/src/Pages/inventory/AttributeFields.tsx` — the schema-driven field renderer
+- `client/src/Pages/inventory/InventoryNewItemPage.tsx` — the debounced live code-pattern preview effect
+- `client/src/utils/useDebouncedValue.ts`, `client/src/utils/useDebouncedInput.ts` — the shared hooks (2026-09-29), used by the seven URL-backed list searches; `client/src/__tests__/useDebouncedInput.test.tsx` covers the clear-filters race
+- `client/src/Pages/inventory/InventoryLabelsPage.tsx` — renders the generated labels, including the size-preset class switch
 - `client/src/index.css` — `@page`, `.label-sheet .label { break-inside: avoid }`, `.label-sm/-md/-lg`
 - `server/src/utils/stockAttributes.ts` — the server-side counterpart validating the same NUMBER-as-string contract
-- `client/src/__tests__/stockNewItem.test.tsx` — includes the 422-message-shown-verbatim test that fills every required custom field precisely because native HTML5 `required` would otherwise block the fetch the test is trying to exercise
-- `client/src/__tests__/stockLabels.test.tsx` — `'size preset switches the class'`, asserting the label-size class swap on selection
+- `client/src/__tests__/inventoryNewItem.test.tsx` — includes the 422-message-shown-verbatim test that fills every required custom field precisely because native HTML5 `required` would otherwise block the fetch the test is trying to exercise
+- `client/src/__tests__/inventoryLabels.test.tsx` — `'size preset switches the class'`, asserting the label-size class swap on selection
 
 ## Gotchas
 
@@ -121,6 +129,9 @@ A: Because a JSON/JS `number` is a 64-bit float with no guaranteed precision for
 
 **Q: Walk me through how you'd debounce an API call tied to a text input in React, without a library.**
 A: A `useEffect` whose dependency array includes the input's current value, which starts a `setTimeout` for the delay you want and calls the API when it fires. The key piece is the effect's cleanup function — returned from the effect, and called by React automatically before the effect re-runs (or on unmount) — which clears that same timer. Every keystroke re-runs the effect, which first cancels the previous keystroke's pending timer via cleanup, then schedules a new one; only the last keystroke in a burst ever gets far enough to have its timer actually fire, so you get a real network call once input pauses rather than one per keystroke, with zero external dependencies.
+
+**Q: Your search box debounces, and the search term also lives in the URL. What can go wrong between the two?**
+A: The input needs its own local draft, or every keystroke rewrites the URL and refetches. The draft is then committed to the URL once typing pauses. The trap is the other direction: something else changes the URL, like a "Clear filters" button. I reset the draft when the URL changes, but that state update doesn't apply until the next render. In the render where the URL goes empty, my commit effect still sees the old draft and the old debounced value, which match each other and differ from the URL. So a naive "commit when settled and different" rule writes the old search straight back, and the filter can't be cleared. An existing page test caught exactly that. The fix is to commit only when the debounced value has just *changed*, which I track with a ref holding its previous value. The URL changing on its own never counts as the user finishing typing. I then added a unit test for that sequence and confirmed it failed against the first version.
 
 **Q: Why does a print stylesheet for physical labels use millimeters instead of the same CSS units the rest of the app uses?**
 A: Because CSS pixels (and units derived from them, like `rem`) are a *screen* concept — a browser maps them to physical size using an assumed density (96 px per inch, by convention), not the printer's actual resolution. Physical units like `mm`, `cm`, `in`, and `pt` are resolved by the browser's print pipeline against the actual page and printer, so a label declared as 50mm wide prints at 50mm regardless of screen DPI or zoom level. If the stylesheet used `px` instead, the label would print at whatever size the browser's default pixel-to-inch assumption happens to produce, which is very unlikely to match the physical adhesive label stock it's meant to be printed onto.

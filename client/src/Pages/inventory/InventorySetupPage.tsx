@@ -181,30 +181,32 @@ export default function InventorySetupPage() {
         <section aria-label="Preview">
           <h2 className="text-sm font-medium text-[var(--text)] mb-2">2. Preview</h2>
           <p className="text-xs text-[var(--muted)] mb-2">You can add, rename or deactivate any of this later.</p>
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="pr-3 py-1">Code</th>
-                <th className="pr-3 py-1">Name</th>
-                <th className="pr-3 py-1">Type</th>
-                <th className="pr-3 py-1">Tracking</th>
-                <th className="pr-3 py-1">Custom fields</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedProfile.categories.map((category) => (
-                <tr key={category.code} className="border-t border-[var(--border)]">
-                  <td className="pr-3 py-1 text-[var(--text)]">{category.code}</td>
-                  <td className="pr-3 py-1 text-[var(--text)]">{category.name}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(category.itemType)}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{category.defaultTracking}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">
-                    {category.attributes.map((a) => a.label).join(', ') || '—'}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-[var(--muted)]">
+                  <th className="pr-3 py-1">Code</th>
+                  <th className="pr-3 py-1">Name</th>
+                  <th className="pr-3 py-1">Type</th>
+                  <th className="pr-3 py-1">Tracking</th>
+                  <th className="pr-3 py-1">Custom fields</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {selectedProfile.categories.map((category) => (
+                  <tr key={category.code} className="border-t border-[var(--border)]">
+                    <td className="pr-3 py-1 text-[var(--text)]">{category.code}</td>
+                    <td className="pr-3 py-1 text-[var(--text)]">{category.name}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(category.itemType)}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">{category.defaultTracking}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">
+                      {category.attributes.map((a) => a.label).join(', ') || '—'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="mt-3 space-y-1">
             {selectedProfile.codeSchemes.map((scheme) => (

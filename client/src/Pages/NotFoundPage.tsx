@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom';
+import { Compass } from 'lucide-react';
+import EmptyState from '../components/ui/EmptyState';
 
 /**
  * Rendered for any URL no route matches. Inside the workspace it appears
@@ -7,12 +9,14 @@ import { Link } from 'react-router-dom';
  */
 export default function NotFoundPage() {
   return (
-    <section className="shell shell--narrow">
-      <h1>Not found</h1>
-      <p className="muted">That page does not exist. It may have moved, or the link may be mistyped.</p>
-      <p>
-        <Link to="/">Back to the dashboard</Link>
-      </p>
+    <section className="flex flex-col gap-4 max-w-xl mx-auto py-10 px-4">
+      <h1 className="text-lg font-semibold m-0">Page not found</h1>
+      <EmptyState
+        icon={Compass}
+        title="That page does not exist"
+        body="It may have moved, or the link may be mistyped."
+        action={<Link to="/">Back to the dashboard</Link>}
+      />
     </section>
   );
 }

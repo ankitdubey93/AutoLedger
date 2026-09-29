@@ -178,26 +178,28 @@ export default function InventoryOverview() {
         ) : (
           <div className="card p-0 overflow-hidden">
             <div className="table-scroll">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="text-left text-[var(--muted)]">
-                    <th className="px-3 py-2">Code</th>
-                    <th className="px-3 py-2">Name</th>
-                    <th className="px-3 py-2">On hand</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {lowStockItems.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-3 py-2 text-[var(--text)]">{item.code}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">{item.name}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">
-                        {formatQuantityMilli(item.onHandQuantityMilli)} {item.uomCode}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left text-[var(--muted)]">
+                      <th className="px-3 py-2">Code</th>
+                      <th className="px-3 py-2">Name</th>
+                      <th className="px-3 py-2">On hand</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {lowStockItems.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-3 py-2 text-[var(--text)]">{item.code}</td>
+                        <td className="px-3 py-2 text-[var(--text)]">{item.name}</td>
+                        <td className="px-3 py-2 text-[var(--text)]">
+                          {formatQuantityMilli(item.onHandQuantityMilli)} {item.uomCode}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -212,28 +214,30 @@ export default function InventoryOverview() {
         ) : (
           <div className="card p-0 overflow-hidden">
             <div className="table-scroll">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="text-left text-[var(--muted)]">
-                    <th className="px-3 py-2">Date</th>
-                    <th className="px-3 py-2">Type</th>
-                    <th className="px-3 py-2">Item</th>
-                    <th className="px-3 py-2">Location</th>
-                    <th className="px-3 py-2">Quantity</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {recentMovements.map((m) => (
-                    <tr key={m.id}>
-                      <td className="px-3 py-2 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">{m.itemCode}</td>
-                      <td className="px-3 py-2 text-[var(--muted)]">{m.locationCode}</td>
-                      <td className="px-3 py-2 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm border-collapse">
+                  <thead>
+                    <tr className="text-left text-[var(--muted)]">
+                      <th className="px-3 py-2">Date</th>
+                      <th className="px-3 py-2">Type</th>
+                      <th className="px-3 py-2">Item</th>
+                      <th className="px-3 py-2">Location</th>
+                      <th className="px-3 py-2">Quantity</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {recentMovements.map((m) => (
+                      <tr key={m.id}>
+                        <td className="px-3 py-2 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
+                        <td className="px-3 py-2 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
+                        <td className="px-3 py-2 text-[var(--text)]">{m.itemCode}</td>
+                        <td className="px-3 py-2 text-[var(--muted)]">{m.locationCode}</td>
+                        <td className="px-3 py-2 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}

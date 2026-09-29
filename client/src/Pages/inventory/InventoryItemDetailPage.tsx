@@ -249,52 +249,56 @@ export default function InventoryItemDetailPage() {
 
       <section aria-label="On hand" className="space-y-2">
         <h2 className="text-sm font-medium text-[var(--text)]">On hand</h2>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pr-3 py-1">Location</th>
-              <th className="pr-3 py-1">Lot</th>
-              <th className="pr-3 py-1">Quantity</th>
-              <th className="pr-3 py-1">Value</th>
-              <th className="pr-3 py-1">Source</th>
-            </tr>
-          </thead>
-          <tbody>
-            {balances.map((b) => (
-              <tr key={`${b.locationId}-${b.lotId ?? ''}`} className="border-t border-[var(--border)]">
-                <td className="pr-3 py-1 text-[var(--text)]">{b.locationPath}</td>
-                <td className="pr-3 py-1 text-[var(--muted)]">{b.lotNumber ?? '—'}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">
-                  {formatQuantityMilli(b.quantityMilli)} {b.uomCode}
-                </td>
-                <td className="pr-3 py-1 text-[var(--text)]">{formatCents(b.valueCents)}</td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left text-[var(--muted)]">
+                <th className="pr-3 py-1">Location</th>
+                <th className="pr-3 py-1">Lot</th>
+                <th className="pr-3 py-1">Quantity</th>
+                <th className="pr-3 py-1">Value</th>
+                <th className="pr-3 py-1">Source</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {balances.map((b) => (
+                <tr key={`${b.locationId}-${b.lotId ?? ''}`} className="border-t border-[var(--border)]">
+                  <td className="pr-3 py-1 text-[var(--text)]">{b.locationPath}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">{b.lotNumber ?? '—'}</td>
+                  <td className="pr-3 py-1 text-[var(--text)]">
+                    {formatQuantityMilli(b.quantityMilli)} {b.uomCode}
+                  </td>
+                  <td className="pr-3 py-1 text-[var(--text)]">{formatCents(b.valueCents)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {item.tracking === 'LOT' ? (
         <section aria-label="Lots" className="space-y-2">
           <h2 className="text-sm font-medium text-[var(--text)]">Lots</h2>
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="pr-3 py-1">Lot</th>
-                <th className="pr-3 py-1">Expires</th>
-                <th className="pr-3 py-1">On hand</th>
-              </tr>
-            </thead>
-            <tbody>
-              {lots.map((lot) => (
-                <tr key={lot.id} className="border-t border-[var(--border)]">
-                  <td className="pr-3 py-1 text-[var(--text)]">{lot.lotNumber}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{lot.expiresOn ?? 'No expiry'}</td>
-                  <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(lot.onHandQuantityMilli)}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-[var(--muted)]">
+                  <th className="pr-3 py-1">Lot</th>
+                  <th className="pr-3 py-1">Expires</th>
+                  <th className="pr-3 py-1">On hand</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lots.map((lot) => (
+                  <tr key={lot.id} className="border-t border-[var(--border)]">
+                    <td className="pr-3 py-1 text-[var(--text)]">{lot.lotNumber}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">{lot.expiresOn ?? 'No expiry'}</td>
+                    <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(lot.onHandQuantityMilli)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
@@ -308,112 +312,116 @@ export default function InventoryItemDetailPage() {
               </button>
             ) : null}
           </div>
-          <table className="w-full text-sm border-collapse">
-            <thead>
-              <tr className="text-left text-[var(--muted)]">
-                <th className="pr-2 py-1"></th>
-                <th className="pr-3 py-1">Serial</th>
-                <th className="pr-3 py-1">Status</th>
-                <th className="pr-3 py-1">Location</th>
-                <th className="pr-3 py-1">Cost</th>
-                <th className="pr-3 py-1">Attributes</th>
-                {canWrite ? <th className="pr-3 py-1">Actions</th> : null}
-              </tr>
-            </thead>
-            <tbody>
-              {serials.map((serial) => (
-                <tr key={serial.id} className="border-t border-[var(--border)]">
-                  <td className="pr-2 py-1">
-                    <input
-                      type="checkbox"
-                      aria-label={`Select ${serial.serialNumber}`}
-                      checked={selectedSerialIds.includes(serial.id)}
-                      onChange={() => toggleSerialSelected(serial.id)}
-                    />
-                  </td>
-                  <td className="pr-3 py-1 text-[var(--text)]">{serial.serialNumber}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(serial.status)}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">{serial.locationCode ?? '—'}</td>
-                  <td className="pr-3 py-1 text-[var(--text)]">{formatCents(serial.costCents)}</td>
-                  <td className="pr-3 py-1 text-[var(--muted)]">
-                    {Object.values(serial.attributes)
-                      .map((v) => String(v))
-                      .join(', ')}
-                  </td>
-                  {canWrite ? (
-                    <td className="pr-3 py-1 space-x-2">
-                      {serial.status === 'AVAILABLE' ? (
-                        <>
-                          <button type="button" onClick={() => void handleSerialAction(serial, 'ON_HOLD')} className="text-xs text-[var(--muted)]">
-                            Hold
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setBookingNote('');
-                              setBookingSerial(serial);
-                            }}
-                            className="text-xs text-[var(--muted)]"
-                          >
-                            Book
-                          </button>
-                        </>
-                      ) : null}
-                      {serial.status === 'ON_HOLD' || serial.status === 'BOOKED' ? (
-                        <button type="button" onClick={() => void handleSerialAction(serial, 'AVAILABLE')} className="text-xs text-[var(--muted)]">
-                          Release
-                        </button>
-                      ) : null}
-                    </td>
-                  ) : null}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm border-collapse">
+              <thead>
+                <tr className="text-left text-[var(--muted)]">
+                  <th className="pr-2 py-1"></th>
+                  <th className="pr-3 py-1">Serial</th>
+                  <th className="pr-3 py-1">Status</th>
+                  <th className="pr-3 py-1">Location</th>
+                  <th className="pr-3 py-1">Cost</th>
+                  <th className="pr-3 py-1">Attributes</th>
+                  {canWrite ? <th className="pr-3 py-1">Actions</th> : null}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {serials.map((serial) => (
+                  <tr key={serial.id} className="border-t border-[var(--border)]">
+                    <td className="pr-2 py-1">
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${serial.serialNumber}`}
+                        checked={selectedSerialIds.includes(serial.id)}
+                        onChange={() => toggleSerialSelected(serial.id)}
+                      />
+                    </td>
+                    <td className="pr-3 py-1 text-[var(--text)]">{serial.serialNumber}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">{humanizeEnum(serial.status)}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">{serial.locationCode ?? '—'}</td>
+                    <td className="pr-3 py-1 text-[var(--text)]">{formatCents(serial.costCents)}</td>
+                    <td className="pr-3 py-1 text-[var(--muted)]">
+                      {Object.values(serial.attributes)
+                        .map((v) => String(v))
+                        .join(', ')}
+                    </td>
+                    {canWrite ? (
+                      <td className="pr-3 py-1 space-x-2">
+                        {serial.status === 'AVAILABLE' ? (
+                          <>
+                            <button type="button" onClick={() => void handleSerialAction(serial, 'ON_HOLD')} className="text-xs text-[var(--muted)]">
+                              Hold
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setBookingNote('');
+                                setBookingSerial(serial);
+                              }}
+                              className="text-xs text-[var(--muted)]"
+                            >
+                              Book
+                            </button>
+                          </>
+                        ) : null}
+                        {serial.status === 'ON_HOLD' || serial.status === 'BOOKED' ? (
+                          <button type="button" onClick={() => void handleSerialAction(serial, 'AVAILABLE')} className="text-xs text-[var(--muted)]">
+                            Release
+                          </button>
+                        ) : null}
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       ) : null}
 
       <section aria-label="Movement history" className="space-y-2">
         <h2 className="text-sm font-medium text-[var(--text)]">Movement history</h2>
-        <table className="w-full text-sm border-collapse">
-          <thead>
-            <tr className="text-left text-[var(--muted)]">
-              <th className="pr-3 py-1">Date</th>
-              <th className="pr-3 py-1">Type</th>
-              <th className="pr-3 py-1">Location</th>
-              <th className="pr-3 py-1">Quantity</th>
-              <th className="pr-3 py-1">Running qty</th>
-              <th className="pr-3 py-1">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            {movements.map((m) => (
-              <tr key={m.id} className="border-t border-[var(--border)]">
-                <td className="pr-3 py-1 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
-                <td className="pr-3 py-1 text-[var(--muted)]">{m.locationCode}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
-                <td className="pr-3 py-1 text-[var(--muted)]">{formatQuantityMilli(m.runningLocationQuantityMilli)}</td>
-                <td className="pr-3 py-1 text-[var(--text)]">{formatCents(m.valueCents)}</td>
-                <td className="pr-3 py-1 text-[var(--muted)]">
-                  {m.sourceType === 'bill' && m.sourceId !== null ? (
-                    <Link to={`/bills/${m.sourceId}`} className="underline">
-                      Bill
-                    </Link>
-                  ) : m.sourceType === 'invoice' && m.sourceId !== null ? (
-                    <Link to={`/invoices/${m.sourceId}`} className="underline">
-                      Invoice
-                    </Link>
-                  ) : m.glAccountId !== null ? (
-                    'Posted to ledger'
-                  ) : (
-                    '—'
-                  )}
-                </td>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm border-collapse">
+            <thead>
+              <tr className="text-left text-[var(--muted)]">
+                <th className="pr-3 py-1">Date</th>
+                <th className="pr-3 py-1">Type</th>
+                <th className="pr-3 py-1">Location</th>
+                <th className="pr-3 py-1">Quantity</th>
+                <th className="pr-3 py-1">Running qty</th>
+                <th className="pr-3 py-1">Value</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {movements.map((m) => (
+                <tr key={m.id} className="border-t border-[var(--border)]">
+                  <td className="pr-3 py-1 text-[var(--muted)]">{formatDate(m.occurredOn)}</td>
+                  <td className="pr-3 py-1 text-[var(--text)]">{humanizeEnum(m.movementType)}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">{m.locationCode}</td>
+                  <td className="pr-3 py-1 text-[var(--text)]">{formatQuantityMilli(m.quantityMilli)}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">{formatQuantityMilli(m.runningLocationQuantityMilli)}</td>
+                  <td className="pr-3 py-1 text-[var(--text)]">{formatCents(m.valueCents)}</td>
+                  <td className="pr-3 py-1 text-[var(--muted)]">
+                    {m.sourceType === 'bill' && m.sourceId !== null ? (
+                      <Link to={`/bills/${m.sourceId}`} className="underline">
+                        Bill
+                      </Link>
+                    ) : m.sourceType === 'invoice' && m.sourceId !== null ? (
+                      <Link to={`/invoices/${m.sourceId}`} className="underline">
+                        Invoice
+                      </Link>
+                    ) : m.glAccountId !== null ? (
+                      'Posted to ledger'
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {confirmLink && (

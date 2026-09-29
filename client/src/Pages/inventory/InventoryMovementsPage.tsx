@@ -22,6 +22,8 @@ import {
   type StockSerial,
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
+import { ArrowRightLeft } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 
@@ -300,12 +302,17 @@ export default function InventoryMovementsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Movements</h1>
-      <p className="text-sm text-[var(--muted)]">
-        Movements of items linked to Products &amp; Services also post to your ledger. Receipts post as opening stock
-        or a count gain; issues go to inventory adjustments or the expense account you choose; transfers post nothing.
-        To record a purchase, approve a bill; to record a sale, issue an invoice.
-      </p>
+      <PageHeader
+        as="h2"
+        icon={ArrowRightLeft}
+        title="Stock movements"
+        subtitle={
+          <>
+            Record a receipt, issue, transfer or count adjustment. Movements of items linked to Products &amp; Services
+            also post to your ledger — to record a purchase, approve a bill; to record a sale, issue an invoice.
+          </>
+        }
+      />
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">

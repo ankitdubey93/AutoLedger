@@ -97,28 +97,30 @@ function MembersPanel() {
 
       {members !== null && (
         <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Joined</th>
-              </tr>
-            </thead>
-            <tbody>
-              {members.map((m) => (
-                <tr key={m.userId}>
-                  <td>{m.name ?? '—'}</td>
-                  <td>{m.email}</td>
-                  <td>
-                    <span className="chip">{m.role}</span>
-                  </td>
-                  <td>{new Date(m.joinedAt).toLocaleDateString()}</td>
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Joined</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {members.map((m) => (
+                  <tr key={m.userId}>
+                    <td>{m.name ?? '—'}</td>
+                    <td>{m.email}</td>
+                    <td>
+                      <span className="chip">{m.role}</span>
+                    </td>
+                    <td>{new Date(m.joinedAt).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </section>
@@ -169,23 +171,25 @@ function BusinessIdentificationPanel() {
     <section className="card">
       <h2>Business identification</h2>
 
-      <label htmlFor="tax-number">Tax registration number</label>
-      <input
-        id="tax-number"
-        type="text"
-        maxLength={64}
-        value={taxNumber}
-        onChange={(e) => setTaxNumber(e.target.value)}
-      />
+      <div className="form">
+        <label htmlFor="tax-number">Tax registration number</label>
+        <input
+          id="tax-number"
+          type="text"
+          maxLength={64}
+          value={taxNumber}
+          onChange={(e) => setTaxNumber(e.target.value)}
+        />
 
-      <label htmlFor="business-number">Business registration number</label>
-      <input
-        id="business-number"
-        type="text"
-        maxLength={64}
-        value={businessNumber}
-        onChange={(e) => setBusinessNumber(e.target.value)}
-      />
+        <label htmlFor="business-number">Business registration number</label>
+        <input
+          id="business-number"
+          type="text"
+          maxLength={64}
+          value={businessNumber}
+          onChange={(e) => setBusinessNumber(e.target.value)}
+        />
+      </div>
 
       <p className="muted">Shown on invoices when enabled in the invoice settings.</p>
 

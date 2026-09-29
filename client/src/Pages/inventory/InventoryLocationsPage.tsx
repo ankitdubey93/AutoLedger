@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MapPin, Plus } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { INVENTORY_BASE } from '../../routes/paths';
 import {
@@ -13,8 +14,11 @@ import {
   type StockLocationKind,
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
+import PageHeader from '../../components/ui/PageHeader';
+import EmptyState from '../../components/ui/EmptyState';
+import { SkeletonRows } from '../../components/ui/Skeleton';
+import { inputClass } from '../../components/ui/formClasses';
 
-const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 const NESTED_KINDS: readonly StockLocationKind[] = ['ZONE', 'BIN'];
 
 /**
@@ -30,7 +34,7 @@ export default function InventoryLocationsPage() {
   const navigate = useNavigate();
   const base = INVENTORY_BASE;
 
-  const [locations, setLocations] = useState<StockLocation[]>([]);
+  const [locations, setLocations] = useState<StockLocation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [defaultLocationId, setDefaultLocationId] = useState<string>('');
 
@@ -102,112 +106,144 @@ export default function InventoryLocationsPage() {
     navigate(`${base}/labels`, { state: { targets: [{ kind: 'LOCATION', id: location.id, copies: 1 }] } });
   }
 
-  return (
-    <div className="space-y-6">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Locations</h1>
+  const activeLocations = (locations ?? []).filter((l) => l.isActive);
 
-      {error !== null ? (
-        <p role="alert" className="text-sm text-[var(--bad)]">
+  return (
+    <section className="flex flex-col gap-5">
+      <PageHeader
+        as="h2"
+        icon={MapPin}
+        title="Locations"
+        subtitle="Where stock is kept: warehouses, stores and sites, with zones and bins inside them."
+      />
+
+      {error !== null && (
+        <p role="alert" className="status status--bad">
           {error}
         </p>
-      ) : null}
+      )}
 
-      <div>
-        <label htmlFor="default-location" className="block text-sm text-[var(--text)] mb-1">
-          Default location for invoices and bills
-        </label>
+      <label className="flex flex-col gap-1 text-sm max-w-sm">
+        <span className="text-[var(--muted)]">Default location for invoices and bills</span>
         <select
-          id="default-location"
           value={defaultLocationId}
           disabled={!canWrite}
           onChange={(e) => void handleDefaultLocation(e.target.value)}
           className={inputClass}
         >
           <option value="">None — choose on every line</option>
-          {locations
-            .filter((l) => l.isActive)
-            .map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.path}
-              </option>
-            ))}
+          {activeLocations.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.path}
+            </option>
+          ))}
         </select>
-      </div>
+      </label>
 
-      <ul className="space-y-1">
-        {locations.map((location) => (
-          <li
-            key={location.id}
-            className="flex items-center justify-between text-sm"
-            style={{ paddingLeft: `${(location.depth - 1) * 16}px` }}
-          >
-            <span title={location.path} className={location.isActive ? 'text-[var(--text)]' : 'text-[var(--muted)] line-through'}>
-              {location.code} — {location.name} ({humanizeEnum(location.kind)})
-            </span>
-            <span className="flex gap-2">
-              <button type="button" onClick={() => handlePrintLabel(location)} className="text-xs text-[var(--muted)]">
-                Print label
-              </button>
-              {canWrite ? (
-                <button type="button" onClick={() => void handleToggle(location)} className="text-xs text-[var(--muted)]">
-                  {location.isActive ? 'Deactivate' : 'Activate'}
-                </button>
-              ) : null}
-            </span>
-          </li>
-        ))}
-      </ul>
+      {locations === null && error === null && <SkeletonRows count={3} />}
 
-      {canWrite ? (
-        <div className="flex flex-wrap gap-2 items-end">
-          <input
-            aria-label="Location code"
-            placeholder="Code"
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className={`${inputClass} w-28`}
-          />
-          <input
-            aria-label="Location name"
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={`${inputClass} w-40`}
-          />
-          <select
-            aria-label="Parent location"
-            value={parentId}
-            onChange={(e) => setParentId(e.target.value)}
-            className={`${inputClass} w-40`}
-          >
-            <option value="">Top level</option>
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                {l.path}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Location kind"
-            value={kind}
-            onChange={(e) => setKind(e.target.value as StockLocationKind)}
-            className={`${inputClass} w-32`}
-          >
-            {availableKinds.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={() => void handleCreate()}
-            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
-          >
-            Add location
-          </button>
+      {locations !== null && locations.length === 0 && (
+        <EmptyState icon={MapPin} title="No locations yet" body="Add a warehouse, store or site below." />
+      )}
+
+      {locations !== null && locations.length > 0 && (
+        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+          <table className="w-full border-collapse text-sm min-w-[36rem]">
+            <thead>
+              <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                <th className="p-3 font-medium">Code</th>
+                <th className="p-3 font-medium">Name</th>
+                <th className="p-3 font-medium">Kind</th>
+                <th className="p-3 font-medium">Status</th>
+                <th className="p-3 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {locations.map((location) => (
+                <tr key={location.id} className="border-t border-[var(--border)]">
+                  <td className="p-3 font-mono text-xs" style={{ paddingLeft: `${12 + (location.depth - 1) * 20}px` }}>
+                    {location.code}
+                  </td>
+                  <td className="p-3" title={location.path}>
+                    {location.name}
+                  </td>
+                  <td className="p-3 text-[var(--muted)]">{humanizeEnum(location.kind)}</td>
+                  <td className="p-3 text-[var(--muted)]">{location.isActive ? 'Active' : 'Inactive'}</td>
+                  <td className="p-3">
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintLabel(location)}
+                        className="px-2 py-1 rounded-md text-xs text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer"
+                      >
+                        Print label
+                      </button>
+                      {canWrite && (
+                        <button
+                          type="button"
+                          onClick={() => void handleToggle(location)}
+                          className="px-2 py-1 rounded-md text-xs text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer"
+                        >
+                          {location.isActive ? 'Deactivate' : 'Activate'}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      ) : null}
-    </div>
+      )}
+
+      {canWrite && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void handleCreate();
+          }}
+          className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
+        >
+          <p className="m-0 text-sm font-semibold">New location</p>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex flex-col gap-1 text-sm w-28">
+              <span className="text-[var(--muted)]">Code</span>
+              <input required value={code} onChange={(e) => setCode(e.target.value)} placeholder="WH2" className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm flex-1 min-w-40">
+              <span className="text-[var(--muted)]">Name</span>
+              <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Overflow warehouse" className={inputClass} />
+            </label>
+            <label className="flex flex-col gap-1 text-sm w-48">
+              <span className="text-[var(--muted)]">Inside</span>
+              <select value={parentId} onChange={(e) => setParentId(e.target.value)} className={inputClass}>
+                <option value="">Top level</option>
+                {(locations ?? []).map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.path}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm w-36">
+              <span className="text-[var(--muted)]">Kind</span>
+              <select value={kind} onChange={(e) => setKind(e.target.value as StockLocationKind)} className={inputClass}>
+                {availableKinds.map((k) => (
+                  <option key={k} value={k}>
+                    {humanizeEnum(k)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="submit"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            >
+              <Plus size={15} aria-hidden="true" /> Add location
+            </button>
+          </div>
+        </form>
+      )}
+    </section>
   );
 }

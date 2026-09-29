@@ -414,54 +414,56 @@ export default function InboxDocumentPage() {
             </dl>
 
             {document.lineItems.length > 0 && (
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Description</th>
-                    <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Amount</th>
-                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Account</th>
-                    <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Source</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {document.lineItems.map((item) => (
-                    <tr key={item.id}>
-                      <td className="px-2 py-1.5 border-b border-[var(--border)]">{item.description}</td>
-                      <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                        {formatCents(item.amountCents)}
-                      </td>
-                      <td className="px-2 py-1.5 border-b border-[var(--border)]">
-                        <select
-                          value={item.accountId ?? ''}
-                          disabled={!canReview}
-                          aria-label={`Account for ${item.description}`}
-                          onChange={(e) => void handleAccountChange(item.id, e.target.value)}
-                          className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-sm text-[var(--text)] disabled:opacity-60"
-                        >
-                          <option value="">Select…</option>
-                          {accounts.map((account) => (
-                            <option key={account.id} value={account.id}>
-                              {account.code} · {account.name}
-                            </option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="px-2 py-1.5 border-b border-[var(--border)]">
-                        <span
-                          className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${mappingSourceClass(item.mappingSource)}`}
-                        >
-                          {mappingSourceLabel(item.mappingSource)}
-                        </span>
-                        {item.mappingConfidence !== null && item.mappingSource !== 'MANUAL' && (
-                          <span className="text-xs text-[var(--muted)] ml-1.5">
-                            {String(Math.round(item.mappingConfidence * 100))}%
-                          </span>
-                        )}
-                      </td>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr>
+                      <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Description</th>
+                      <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Amount</th>
+                      <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Account</th>
+                      <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Source</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {document.lineItems.map((item) => (
+                      <tr key={item.id}>
+                        <td className="px-2 py-1.5 border-b border-[var(--border)]">{item.description}</td>
+                        <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                          {formatCents(item.amountCents)}
+                        </td>
+                        <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                          <select
+                            value={item.accountId ?? ''}
+                            disabled={!canReview}
+                            aria-label={`Account for ${item.description}`}
+                            onChange={(e) => void handleAccountChange(item.id, e.target.value)}
+                            className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-sm text-[var(--text)] disabled:opacity-60"
+                          >
+                            <option value="">Select…</option>
+                            {accounts.map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.code} · {account.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                          <span
+                            className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${mappingSourceClass(item.mappingSource)}`}
+                          >
+                            {mappingSourceLabel(item.mappingSource)}
+                          </span>
+                          {item.mappingConfidence !== null && item.mappingSource !== 'MANUAL' && (
+                            <span className="text-xs text-[var(--muted)] ml-1.5">
+                              {String(Math.round(item.mappingConfidence * 100))}%
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         )}
@@ -470,33 +472,35 @@ export default function InboxDocumentPage() {
       {document.modelCalls.length > 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3">
           <p className="text-sm font-medium m-0">AI usage for this document</p>
-          <table className="w-full border-collapse text-sm">
-            <thead>
-              <tr>
-                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Purpose</th>
-                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Model</th>
-                <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Tokens</th>
-                <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {document.modelCalls.map((call) => (
-                <tr key={call.id}>
-                  <td className="px-2 py-1.5 border-b border-[var(--border)]">
-                    {call.purpose}
-                    {call.status === 'ERROR' && (
-                      <span className="ml-1.5 text-[11px] uppercase tracking-wide text-red-400">Failed</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1.5 border-b border-[var(--border)]">{call.model}</td>
-                  <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{call.totalTokens}</td>
-                  <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
-                    {call.costMicroUsd === null ? '—' : `$${formatMicroUsd(call.costMicroUsd)}`}
-                  </td>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr>
+                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Purpose</th>
+                  <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Model</th>
+                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Tokens</th>
+                  <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Cost</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {document.modelCalls.map((call) => (
+                  <tr key={call.id}>
+                    <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                      {call.purpose}
+                      {call.status === 'ERROR' && (
+                        <span className="ml-1.5 text-[11px] uppercase tracking-wide text-red-400">Failed</span>
+                      )}
+                    </td>
+                    <td className="px-2 py-1.5 border-b border-[var(--border)]">{call.model}</td>
+                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">{call.totalTokens}</td>
+                    <td className="px-2 py-1.5 border-b border-[var(--border)] text-right">
+                      {call.costMicroUsd === null ? '—' : `$${formatMicroUsd(call.costMicroUsd)}`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className="text-sm text-[var(--muted)] m-0">
             Total: $
             {formatMicroUsd(

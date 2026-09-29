@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { INVENTORY_BASE } from '../../routes/paths';
 import { lookupStock, type StockLookupMatch } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
+import { Search } from 'lucide-react';
+import PageHeader from '../../components/ui/PageHeader';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
@@ -62,7 +64,7 @@ export default function InventoryLookupPage() {
 
   return (
     <div className="space-y-4">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Lookup</h1>
+      <PageHeader as="h2" icon={Search} title="Lookup" subtitle="Find an item, lot, serial or location by its exact code — or scan its label." />
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">

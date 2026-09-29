@@ -4,8 +4,8 @@ import type { LucideIcon } from 'lucide-react';
 export interface EmptyStateProps {
   icon: LucideIcon;
   title: string;
-  body?: string;
-  action?: ReactNode;
+  body?: string | undefined;
+  action?: ReactNode | undefined;
 }
 
 /**

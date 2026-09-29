@@ -14,6 +14,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import TabBar from '../../components/ui/TabBar';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * Products & Services — the one master an invoice or bill line is picked from
@@ -238,6 +239,7 @@ export default function ProductsPage() {
   const [balances, setBalances] = useState<Map<string, StockProductBalance>>(new Map());
   const [tab, setTab] = useState<TabId>('ALL');
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, setSearch);
 
   useEffect(() => {
     let ignore = false;
@@ -310,7 +312,7 @@ export default function ProductsPage() {
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">
         <span className="text-[var(--muted)]">Search</span>
-        <input type="text" value={q} onChange={(e) => setSearch(e.target.value)} className={inputClass} />
+        <input type="text" value={qDraft} onChange={(e) => setQDraft(e.target.value)} className={inputClass} />
       </label>
 
       {error !== null && <p className="status status--bad">{error}</p>}

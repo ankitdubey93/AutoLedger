@@ -22,6 +22,15 @@ function baseLayerBody(source: string): string {
 }
 
 describe('index.css cascade layers', () => {
+  it('keeps the heading element rules inside @layer base, label style only on a bare h2', () => {
+    const body = baseLayerBody(css);
+    expect(body).toContain('h1 {');
+    expect(body).toContain('h2:not([class]) {');
+    // Nothing unlayered may target the heading elements again.
+    const unlayered = css.slice(0, css.indexOf('@layer base {'));
+    expect(unlayered).not.toMatch(/^h[12]\s*\{/m);
+  });
+
   it('keeps the blanket table element rules inside @layer base', () => {
     const body = baseLayerBody(css);
     expect(body).toContain('th,');

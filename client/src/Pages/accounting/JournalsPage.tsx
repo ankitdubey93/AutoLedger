@@ -12,6 +12,7 @@ import {
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { formatDate } from '../../utils/date';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The journal register — every posted entry, filterable and paginated.
@@ -65,6 +66,7 @@ export default function JournalsPage() {
   const to = params.get('to') ?? '';
   const accountId = params.get('accountId') ?? '';
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, (v) => setFilter('q', v));
   const page = Number(params.get('page') ?? '1');
   const anyFilterSet = from !== '' || to !== '' || accountId !== '' || q !== '';
 
@@ -201,8 +203,8 @@ export default function JournalsPage() {
           <span className="text-[var(--muted)]">Search description</span>
           <input
             type="text"
-            value={q}
-            onChange={(e) => setFilter('q', e.target.value)}
+            value={qDraft}
+            onChange={(e) => setQDraft(e.target.value)}
             aria-label="Search description"
             placeholder="AWS"
             className={inputClass}

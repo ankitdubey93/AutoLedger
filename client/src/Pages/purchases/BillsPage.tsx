@@ -10,6 +10,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
+import { useDebouncedInput } from '../../utils/useDebouncedInput';
 
 /**
  * The bill register — every accounts-payable document, filterable and
@@ -85,6 +86,7 @@ export default function BillsPage() {
   const status = (params.get('status') ?? '') as BillStatus | '';
   const settlement = (params.get('settlement') ?? '') as SettlementFilter | '';
   const q = params.get('q') ?? '';
+  const [qDraft, setQDraft] = useDebouncedInput(q, setSearch);
   const page = Number(params.get('page') ?? '1');
 
   const activeTab = TABS.find((t) => t.status === status && t.settlement === settlement)?.key ?? 'all';
@@ -190,8 +192,8 @@ export default function BillsPage() {
         <span className="text-[var(--muted)]">Search</span>
         <input
           type="text"
-          value={q}
-          onChange={(e) => setSearch(e.target.value)}
+          value={qDraft}
+          onChange={(e) => setQDraft(e.target.value)}
           placeholder="Vendor reference or name"
           className={inputClass}
         />

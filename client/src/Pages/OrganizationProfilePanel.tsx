@@ -7,6 +7,7 @@ import {
 } from '../services/fetchServices';
 import { useOrg } from '../context/OrgContext';
 import { useDocumentObjectUrl } from '../utils/useDocumentObjectUrl';
+import { inputClass } from '../components/ui/formClasses';
 
 /**
  * The organization's postal identity: legal name, industry, street and postal
@@ -216,23 +217,25 @@ export default function OrganizationProfilePanel() {
         <p className="muted">Only an OWNER or ADMIN can edit the organization profile.</p>
       )}
 
-      <h3>Logo</h3>
+      <h3 className="m-0 mt-2 mb-2 text-sm font-semibold">Logo</h3>
       {logoUrl !== null && (
         <img src={logoUrl} alt="Organization logo" style={{ maxHeight: '96px', maxWidth: '240px' }} />
       )}
       {canEdit && (
-        <div>
-          <label htmlFor="org-logo">Upload logo (PNG or JPEG, up to 10 MB)</label>
-          <input
-            id="org-logo"
-            ref={fileInput}
-            type="file"
-            accept="image/png,image/jpeg"
-            disabled={logoBusy}
-            onChange={(e) => void handleLogoChosen(e)}
-          />
+        <div className="flex flex-wrap items-center gap-3 text-sm">
+          <label htmlFor="org-logo" className="flex flex-col gap-1">
+            <span className="text-[var(--muted)]">Upload logo (PNG or JPEG, up to 10 MB)</span>
+            <input
+              id="org-logo"
+              ref={fileInput}
+              type="file"
+              accept="image/png,image/jpeg"
+              disabled={logoBusy}
+              onChange={(e) => void handleLogoChosen(e)}
+            />
+          </label>
           {logoDocumentId !== null && (
-            <button type="button" className="btn" disabled={logoBusy} onClick={() => void handleRemoveLogo()}>
+            <button type="button" className="btn btn--ghost !mt-0" disabled={logoBusy} onClick={() => void handleRemoveLogo()}>
               Remove logo
             </button>
           )}
@@ -240,79 +243,117 @@ export default function OrganizationProfilePanel() {
       )}
       {logoError !== null && <p className="status status--bad">{logoError}</p>}
 
-      <h3>Identity</h3>
-      <label htmlFor="org-legal-name">Legal name</label>
-      <input id="org-legal-name" type="text" maxLength={200} disabled={ro} value={form.legalName}
-        onChange={(e) => set('legalName', e.target.value)} />
-      <label htmlFor="org-industry">Industry</label>
-      <input id="org-industry" type="text" maxLength={120} disabled={ro} value={form.industry}
-        onChange={(e) => set('industry', e.target.value)} />
-
-      <h3>Street address</h3>
-      <label htmlFor="org-street-1">Address line 1</label>
-      <input id="org-street-1" type="text" maxLength={200} disabled={ro} value={form.streetAddress1}
-        onChange={(e) => set('streetAddress1', e.target.value)} />
-      <label htmlFor="org-street-2">Address line 2</label>
-      <input id="org-street-2" type="text" maxLength={200} disabled={ro} value={form.streetAddress2}
-        onChange={(e) => set('streetAddress2', e.target.value)} />
-      <label htmlFor="org-city">City</label>
-      <input id="org-city" type="text" maxLength={120} disabled={ro} value={form.city}
-        onChange={(e) => set('city', e.target.value)} />
-      <label htmlFor="org-region">State / region</label>
-      <input id="org-region" type="text" maxLength={120} disabled={ro} value={form.region}
-        onChange={(e) => set('region', e.target.value)} />
-      <label htmlFor="org-postal-code">Postal code</label>
-      <input id="org-postal-code" type="text" maxLength={32} disabled={ro} value={form.postalCode}
-        onChange={(e) => set('postalCode', e.target.value)} />
-      <label htmlFor="org-country">Country code</label>
-      <input id="org-country" type="text" maxLength={2} disabled={ro} value={form.countryCode}
-        onChange={(e) => set('countryCode', e.target.value.toUpperCase())} />
-
-      <h3>Postal address</h3>
-      <label htmlFor="org-postal-same">
+      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Identity</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label htmlFor="org-legal-name" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Legal name</span>
+          <input id="org-legal-name" type="text" maxLength={200} disabled={ro} value={form.legalName} className={inputClass}
+            onChange={(e) => set('legalName', e.target.value)} />
+        </label>
+        <label htmlFor="org-industry" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Industry</span>
+          <input id="org-industry" type="text" maxLength={120} disabled={ro} value={form.industry} className={inputClass}
+            onChange={(e) => set('industry', e.target.value)} />
+        </label>
+      </div>
+      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Street address</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label htmlFor="org-street-1" className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-[var(--muted)]">Address line 1</span>
+          <input id="org-street-1" type="text" maxLength={200} disabled={ro} value={form.streetAddress1} className={inputClass}
+            onChange={(e) => set('streetAddress1', e.target.value)} />
+        </label>
+        <label htmlFor="org-street-2" className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-[var(--muted)]">Address line 2</span>
+          <input id="org-street-2" type="text" maxLength={200} disabled={ro} value={form.streetAddress2} className={inputClass}
+            onChange={(e) => set('streetAddress2', e.target.value)} />
+        </label>
+        <label htmlFor="org-city" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">City</span>
+          <input id="org-city" type="text" maxLength={120} disabled={ro} value={form.city} className={inputClass}
+            onChange={(e) => set('city', e.target.value)} />
+        </label>
+        <label htmlFor="org-region" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">State / region</span>
+          <input id="org-region" type="text" maxLength={120} disabled={ro} value={form.region} className={inputClass}
+            onChange={(e) => set('region', e.target.value)} />
+        </label>
+        <label htmlFor="org-postal-code" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Postal code</span>
+          <input id="org-postal-code" type="text" maxLength={32} disabled={ro} value={form.postalCode} className={inputClass}
+            onChange={(e) => set('postalCode', e.target.value)} />
+        </label>
+        <label htmlFor="org-country" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Country code</span>
+          <input id="org-country" type="text" maxLength={2} disabled={ro} value={form.countryCode} className={inputClass}
+            onChange={(e) => set('countryCode', e.target.value.toUpperCase())} />
+        </label>
+      </div>
+      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Postal address</h3>
+      <label htmlFor="org-postal-same" className="flex items-center gap-2 text-sm">
         <input id="org-postal-same" type="checkbox" disabled={ro} checked={form.postalSameAsStreet}
-          onChange={(e) => set('postalSameAsStreet', e.target.checked)} />{' '}
+          onChange={(e) => set('postalSameAsStreet', e.target.checked)} />
         Same as street address
       </label>
       {!form.postalSameAsStreet && (
-        <>
-          <label htmlFor="org-postal-1">Postal address line 1</label>
-          <input id="org-postal-1" type="text" maxLength={200} disabled={ro} value={form.postalAddress1}
-            onChange={(e) => set('postalAddress1', e.target.value)} />
-          <label htmlFor="org-postal-2">Postal address line 2</label>
-          <input id="org-postal-2" type="text" maxLength={200} disabled={ro} value={form.postalAddress2}
-            onChange={(e) => set('postalAddress2', e.target.value)} />
-          <label htmlFor="org-postal-city">Postal city</label>
-          <input id="org-postal-city" type="text" maxLength={120} disabled={ro} value={form.postalCity}
-            onChange={(e) => set('postalCity', e.target.value)} />
-          <label htmlFor="org-postal-region">Postal state / region</label>
-          <input id="org-postal-region" type="text" maxLength={120} disabled={ro} value={form.postalRegion}
-            onChange={(e) => set('postalRegion', e.target.value)} />
-          <label htmlFor="org-postal-postal-code">Postal code (mailing)</label>
-          <input id="org-postal-postal-code" type="text" maxLength={32} disabled={ro} value={form.postalPostalCode}
-            onChange={(e) => set('postalPostalCode', e.target.value)} />
-          <label htmlFor="org-postal-country">Postal country code</label>
-          <input id="org-postal-country" type="text" maxLength={2} disabled={ro} value={form.postalCountryCode}
-            onChange={(e) => set('postalCountryCode', e.target.value.toUpperCase())} />
-        </>
+        <div className="grid gap-3 sm:grid-cols-2 mt-3">
+          <label htmlFor="org-postal-1" className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="text-[var(--muted)]">Postal address line 1</span>
+            <input id="org-postal-1" type="text" maxLength={200} disabled={ro} value={form.postalAddress1} className={inputClass}
+              onChange={(e) => set('postalAddress1', e.target.value)} />
+          </label>
+          <label htmlFor="org-postal-2" className="flex flex-col gap-1 text-sm sm:col-span-2">
+            <span className="text-[var(--muted)]">Postal address line 2</span>
+            <input id="org-postal-2" type="text" maxLength={200} disabled={ro} value={form.postalAddress2} className={inputClass}
+              onChange={(e) => set('postalAddress2', e.target.value)} />
+          </label>
+          <label htmlFor="org-postal-city" className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Postal city</span>
+            <input id="org-postal-city" type="text" maxLength={120} disabled={ro} value={form.postalCity} className={inputClass}
+              onChange={(e) => set('postalCity', e.target.value)} />
+          </label>
+          <label htmlFor="org-postal-region" className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Postal state / region</span>
+            <input id="org-postal-region" type="text" maxLength={120} disabled={ro} value={form.postalRegion} className={inputClass}
+              onChange={(e) => set('postalRegion', e.target.value)} />
+          </label>
+          <label htmlFor="org-postal-postal-code" className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Postal code (mailing)</span>
+            <input id="org-postal-postal-code" type="text" maxLength={32} disabled={ro} value={form.postalPostalCode} className={inputClass}
+              onChange={(e) => set('postalPostalCode', e.target.value)} />
+          </label>
+          <label htmlFor="org-postal-country" className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Postal country code</span>
+            <input id="org-postal-country" type="text" maxLength={2} disabled={ro} value={form.postalCountryCode} className={inputClass}
+              onChange={(e) => set('postalCountryCode', e.target.value.toUpperCase())} />
+          </label>
+        </div>
       )}
 
-      <h3>Contact</h3>
-      <label htmlFor="org-phone">Phone</label>
-      <input id="org-phone" type="text" maxLength={40} disabled={ro} value={form.phone}
-        onChange={(e) => set('phone', e.target.value)} />
-      <label htmlFor="org-contact-email">Contact email</label>
-      <input id="org-contact-email" type="email" maxLength={254} disabled={ro} value={form.contactEmail}
-        onChange={(e) => set('contactEmail', e.target.value)} />
-      <label htmlFor="org-website">Website</label>
-      <input id="org-website" type="text" maxLength={200} disabled={ro} value={form.website}
-        onChange={(e) => set('website', e.target.value)} />
+      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Contact</h3>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label htmlFor="org-phone" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Phone</span>
+          <input id="org-phone" type="text" maxLength={40} disabled={ro} value={form.phone} className={inputClass}
+            onChange={(e) => set('phone', e.target.value)} />
+        </label>
+        <label htmlFor="org-contact-email" className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Contact email</span>
+          <input id="org-contact-email" type="email" maxLength={254} disabled={ro} value={form.contactEmail} className={inputClass}
+            onChange={(e) => set('contactEmail', e.target.value)} />
+        </label>
+        <label htmlFor="org-website" className="flex flex-col gap-1 text-sm sm:col-span-2">
+          <span className="text-[var(--muted)]">Website</span>
+          <input id="org-website" type="text" maxLength={200} disabled={ro} value={form.website} className={inputClass}
+            onChange={(e) => set('website', e.target.value)} />
+        </label>
+      </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
       {saved && error === null && <p className="status status--good">Saved.</p>}
 
       {canEdit && (
-        <button type="button" className="btn" disabled={saving} onClick={() => void handleSave()}>
+        <button type="button" className="btn mt-4" disabled={saving} onClick={() => void handleSave()}>
           {saving ? 'Saving…' : 'Save'}
         </button>
       )}
