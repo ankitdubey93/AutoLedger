@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext';
 import { INVENTORY_BASE } from '../../routes/paths';
 import AttributeFields from './AttributeFields';
 import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
+import { inputClass } from '../../components/ui/formClasses';
 import { formatQuantityMilli } from '../../utils/quantity';
 import { formatCents } from '../../utils/money';
 import {
@@ -50,6 +52,9 @@ export default function InventoryItemDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [selectedSerialIds, setSelectedSerialIds] = useState<string[]>([]);
+  const [confirmLink, setConfirmLink] = useState(false);
+  const [bookingSerial, setBookingSerial] = useState<StockSerial | null>(null);
+  const [bookingNote, setBookingNote] = useState('');
 
   function reload() {
     if (id === undefined) return;
@@ -63,10 +68,10 @@ export default function InventoryItemDetailPage() {
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load the item'));
     fetchStockBalances({ itemId: id })
       .then((res) => setBalances(res.balances))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load stock balances'));
     fetchStockMovements({ itemId: id })
       .then((res) => setMovements(res.movements))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load stock movements'));
   }
 
   useEffect(() => {
@@ -79,11 +84,11 @@ export default function InventoryItemDetailPage() {
     if (item.tracking === 'LOT') {
       fetchStockItemLots(id)
         .then((res) => setLots(res.lots))
-        .catch(() => undefined);
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load lots'));
     } else if (item.tracking === 'SERIAL') {
       fetchStockItemSerials(id)
         .then((res) => setSerials(res.serials))
-        .catch(() => undefined);
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load serials'));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.tracking, id]);
@@ -104,9 +109,6 @@ export default function InventoryItemDetailPage() {
 
   async function handleLinkProduct() {
     if (id === undefined) return;
-    if (!window.confirm('Link this item to Products & Services? Any stock it already holds is posted to your inventory account as opening stock.')) {
-      return;
-    }
     setSaving(true);
     setError(null);
     try {
@@ -124,18 +126,18 @@ export default function InventoryItemDetailPage() {
       setError(err instanceof Error ? err.message : 'Could not link the item');
     } finally {
       setSaving(false);
+      setConfirmLink(false);
     }
   }
 
-  async function handleSerialAction(serial: StockSerial, status: Exclude<StockSerialStatus, 'ISSUED'>) {
+  async function handleSerialAction(serial: StockSerial, status: Exclude<StockSerialStatus, 'ISSUED'>, note: string | null = null) {
     setError(null);
-    const note = status === 'BOOKED' ? window.prompt('Note for this booking (optional):') : null;
     try {
-      await changeStockSerialStatus(serial.id, { status, note: note ?? null });
+      await changeStockSerialStatus(serial.id, { status, note });
       if (id !== undefined) {
         fetchStockItemSerials(id)
           .then((res) => setSerials(res.serials))
-          .catch(() => undefined);
+          .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not refresh serials'));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not change the serial status');
@@ -218,7 +220,7 @@ export default function InventoryItemDetailPage() {
               <button
                 type="button"
                 disabled={saving}
-                onClick={() => void handleLinkProduct()}
+                onClick={() => setConfirmLink(true)}
                 className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--panel-2)] disabled:opacity-60"
               >
                 Link to Products &amp; Services
@@ -343,7 +345,14 @@ export default function InventoryItemDetailPage() {
                           <button type="button" onClick={() => void handleSerialAction(serial, 'ON_HOLD')} className="text-xs text-[var(--muted)]">
                             Hold
                           </button>
-                          <button type="button" onClick={() => void handleSerialAction(serial, 'BOOKED')} className="text-xs text-[var(--muted)]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBookingNote('');
+                              setBookingSerial(serial);
+                            }}
+                            className="text-xs text-[var(--muted)]"
+                          >
                             Book
                           </button>
                         </>
@@ -404,6 +413,36 @@ export default function InventoryItemDetailPage() {
           </tbody>
         </table>
       </section>
+
+      {confirmLink && (
+        <ConfirmDialog
+          title="Link to Products & Services?"
+          body="Any stock this item already holds is posted to your inventory account as opening stock."
+          confirmLabel="Link item"
+          busy={saving}
+          onConfirm={() => void handleLinkProduct()}
+          onCancel={() => setConfirmLink(false)}
+        />
+      )}
+
+      {bookingSerial !== null && (
+        <ConfirmDialog
+          title={`Book serial ${bookingSerial.serialNumber}`}
+          body={
+            <label className="flex flex-col gap-1">
+              <span>Note (optional)</span>
+              <input value={bookingNote} onChange={(e) => setBookingNote(e.target.value)} maxLength={200} className={inputClass} />
+            </label>
+          }
+          confirmLabel="Book"
+          onConfirm={() => {
+            const serial = bookingSerial;
+            setBookingSerial(null);
+            void handleSerialAction(serial, 'BOOKED', bookingNote.trim() === '' ? null : bookingNote.trim());
+          }}
+          onCancel={() => setBookingSerial(null)}
+        />
+      )}
     </div>
   );
 }

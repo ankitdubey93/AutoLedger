@@ -88,6 +88,17 @@ export default function JournalDetailPage() {
     );
   }
 
+  // A load that failed for any reason other than 404 would otherwise leave
+  // the loading placeholder up forever — the page-level error below never renders.
+  if (entry === null && error !== null) {
+    return (
+      <section className="flex flex-col gap-3">
+        <BackLink to="/journals" label="Back to journal entries" />
+        <p className="status status--bad">{error}</p>
+      </section>
+    );
+  }
+
   if (entry === null) {
     return (
       <div className="shell" aria-busy="true">

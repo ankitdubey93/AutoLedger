@@ -145,6 +145,17 @@ export default function BillDetailPage() {
     );
   }
 
+  // A load that failed for any reason other than 404 would otherwise leave
+  // the loading placeholder up forever — the page-level error below never renders.
+  if (bill === null && error !== null) {
+    return (
+      <section className="flex flex-col gap-3">
+        <BackLink to="/expenses" label="Back to expenses" />
+        <p className="status status--bad">{error}</p>
+      </section>
+    );
+  }
+
   if (bill === null) {
     return (
       <div className="shell" aria-busy="true">

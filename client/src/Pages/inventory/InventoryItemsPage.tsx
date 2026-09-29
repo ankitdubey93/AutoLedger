@@ -46,7 +46,7 @@ export default function InventoryItemsPage() {
   useEffect(() => {
     fetchStockCategories()
       .then((res) => setCategories(res.categories))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load categories'));
   }, []);
 
   useEffect(() => {

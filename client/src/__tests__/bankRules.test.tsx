@@ -173,3 +173,51 @@ it('apply button reports the settled count', async () => {
     expect(screen.getByText('Settled 3 line(s)')).toBeInTheDocument();
   });
 });
+
+it('amounts are typed as money and sent as cents', async () => {
+  render(
+    <MemoryRouter>
+      <BankRulesPage />
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByText('New rule'));
+
+  fireEvent.change(screen.getByPlaceholderText('Rule name'), { target: { value: 'Fees' } });
+  fireEvent.change(screen.getByPlaceholderText('Text to match'), { target: { value: 'FEE' } });
+  fireEvent.change(screen.getAllByDisplayValue('Select an account…')[0]!, { target: { value: 'acc-6600' } });
+  const [minInput, maxInput] = screen.getAllByPlaceholderText('(any)');
+  fireEvent.change(minInput!, { target: { value: '12.50' } });
+  fireEvent.change(maxInput!, { target: { value: '100' } });
+  fireEvent.click(screen.getByText('Create rule'));
+
+  await waitFor(() => {
+    expect(vi.mocked(fetchServices.createBankRule)).toHaveBeenCalledWith(
+      expect.objectContaining({ amountMinCents: 1250, amountMaxCents: 10000 }),
+    );
+  });
+});
+
+it('rejects an unparseable or inverted amount range without calling the API', async () => {
+  render(
+    <MemoryRouter>
+      <BankRulesPage />
+    </MemoryRouter>,
+  );
+  fireEvent.click(await screen.findByText('New rule'));
+
+  fireEvent.change(screen.getByPlaceholderText('Rule name'), { target: { value: 'Fees' } });
+  fireEvent.change(screen.getByPlaceholderText('Text to match'), { target: { value: 'FEE' } });
+  fireEvent.change(screen.getAllByDisplayValue('Select an account…')[0]!, { target: { value: 'acc-6600' } });
+  const [minInput, maxInput] = screen.getAllByPlaceholderText('(any)');
+
+  fireEvent.change(minInput!, { target: { value: '12.345' } });
+  fireEvent.click(screen.getByText('Create rule'));
+  expect(await screen.findByText('Enter amounts like 450 or 450.50')).toBeInTheDocument();
+
+  fireEvent.change(minInput!, { target: { value: '200' } });
+  fireEvent.change(maxInput!, { target: { value: '100' } });
+  fireEvent.click(screen.getByText('Create rule'));
+  expect(await screen.findByText('Min amount cannot be more than max amount')).toBeInTheDocument();
+
+  expect(vi.mocked(fetchServices.createBankRule)).not.toHaveBeenCalled();
+});

@@ -178,6 +178,17 @@ export default function InboxDocumentPage() {
     );
   }
 
+  // A load that failed for any reason other than 404 would otherwise leave
+  // the loading placeholder up forever — the page-level error below never renders.
+  if (document === null && error !== null) {
+    return (
+      <section className="flex flex-col gap-4">
+        <BackLink to={base} label="Back to bill inbox" />
+        <p className="status status--bad">{error}</p>
+      </section>
+    );
+  }
+
   if (document === null) {
     return (
       <section className="flex flex-col gap-4" aria-busy="true">

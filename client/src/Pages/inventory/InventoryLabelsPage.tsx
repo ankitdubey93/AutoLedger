@@ -46,7 +46,7 @@ export default function InventoryLabelsPage() {
     }
     lookupStock(q)
       .then((res) => setSearchResults(res.matches.filter((m) => m.kind === 'ITEM' || m.kind === 'LOCATION')))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not search items and locations'));
   }
 
   function addTarget(match: StockLookupMatch) {

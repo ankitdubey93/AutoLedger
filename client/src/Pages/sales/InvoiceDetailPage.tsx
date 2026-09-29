@@ -147,6 +147,17 @@ export default function InvoiceDetailPage() {
     );
   }
 
+  // A load that failed for any reason other than 404 would otherwise leave
+  // the loading placeholder up forever — the page-level error below never renders.
+  if (invoice === null && error !== null) {
+    return (
+      <section className="flex flex-col gap-3">
+        <BackLink to="/invoices" label="Back to invoices" />
+        <p className="status status--bad">{error}</p>
+      </section>
+    );
+  }
+
   if (invoice === null) {
     return (
       <div className="shell" aria-busy="true">

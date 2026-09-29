@@ -115,6 +115,47 @@ describe('BankImportPage', () => {
     });
   });
 
+  it('sends a negative closing balance as integer cents', async () => {
+    mockRoutes([account()], {
+      status: 201,
+      body: { success: true, import: { id: 'imp-1' }, importedCount: 1, duplicateCount: 0, suggestedCount: 0, autoMatchableCount: 0 },
+    });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('1110 · Operating Cash');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Bank account' }), 'acc-1110');
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, makeCsvFile());
+    await waitFor(() => expect(fileInput.files?.length).toBe(1));
+    await user.type(screen.getByLabelText('Statement closing balance (optional)'), '-80.50');
+    await user.click(screen.getByRole('button', { name: 'Import statement' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => (c as [unknown, RequestInit?])[1]?.method === 'POST');
+      expect(call).toBeDefined();
+      const body = JSON.parse((call as [unknown, RequestInit])[1].body as string) as { closingBalanceCents: number };
+      expect(body.closingBalanceCents).toBe(-8050);
+    });
+  });
+
+  it('refuses a malformed closing balance instead of sending NaN', async () => {
+    mockRoutes([account()], { status: 201, body: {} });
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('1110 · Operating Cash');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Bank account' }), 'acc-1110');
+    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+    await user.upload(fileInput, makeCsvFile());
+    await waitFor(() => expect(fileInput.files?.length).toBe(1));
+    await user.type(screen.getByLabelText('Statement closing balance (optional)'), '1,250');
+    await user.click(screen.getByRole('button', { name: 'Import statement' }));
+
+    expect(await screen.findByText('Enter the closing balance like 1250.00 or -80.50')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some((c) => (c as [unknown, RequestInit?])[1]?.method === 'POST')).toBe(false);
+  });
+
   it('shows the imported/duplicate summary on success', async () => {
     mockRoutes([account()], {
       status: 201,

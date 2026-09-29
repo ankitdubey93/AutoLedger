@@ -12,7 +12,7 @@ import {
 import { listAccounts, type Account } from '../../services/fetchServices';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
-import { formatCents } from '../../utils/money';
+import { formatCents, parseCentsInput } from '../../utils/money';
 
 function BankRuleForm({
   accounts,
@@ -29,8 +29,9 @@ function BankRuleForm({
   const [priority, setPriority] = useState('100');
   const [direction, setDirection] = useState<'IN' | 'OUT' | 'ANY'>(prefill?.direction || 'ANY');
   const [memoContains, setMemoContains] = useState(prefill?.memo || '');
-  const [amountMinCents, setAmountMinCents] = useState('');
-  const [amountMaxCents, setAmountMaxCents] = useState('');
+  // Typed as money ("450.50"), converted to cents on submit — never sent as typed.
+  const [amountMin, setAmountMin] = useState('');
+  const [amountMax, setAmountMax] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
   const [targetAccountId, setTargetAccountId] = useState(prefill?.account || '');
   const [description, setDescription] = useState('');
@@ -42,6 +43,16 @@ function BankRuleForm({
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
+    const amountMinCents = amountMin.trim() === '' ? null : parseCentsInput(amountMin);
+    const amountMaxCents = amountMax.trim() === '' ? null : parseCentsInput(amountMax);
+    if ((amountMin.trim() !== '' && amountMinCents === null) || (amountMax.trim() !== '' && amountMaxCents === null)) {
+      setError('Enter amounts like 450 or 450.50');
+      return;
+    }
+    if (amountMinCents !== null && amountMaxCents !== null && amountMinCents > amountMaxCents) {
+      setError('Min amount cannot be more than max amount');
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -50,8 +61,8 @@ function BankRuleForm({
         priority: Number(priority),
         direction,
         memoContains: memoContains.trim(),
-        amountMinCents: amountMinCents.trim() === '' ? null : Number(amountMinCents),
-        amountMaxCents: amountMaxCents.trim() === '' ? null : Number(amountMaxCents),
+        amountMinCents,
+        amountMaxCents,
         bankAccountId: bankAccountId === '' ? null : bankAccountId,
         targetAccountId,
         description: description.trim() === '' ? null : description.trim(),
@@ -126,10 +137,10 @@ function BankRuleForm({
         <label className="flex flex-col gap-1 text-sm w-28">
           <span className="text-[var(--muted)]">Min amount</span>
           <input
-            type="number"
-            min="0"
-            value={amountMinCents}
-            onChange={(e) => setAmountMinCents(e.target.value)}
+            type="text"
+            inputMode="decimal"
+            value={amountMin}
+            onChange={(e) => setAmountMin(e.target.value)}
             placeholder="(any)"
             className={inputClass}
           />
@@ -137,10 +148,10 @@ function BankRuleForm({
         <label className="flex flex-col gap-1 text-sm w-28">
           <span className="text-[var(--muted)]">Max amount</span>
           <input
-            type="number"
-            min="0"
-            value={amountMaxCents}
-            onChange={(e) => setAmountMaxCents(e.target.value)}
+            type="text"
+            inputMode="decimal"
+            value={amountMax}
+            onChange={(e) => setAmountMax(e.target.value)}
             placeholder="(any)"
             className={inputClass}
           />

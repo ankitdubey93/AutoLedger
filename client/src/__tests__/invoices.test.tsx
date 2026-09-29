@@ -510,6 +510,23 @@ describe('InvoiceDetailPage', () => {
     expect(screen.queryByRole('link', { name: /\bedit\b/i })).toBeNull();
   });
 
+  it('shows a load failure instead of the loading placeholder', async () => {
+    const invoice = baseInvoice();
+    mockDetailRoutes(invoice);
+    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith(`/api/v1/invoices/${invoice.id}`)) {
+        return Promise.resolve(jsonResponse(500, { success: false, error: 'Database unavailable' }));
+      }
+      return base(input, init);
+    });
+    renderInvoiceDetailPage(invoice.id);
+
+    expect(await screen.findByText('Database unavailable')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Back to invoices/ })).toBeInTheDocument();
+  });
+
   it('links to the posted journal entry', async () => {
     const invoice = baseInvoice({ status: 'ISSUED', invoiceNumber: 'INV-000001', journalEntryId: 'entry-1' });
     mockDetailRoutes(invoice);

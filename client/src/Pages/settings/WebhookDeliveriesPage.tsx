@@ -92,7 +92,7 @@ export default function WebhookDeliveriesPage() {
   useEffect(() => {
     getWebhookEndpoints()
       .then((res) => setEndpoints(res.endpoints))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load webhook endpoints'));
   }, []);
 
   useEffect(() => {

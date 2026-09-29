@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listAccounts, importBankStatement, type Account, type DateFormat } from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
+import { parseCentsInput } from '../../utils/money';
 
 /**
  * Upload a bank statement CSV. The file's text goes straight into the JSON
@@ -85,6 +86,21 @@ export default function BankImportPage() {
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) return;
+
+    // A closing balance may be negative (an overdrawn account); parseCentsInput
+    // only takes magnitudes, so the sign is split off first.
+    let closingBalanceCents: number | null = null;
+    const trimmedBalance = closingBalance.trim();
+    if (trimmedBalance !== '') {
+      const negative = trimmedBalance.startsWith('-');
+      const magnitude = parseCentsInput(negative ? trimmedBalance.slice(1) : trimmedBalance);
+      if (magnitude === null) {
+        setError('Enter the closing balance like 1250.00 or -80.50');
+        return;
+      }
+      closingBalanceCents = negative ? -magnitude : magnitude;
+    }
+
     setBusy(true);
     setError(null);
     setSummary(null);
@@ -100,9 +116,6 @@ export default function BankImportPage() {
             reference: referenceColumn.trim() === '' ? null : referenceColumn.trim(),
           }
         : null;
-
-    const closingBalanceCents =
-      closingBalance.trim() === '' ? null : Math.round(Number(closingBalance) * 100);
 
     try {
       const res = await importBankStatement({

@@ -36,7 +36,7 @@ export default function InventoryLocationsPage() {
   useEffect(() => {
     fetchStockSettings()
       .then((res) => setDefaultLocationId(res.settings.defaultLocationId ?? ''))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load the default location'));
   }, []);
 
   async function handleDefaultLocation(next: string) {

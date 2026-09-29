@@ -136,7 +136,7 @@ export default function InventoryMovementsPage() {
     }
     fetchStockItems({ q })
       .then((res) => updateLine(line.key, { itemResults: res.items }))
-      .catch(() => undefined);
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not search items'));
   }
 
   function selectItem(line: LineState, item: StockItem) {
@@ -161,14 +161,14 @@ export default function InventoryMovementsPage() {
           const first = res.lots[0];
           updateLine(line.key, { availableLots: res.lots, lotId: first !== undefined ? first.id : '' });
         })
-        .catch(() => undefined);
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load lots'));
     }
 
     if (item.tracking === 'SERIAL') {
       if (tab === 'RECEIVE') {
         fetchStockCategory(item.categoryId)
           .then((res) => updateLine(line.key, { serialAttributeDefs: res.attributes.filter((a) => a.appliesTo === 'SERIAL') }))
-          .catch(() => undefined);
+          .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load serial attributes'));
       } else if (tab === 'ISSUE' || tab === 'TRANSFER') {
         fetchStockItemSerials(item.id)
           .then((res) => {
@@ -177,7 +177,7 @@ export default function InventoryMovementsPage() {
             );
             updateLine(line.key, { availableSerials: eligible });
           })
-          .catch(() => undefined);
+          .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load serials'));
       }
     }
   }
