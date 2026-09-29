@@ -118,9 +118,10 @@ flowchart LR
   ENG -->|score &lt; 85| Q[Approval queue]
   Q -->|accountant accepts| PG
   MAN[Manual journal entry] --> PG
-  AP[AP-Flow documents] -->|source_type = 'ap_flow'| PG
+  AP[Bill inbox — capture] -->|approved bill, source_type = 'bill'| PG
+  INV[Inventory movements] -->|source_type = 'stock'| PG
   PG --> RPT[Live statements<br/>trial balance · P&L · balance sheet]
-  PG --> QBO[QuickBooks Online<br/>OAuth 2.0 sync]
+  PG -.-> QBO[QuickBooks Online<br/>not built — Phase 17]
   PG -.->|deferred constraint trigger| PG
 ```
 

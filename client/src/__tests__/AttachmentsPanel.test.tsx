@@ -92,7 +92,7 @@ function mockRoutes(options: {
         jsonResponse(201, { success: true, created: true, document: doc({ linkCount: 0 }) }),
       );
     }
-    if (method === 'POST' && /\/links$/.test(url)) {
+    if (method === 'POST' && url.endsWith('/links')) {
       const response = options.attachResponse ?? {
         status: 201,
         body: {

@@ -1,0 +1,10 @@
+node_modules
+dist
+coverage
+storage
+storage-test
+storage-test-*
+.tesseract
+.env
+.env.*
+!.env.example

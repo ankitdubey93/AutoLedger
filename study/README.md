@@ -96,6 +96,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | Note | Covers |
 |---|---|
 | [typescript-build-and-dev-tooling.md](tooling/typescript-build-and-dev-tooling.md) | Erasure and why transpiling ≠ type-checking, `tsx`/esbuild, TypeScript 7's Go binary, `NodeNext` vs `bundler` resolution and the `.js` extension rule, `verbatimModuleSyntax`, what `strict` omits, Vite's two pipelines and Rolldown, build-time env inlining |
+| [docker-images-and-ci.md](tooling/docker-images-and-ci.md) | **Image layers and content-keyed caching (why `package.json` is copied before the source), multi-stage builds shipping only `dist/` and production dependencies, overlay copy-up and the measured `chown -R` trap (1.04 GB → 685 MB), `npm ci`, build-time vs runtime config (Vite inlines `VITE_*`, so the client's settings are build args), nginx SPA fallback and cache headers, compose profiles and `depends_on` conditions (a one-shot migrate service), GitHub Actions service containers for a real-database CI job, and why the linter is oxlint — TypeScript 7 ships no JS API for `typescript-eslint`** |
 | [testing-with-vitest.md](tooling/testing-with-vitest.md) | Why Vitest over Jest (ESM mocking, the `require`-registry problem, verified Jest 30 failures), forks vs threads isolation, **how to write a test** — AAA, `it.each`, error paths, test doubles, supertest, real-DB integration, coverage as a negative signal, the `vi.mock` hoisting trap |
 
 ### React
@@ -292,7 +293,8 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Mocking a DB pool, and why it proves less than you think | 1 | ✅ |
 | Testing transactions and rollback paths | 3 | ✅ |
 | Testing concurrency (two clients, one row) | 28 (StockLedger — repeated opposite-direction transfers asserting zero deadlocks) | ✅ |
-| Docker layer caching & multi-stage builds | deployment | ⬜ |
+| Docker layer caching & multi-stage builds | 2026-09-29 (pre-showcase polish — `docker-images-and-ci.md`) | ✅ |
+| CI with real service containers; choosing a linter under TypeScript 7 | 2026-09-29 (`docker-images-and-ci.md`) | ✅ |
 | Debugging a blocked event loop in production | later | ⬜ |
 
-Phase 0 built no Dockerfiles — Postgres and Redis run in containers, the app runs on the host ([development.md](../docs/development.md#why-not-full-docker)). The multi-stage build note is owed when a production image is actually built.
+Phase 0 built no Dockerfiles — Postgres and Redis run in containers, the app runs on the host ([development.md](../docs/development.md#why-not-full-docker)). Production images arrived on 2026-09-29 and the owed note with them: [tooling/docker-images-and-ci.md](tooling/docker-images-and-ci.md). Development itself still runs on the host.

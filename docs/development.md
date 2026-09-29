@@ -71,6 +71,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 |---|---|
 | `npm run dev` | `tsx watch src/index.ts` — restarts on change, no build step |
 | `npm run typecheck` | `tsc --noEmit`. **`tsx` does not type-check** — run this |
+| `npm run lint` | `oxlint --deny-warnings` with `.oxlintrc.json` — correctness rules; any finding fails. oxlint, not ESLint: `typescript-eslint` needs TypeScript's JS API, which TypeScript 7 does not ship |
 | `npm run build` | `tsc -p tsconfig.build.json` → `dist/`, **then copies `src/db/migrations/*.sql`** — `tsc` only emits JS, so without the copy step `dist/db/migrations/` would be empty and the built server could not migrate |
 | `npm start` | Runs the built `dist/index.js` |
 | `npm run migrate` | Applies pending migrations |
@@ -80,7 +81,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 | `npm run seed:demo` | Builds a populated demo organization, **Harbor Point Fabrication**, through the real HTTP API (an app started in-process on a random port — no SQL). Replays the four walkthrough months via `scripts/walkthroughReplay.ts` — the same code `walkthrough.test.ts` proves equal to the answer key — then adds inventory (Manufacturing profile, stock received on a bill and partly sold), this month's open work (an overdue invoice, an open one, a draft, a bill awaiting approval) and two bank rules. Needs a migrated database; refuses if the demo email already exists (`npm run db:reset` first). Credentials: `DEMO_EMAIL` / `DEMO_PASSWORD`, default `demo@autoledger.dev` / `autoledger-demo`. `--anchor YYYY-MM` as for `walkthrough`; the default puts month 4 on last month. Takes about 10 seconds |
 | `npm run worker` | Phase 7 — `tsx watch src/worker.ts`, a second process consuming the `integrity-check`, `outbox-drain`, and `webhook-deliver` queues. Requires `docker compose up -d redis` |
 | `npm run worker:start` | Runs the built `dist/worker.js` |
-| `npm test` | Vitest, single run (~3.3 min, 126 files in parallel). Requires `docker compose up -d postgres-test redis` — the **test** cluster on :5433, not the dev one |
+| `npm test` | Vitest, single run (~4 min, 137 files in parallel). Requires `docker compose up -d postgres-test redis` — the **test** cluster on :5433, not the dev one |
 | `npm run test:watch` | Vitest watch mode |
 | `npm run test:coverage` | Coverage over `services/`, `utils/` and `middleware/` |
 
@@ -90,6 +91,7 @@ Shut down with `Ctrl-C` in each terminal; `docker compose down` stops the contai
 |---|---|
 | `npm run dev` | Vite dev server on 5173, `strictPort` |
 | `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | `oxlint --deny-warnings` with `.oxlintrc.json` (adds the React and hooks rules) |
 | `npm run build` | Type-check, then Vite production build → `dist/` |
 | `npm run preview` | Serves the built bundle |
 | `npm test` | Vitest + jsdom + Testing Library, single run |
@@ -129,9 +131,9 @@ No application secrets live here.
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. Each test worker pins itself to its own index (1..3, never 0) so `npm test` never touches your dev queues |
 | `STORAGE_ROOT` | no — defaults `storage` | Phase 9.5 — the Document Vault's filesystem backend, resolved relative to `server/`'s package root. Gitignored. Each test worker pins itself to its own `storage-test-<n>` so `npm test` never touches your dev vault |
-| `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — AP-Flow's vision extraction. The server and worker both boot without it; `extractionService` throws `503` only when a real call is attempted with no key configured. Every test stubs the client, so the suite needs no key at all |
+| `ANTHROPIC_API_KEY` | no — defaults `''` | Phase 10 — the bill inbox's (capture's) vision extraction. The server and worker both boot without it; `extractionService` throws `503` only when a real call is attempted with no key configured. Every test stubs the client, so the suite needs no key at all |
 | `CAPTURE_AI_PROVIDER` | no — defaults `anthropic` | Phase 19 (named `AP_FLOW_AI_PROVIDER` until Phase 33 — rename it in an existing `.env`) — which of `anthropic` \| `gemini` the bill inbox's extraction and classification use. Only the selected provider's key needs to be set |
-| `GEMINI_API_KEY` | no — defaults `''` | Phase 19 — AP-Flow's second extraction provider, called over `fetch` (no SDK — rule 14). Needed only when `CAPTURE_AI_PROVIDER=gemini`. Note: on Google's free tier, prompt content may be used to improve Google's products — AP-Flow only ever sends already-redacted pages, but confirm which tier your key is on |
+| `GEMINI_API_KEY` | no — defaults `''` | Phase 19 — the bill inbox's second extraction provider, called over `fetch` (no SDK — rule 14). Needed only when `CAPTURE_AI_PROVIDER=gemini`. Note: on Google's free tier, prompt content may be used to improve Google's products — capture only ever sends already-redacted pages, but confirm which tier your key is on |
 | `CAPTURE_GEMINI_MODEL` | no — defaults `gemini-3.6-flash` | Phase 19. Pinned deliberately, not the floating `gemini-flash-latest` alias — a model must not change under a live ledger without a diff. Retiring one is expected maintenance: the original default, `gemini-2.5-flash`, started returning `404` ("no longer available to new users") on 2026-09-14 even though it still appeared in Google's `ListModels`; only `generateContent` had actually stopped serving it |
 | `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` | no — both default `''` | Phase 19.3 — the Drive integration's **recommended** connection mode: no consent screen, no Google app verification, no refresh-token expiry (RFC 7523's JWT-bearer grant). The server and worker both boot without them; `driveConnectionService.connectServiceAccount` returns `503` only when actually attempted with either unset. The private key must be a PKCS#8 PEM (`-----BEGIN PRIVATE KEY-----`, the format Google's downloaded JSON key uses) with its `\n` escapes intact — the server unescapes them at load time. Never written to a table, never logged |
 | `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` | no — both default `''` | Phase 19.2 — the Drive integration's secondary connection mode, a Web application OAuth client from Google Cloud Console. Retained for a tenant whose Workspace admin blocks sharing to an external service-account address. The server and worker both boot without them; `driveConnectionService` returns `503` only when a real Drive action is attempted with either unset |
@@ -197,9 +199,25 @@ The prior setup containerised all four services with source-mount hot reload. Ru
 - Debugger attach and stack traces point at real host paths
 - Container startup is not on the edit/reload path
 
-The cost is that Node and npm must be installed on the host, and "works on my machine" drift is possible. Containerising the server and client is deferred, not rejected — it belongs with deployment work, where a multi-stage production image is the actual requirement rather than a dev-mode image with a source mount.
+The cost is that Node and npm must be installed on the host, and "works on my machine" drift is possible. Development stays on the host; the **production images** (2026-09-29) are separate, below.
 
-The prior `entrypoint.sh` ran migrations **and the full test suite** before starting the server, aborting startup on a failing test. That behaviour has no host equivalent right now and is not simulated. Its real home is CI, which is not yet set up.
+### Production images — `docker compose --profile app up --build`
+
+Added 2026-09-29. Multi-stage images, not dev images with a source mount:
+
+| Service | Image | Port | What |
+|---|---|---|---|
+| `migrate` | `autoledger-server` | — | `node dist/db/migrate.js`, once; `server` and `worker` wait for it to exit `0` (`service_completed_successfully`) |
+| `server` | `autoledger-server` | 5100 → 5000 | The API, `NODE_ENV=production` |
+| `worker` | `autoledger-server` | — | `node dist/worker.js` |
+| `client` | `autoledger-client` | 8080 → 80 | The Vite build served by nginx with an SPA fallback; `index.html` uncached, hashed `/assets/` cached a year |
+
+- **One server image, three entry points.** `server/Dockerfile` compiles in a build stage and ships only `dist/` plus production dependencies (`npm ci --omit=dev`), running as the unprivileged `node` user. The migrations are copied beside `dist/db/migrate.js` by `npm run build`.
+- **The client's settings are build arguments.** Vite inlines `VITE_*` at build time, so the API URL (and the optional demo credentials) are baked into the bundle — changing them means rebuilding the image, not restarting a container.
+- **Behind a profile on purpose.** Plain `docker compose up` (and `./dev.sh`, which names its services) still starts only the databases. The app services read `server/.env` and override the hosts (`postgres`, `redis`) and `FRONTEND_URL` (`http://localhost:8080`). Ports 5100/8080 sit beside the host stack's 5000/5173, so both can run at once — against the **same** dev database and the same Redis queues (a containerised worker and `npm run worker` would share jobs). Stop just the app with `docker compose --profile app rm -sf migrate server worker client`; `docker compose --profile app down` would stop the databases too.
+- Documents uploaded in the container live in the `server-storage` volume, not `server/storage/`.
+
+The prior `entrypoint.sh` ran migrations **and the full test suite** before starting the server, aborting startup on a failing test. The images do not do that; the tests run in **CI** instead — `.github/workflows/ci.yml` runs typecheck, lint and tests for both packages (the server against real Postgres and Redis service containers) and builds both images, on every push to `main` and every pull request.
 
 ---
 
@@ -309,6 +327,8 @@ Added in Phase 28:
 | `qrcode` | server | StockLedger's label generation (`services/inventory/labelService.ts`) — renders a QR payload to SVG server-side, so the physical label size and print scaling stay lossless and the payload-construction logic (the frontend base URL) never has to ship to the client. `@types/qrcode` alongside it, dev-only |
 
 No client-side dependency this phase — every StockLedger page (`StockSetupPage`, `StockItemsPage`, `StockMovementPage`, `StockLabelsPage`, `AttributeFields`, and the rest) is hand-rolled, matching every other app's pages; the generated QR SVG reaches the client as a string and is rendered as an `<img src="data:image/svg+xml;base64,...">`, never `dangerouslySetInnerHTML`.
+
+**Added 2026-09-29 (pre-showcase polish): `oxlint`, both packages, dev only** — the first linter in the repo. ESLint was the default choice and was rejected on a hard constraint, not taste: `typescript-eslint` parses through TypeScript's JavaScript API, and TypeScript 7 (the native compiler this repo is on) does not ship one (`require('typescript').createSourceFile` is `undefined`; `typescript-eslint`'s peer range stops at `<6.1.0`). Running ESLint would mean installing a second, older TypeScript beside the real one. `oxlint` has its own parser, needs no TypeScript API, is one package, and honours the `eslint-disable-next-line` comments already in the client. Biome was the other candidate and was passed over because it uses its own suppression syntax. Type errors stay `tsc`'s job; the lint config is correctness rules only, with each disabled rule's reason written beside it in `.oxlintrc.json`. The Docker images and CI workflow added the same day brought **no** npm dependency.
 
 **Phase 31 (workspace UI/UX redesign) added no npm dependency either — server or client.** The new theme system, shell (sidebar/top bar/footer/command palette), and shared `components/ui/` library are all hand-rolled: `Menu`'s accessible-menu-button behaviour, `ThemeContext`'s light/dark/system state, and `CommandPalette`'s substring matching are plain React and DOM APIs, not a headless-UI or dialog library. The one new asset is **Inter**, loaded from Google Fonts via a `<link>` in `client/index.html` — a network resource, not an npm package, so it needs no `package.json` entry and no build-time bundling; the existing system-font stack (`ui-sans-serif, system-ui, …`) stays as the fallback if the font fails to load.
 

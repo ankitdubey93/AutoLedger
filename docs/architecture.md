@@ -67,7 +67,49 @@ Move to `roles`/`permissions` tables only when granular per-module permissions g
 
 ## Repository layout
 
-### Current (verified 2026-09-11, after Phase 13)
+### Current (verified 2026-09-29, after Phase 35a)
+
+```text
+.github/workflows/ci.yml   typecheck + lint + tests (real Postgres/Redis services) + image builds
+docker-compose.yml         postgres, postgres-test, redis; the app itself behind `--profile app`
+dev.sh                     one-command host dev stack
+server/
+  Dockerfile               one image: API (default), worker, migration runner
+  src/
+    app.ts index.ts worker.ts
+    config/                env, constants, modules.ts (provenance tags), industry profiles, AI pricing
+    db/                    connect, transaction, integrity, migrate, reset + migrations/ (001–076)
+    middleware/            auth, rbac, rateLimit, requestContext, upload, errorHandler
+    routes/ controllers/ schemas/ services/
+                           each: platform files at the root, then accounting/, capture/,
+                           inventory/, integrations/
+    queue/                 queues, worker wiring, handlers/
+    scripts/               verifyIntegrity, generateWalkthrough, walkthrough* (dataset,
+                           expected, replay), seedDemo
+    types/ utils/
+    __tests__/             setup/, helpers/, one folder per module plus platform tests
+client/
+  Dockerfile nginx.conf    static build served by nginx with an SPA fallback
+  public/favicon.svg
+  src/
+    App.tsx main.tsx
+    routes/                ProductRoutes, SetupGate, InventoryGate, WorkspaceLayout, LegacyAppRedirect
+    components/            layout/ (shell, sidebar, nav.ts, top bar), ui/ (shared primitives),
+                           BrandMark, DocumentTitle, ConfirmDialog, BackLink, …
+    context/               Auth, Org, LedgerSettings, Theme
+    Pages/                 one folder per sidebar section: home, sales, purchases, inbox,
+                           products, inventory, banking, accounting, reports, settings, auth
+    services/fetchServices.ts   every API call
+    utils/                 money, date, quantity, enumLabel, pageTitle, moduleLabels, …
+    __tests__/
+walkthrough/               the hand-enterable four-month scenario (generated, committed)
+docs/ study/
+```
+
+### History — per-phase file deltas (frozen at Phase 19.3)
+
+> Not maintained past Phase 19.3 — the per-phase record lives in [roadmap.md](roadmap.md) (search "as delivered"). Kept because it records *why* files were split or promoted when they were.
+
 
 > **Phase 33 (2026-09-25) renamed the folders this history mentions.** Server `*/ledger-core/` → `*/accounting/`, `*/ap-flow/` → `*/capture/`, `*/stock/` → `*/inventory/`; client `Pages/ledger-core|ap-flow|stock/` became section folders (`Pages/sales`, `purchases`, `inbox`, `products`, `inventory`, `banking`, `accounting`, `reports`, `settings`, `home`); `apps/`, `config/apps.ts`, `AppFrame`, `PlatformLayout` and the chooser were deleted. Paths in the historical entries below were partly rewritten to the new names. The target layout further down is current.
 

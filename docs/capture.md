@@ -5,9 +5,9 @@
 **Provenance tag:** `ap-flow` · **Domain:** Operational Accounting · **Phases:** 10–11, 19, 19.1, 19.2, 19.4
 **Status: Phases 10, 11, 19, 19.1, 19.2 and 19.4 all done.** Google Drive intake, deferred at Phase 19, shipped in Phase 19.2 — then **moved to the platform in Phase 19.3** (not an AP-Flow phase; see [roadmap.md](roadmap.md#phase-193-as-delivered) and [api.md](api.md#integrations--apiv1integrationsdrive--phase-193)). AP-Flow still *receives* files imported this way, unchanged — it just no longer owns the connection. Phase 19.4 fixed a real bug 19.3's own use surfaced: a repeat capture of identical bytes is now a visible `DUPLICATE` row, not a silent no-op — see [roadmap.md](roadmap.md#phase-194-as-delivered). See [roadmap.md](roadmap.md#phase-10-as-delivered), [roadmap.md](roadmap.md#phase-11-as-delivered), [roadmap.md](roadmap.md#phase-19-as-delivered), [roadmap.md](roadmap.md#phase-191-as-delivered) and [roadmap.md](roadmap.md#phase-192-as-delivered) for what was actually delivered.
 
-AP-Flow turns a photograph of a receipt into a balanced, auditable bill in LedgerCore. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
+The capture module (the **Bill inbox**; AP-Flow before Phase 33) turns a photograph of a receipt into a balanced, auditable bill in the accounting module. It keeps no ledger of its own — since Phase 19 it posts a real bill via `billService`'s `*OnClient` functions, so the resulting journal entry carries `source_type = 'bill'` and `source_id` pointing at that bill, exactly as if a human had entered and approved it directly ([guardrails.md](guardrails.md) rule 16). (Phase 11 originally posted a raw journal entry with `source_type = 'ap_flow'`; that broke AP aging's reconciliation against the ledger and is why Phase 19 rewrote it — see [roadmap.md](roadmap.md#phase-19-as-delivered).)
 
-**Gated on LedgerCore.** It needs `journalService` to post (Phase 3), the `fx_rates` table for historical rate lookup at invoice date (Phase 8), the audit trail its provenance claims depend on (Phase 5), and the job queue, because OCR and a vision call are far too slow to run inside a request (Phase 7).
+**Depends on the accounting module.** It needs bills and `journalService` to post (Phases 3, 3.9), the `fx_rates` table for historical rate lookup at invoice date (Phase 8), the audit trail its provenance claims depend on (Phase 5), and the job queue, because OCR and a vision call are far too slow to run inside a request (Phase 7).
 
 ---
 
@@ -57,13 +57,13 @@ Every suggestion is a suggestion. Nothing reaches the ledger without a human acc
 ### C. Tax & currency normalization — Phase 11
 
 - **Input tax is split out** of the total into its own line rather than buried in the expense: GST/VAT goes to `1180 GST/VAT Input Credit`, which is an asset — a claim against the tax authority, not a cost of doing business. Getting this wrong overstates expenses and loses a refund.
-- **Foreign currency is detected** from the document and normalized through LedgerCore's `fx_rates` at the **invoice date**, not today's rate. An August invoice booked at September's rate is wrong, and it is exactly the error that produces the FX gain/loss that [LedgerCore's Phase 8](accounting.md#3-realized-fx--the-worked-example) then has to post on settlement.
+- **Foreign currency is detected** from the document and normalized through the accounting module's `fx_rates` at the **invoice date**, not today's rate. An August invoice booked at September's rate is wrong, and it is exactly the error that produces the FX gain/loss that [accounting's Phase 8](accounting.md#3-realized-fx--the-worked-example) then has to post on settlement.
 
 ### D. Human-in-the-loop review queue — Phase 11
 
 - **Per-field confidence.** Each extracted field carries a 0–1 score; the UI colours the low ones yellow and red. Blurry thermal-printer receipts fail on totals far more often than on vendor names, and the reviewer's attention should go where the model is least sure.
 - **Side-by-side review.** The original document image next to the extracted values, so verification is a glance rather than a re-entry.
-- **One-click post & verify.** Approval hands the confirmed data to LedgerCore's `journalService` inside one transaction. Until then nothing exists in the ledger — the draft lives entirely in AP-Flow's own tables.
+- **One-click post & verify.** Approval creates and approves a real bill through `billService`'s `*OnClient` functions inside one transaction (Phase 19; Phase 11 posted a raw journal entry instead). Until then nothing exists in the ledger — the draft lives entirely in capture's own `ap_flow_*` tables.
 
 ---
 
@@ -85,7 +85,7 @@ flowchart LR
   M --> V[Claude Vision<br/>structured extraction]
   V --> C[COA mapping<br/>history → chart → model]
   C --> Q[Review queue<br/>per-field confidence]
-  Q -->|accountant approves| GL[(LedgerCore GL<br/>immutable)]
+  Q -->|accountant approves| GL[(Accounting — bill + GL<br/>immutable)]
 ```
 
 OCR runs **locally** and returns text *with bounding boxes*. The detector locates card numbers (Luhn-checked, not just sixteen digits), national identifiers, and personal names in that local text. The corresponding pixel regions are painted over on the image buffer. Only the redacted raster ever leaves the machine. The boxes that were masked are stored as `redacted_regions` JSONB, so the redaction decision is itself auditable.
@@ -94,7 +94,7 @@ OCR runs **locally** and returns text *with bounding boxes*. The detector locate
 
 ### 2. Multi-line-item splitting
 
-Most OCR bookkeeping tools extract the invoice total and stop. AP-Flow parses individual line items and maps different lines on one document to **different** GL accounts.
+Most OCR bookkeeping tools extract the invoice total and stop. Capture parses individual line items and maps different lines on one document to **different** GL accounts.
 
 A single supermarket receipt splits across `6130 Office Supplies` and `6140 Kitchen & Breakroom` — two debits, one credit, one balanced entry. That is what an actual bookkeeper does with that receipt, and it is why the two accounts are in the [default chart](schema.md#default-chart-of-accounts) from Phase 3.
 

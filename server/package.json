@@ -18,6 +18,7 @@
     "walkthrough": "tsx src/scripts/generateWalkthrough.ts",
     "seed:demo": "tsx src/scripts/seedDemo.ts",
     "typecheck": "tsc --noEmit",
+    "lint": "oxlint --deny-warnings",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -54,6 +55,7 @@
     "@types/qrcode": "^1.5.6",
     "@types/supertest": "^7.2.1",
     "@vitest/coverage-v8": "^4.1.10",
+    "oxlint": "^1.86.0",
     "supertest": "^7.2.2",
     "tsx": "^4.23.1",
     "typescript": "^7.0.2",

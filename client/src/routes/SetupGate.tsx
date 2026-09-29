@@ -40,8 +40,10 @@ export function OnboardingRoute() {
   if (settings.status === 'loading') return <Loading />;
   if (settings.status === 'error') return <p className="status status--bad">{settings.message}</p>;
 
-  onboardedOnArrival.current ??= settings.settings.onboardedAt !== null;
-  return onboardedOnArrival.current ? <Navigate to="/" replace /> : <OnboardingPage />;
+  // A latch, read and written during render on purpose — see the comment above.
+  // eslint-disable-next-line react/refs
+  const onboarded = (onboardedOnArrival.current ??= settings.settings.onboardedAt !== null);
+  return onboarded ? <Navigate to="/" replace /> : <OnboardingPage />;
 }
 
 /**
@@ -61,9 +63,10 @@ export function OnboardingRoute() {
 export default function SetupGate() {
   const settings = useLedgerSettings();
   const [onboardingStatus, setOnboardingStatus] = useState<OnboardingStatus | 'loading'>('loading');
+  const onboardedAt = settings.status === 'ready' ? settings.settings.onboardedAt : null;
 
   useEffect(() => {
-    if (settings.status !== 'ready' || settings.settings.onboardedAt !== null) return;
+    if (settings.status !== 'ready' || onboardedAt !== null) return;
     let ignore = false;
 
     getOnboardingState('ledger-core')
@@ -79,7 +82,7 @@ export default function SetupGate() {
     return () => {
       ignore = true;
     };
-  }, [settings.status, settings.status === 'ready' ? settings.settings.onboardedAt : null]);
+  }, [settings.status, onboardedAt]);
 
   if (settings.status === 'loading') return <Loading />;
   if (settings.status === 'error') return <p className="status status--bad">{settings.message}</p>;

@@ -1060,6 +1060,27 @@ A direct feature request, numbered like 24/30/32/33/34, closing three items Phas
 
 **Study notes:** extended [inventory-valuation-and-perpetual-stock.md](../study/architecture/inventory-valuation-and-perpetual-stock.md) (control accounts, subledger = GL, value-only reclass pairs, why the true-up moves the GL not the stock), [subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md) (inventory as a third control account, alongside AR/AP), [transactions-isolation-pooling.md](../study/postgresql/transactions-isolation-pooling.md) (`FOR SHARE` vs `FOR UPDATE` as a read-mapping/write-mapping protocol; `pg_advisory_xact_lock` with `hashtextextended`).
 
+## Pre-showcase polish (2026-09-29)
+
+Not a numbered phase — an audit of what an evaluator sees first, then fixes in three commits. No migration, no route, no schema change.
+
+**1. Defects (client).** Five detail pages (invoice, expense, journal, recurring schedule, inbox document) showed the loading placeholder forever on any non-404 load failure; they now render the error. Bank-rule min/max amounts were sent as typed, i.e. as cents (typing `100` made a `1.00` rule); they are parsed as money. The bank-import closing balance could send `NaN`; it is parsed as money and may be negative. 14 swallowed `.catch(() => undefined)` calls now surface their error (5 documented best-effort ones kept). Inventory's `window.confirm`/`window.prompt` became `ConfirmDialog` — cancelling the booking prompt had still booked the serial.
+
+**2. First impression.** `npm run seed:demo` builds *Harbor Point Fabrication* over the real HTTP API: the four walkthrough months, Manufacturing inventory received and sold, this month's open/overdue/draft/awaiting-approval documents, and two bank rules (created last, so they cannot change how the verified months match). The replay moved from `walkthrough.test.ts` into `scripts/walkthroughReplay.ts`, shared by the test and the seeder, so the demo is the data the answer-key test proves; all 7 integrity checks pass on a seeded database. Sign-in/sign-up redesigned (`AuthLayout`, a demo entry when `VITE_DEMO_EMAIL`/`VITE_DEMO_PASSWORD` are set), favicon, per-page titles derived from `nav.ts`, developer-facing text removed, `formatCents` groups thousands (and `parseCentsInput` accepts exactly that grouping back; `formatCentsPlain` for machine output), `formatDate` renders date-only strings in UTC. `sandbox/` deleted — its seeder was removed in Phase 29.
+
+**3. Packaging.** `npm run lint` (oxlint, both packages — ESLint rejected because `typescript-eslint` needs TypeScript's JS API, which TypeScript 7 lacks). Multi-stage `server/Dockerfile` (one image: API, worker, migrate) and `client/Dockerfile` (nginx), run with `docker compose --profile app up --build`, verified end to end locally. `.github/workflows/ci.yml` — **written but not yet run on GitHub** (it needs a push). Docs drift fixed in `SETUP.md`, `api.md`, `architecture.md` (a re-verified layout), `development.md` and the three module specs.
+
+**Found along the way.**
+- `vitest.config.ts` pinned `AP_FLOW_AI_PROVIDER`, renamed to `CAPTURE_AI_PROVIDER` in Phase 33 — the pin had silently stopped pinning, so a developer's `CAPTURE_AI_PROVIDER=gemini` reached the suite. Fixed.
+- `driveIntake.test.ts`'s metering case ran a real cold tesseract worker and took ~5.1 s against the 5 s default timeout — it failed in three consecutive full runs. It now injects a stub OCR like the other capture tests (5,180 ms → 259 ms).
+- The first server image was 1.04 GB because `chown -R /app` copied `node_modules` into a second layer; 685 MB after re-owning only the two written directories.
+
+**Tests.** 1708 server tests passing (2 skipped — the gated live-provider cases), a clean full run after the Drive fix. 470 client tests passing, up from 451. Lint and typecheck clean in both packages.
+
+**Deliberately not done (still open from the audit):** the consistency sweep (inventory pages' separate visual style, shared `EmptyState`/skeletons, list sorting and pagination gaps, debounced search, table overflow on mobile); security hardening (`helmet`, an Origin check on cookie-authenticated POSTs, structured logging with request IDs, password reset, email verification); README screenshots; and every missing Xero-standard feature the audit listed (tax rates/returns, multi-user invites, cash-flow statement, report export, quotes, purchase orders, PDF/email).
+
+**Study notes:** new [docker-images-and-ci.md](../study/tooling/docker-images-and-ci.md) (the owed multi-stage note); extended [deterministic-demo-fixtures.md](../study/architecture/deterministic-demo-fixtures.md) (one replay, two consumers).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

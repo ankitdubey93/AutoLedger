@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // oxlint, not ESLint: typescript-eslint needs TypeScript's JS API, which
+  // TypeScript 7 (the native compiler this repo uses) does not ship.
+  // Type errors are tsc's job (`npm run typecheck`); this catches the rest.
+  "plugins": ["typescript", "unicorn", "oxc"],
+  "categories": { "correctness": "error" },
+  "rules": {
+    // `const { success, ...rest } = body` is the idiom for omitting a key.
+    "no-unused-vars": [
+      "error",
+      { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ],
+    // Pre-sized typed arrays filled by index (documentStockService) are deliberate.
+    "unicorn/no-new-array": "off"
+  },
+  "overrides": [
+    {
+      // In a test, a TypeError from `a?.b.c` fails the test — the right outcome.
+      "files": ["src/__tests__/**"],
+      "rules": { "no-unsafe-optional-chaining": "off" }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "coverage/**"]
+}

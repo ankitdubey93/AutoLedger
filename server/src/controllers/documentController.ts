@@ -11,6 +11,8 @@ import { ApiError } from '../utils/apiError.js';
 
 /** Strips characters that would make a filename dangerous inside a header. */
 function safeFilename(name: string): string {
+  // Matching control characters is the point: they must never reach a header.
+  // eslint-disable-next-line no-control-regex
   return name.replace(/["\\\r\n\x00-\x1f]/g, '');
 }
 

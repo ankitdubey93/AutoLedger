@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: Client — typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+        env:
+          VITE_API_BASE_URL: http://localhost:5000
+
+  server:
+    name: Server — typecheck, lint, test (real Postgres + Redis)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      # The same image docker-compose.yml runs. The suite's globalSetup creates
+      # its own databases on this cluster (autodb_test + one per worker) and
+      # applies every migration, so nothing is prepared here.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: autodb_user
+          POSTGRES_PASSWORD: autodb_pass
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U autodb_user -d postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      # There is no server/.env in CI. vitest.config.ts pins NODE_ENV, the
+      # token secrets, PG_PORT (5433), REDIS_DB and every provider key; these
+      # are the remaining values config/env.ts requires.
+      PG_HOST: localhost
+      PG_USER: autodb_user
+      PG_PASSWORD: autodb_pass
+      PG_DATABASE: autodb
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      FRONTEND_URL: http://localhost:5173
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+
+  images:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t autoledger-server server
+      - run: docker build -t autoledger-client client

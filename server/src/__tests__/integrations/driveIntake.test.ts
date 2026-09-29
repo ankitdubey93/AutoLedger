@@ -14,6 +14,8 @@ import { sha256Hex } from '../../utils/pkce.js';
 import { listCallsForEntity } from '../../services/aiUsageService.js';
 import { handleCaptureExtract } from '../../queue/handlers/captureExtractHandler.js';
 import type { VisionClient } from '../../services/capture/extractionService.js';
+import type { OcrAdapter } from '../../services/redactionService.js';
+import type { OcrPageResult } from '../../types/capture.js';
 import { QUEUE_NAMES } from '../../types/jobs.js';
 import { INTEGRATION_DRIVE_POLL_INTERVAL_MS } from '../../config/constants.js';
 import type { DriveServiceDeps } from '../../services/integrations/driveConnectionService.js';
@@ -733,7 +735,12 @@ describe('Google Drive folder intake', () => {
           }),
       },
     };
-    await handleCaptureExtract({ orgId: orgA, captureDocumentId: captureDocId }, { vision: stubVision });
+    // A stub OCR, as autoPost.test.ts uses: this case is about metering, and a
+    // real tesseract worker's cold start (loading its language data) takes
+    // about 5s on its own — enough to time the test out under parallel load.
+    const stubOcr: OcrAdapter = () =>
+      Promise.resolve<OcrPageResult>({ width: 300, height: 150, text: 'V Total 10.00', words: [] });
+    await handleCaptureExtract({ orgId: orgA, captureDocumentId: captureDocId }, { vision: stubVision, ocr: stubOcr });
 
     const calls = await listCallsForEntity(orgA, 'ap_flow_document', captureDocId);
     expect(calls.length).toBeGreaterThan(0);

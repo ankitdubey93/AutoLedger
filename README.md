@@ -25,7 +25,8 @@ One product since Phase 33 (2026-09-25). It was built as three separately chosen
 | Accounting: GL, statements, periods, bank reconciliation, multi-currency FX, invoices, bills, payments, credit/debit notes, customer & vendor subsidiary ledgers, staged data import | Lot/serial items and fixed assets on invoice/bill lines, depreciation (Phase 32 step 2) |
 | Bill inbox: local OCR, PII pixel masking, Claude or Gemini extraction, history-first GL coding, review queue, confidence-gated auto-post, Google Drive intake | PDF/XLSX export, emailed documents |
 | Inventory: perpetual valuation posting to the GL, templates, item codes, QR labels | Statutory tax engine (GST/VAT returns) |
-| CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | Deployment (no Dockerfiles yet) |
+| CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | A hosted deployment (images exist; nothing is deployed) |
+| Production Docker images, CI (typecheck, lint, tests on real Postgres/Redis, image builds), a one-command demo company | Multi-user invites, password reset, email verification |
 | 1708 server tests (2 skipped), 470 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
 Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
@@ -62,6 +63,12 @@ Setting up a machine from scratch — installing Node and Docker, generating the
 
 Prefer a terminal per process, or need the test cluster? See [docs/development.md](docs/development.md) for the manual path.
 
+**Run the production images instead** (API on :5100, web on :8080, against the same databases):
+
+```bash
+docker compose --profile app up --build
+```
+
 ```bash
 curl http://localhost:5000/api/v1/health
 ```
@@ -74,6 +81,7 @@ Full detail, including environment variables and the dependency policy: [docs/de
 cd server
 npm test              # unit + integration
 npm run test:coverage
+npm run lint          # oxlint; also in client/
 ```
 
 Integration tests need the Postgres container running. Every module ships a cross-tenant isolation test from Phase 1 onward — see [docs/testing.md](docs/testing.md).

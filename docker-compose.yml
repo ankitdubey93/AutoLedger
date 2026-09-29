@@ -82,6 +82,82 @@ services:
       timeout: 3s
       retries: 10
 
+  # ---------------------------------------------------------------------------
+  # The application itself, containerized — opt-in via the `app` profile, so
+  # `docker compose up` (and ./dev.sh, which names its services) still starts
+  # only the databases above:
+  #
+  #   docker compose --profile app up --build
+  #
+  # Reads server/.env for secrets and settings, overriding only what differs
+  # inside the compose network. Ports 5100 (API) and 8080 (web) sit beside the
+  # host dev stack's 5000/5173, so both can run at once against the same
+  # databases.
+  # ---------------------------------------------------------------------------
+
+  migrate:
+    profiles: ["app"]
+    build: ./server
+    image: autoledger-server
+    command: ["node", "dist/db/migrate.js"]
+    env_file: server/.env
+    environment: &server-environment
+      NODE_ENV: production
+      PG_HOST: postgres
+      PG_PORT: "5432"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      FRONTEND_URL: http://localhost:8080
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  server:
+    profiles: ["app"]
+    image: autoledger-server
+    env_file: server/.env
+    environment:
+      <<: *server-environment
+      PORT: "5000"
+    ports:
+      - "5100:5000"
+    volumes:
+      - server-storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  worker:
+    profiles: ["app"]
+    image: autoledger-server
+    command: ["node", "dist/worker.js"]
+    env_file: server/.env
+    environment: *server-environment
+    volumes:
+      - server-storage:/app/storage
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+  client:
+    profiles: ["app"]
+    build:
+      context: ./client
+      args:
+        VITE_API_BASE_URL: http://localhost:5100
+        VITE_DEMO_EMAIL: ${VITE_DEMO_EMAIL:-}
+        VITE_DEMO_PASSWORD: ${VITE_DEMO_PASSWORD:-}
+    image: autoledger-client
+    ports:
+      - "8080:80"
+    depends_on:
+      - server
+
 volumes:
   postgres-data:
   postgres-test-data:
+  server-storage:

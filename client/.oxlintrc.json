@@ -1,0 +1,30 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // oxlint, not ESLint: typescript-eslint needs TypeScript's JS API, which
+  // TypeScript 7 (the native compiler this repo uses) does not ship.
+  // Type errors are tsc's job (`npm run typecheck`); this catches the rest.
+  "plugins": ["typescript", "unicorn", "oxc", "react"],
+  "categories": { "correctness": "error" },
+  "rules": {
+    // `const { success, ...rest } = body` is the idiom for omitting a key.
+    "no-unused-vars": [
+      "error",
+      { "ignoreRestSiblings": true, "argsIgnorePattern": "^_", "varsIgnorePattern": "^_", "caughtErrorsIgnorePattern": "^_" }
+    ],
+    // Pages reset their state at the top of a fetch effect (setX(null) before
+    // loading a new id) on purpose, so a stale record never renders under a
+    // new URL. This rule targets derived state, which that is not.
+    "react/set-state-in-effect": "off",
+    // Reading the clock for "today" or the footer year during render is
+    // intended; this rule exists for the React Compiler, which is not used.
+    "react/purity": "off"
+  },
+  "overrides": [
+    {
+      // In a test, a TypeError from `a?.b.c` fails the test — the right outcome.
+      "files": ["src/__tests__/**"],
+      "rules": { "no-unsafe-optional-chaining": "off" }
+    }
+  ],
+  "ignorePatterns": ["dist/**", "coverage/**"]
+}

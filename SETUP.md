@@ -39,8 +39,8 @@ Only `server/.env` really matters. The two token secrets can be regenerated
 (existing sessions just get logged out), but these cannot be regenerated for
 free and would have to be re-issued from each provider's console:
 
-- `ANTHROPIC_API_KEY` — AP-Flow vision extraction
-- `GEMINI_API_KEY` — AP-Flow's alternate provider
+- `ANTHROPIC_API_KEY` — bill inbox (capture) vision extraction
+- `GEMINI_API_KEY` — the bill inbox's alternate provider
 - `GOOGLE_SERVICE_ACCOUNT_EMAIL` / `GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY` — Drive intake
 - `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` / `INTEGRATION_ENCRYPTION_KEY` — Drive OAuth path
 
@@ -224,9 +224,9 @@ breaks, and the test suite never needs any of them.
 
 | Unset | What stops working | What still works |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | AP-Flow AI extraction | AP-Flow upload, rasterization, local OCR, PII masking, manual review, posting |
-| `GEMINI_API_KEY` | only matters if `AP_FLOW_AI_PROVIDER=gemini` | the Anthropic path (the default) |
-| `GOOGLE_SERVICE_ACCOUNT_*` | Drive folder intake | direct upload into AP-Flow |
+| `ANTHROPIC_API_KEY` | Bill inbox AI extraction | bill upload, rasterization, local OCR, PII masking, manual review, posting |
+| `GEMINI_API_KEY` | only matters if `CAPTURE_AI_PROVIDER=gemini` | the Anthropic path (the default) |
+| `GOOGLE_SERVICE_ACCOUNT_*` | Drive folder intake | direct upload into the bill inbox |
 
 Drive intake needs a one-time Google Cloud setup (service account, JSON key,
 share a folder with its address) — the step-by-step is
@@ -287,8 +287,9 @@ Healthy is `200` with `"status":"ok"`, `db.connected: true`, `redis.connected: t
 A `503` means Postgres is unreachable. Redis being down is `200` +
 `"status":"degraded"` — reads all still work, only background jobs stop.
 
-Then open **http://localhost:5173**, register an organization, and you land on
-the app chooser with the three available apps.
+Then open **http://localhost:5173**, register an organization, and the setup
+wizard takes you to the dashboard. For a populated demo company instead, run
+`npm run seed:demo` in `server/` (see docs/development.md).
 
 Use `localhost` everywhere — never mix `localhost` and `127.0.0.1` between the
 page origin and `VITE_API_BASE_URL`. They are different sites to the browser,
