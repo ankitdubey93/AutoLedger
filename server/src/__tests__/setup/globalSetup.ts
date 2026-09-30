@@ -7,6 +7,7 @@ import 'dotenv/config';
 import { Client } from 'pg';
 import { TEST_DATABASE, TEST_MAX_WORKERS, TEST_PG_PORT } from './testDatabase.js';
 import { workerDatabase, workerRedisDb } from './workerResources.js';
+import { TEST_ACCESS_TOKEN_SECRET, TEST_REFRESH_TOKEN_SECRET } from './testSecrets.js';
 
 /**
  * Runs once before the suite: guarantees `autodb_test` exists and has the
@@ -35,6 +36,13 @@ export default async function setup(): Promise<void> {
   // Without this, globalSetup would migrate the template into the dev cluster
   // while the workers ran against the test one.
   process.env.PG_PORT = TEST_PG_PORT;
+
+  // And the token secrets: the migration runner imports config/env.ts, which
+  // refuses to load without them. Locally server/.env hid this; CI has no
+  // .env (the first CI run failed here). Set, not defaulted, for the same
+  // reason as PG_PORT — the suite must not depend on a developer's .env.
+  process.env.ACCESS_TOKEN_SECRET = TEST_ACCESS_TOKEN_SECRET;
+  process.env.REFRESH_TOKEN_SECRET = TEST_REFRESH_TOKEN_SECRET;
 
   /**
    * Without this, a Postgres whose port is open but which never accepts

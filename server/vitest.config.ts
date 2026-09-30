@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import { TEST_MAX_WORKERS } from './src/__tests__/setup/testDatabase.js';
+import { TEST_ACCESS_TOKEN_SECRET, TEST_REFRESH_TOKEN_SECRET } from './src/__tests__/setup/testSecrets.js';
 
 export default defineConfig({
   test: {
@@ -33,8 +34,8 @@ export default defineConfig({
       // perWorkerEnv.ts sets this too; this is the default for anything that
       // somehow loads before it.
       PG_PORT: process.env.PG_TEST_PORT ?? '5433',
-      ACCESS_TOKEN_SECRET: 'test-access-secret-not-for-any-real-deployment-0001',
-      REFRESH_TOKEN_SECRET: 'test-refresh-secret-not-for-any-real-deployment-0002',
+      ACCESS_TOKEN_SECRET: TEST_ACCESS_TOKEN_SECRET,
+      REFRESH_TOKEN_SECRET: TEST_REFRESH_TOKEN_SECRET,
       // Index 1, never 0. globalSetup flushes this database before the suite;
       // flushing index 0 would wipe the dev queues you were watching.
       REDIS_DB: '1',
