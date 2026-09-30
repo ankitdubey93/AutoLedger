@@ -27,6 +27,7 @@ import {
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
 import { formatDate } from '../../utils/date';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * One item, in full: its custom fields (editable), where it's on hand,
@@ -169,7 +170,7 @@ export default function InventoryItemDetailPage() {
     );
   }
   if (item === null) {
-    return <p>Loading…</p>;
+    return <LoadingState />;
   }
 
   return (

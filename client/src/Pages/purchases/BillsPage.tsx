@@ -7,10 +7,15 @@ import {
   type BillStatus,
   type SettlementFilter,
   type SettlementStatus,
+  type BillSortKey,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
+import type { SortState } from '../../utils/useTableSort';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The bill register — every accounts-payable document, filterable and
@@ -86,6 +91,22 @@ export default function BillsPage() {
   const status = (params.get('status') ?? '') as BillStatus | '';
   const settlement = (params.get('settlement') ?? '') as SettlementFilter | '';
   const q = params.get('q') ?? '';
+  // Server-side sort (2026-09-30), kept in the URL like the filters so a
+  // sorted view is linkable. An unknown value falls back to the default.
+  const SORT_KEYS: readonly BillSortKey[] = ['billDate', 'dueDate', 'reference', 'vendor', 'total', 'status'];
+  const sortParam = params.get('sort');
+  const sort: SortState<BillSortKey> = {
+    key: SORT_KEYS.find((k) => k === sortParam) ?? 'billDate',
+    direction: params.get('dir') === 'asc' ? 'asc' : 'desc',
+  };
+  function toggleSort(key: BillSortKey) {
+    const next = new URLSearchParams(params);
+    const direction = key === sort.key ? (sort.direction === 'asc' ? 'desc' : 'asc') : 'asc';
+    next.set('sort', key);
+    next.set('dir', direction);
+    next.delete('page');
+    setParams(next);
+  }
   const [qDraft, setQDraft] = useDebouncedInput(q, setSearch);
   const page = Number(params.get('page') ?? '1');
 
@@ -99,6 +120,10 @@ export default function BillsPage() {
     if (status !== '') filters.status = status;
     if (settlement !== '') filters.settlement = settlement;
     if (q !== '') filters.q = q;
+    if (sortParam !== null) {
+      filters.sort = sort.key;
+      filters.dir = sort.direction;
+    }
 
     listBills(filters)
       .then((res) => {
@@ -121,7 +146,7 @@ export default function BillsPage() {
     return () => {
       ignore = true;
     };
-  }, [status, settlement, q, page]);
+  }, [status, settlement, q, page, sortParam, sort.key, sort.direction]);
 
   function selectTab(tab: Tab) {
     const next = new URLSearchParams(params);
@@ -200,7 +225,7 @@ export default function BillsPage() {
       </label>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && (
         <>
@@ -219,12 +244,12 @@ export default function BillsPage() {
               <table className="w-full border-collapse text-sm min-w-[54rem]">
                 <thead>
                   <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                    <th className="p-3 font-medium">Vendor</th>
-                    <th className="p-3 font-medium">Reference</th>
-                    <th className="p-3 font-medium">Expense date</th>
-                    <th className="p-3 font-medium">Due date</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium text-right">Total</th>
+                    <SortableHeader label="Vendor" sortKey="vendor" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Reference" sortKey="reference" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Expense date" sortKey="billDate" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Due date" sortKey="dueDate" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Total" sortKey="total" sort={sort} onSort={toggleSort} align="right" />
                     <th className="p-3 font-medium text-right">Due</th>
                     <th className="p-3 font-medium text-right">Actions</th>
                   </tr>
@@ -277,29 +302,14 @@ export default function BillsPage() {
           )}
 
           {totalCount > 0 && (
-            <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-              <span>
-                Showing {bills.length} of {totalCount}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page <= 1}
-                  onClick={() => goToPage(page - 1)}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page >= totalPages}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              shownCount={bills.length}
+              totalCount={totalCount}
+              noun="expenses"
+              onPageChange={goToPage}
+            />
           )}
         </>
       )}

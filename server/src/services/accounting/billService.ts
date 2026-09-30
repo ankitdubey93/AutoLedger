@@ -112,7 +112,25 @@ export interface ListBillsOptions {
   q: string | null;
   /** `null` for no filter. OUTSTANDING/OVERDUE/PAID all imply status = POSTED. */
   settlement: 'OUTSTANDING' | 'OVERDUE' | 'PAID' | null;
+  /** Optional so existing callers keep the newest-first default. */
+  sort?: { key: BillSortKey; direction: 'asc' | 'desc' };
 }
+
+/**
+ * The columns a bill list can be sorted by (2026-09-30). Keys come from the
+ * request (validated by `readSort` against this list); the SQL comes only from
+ * this constant table — request text never reaches an ORDER BY (rule 4).
+ */
+export const BILL_SORT_KEYS = ['billDate', 'dueDate', 'reference', 'vendor', 'total', 'status'] as const;
+export type BillSortKey = (typeof BILL_SORT_KEYS)[number];
+const BILL_SORT_COLUMNS: Record<BillSortKey, string> = {
+  billDate: 'b.bill_date',
+  dueDate: 'b.due_date',
+  reference: 'b.vendor_reference',
+  vendor: 'b.vendor_name_snapshot',
+  total: 'b.total_cents',
+  status: 'b.status',
+};
 
 // ---------------------------------------------------------------- row mapping
 
@@ -351,6 +369,17 @@ function buildFilters(
   return { where: clauses.join(' AND '), values };
 }
 
+/**
+ * The chosen column, then `created_at`/`id` as tiebreakers so two rows with the
+ * same value can never swap between pages. NULLS LAST keeps drafts (no number
+ * yet) at the end in either direction.
+ */
+function billOrderBy(options: ListBillsOptions): string {
+  const sort = options.sort ?? { key: 'billDate', direction: 'desc' };
+  const direction = sort.direction === 'asc' ? 'ASC' : 'DESC';
+  return `${BILL_SORT_COLUMNS[sort.key]} ${direction} NULLS LAST, b.created_at DESC, b.id DESC`;
+}
+
 export async function listBills(
   orgId: string,
   options: ListBillsOptions,
@@ -369,7 +398,7 @@ export async function listBills(
   const { rows } = await pool.query<BillRow>(
     `${BILL_SELECT}
       WHERE ${where}
-      ORDER BY b.bill_date DESC, b.created_at DESC, b.id DESC
+      ORDER BY ${billOrderBy(options)}
       LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
     [...values, options.limit, offset],
   );

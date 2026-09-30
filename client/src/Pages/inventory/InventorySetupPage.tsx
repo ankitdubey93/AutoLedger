@@ -10,6 +10,7 @@ import {
   type StockSettings,
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Inventory setup: choose an industry, preview what it seeds, apply it.
@@ -82,7 +83,7 @@ export default function InventorySetupPage() {
   }
 
   if (settings === null || profiles.length === 0) {
-    return <p>Loading…</p>;
+    return <LoadingState />;
   }
 
   if (created !== null) {

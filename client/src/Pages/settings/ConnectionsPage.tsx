@@ -15,6 +15,7 @@ import {
 } from '../../services/fetchServices';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import DriveFolderForm from './DriveFolderForm';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Platform Integrations — Phase 19.3. One page because a Drive connection now
@@ -170,7 +171,7 @@ export default function ConnectionsPage() {
       {driveParam === 'error' && <p className="status status--bad">Google Drive could not be connected. Try again.</p>}
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {notConfigured && (
         <p className="text-sm text-[var(--muted)] m-0">

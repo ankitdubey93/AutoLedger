@@ -9,6 +9,7 @@ import {
   type VaultDocument,
 } from '../services/fetchServices';
 import ConfirmDialog from './ConfirmDialog';
+import LoadingState from './ui/LoadingState';
 
 /**
  * A reusable panel of the documents attached to one record — dropped onto
@@ -144,7 +145,7 @@ export default function AttachmentsPanel({
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {attachments === null && error === null && <p className="muted">Loading…</p>}
+      {attachments === null && error === null && <LoadingState />}
 
       {attachments !== null && attachments.length === 0 && (
         <p className="text-sm text-[var(--muted)] m-0">No attachments yet.</p>

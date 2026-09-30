@@ -14,6 +14,8 @@ import {
 } from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The delivery log for outbound financial-event webhooks (Phase 7) — every
@@ -229,7 +231,7 @@ export default function WebhookDeliveriesPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {deliveries === null && error === null && <p className="muted">Loading…</p>}
+      {deliveries === null && error === null && <LoadingState />}
 
       {deliveries !== null && deliveries.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No deliveries match these filters.</p>
@@ -275,7 +277,7 @@ export default function WebhookDeliveriesPage() {
                       <td colSpan={7} className="p-3">
                         {detailError !== null && <p className="status status--bad m-0">{detailError}</p>}
                         {detailError === null && detail === null && (
-                          <p className="text-sm text-[var(--muted)] m-0">Loading…</p>
+                          <LoadingState rows={2} />
                         )}
                         {detail !== null && <DetailPanel delivery={detail} />}
                       </td>
@@ -289,22 +291,14 @@ export default function WebhookDeliveriesPage() {
       )}
 
       {deliveries !== null && totalPages > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <button type="button" className="btn btn--ghost" disabled={page <= 1} onClick={() => setPage(Math.max(1, page - 1))}>
-            Previous
-          </button>
-          <span className="text-[var(--muted)]">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            disabled={page >= totalPages}
-            onClick={() => setPage(Math.min(totalPages, page + 1))}
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          shownCount={deliveries.length}
+          totalCount={totalCount}
+          noun="deliveries"
+          onPageChange={setPage}
+        />
       )}
 
       {retryTarget !== null && (

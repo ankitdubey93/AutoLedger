@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { getFxExposure, runFxRevaluation, type FxExposureReport } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Period-end FX exposure preview — Phase 8. Read-only: this page never posts
@@ -75,7 +76,7 @@ export default function FxExposurePage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {report === null && error === null && <p className="muted">Loading…</p>}
+      {report === null && error === null && <LoadingState />}
 
       {report !== null && (
         <>

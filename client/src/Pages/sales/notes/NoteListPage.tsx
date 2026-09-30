@@ -4,6 +4,8 @@ import type { NoteStatus } from '../../../services/fetchServices';
 import { formatCents } from '../../../utils/money';
 import { REASON_LABELS, type NoteKindConfig, type NoteView } from './noteKinds';
 import { formatDate } from '../../../utils/date';
+import Pagination from '../../../components/ui/Pagination';
+import LoadingState from '../../../components/ui/LoadingState';
 
 /**
  * The credit-note or debit-note register (Phase 26). There is deliberately no
@@ -115,7 +117,7 @@ export default function NoteListPage({ config }: { config: NoteKindConfig }) {
       </nav>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && totalCount === 0 && (
         <p className="muted">No {config.plural.toLowerCase()} {status === '' ? 'yet' : 'with this status'}.</p>
@@ -159,24 +161,14 @@ export default function NoteListPage({ config }: { config: NoteKindConfig }) {
               </tbody>
             </table>
           </div>
-          <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-            <span>
-              Showing {notes.length} of {totalCount}
-            </span>
-            <div className="flex items-center gap-2">
-              <button type="button" className="btn btn--ghost" disabled={page <= 1} onClick={() => goToPage(page - 1)}>
-                Previous
-              </button>
-              <button
-                type="button"
-                className="btn btn--ghost"
-                disabled={page >= totalPages}
-                onClick={() => goToPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <Pagination
+            page={page}
+            totalPages={totalPages}
+            shownCount={notes.length}
+            totalCount={totalCount}
+            noun="notes"
+            onPageChange={goToPage}
+          />
         </>
       )}
     </section>

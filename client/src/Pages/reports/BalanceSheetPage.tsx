@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { getBalanceSheet, type BalanceSheet, type StatementRow } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import BackLink from '../../components/BackLink';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Balance sheet — Assets = Liabilities + Equity as at a chosen date.
@@ -110,7 +111,7 @@ export default function BalanceSheetPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {report === null && error === null && <p className="muted">Loading…</p>}
+      {report === null && error === null && <LoadingState />}
 
       {report !== null && (
         <>

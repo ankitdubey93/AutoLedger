@@ -4,6 +4,8 @@ import { listPayments, voidPayment, type Payment, type PaymentDirection } from '
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { formatDate } from '../../utils/date';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The payment register — every receipt and every vendor payment, across both
@@ -121,7 +123,7 @@ export default function PaymentsPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && (
         <>
@@ -178,29 +180,14 @@ export default function PaymentsPage() {
           )}
 
           {totalCount > 0 && (
-            <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-              <span>
-                Showing {payments.length} of {totalCount}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page <= 1}
-                  onClick={() => goToPage(page - 1)}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page >= totalPages}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              shownCount={payments.length}
+              totalCount={totalCount}
+              noun="payments"
+              onPageChange={goToPage}
+            />
           )}
         </>
       )}

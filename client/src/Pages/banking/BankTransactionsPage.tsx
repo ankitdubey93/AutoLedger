@@ -18,6 +18,8 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import MatchScoreBadge from './MatchScoreBadge';
 import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The bank-line approval queue. Every unmatched line's top candidates are
@@ -227,7 +229,7 @@ export default function BankTransactionsPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && (
         <>
@@ -430,29 +432,14 @@ export default function BankTransactionsPage() {
           )}
 
           {totalCount > 0 && (
-            <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-              <span>
-                Showing {transactions.length} of {totalCount}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page <= 1}
-                  onClick={() => goToPage(page - 1)}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page >= totalPages}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              shownCount={transactions.length}
+              totalCount={totalCount}
+              noun="bank lines"
+              onPageChange={goToPage}
+            />
           )}
         </>
       )}

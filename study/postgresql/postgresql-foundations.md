@@ -99,6 +99,10 @@ SELECT * FROM journal_entries ORDER BY $1   -- sorts by a constant string; not a
 
 So a user-supplied sort column has to be validated a different way — whitelist it against a constant map ([guardrails rule 4](../../docs/guardrails.md)), never `quote_ident` and hope. That is a genuinely common gap in otherwise parameterised codebases.
 
+**How that looks in this codebase (2026-09-30).** The invoice and bill lists take `?sort=<key>&dir=asc|desc`. `utils/queryParam.ts`'s `readSort` checks the key against the service's own exported list (`INVOICE_SORT_KEYS`) and returns a *key*, never a column; the service turns it into SQL only through a constant `Record<InvoiceSortKey, string>` (`total → 'i.total_cents'`), and the direction through a two-way ternary to the literals `ASC`/`DESC`. An unknown key is a `400`, not a silent default, so a typo is visible and a probe like `sort=total_cents;DROP TABLE invoices` gets an error message rather than a changed query (there's a test sending exactly that). Two details keep the pages honest: `NULLS LAST` (a draft invoice has no number yet) and `created_at DESC, id DESC` as tiebreakers, so rows with equal values cannot swap between page 1 and page 2.
+
+**Server sort vs browser sort.** The same release sorts customers, vendors and products *in the browser* (`useTableSort`), and invoices and bills *on the server*. The rule is whether the browser holds the whole list. Customers load in full, so sorting them locally is exact. Invoices are paginated, and sorting the 50 rows on screen would put "the largest invoice on this page" at the top, not the largest invoice, which is a quietly wrong answer.
+
 A side benefit: a parsed statement can be re-executed with new Bind values, so prepared statements avoid re-planning. `pg` exposes this via named statements.
 
 ## What it does best, and how
@@ -154,6 +158,9 @@ A: Right when the shape is genuinely dynamic or per-tenant — our QMS inspectio
 
 **Q: How do you decide what to index?**
 A: Start from actual queries, not intuition — the columns in `WHERE`, `JOIN`, and `ORDER BY`. For composite indexes, column order matters enormously: put equality predicates first, then the range or sort column, because a B-tree can only use a prefix of its columns for seeking. In our schema every hot query filters on `org_id`, so it's the leading column of nearly every index — `(org_id, entry_date)`, never the reverse. Then look for the cheap wins Postgres offers specifically: a partial index when most rows are irrelevant (`WHERE is_active`), an expression index when you query a transformation (`LOWER(email)`), and `INCLUDE` columns to make a scan index-only. And verify with `EXPLAIN ANALYZE` rather than assuming — every index has a write cost, so an unused one is pure overhead.
+
+**Q: How do you let users sort a paginated list by a column they choose, safely?**
+A: Two separate questions: where to sort, and how to take a column name from a request. Where: on the server, because the list is paginated. Sorting the current page in the browser gives the right order for the wrong rows. How: a column name is an identifier, and placeholders only bind values, so `ORDER BY $1` sorts by a constant. The request supplies a key like `total`; I check it against an allowed list and map it to SQL through a constant table, so only strings I wrote ever reach the query. An unknown key is a 400. The direction becomes a hard-coded `ASC` or `DESC`. Then I add the primary key as a final tiebreaker, because without a total order two rows with the same value can appear on both page 1 and page 2, or on neither.
 
 ## Follow-ups they'll dig into
 

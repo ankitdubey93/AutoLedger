@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import { listCaptureReviewQueue, type CaptureReviewQueueEntry } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { INBOX_BASE } from '../../routes/paths';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The human review queue (Phase 11) — documents awaiting a reviewer's
@@ -74,7 +76,7 @@ export default function InboxReviewPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {entries === null && error === null && <p className="muted">Loading…</p>}
+      {entries === null && error === null && <LoadingState />}
 
       {entries !== null && entries.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center">
@@ -131,27 +133,14 @@ export default function InboxReviewPage() {
       )}
 
       {entries !== null && entries.length > 0 && totalPages > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            type="button"
-            disabled={currentPage <= 1}
-            onClick={() => setCurrentPage((p) => p - 1)}
-            className="btn btn--ghost"
-          >
-            Previous
-          </button>
-          <span className="text-[var(--muted)]">
-            Page {currentPage} of {totalPages} ({totalCount} total)
-          </span>
-          <button
-            type="button"
-            disabled={currentPage >= totalPages}
-            onClick={() => setCurrentPage((p) => p + 1)}
-            className="btn btn--ghost"
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          shownCount={entries.length}
+          totalCount={totalCount}
+          noun="documents"
+          onPageChange={setCurrentPage}
+        />
       )}
     </section>
   );

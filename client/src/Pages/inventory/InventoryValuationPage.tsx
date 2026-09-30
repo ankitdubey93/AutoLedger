@@ -15,6 +15,7 @@ import {
   type LinkAllResult,
 } from '../../services/fetchServices';
 import { formatDate } from '../../utils/date';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Phase 35a — inventory's reconciliation report: every control account's
@@ -126,7 +127,7 @@ export default function InventoryValuationPage() {
         </p>
       )}
 
-      {valuation === null && error === null && <p className="muted">Loading…</p>}
+      {valuation === null && error === null && <LoadingState />}
 
       {valuation !== null && (
         <>

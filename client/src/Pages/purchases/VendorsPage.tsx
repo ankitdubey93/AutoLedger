@@ -10,6 +10,11 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
+import { useTableSort } from '../../utils/useTableSort';
+import { useClientPage } from '../../utils/useClientPage';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The vendor list — the parties bills are entered against.
@@ -157,6 +162,20 @@ export default function VendorsPage() {
   // Balance due per vendor, from the AP aging report's per-party rows
   // (Phase 25). `null` = still loading or failed — the list renders anyway.
   const [balances, setBalances] = useState<Map<string, number> | null>(null);
+  const { sorted: sortedVendors, sort, toggle: toggleSort } = useTableSort(
+    vendors,
+    {
+      name: (row: Vendor) => row.name,
+      email: (row: Vendor) => row.email,
+      phone: (row: Vendor) => row.phone,
+      taxNumber: (row: Vendor) => row.taxNumber,
+      balance: (row: Vendor) => (balances === null ? null : (balances.get(row.id) ?? 0)),
+      status: (row: Vendor) => (row.isActive ? 0 : 1),
+    },
+    { key: 'name', direction: 'asc' },
+    [balances],
+  );
+  const paged = useClientPage(sortedVendors);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(params.get('new') === '1');
   const [reloadToken, setReloadToken] = useState(0);
@@ -246,7 +265,7 @@ export default function VendorsPage() {
         />
       )}
 
-      {vendors === null && error === null && <p className="muted">Loading…</p>}
+      {vendors === null && error === null && <LoadingState />}
 
       {vendors !== null && vendors.length === 0 && !showForm && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
@@ -266,17 +285,17 @@ export default function VendorsPage() {
           <table className="w-full border-collapse text-sm min-w-[42rem]">
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                <th className="p-3 font-medium">Name</th>
-                <th className="p-3 font-medium">Email</th>
-                <th className="p-3 font-medium">Phone</th>
-                <th className="p-3 font-medium">Tax number</th>
-                <th className="p-3 font-medium text-right">Balance due</th>
-                <th className="p-3 font-medium">Status</th>
+                <SortableHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Email" sortKey="email" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Phone" sortKey="phone" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Tax number" sortKey="taxNumber" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Balance due" sortKey="balance" sort={sort} onSort={toggleSort} align="right" />
+                <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
                 <th className="p-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {vendors.map((vendor) => (
+              {(paged.pageRows ?? []).map((vendor) => (
                 <tr key={vendor.id} className="border-t border-[var(--border)]">
                   <td className="p-3">
                     <Link to={vendor.id}>{vendor.name}</Link>
@@ -306,6 +325,17 @@ export default function VendorsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {paged.pageRows !== null && (
+        <Pagination
+          page={paged.page}
+          totalPages={paged.totalPages}
+          shownCount={paged.pageRows.length}
+          totalCount={paged.totalCount}
+          noun="vendors"
+          onPageChange={paged.setPage}
+        />
       )}
     </section>
   );

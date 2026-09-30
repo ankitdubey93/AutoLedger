@@ -335,6 +335,25 @@ describe('InvoicesPage', () => {
     expect(editLinks).toHaveLength(1);
     expect(editLinks[0]).toHaveAttribute('href', `/invoices/${draft.id}/edit`);
   });
+
+  it('sorts on the server: clicking a header requests that sort, and again flips it', async () => {
+    const issued = baseInvoice({ id: 'inv-issued', status: 'ISSUED', invoiceNumber: 'INV-000001' });
+    renderInvoicesPage([issued]);
+    const user = userEvent.setup();
+    await screen.findByText('INV-000001');
+
+    const listUrls = () =>
+      fetchMock.mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url.includes('/api/v1/invoices') && !url.includes('/api/v1/invoices/'));
+
+    await user.click(screen.getByRole('button', { name: /Total/ }));
+    await waitFor(() => expect(listUrls().at(-1)).toContain('sort=total&dir=asc'));
+    expect(screen.getByRole('columnheader', { name: /Total/ })).toHaveAttribute('aria-sort', 'ascending');
+
+    await user.click(screen.getByRole('button', { name: /Total/ }));
+    await waitFor(() => expect(listUrls().at(-1)).toContain('sort=total&dir=desc'));
+  });
 });
 
 describe('NewInvoicePage', () => {

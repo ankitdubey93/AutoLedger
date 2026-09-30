@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import { listMigrationImports, type MigrationImport } from '../../services/fetchServices';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The register of staged migration imports (Phase 9b) — chart-of-accounts
@@ -24,13 +26,19 @@ const KIND_LABEL: Record<MigrationImport['kind'], string> = {
 export default function MigrationImportsPage() {
   const [imports, setImports] = useState<MigrationImport[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Paged on the server (20 by default). Until 2026-09-30 this page never
+  // asked for page 2, so the 21st import onward was unreachable.
+  const [page, setPage] = useState(1);
+  const [paging, setPaging] = useState({ totalCount: 0, totalPages: 1 });
 
   useEffect(() => {
     let ignore = false;
 
-    listMigrationImports()
+    listMigrationImports({ page })
       .then((res) => {
-        if (!ignore) setImports(res.imports);
+        if (ignore) return;
+        setImports(res.imports);
+        setPaging({ totalCount: res.totalCount, totalPages: res.totalPages });
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load imports');
@@ -39,7 +47,7 @@ export default function MigrationImportsPage() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [page]);
 
   return (
     <section className="flex flex-col gap-4">
@@ -60,7 +68,7 @@ export default function MigrationImportsPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {imports === null && error === null && <p className="muted">Loading…</p>}
+      {imports === null && error === null && <LoadingState />}
 
       {imports !== null && imports.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
@@ -107,6 +115,17 @@ export default function MigrationImportsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {imports !== null && (
+        <Pagination
+          page={page}
+          totalPages={paging.totalPages}
+          shownCount={imports.length}
+          totalCount={paging.totalCount}
+          noun="imports"
+          onPageChange={setPage}
+        />
       )}
     </section>
   );

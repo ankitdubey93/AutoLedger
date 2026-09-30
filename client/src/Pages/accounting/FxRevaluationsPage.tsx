@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listFxRevaluations, type FxRevaluation } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import LoadingState from '../../components/ui/LoadingState';
 
 /** Past revaluations, newest first — each expands to its per-document lines. */
 export default function FxRevaluationsPage() {
@@ -42,7 +43,7 @@ export default function FxRevaluationsPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {revaluations === null && error === null && <p className="muted">Loading…</p>}
+      {revaluations === null && error === null && <LoadingState />}
 
       {revaluations !== null && revaluations.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No revaluations posted yet.</p>

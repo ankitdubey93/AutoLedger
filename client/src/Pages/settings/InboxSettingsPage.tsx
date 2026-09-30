@@ -5,6 +5,7 @@ import { getCaptureSettings, updateCaptureSettings } from '../../services/fetchS
 import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import PageHeader from '../../components/ui/PageHeader';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Capture's settings page — the auto-post gate a reviewer or owner tunes
@@ -86,7 +87,7 @@ export default function InboxSettingsPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && (
         <div className="card flex flex-col gap-3">

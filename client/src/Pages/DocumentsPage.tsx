@@ -9,6 +9,8 @@ import {
 } from '../services/fetchServices';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { moduleLabel } from '../utils/moduleLabels';
+import Pagination from '../components/ui/Pagination';
+import LoadingState from '../components/ui/LoadingState';
 
 /**
  * The suite-level Document Vault — every file uploaded to the platform, not
@@ -191,7 +193,7 @@ export default function DocumentsPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {documents === null && error === null && <p className="muted">Loading…</p>}
+      {documents === null && error === null && <LoadingState />}
 
       {documents !== null && documents.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center">
@@ -255,27 +257,14 @@ export default function DocumentsPage() {
       )}
 
       {documents !== null && documents.length > 0 && totalPages > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            type="button"
-            disabled={currentPage <= 1}
-            onClick={() => setCurrentPage((p) => p - 1)}
-            className="btn btn--ghost"
-          >
-            Previous
-          </button>
-          <span className="text-[var(--muted)]">
-            Page {currentPage} of {totalPages} ({totalCount} total)
-          </span>
-          <button
-            type="button"
-            disabled={currentPage >= totalPages}
-            onClick={() => setCurrentPage((p) => p + 1)}
-            className="btn btn--ghost"
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          shownCount={documents.length}
+          totalCount={totalCount}
+          noun="documents"
+          onPageChange={setCurrentPage}
+        />
       )}
 
       {pendingDelete !== null && (

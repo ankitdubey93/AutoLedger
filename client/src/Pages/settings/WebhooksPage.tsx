@@ -13,6 +13,11 @@ import {
 } from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { useTableSort } from '../../utils/useTableSort';
+import { useClientPage } from '../../utils/useClientPage';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Webhook endpoint configuration (Phase 7) — where a tenant registers a
@@ -143,6 +148,18 @@ function EndpointForm({ onCreated, onCancel }: { onCreated: (secret: string, not
 
 export default function WebhooksPage() {
   const [endpoints, setEndpoints] = useState<WebhookEndpoint[] | null>(null);
+  const { sorted: sortedEndpoints, sort, toggle: toggleSort } = useTableSort(
+    endpoints,
+    {
+      label: (row: WebhookEndpoint) => row.label,
+      url: (row: WebhookEndpoint) => row.url,
+      events: (row: WebhookEndpoint) => row.eventTypes.length,
+      active: (row: WebhookEndpoint) => (row.isActive ? 0 : 1),
+      created: (row: WebhookEndpoint) => row.createdAt,
+    },
+    { key: 'label', direction: 'asc' },
+  );
+  const paged = useClientPage(sortedEndpoints);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
   const [showForm, setShowForm] = useState(false);
@@ -267,7 +284,7 @@ export default function WebhooksPage() {
         />
       )}
 
-      {endpoints === null && error === null && <p className="muted">Loading…</p>}
+      {endpoints === null && error === null && <LoadingState />}
 
       {endpoints !== null && endpoints.length === 0 && !showForm && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
@@ -280,16 +297,16 @@ export default function WebhooksPage() {
           <table className="w-full border-collapse text-sm min-w-[50rem]">
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                <th className="p-3 font-medium">Label</th>
-                <th className="p-3 font-medium">URL</th>
-                <th className="p-3 font-medium">Events</th>
-                <th className="p-3 font-medium">Active</th>
-                <th className="p-3 font-medium">Created</th>
+                <SortableHeader label="Label" sortKey="label" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="URL" sortKey="url" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Events" sortKey="events" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Active" sortKey="active" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Created" sortKey="created" sort={sort} onSort={toggleSort} />
                 <th className="p-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {endpoints.map((endpoint) => (
+              {(paged.pageRows ?? []).map((endpoint) => (
                 <tr key={endpoint.id} className="border-t border-[var(--border)]">
                   <td className="p-3">{endpoint.label}</td>
                   <td className="p-3 font-mono text-xs break-all max-w-xs">{endpoint.url}</td>
@@ -322,6 +339,17 @@ export default function WebhooksPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {paged.pageRows !== null && (
+        <Pagination
+          page={paged.page}
+          totalPages={paged.totalPages}
+          shownCount={paged.pageRows.length}
+          totalCount={paged.totalCount}
+          noun="endpoints"
+          onPageChange={paged.setPage}
+        />
       )}
 
       {rotateTarget !== null && (

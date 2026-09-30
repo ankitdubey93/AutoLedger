@@ -13,6 +13,11 @@ import { listAccounts, type Account } from '../../services/fetchServices';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
 import { formatCents, parseCentsInput } from '../../utils/money';
+import { useTableSort } from '../../utils/useTableSort';
+import { useClientPage } from '../../utils/useClientPage';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 function BankRuleForm({
   accounts,
@@ -225,6 +230,21 @@ function BankRuleForm({
 export default function BankRulesPage() {
   const [searchParams] = useSearchParams();
   const [rules, setRules] = useState<BankRule[] | null>(null);
+  const { sorted: sortedRules, sort, toggle: toggleSort } = useTableSort(
+    rules,
+    {
+      priority: (row: BankRule) => row.priority,
+      name: (row: BankRule) => row.name,
+      memo: (row: BankRule) => row.memoContains,
+      direction: (row: BankRule) => row.direction,
+      amount: (row: BankRule) => row.amountMinCents ?? row.amountMaxCents,
+      postsTo: (row: BankRule) => row.targetAccountCode,
+      status: (row: BankRule) => (row.isActive ? 0 : 1),
+    },
+    // Rules apply in priority order, so that is the natural default.
+    { key: 'priority', direction: 'asc' },
+  );
+  const paged = useClientPage(sortedRules);
   const [accounts, setAccounts] = useState<Account[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -332,7 +352,7 @@ export default function BankRulesPage() {
         />
       )}
 
-      {rules === null && error === null && <p className="muted">Loading…</p>}
+      {rules === null && error === null && <LoadingState />}
 
       {rules !== null && (
         <>
@@ -345,18 +365,18 @@ export default function BankRulesPage() {
               <table className="w-full border-collapse text-sm min-w-[56rem]">
                 <thead>
                   <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                    <th className="p-3 font-medium">Priority</th>
-                    <th className="p-3 font-medium">Name</th>
-                    <th className="p-3 font-medium">Memo contains</th>
-                    <th className="p-3 font-medium">Direction</th>
-                    <th className="p-3 font-medium">Amount range</th>
-                    <th className="p-3 font-medium">Posts to</th>
-                    <th className="p-3 font-medium">Status</th>
+                    <SortableHeader label="Priority" sortKey="priority" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Memo contains" sortKey="memo" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Direction" sortKey="direction" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Amount range" sortKey="amount" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Posts to" sortKey="postsTo" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
                     <th className="p-3 font-medium text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rules.map((rule) => {
+                  {(paged.pageRows ?? []).map((rule) => {
                     const amountRange =
                       rule.amountMinCents === null && rule.amountMaxCents === null
                         ? 'Any'
@@ -396,6 +416,16 @@ export default function BankRulesPage() {
                 </tbody>
               </table>
             </div>
+          )}
+          {paged.pageRows !== null && (
+            <Pagination
+              page={paged.page}
+              totalPages={paged.totalPages}
+              shownCount={paged.pageRows.length}
+              totalCount={paged.totalCount}
+              noun="rules"
+              onPageChange={paged.setPage}
+            />
           )}
         </>
       )}

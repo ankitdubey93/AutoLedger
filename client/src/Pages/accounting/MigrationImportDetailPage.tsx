@@ -16,6 +16,7 @@ import {
 import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * One staged migration import — its rows, per-row fixes, the commit preview,
@@ -107,7 +108,7 @@ export default function MigrationImportDetailPage() {
 
   if (importId === undefined) return <p className="status status--bad">Missing import id.</p>;
   if (error !== null && imp === null) return <p className="status status--bad">{error}</p>;
-  if (imp === null || rows === null) return <p className="muted">Loading…</p>;
+  if (imp === null || rows === null) return <LoadingState />;
 
   // A fresh const, not `importId` itself: TS's narrowing of a destructured
   // `useParams()` field does not reliably survive into the nested async

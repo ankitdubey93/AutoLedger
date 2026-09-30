@@ -13,6 +13,8 @@ import { INBOX_BASE } from '../../routes/paths';
 import InboxUploadPanel from './InboxUploadPanel';
 import PageHeader from '../../components/ui/PageHeader';
 import EmptyState from '../../components/ui/EmptyState';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Capture's capture register (Phase 10; direct upload and auto-post status
@@ -230,7 +232,7 @@ export default function InboxPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {documents === null && error === null && <p className="muted">Loading…</p>}
+      {documents === null && error === null && <LoadingState />}
 
       {documents !== null && documents.length === 0 && (
         <EmptyState icon={Inbox} title="No documents yet — drop one above." />
@@ -276,27 +278,14 @@ export default function InboxPage() {
       )}
 
       {documents !== null && documents.length > 0 && totalPages > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            type="button"
-            disabled={currentPage <= 1}
-            onClick={() => setCurrentPage((p) => p - 1)}
-            className="btn btn--ghost"
-          >
-            Previous
-          </button>
-          <span className="text-[var(--muted)]">
-            Page {currentPage} of {totalPages} ({totalCount} total)
-          </span>
-          <button
-            type="button"
-            disabled={currentPage >= totalPages}
-            onClick={() => setCurrentPage((p) => p + 1)}
-            className="btn btn--ghost"
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          shownCount={documents.length}
+          totalCount={totalCount}
+          noun="documents"
+          onPageChange={setCurrentPage}
+        />
       )}
     </section>
   );

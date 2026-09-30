@@ -102,4 +102,35 @@ describe('CustomersPage', () => {
     await screen.findByText('Northwind Traders');
     expect(screen.getByLabelText('Name')).toBeInTheDocument();
   });
+
+  it('sorts by a column header and marks it with aria-sort', async () => {
+    const zeta = { ...customer1, id: 'cust-z', name: 'Zeta Freight' };
+    const alpha = { ...customer1, id: 'cust-a', name: 'Alpha Mills' };
+    mockCustomerRoutes([zeta, alpha, customer1]);
+    const user = userEvent.setup();
+    renderCustomersPage();
+
+    await screen.findByText('Alpha Mills');
+    const names = () => screen.getAllByRole('link').map((l) => l.textContent);
+    expect(names()).toEqual(['Alpha Mills', 'Northwind Traders', 'Zeta Freight']);
+    expect(screen.getByRole('columnheader', { name: /Name/ })).toHaveAttribute('aria-sort', 'ascending');
+
+    await user.click(screen.getByRole('button', { name: /Name/ }));
+    expect(names()).toEqual(['Zeta Freight', 'Northwind Traders', 'Alpha Mills']);
+    expect(screen.getByRole('columnheader', { name: /Name/ })).toHaveAttribute('aria-sort', 'descending');
+  });
+
+  it('pages a long list 25 at a time', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ ...customer1, id: `c-${String(i)}`, name: `Customer ${String(i + 1).padStart(2, '0')}` }));
+    mockCustomerRoutes(many);
+    const user = userEvent.setup();
+    renderCustomersPage();
+
+    await screen.findByText('Customer 01');
+    expect(screen.queryByText('Customer 26')).toBeNull();
+    expect(screen.getByText(/Showing 25 of 30 customers/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('Customer 26')).toBeInTheDocument();
+  });
 });
+

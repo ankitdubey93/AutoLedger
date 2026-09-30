@@ -105,7 +105,25 @@ export interface ListInvoicesOptions {
   q: string | null;
   /** `null` for no filter. OUTSTANDING/OVERDUE/PAID all imply status = ISSUED. */
   settlement: 'OUTSTANDING' | 'OVERDUE' | 'PAID' | null;
+  /** Optional so existing callers keep the newest-first default. */
+  sort?: { key: InvoiceSortKey; direction: 'asc' | 'desc' };
 }
+
+/**
+ * The columns a invoice list can be sorted by (2026-09-30). Keys come from the
+ * request (validated by `readSort` against this list); the SQL comes only from
+ * this constant table — request text never reaches an ORDER BY (rule 4).
+ */
+export const INVOICE_SORT_KEYS = ['issueDate', 'dueDate', 'number', 'customer', 'total', 'status'] as const;
+export type InvoiceSortKey = (typeof INVOICE_SORT_KEYS)[number];
+const INVOICE_SORT_COLUMNS: Record<InvoiceSortKey, string> = {
+  issueDate: 'i.issue_date',
+  dueDate: 'i.due_date',
+  number: 'i.invoice_number',
+  customer: 'i.customer_name_snapshot',
+  total: 'i.total_cents',
+  status: 'i.status',
+};
 
 // ---------------------------------------------------------------- row mapping
 
@@ -338,6 +356,17 @@ function buildFilters(
   return { where: clauses.join(' AND '), values };
 }
 
+/**
+ * The chosen column, then `created_at`/`id` as tiebreakers so two rows with the
+ * same value can never swap between pages. NULLS LAST keeps drafts (no number
+ * yet) at the end in either direction.
+ */
+function invoiceOrderBy(options: ListInvoicesOptions): string {
+  const sort = options.sort ?? { key: 'issueDate', direction: 'desc' };
+  const direction = sort.direction === 'asc' ? 'ASC' : 'DESC';
+  return `${INVOICE_SORT_COLUMNS[sort.key]} ${direction} NULLS LAST, i.created_at DESC, i.id DESC`;
+}
+
 export async function listInvoices(
   orgId: string,
   options: ListInvoicesOptions,
@@ -356,7 +385,7 @@ export async function listInvoices(
   const { rows } = await pool.query<InvoiceRow>(
     `${INVOICE_SELECT}
       WHERE ${where}
-      ORDER BY i.issue_date DESC, i.created_at DESC, i.id DESC
+      ORDER BY ${invoiceOrderBy(options)}
       LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
     [...values, options.limit, offset],
   );

@@ -19,6 +19,7 @@ import { formatCents } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import MetricTile from '../../components/ui/MetricTile';
 import { formatDate } from '../../utils/date';
+import Pagination from '../../components/ui/Pagination';
 
 /**
  * A customer's or vendor's account (Phase 25) — the party's subsidiary ledger
@@ -365,29 +366,14 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
       </div>
 
       {ledger.totalCount > PAGE_LIMIT && (
-        <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-          <span>
-            Showing {ledger.rows.length} of {ledger.totalCount}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={page <= 1}
-              onClick={() => goToPage(page - 1)}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={page >= totalPages}
-              onClick={() => goToPage(page + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          shownCount={ledger.rows.length}
+          totalCount={ledger.totalCount}
+          noun="lines"
+          onPageChange={goToPage}
+        />
       )}
 
       {ledger.controlAccount !== null && (

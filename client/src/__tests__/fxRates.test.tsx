@@ -135,4 +135,27 @@ describe('FxRatesPage', () => {
 
     await screen.findByText('No exchange rates recorded yet.');
   });
+
+  it('reaches rates beyond the first page (page 2 is requested from the server)', async () => {
+    mockFxRateRoutes([rate1]);
+    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (!init?.method && url.includes('/api/v1/fx-rates')) {
+        const page = Number(new URL(url).searchParams.get('page') ?? '1');
+        const rate = { ...rate1, id: `rate-p${String(page)}`, rate: page === 1 ? '83.00000000' : '84.00000000' };
+        return Promise.resolve(
+          jsonResponse(200, { success: true, count: 1, totalCount: 51, currentPage: page, totalPages: 2, rates: [rate] }),
+        );
+      }
+      return base(input, init);
+    });
+    const user = userEvent.setup();
+    renderFxRatesPage();
+
+    await screen.findByText('83.00000000');
+    await user.click(screen.getByRole('button', { name: 'Next' }));
+    expect(await screen.findByText('84.00000000')).toBeInTheDocument();
+  });
 });
+

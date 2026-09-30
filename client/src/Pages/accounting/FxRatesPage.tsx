@@ -3,6 +3,8 @@ import { Plus } from 'lucide-react';
 import { deleteFxRate, listFxRates, upsertFxRate, type FxRate } from '../../services/fetchServices';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Exchange rates — Phase 8. A rate is always recorded foreign -> base: `toCode`
@@ -126,12 +128,18 @@ export default function FxRatesPage() {
   const [reloadToken, setReloadToken] = useState(0);
   const [pendingDelete, setPendingDelete] = useState<FxRate | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // Paged on the server. Until 2026-09-30 this page asked for 100 rates and
+  // showed no pager, so rate 101 onward could not be reached at all.
+  const [page, setPage] = useState(1);
+  const [paging, setPaging] = useState({ totalCount: 0, totalPages: 1 });
 
   useEffect(() => {
     let ignore = false;
-    listFxRates({ limit: 100 })
+    listFxRates({ page, limit: 50 })
       .then((res) => {
-        if (!ignore) setRates(res.rates);
+        if (ignore) return;
+        setRates(res.rates);
+        setPaging({ totalCount: res.totalCount, totalPages: res.totalPages });
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load exchange rates');
@@ -139,10 +147,10 @@ export default function FxRatesPage() {
     return () => {
       ignore = true;
     };
-  }, [reloadToken]);
+  }, [reloadToken, page]);
 
   if (settings.status !== 'ready') {
-    return <p className="muted">Loading…</p>;
+    return <LoadingState />;
   }
   const baseCurrency = settings.settings.baseCurrency;
 
@@ -192,7 +200,7 @@ export default function FxRatesPage() {
         />
       )}
 
-      {rates === null && error === null && <p className="muted">Loading…</p>}
+      {rates === null && error === null && <LoadingState />}
 
       {rates !== null && rates.length === 0 && !showForm && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
@@ -238,6 +246,17 @@ export default function FxRatesPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {rates !== null && (
+        <Pagination
+          page={page}
+          totalPages={paging.totalPages}
+          shownCount={rates.length}
+          totalCount={paging.totalCount}
+          noun="rates"
+          onPageChange={setPage}
+        />
       )}
 
       {pendingDelete !== null && (

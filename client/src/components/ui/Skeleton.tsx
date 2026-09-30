@@ -1,8 +1,7 @@
 /**
- * Small helpers over the `.skeleton` class in index.css, for pages that
- * currently show a bare "Loading…" string (InventoryOverview,
- * InventoryCatalogueSettingsPage, and others) rather than a shape that holds the
- * eventual layout.
+ * Small helpers over the `.skeleton` class in index.css: a shape that holds
+ * the eventual layout while data loads. Pages use them through `LoadingState`,
+ * which adds the announced "Loading…" text these deliberately hide.
  */
 export function SkeletonRows({ count = 4 }: { count?: number }) {
   return (

@@ -10,6 +10,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import NewAccountForm from './NewAccountForm';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The chart of accounts, as a tree.
@@ -241,7 +242,7 @@ export default function AccountsPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {roots === null && error === null && <p className="muted">Loading…</p>}
+      {roots === null && error === null && <LoadingState />}
       {balancesUnavailable && <p className="muted">Balances unavailable.</p>}
 
       {showForm && (

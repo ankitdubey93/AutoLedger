@@ -541,7 +541,7 @@ Failure paths: `404 Customer not found` / `404 Vendor not found` (also another o
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | any member | Paginated, filterable invoices with nested lines — the invoice register |
+| GET | `/` | any member | Paginated, filterable invoices with nested lines — the invoice register. 2026-09-30: `?sort=issueDate\|dueDate\|number\|customer\|total\|status&dir=asc\|desc` (default newest issue date first); an unknown key or direction is `400` |
 | GET | `/:id` | any member | One invoice with its lines |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a draft invoice (never posted directly) |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Replace a **draft** invoice's fields and lines wholesale |
@@ -600,7 +600,7 @@ Failure paths: `400` from the schema (blank name, invalid email) · `400 No fiel
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| GET | `/` | any member | Paginated, filterable bills with nested lines — the bill register |
+| GET | `/` | any member | Paginated, filterable bills with nested lines — the bill register. 2026-09-30: `?sort=billDate\|dueDate\|reference\|vendor\|total\|status&dir=asc\|desc` (default newest bill date first); an unknown key or direction is `400` |
 | GET | `/:id` | any member | One bill with its lines |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create a draft bill (never posted directly) |
 | PATCH | `/:id` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Replace a **draft or in-review** bill's fields and lines wholesale |

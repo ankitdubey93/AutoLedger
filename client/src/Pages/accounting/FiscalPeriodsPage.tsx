@@ -10,6 +10,7 @@ import {
   type FiscalPeriod,
 } from '../../services/fetchServices';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Fiscal periods — the close/lock lifecycle that gates posting (Phase 4).
@@ -139,7 +140,7 @@ export default function FiscalPeriodsPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {periods === null && error === null && <p className="muted">Loading…</p>}
+      {periods === null && error === null && <LoadingState />}
 
       {periods !== null && periods.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-6 flex flex-col items-start gap-3">

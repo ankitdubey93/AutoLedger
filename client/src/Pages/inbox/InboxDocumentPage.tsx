@@ -17,6 +17,7 @@ import { formatCents, formatMicroUsd } from '../../utils/money';
 import { INBOX_BASE } from '../../routes/paths';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * One captured document, in full: the redacted preview image that proves
@@ -193,7 +194,7 @@ export default function InboxDocumentPage() {
     return (
       <section className="flex flex-col gap-4" aria-busy="true">
         <BackLink to={base} label="Back to bill inbox" />
-        <p className="muted">Loading…</p>
+        <LoadingState />
       </section>
     );
   }

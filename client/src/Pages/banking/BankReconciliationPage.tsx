@@ -4,6 +4,7 @@ import { listAccounts, getBankReconciliation, type Account, type BankReconciliat
 import { formatCents } from '../../utils/money';
 import MetricTile from '../../components/ui/MetricTile';
 import BackLink from '../../components/BackLink';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Reconciles one bank account's GL balance against its imported statement.
@@ -101,7 +102,7 @@ export default function BankReconciliationPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && report !== null && (
         <>

@@ -5,6 +5,7 @@ import { formatCents } from '../../utils/money';
 import { TYPE_STYLES } from './AccountsPage';
 import BackLink from '../../components/BackLink';
 import { formatDate } from '../../utils/date';
+import Pagination from '../../components/ui/Pagination';
 
 /**
  * One postable account's ledger — opening balance, every posted line with a
@@ -263,29 +264,14 @@ export default function AccountLedgerPage() {
       </div>
 
       {ledger.totalCount > 0 && (
-        <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-          <span>
-            Showing {ledger.rows.length} of {ledger.totalCount}
-          </span>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={page <= 1}
-              onClick={() => goToPage(page - 1)}
-            >
-              Previous
-            </button>
-            <button
-              type="button"
-              className="btn btn--ghost"
-              disabled={page >= totalPages}
-              onClick={() => goToPage(page + 1)}
-            >
-              Next
-            </button>
-          </div>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          shownCount={ledger.rows.length}
+          totalCount={ledger.totalCount}
+          noun="lines"
+          onPageChange={goToPage}
+        />
       )}
     </section>
   );

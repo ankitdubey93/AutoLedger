@@ -12,6 +12,7 @@ import { useOrg } from '../context/OrgContext';
 import AccountTabs, { type AccountTab } from './AccountTabs';
 import OrganizationProfilePanel from './OrganizationProfilePanel';
 import { initials } from '../utils/initials';
+import LoadingState from '../components/ui/LoadingState';
 
 /**
  * The account page: identity, organization, membership, and session details.
@@ -93,7 +94,7 @@ function MembersPanel() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {!denied && error === null && members === null && <p className="muted">Loading…</p>}
+      {!denied && error === null && members === null && <LoadingState />}
 
       {members !== null && (
         <div className="table-scroll">

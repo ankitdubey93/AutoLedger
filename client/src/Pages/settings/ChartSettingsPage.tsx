@@ -11,6 +11,7 @@ import { TYPE_STYLES } from '../accounting/AccountsPage';
 import NewAccountForm, { ACCOUNT_TYPES } from '../accounting/NewAccountForm';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Phase 30 — the Chart of accounts tab: an in-settings account builder.
@@ -246,7 +247,7 @@ export default function ChartSettingsPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {roots === null && error === null && <p className="muted">Loading…</p>}
+      {roots === null && error === null && <LoadingState />}
 
       {roots !== null &&
         ACCOUNT_TYPES.map((type) => {

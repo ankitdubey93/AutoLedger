@@ -12,6 +12,7 @@ import {
 } from '../../../utils/money';
 import BackLink from '../../../components/BackLink';
 import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } from './noteKinds';
+import LoadingState from '../../../components/ui/LoadingState';
 
 /**
  * Draft a credit or debit note, or edit a draft one (Phase 26). A new note is
@@ -205,7 +206,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
     );
   }
   if (original === null) {
-    return <p className="muted">Loading…</p>;
+    return <LoadingState />;
   }
   if (existing !== null && existing.status !== 'DRAFT') {
     return (

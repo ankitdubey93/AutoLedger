@@ -10,7 +10,7 @@ import {
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
-import { optionalIsoDate, optionalText, optionalUuid, readPagination } from '../../utils/queryParam.js';
+import { optionalIsoDate, optionalText, optionalUuid, readPagination, readSort } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
 import { isBillStatus, type BillStatus } from '../../types/accounting.js';
 import type { Request } from 'express';
@@ -59,6 +59,7 @@ export const list: RequestHandler = async (req, res) => {
     to: optionalIsoDate(req, 'to'),
     q: optionalText(req, 'q', 200),
     settlement: optionalSettlement(req),
+    sort: readSort(req, billService.BILL_SORT_KEYS, { key: 'billDate', direction: 'desc' }),
   });
 
   res.json({

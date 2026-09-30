@@ -7,10 +7,15 @@ import {
   type InvoiceStatus,
   type SettlementFilter,
   type SettlementStatus,
+  type InvoiceSortKey,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
+import type { SortState } from '../../utils/useTableSort';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The invoice register — every sales invoice, filterable and paginated.
@@ -78,6 +83,22 @@ export default function InvoicesPage() {
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
   const q = params.get('q') ?? '';
+  // Server-side sort (2026-09-30), kept in the URL like the filters so a
+  // sorted view is linkable. An unknown value falls back to the default.
+  const SORT_KEYS: readonly InvoiceSortKey[] = ['issueDate', 'dueDate', 'number', 'customer', 'total', 'status'];
+  const sortParam = params.get('sort');
+  const sort: SortState<InvoiceSortKey> = {
+    key: SORT_KEYS.find((k) => k === sortParam) ?? 'issueDate',
+    direction: params.get('dir') === 'asc' ? 'asc' : 'desc',
+  };
+  function toggleSort(key: InvoiceSortKey) {
+    const next = new URLSearchParams(params);
+    const direction = key === sort.key ? (sort.direction === 'asc' ? 'desc' : 'asc') : 'asc';
+    next.set('sort', key);
+    next.set('dir', direction);
+    next.delete('page');
+    setParams(next);
+  }
   const [qDraft, setQDraft] = useDebouncedInput(q, (v) => setFilter('q', v));
   const page = Number(params.get('page') ?? '1');
   const anyFilterSet = status !== '' || settlement !== '' || from !== '' || to !== '' || q !== '';
@@ -93,6 +114,10 @@ export default function InvoicesPage() {
     if (from !== '') filters.from = from;
     if (to !== '') filters.to = to;
     if (q !== '') filters.q = q;
+    if (sortParam !== null) {
+      filters.sort = sort.key;
+      filters.dir = sort.direction;
+    }
 
     listInvoices(filters)
       .then((res) => {
@@ -115,7 +140,7 @@ export default function InvoicesPage() {
     return () => {
       ignore = true;
     };
-  }, [status, settlement, from, to, q, page]);
+  }, [status, settlement, from, to, q, page, sortParam, sort.key, sort.direction]);
 
   function selectTab(tab: Tab) {
     const next = new URLSearchParams(params);
@@ -223,7 +248,7 @@ export default function InvoicesPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {!loaded && error === null && <p className="muted">Loading…</p>}
+      {!loaded && error === null && <LoadingState />}
 
       {loaded && (
         <>
@@ -243,12 +268,12 @@ export default function InvoicesPage() {
               <table className="w-full border-collapse text-sm min-w-[48rem]">
                 <thead>
                   <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                    <th className="p-3 font-medium">Number</th>
-                    <th className="p-3 font-medium">Issue date</th>
-                    <th className="p-3 font-medium">Due date</th>
-                    <th className="p-3 font-medium">Customer</th>
-                    <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium text-right">Total</th>
+                    <SortableHeader label="Number" sortKey="number" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Issue date" sortKey="issueDate" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Due date" sortKey="dueDate" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Customer" sortKey="customer" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
+                    <SortableHeader label="Total" sortKey="total" sort={sort} onSort={toggleSort} align="right" />
                     <th className="p-3 font-medium text-right">Due</th>
                     <th className="p-3 font-medium text-right">Actions</th>
                   </tr>
@@ -304,29 +329,14 @@ export default function InvoicesPage() {
           )}
 
           {totalCount > 0 && (
-            <div className="flex items-center justify-between gap-4 text-sm text-[var(--muted)]">
-              <span>
-                Showing {invoices.length} of {totalCount}
-              </span>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page <= 1}
-                  onClick={() => goToPage(page - 1)}
-                >
-                  Previous
-                </button>
-                <button
-                  type="button"
-                  className="btn btn--ghost"
-                  disabled={page >= totalPages}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
+            <Pagination
+              page={page}
+              totalPages={totalPages}
+              shownCount={invoices.length}
+              totalCount={totalCount}
+              noun="invoices"
+              onPageChange={goToPage}
+            />
           )}
         </>
       )}

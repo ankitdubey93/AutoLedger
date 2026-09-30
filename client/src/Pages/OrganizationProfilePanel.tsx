@@ -8,6 +8,7 @@ import {
 import { useOrg } from '../context/OrgContext';
 import { useDocumentObjectUrl } from '../utils/useDocumentObjectUrl';
 import { inputClass } from '../components/ui/formClasses';
+import LoadingState from '../components/ui/LoadingState';
 
 /**
  * The organization's postal identity: legal name, industry, street and postal
@@ -203,7 +204,7 @@ export default function OrganizationProfilePanel() {
     return (
       <section className="card">
         <h2>Organization profile</h2>
-        <p className="muted">Loading…</p>
+        <LoadingState />
       </section>
     );
   }

@@ -15,6 +15,17 @@ What it covers, in the order the sidebar shows it:
 
 Underneath: double-entry enforced by database triggers (an unbalanced or edited posted entry cannot exist), integer-cent money everywhere, a CDC audit trail on every financial table, and `npm run verify:integrity` to prove the books balance.
 
+## Screenshots
+
+The demo company (`npm run seed:demo`): four months of a fabrication business, entered through the real API.
+
+| | |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) **Dashboard** — position, the accounting equation, receivables and payables aging, inventory and a six-month trend | ![Invoices](docs/screenshots/invoices.png) **Invoices** — status and settlement, server-side sorting on every column |
+| ![Bank reconciliation](docs/screenshots/bank-reconciliation.png) **Bank reconciliation** — the ledger's cash against every imported statement line, to the cent | ![Profit and loss](docs/screenshots/profit-and-loss.png) **Profit & loss** — derived from the ledger on every read |
+| ![Stock on hand](docs/screenshots/stock-on-hand.png) **Stock on hand** — perpetual inventory, valued and tied to the general ledger | ![Dark theme](docs/screenshots/dashboard-dark.png) **Dark theme** — light, dark or follow the system |
+| ![Sign in](docs/screenshots/sign-in.png) **Sign in** — with a one-click entry to the demo company | |
+
 ## Status
 
 One product since Phase 33 (2026-09-25). It was built as three separately chosen apps (LedgerCore, AP-Flow, StockLedger), which are now its accounting, capture (bill inbox) and inventory modules; see [docs/roadmap.md](docs/roadmap.md#phase-33-as-delivered).
@@ -28,7 +39,7 @@ One product since Phase 33 (2026-09-25). It was built as three separately chosen
 | CDC audit trail, background jobs, outbox + webhooks, Document Vault, AI cost metering | A hosted deployment (images exist; nothing is deployed) |
 | Production Docker images, CI (typecheck, lint, tests on real Postgres/Redis, image builds), a one-command demo company | Multi-user invites, email verification |
 | Security headers (helmet), an Origin check against CSRF, structured JSON logs with request IDs, password reset | Sending email — the reset link is logged, not mailed |
-| 1726 server tests (2 skipped), 479 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
+| 1731 server tests (2 skipped), 490 client tests — see [docs/roadmap.md](docs/roadmap.md) for the current count | |
 
 Nothing under `docs/` describes working code unless this table says so. See [docs/roadmap.md](docs/roadmap.md) for the full phase-by-phase record.
 

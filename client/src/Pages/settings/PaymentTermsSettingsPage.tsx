@@ -9,6 +9,7 @@ import {
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The payment terms catalogue — Phase 24's selectable due-date terms, managed
@@ -167,7 +168,7 @@ export default function PaymentTermsSettingsPage() {
         />
       )}
 
-      {terms === null && error === null && <p className="muted">Loading…</p>}
+      {terms === null && error === null && <LoadingState />}
 
       {terms !== null && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">

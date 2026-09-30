@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
@@ -15,6 +15,11 @@ import {
 import { formatCents, parseCentsInput } from '../../utils/money';
 import TabBar from '../../components/ui/TabBar';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
+import { useTableSort } from '../../utils/useTableSort';
+import { useClientPage } from '../../utils/useClientPage';
+import SortableHeader from '../../components/ui/SortableHeader';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Products & Services — the one master an invoice or bill line is picked from
@@ -280,7 +285,22 @@ export default function ProductsPage() {
     }
   }
 
-  const visible = items === null ? null : items.filter((item) => tab === 'ALL' || item.itemType === tab);
+  const visible = useMemo(() => (items === null ? null : items.filter((item) => tab === 'ALL' || item.itemType === tab)), [items, tab]);
+  const { sorted: sortedItems, sort, toggle: toggleSort } = useTableSort(
+    visible,
+    {
+      code: (row: Item) => row.code,
+      name: (row: Item) => row.name,
+      type: (row: Item) => row.itemType,
+      onHand: (row: Item) => balances.get(row.id)?.onHandQuantityMilli ?? null,
+      salePrice: (row: Item) => row.salePriceCents,
+      purchasePrice: (row: Item) => row.purchasePriceCents,
+      status: (row: Item) => (row.isActive ? 0 : 1),
+    },
+    { key: 'code', direction: 'asc' },
+    [balances],
+  );
+  const paged = useClientPage(sortedItems);
 
   function setSearch(value: string) {
     const next = new URLSearchParams(params);
@@ -329,7 +349,7 @@ export default function ProductsPage() {
         />
       )}
 
-      {items === null && error === null && <p className="muted">Loading…</p>}
+      {items === null && error === null && <LoadingState />}
 
       {items !== null && items.length === 0 && !showForm && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
@@ -353,18 +373,18 @@ export default function ProductsPage() {
           <table className="w-full border-collapse text-sm min-w-[42rem]">
             <thead>
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-                <th className="p-3 font-medium">Code</th>
-                <th className="p-3 font-medium">Name</th>
-                <th className="p-3 font-medium">Type</th>
-                <th className="p-3 font-medium text-right">On hand</th>
-                <th className="p-3 font-medium text-right">Sale price</th>
-                <th className="p-3 font-medium text-right">Purchase price</th>
-                <th className="p-3 font-medium">Status</th>
+                <SortableHeader label="Code" sortKey="code" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="Type" sortKey="type" sort={sort} onSort={toggleSort} />
+                <SortableHeader label="On hand" sortKey="onHand" sort={sort} onSort={toggleSort} align="right" />
+                <SortableHeader label="Sale price" sortKey="salePrice" sort={sort} onSort={toggleSort} align="right" />
+                <SortableHeader label="Purchase price" sortKey="purchasePrice" sort={sort} onSort={toggleSort} align="right" />
+                <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
                 <th className="p-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {visible.map((item) => (
+              {(paged.pageRows ?? []).map((item) => (
                 <tr key={item.id} className="border-t border-[var(--border)]">
                   <td className="p-3">{item.code}</td>
                   <td className="p-3">{item.name}</td>
@@ -408,6 +428,17 @@ export default function ProductsPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {paged.pageRows !== null && (
+        <Pagination
+          page={paged.page}
+          totalPages={paged.totalPages}
+          shownCount={paged.pageRows.length}
+          totalCount={paged.totalCount}
+          noun="products"
+          onPageChange={paged.setPage}
+        />
       )}
     </section>
   );

@@ -3,6 +3,7 @@ import { getAiUsage, type AiUsageSummary } from '../../services/fetchServices';
 import { formatMicroUsd } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import { formatDate } from '../../utils/date';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * Capture's AI usage report (Phase 19.1) — every metered token/cost call
@@ -77,7 +78,7 @@ export default function AiUsagePage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {usage === null && error === null && <p className="muted">Loading…</p>}
+      {usage === null && error === null && <LoadingState />}
 
       {usage !== null && usage.totals.callCount === 0 && (
         <p className="muted">No model calls recorded yet.</p>

@@ -64,3 +64,35 @@ export function optionalText(req: Request, name: string, maxLength: number): str
   }
   return trimmed;
 }
+
+export type SortDirection = 'asc' | 'desc';
+
+/**
+ * `?sort=<key>&dir=asc|desc` for a list endpoint (2026-09-30). Returns a
+ * *key* from the caller's own `allowed` list, never a column name: each
+ * service maps its keys to columns through a constant table, so request text
+ * cannot reach an ORDER BY (rule 4 — whitelist identifiers). An unknown key
+ * or direction is a 400, not a silent fallback, so a typo is visible.
+ */
+export function readSort<K extends string>(
+  req: Request,
+  allowed: readonly K[],
+  fallback: { key: K; direction: SortDirection },
+): { key: K; direction: SortDirection } {
+  const rawKey = req.query.sort;
+  const rawDir = req.query.dir;
+  let key = fallback.key;
+  let direction = fallback.direction;
+  if (rawKey !== undefined) {
+    if (typeof rawKey !== 'string' || !(allowed as readonly string[]).includes(rawKey)) {
+      throw new ApiError(400, `sort must be one of ${allowed.join(', ')}`);
+    }
+    key = rawKey as K;
+  }
+  if (rawDir !== undefined) {
+    if (rawDir !== 'asc' && rawDir !== 'desc') throw new ApiError(400, 'dir must be asc or desc');
+    direction = rawDir;
+  }
+  return { key, direction };
+}
+

@@ -7,6 +7,7 @@ import ConfirmDialog from '../../../components/ConfirmDialog';
 import { noteStatusPill } from './NoteListPage';
 import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } from './noteKinds';
 import { formatDate } from '../../../utils/date';
+import LoadingState from '../../../components/ui/LoadingState';
 
 /**
  * One credit or debit note (Phase 26). A DRAFT can be edited, deleted or
@@ -96,7 +97,7 @@ function ApplyDialog({
         <p className="text-sm text-[var(--muted)] m-0">
           Matches this note against another open {config.originalNoun} of {note.partyName}. No journal entry is posted.
         </p>
-        {targets === null && error === null && <p className="muted">Loading…</p>}
+        {targets === null && error === null && <LoadingState />}
         {targets !== null && targets.length === 0 && (
           <p className="muted">{note.partyName} has no open {config.originalNoun} in {note.currencyCode} to apply this to.</p>
         )}
@@ -199,7 +200,7 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
     );
   }
   if (note === null) {
-    return error !== null ? <p className="status status--bad">{error}</p> : <p className="muted">Loading…</p>;
+    return error !== null ? <p className="status status--bad">{error}</p> : <LoadingState />;
   }
 
   const buttonClass =

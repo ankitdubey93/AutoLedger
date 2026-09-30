@@ -1095,6 +1095,8 @@ export interface Invoice {
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
 
+export type InvoiceSortKey = 'issueDate' | 'dueDate' | 'number' | 'customer' | 'total' | 'status';
+
 export interface InvoiceFilters {
   page?: number;
   limit?: number;
@@ -1104,6 +1106,9 @@ export interface InvoiceFilters {
   to?: string;
   q?: string;
   settlement?: SettlementFilter | '';
+  /** 2026-09-30 — server-side sort; omitted means the server's newest-first default. */
+  sort?: InvoiceSortKey;
+  dir?: 'asc' | 'desc';
 }
 
 /** GET /invoices — paginated, filterable, lines nested. */
@@ -1127,6 +1132,8 @@ export function listInvoices(
   if (params.to !== undefined && params.to !== '') query.set('to', params.to);
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
+  if (params.sort !== undefined) query.set('sort', params.sort);
+  if (params.dir !== undefined) query.set('dir', params.dir);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/invoices${suffix}`, { signal: signal ?? null });
@@ -1565,6 +1572,8 @@ export interface Bill {
   settlementStatus: SettlementStatus;
 }
 
+export type BillSortKey = 'billDate' | 'dueDate' | 'reference' | 'vendor' | 'total' | 'status';
+
 export interface BillFilters {
   page?: number;
   limit?: number;
@@ -1574,6 +1583,9 @@ export interface BillFilters {
   to?: string;
   q?: string;
   settlement?: SettlementFilter | '';
+  /** 2026-09-30 — server-side sort; omitted means the server's newest-first default. */
+  sort?: BillSortKey;
+  dir?: 'asc' | 'desc';
 }
 
 /** GET /bills — paginated, filterable, lines nested. */
@@ -1597,6 +1609,8 @@ export function listBills(
   if (params.to !== undefined && params.to !== '') query.set('to', params.to);
   if (params.q !== undefined && params.q !== '') query.set('q', params.q);
   if (params.settlement !== undefined && params.settlement !== '') query.set('settlement', params.settlement);
+  if (params.sort !== undefined) query.set('sort', params.sort);
+  if (params.dir !== undefined) query.set('dir', params.dir);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/bills${suffix}`, { signal: signal ?? null });

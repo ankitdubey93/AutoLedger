@@ -8,6 +8,8 @@ import {
   type AuditOperation,
 } from '../../services/fetchServices';
 import { MODULE_LABELS, moduleLabel } from '../../utils/moduleLabels';
+import Pagination from '../../components/ui/Pagination';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The audit trail (Phase 5) — every INSERT/UPDATE/DELETE across every app,
@@ -217,7 +219,7 @@ export default function AuditLogPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {logs === null && error === null && <p className="muted">Loading…</p>}
+      {logs === null && error === null && <LoadingState />}
 
       {logs !== null && logs.length === 0 && (
         <p className="text-sm text-[var(--muted)]">No audit entries match these filters.</p>
@@ -261,7 +263,7 @@ export default function AuditLogPage() {
                       <td colSpan={7} className="p-3">
                         {detailError !== null && <p className="status status--bad m-0">{detailError}</p>}
                         {detailError === null && detail === null && (
-                          <p className="text-sm text-[var(--muted)] m-0">Loading…</p>
+                          <LoadingState rows={2} />
                         )}
                         {detail !== null && <DetailPanel log={detail} />}
                       </td>
@@ -275,27 +277,14 @@ export default function AuditLogPage() {
       )}
 
       {logs !== null && totalPages > 1 && (
-        <div className="flex items-center gap-3 text-sm">
-          <button
-            type="button"
-            className="btn btn--ghost"
-            disabled={page <= 1}
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-          >
-            Previous
-          </button>
-          <span className="text-[var(--muted)]">
-            Page {page} of {totalPages}
-          </span>
-          <button
-            type="button"
-            className="btn btn--ghost"
-            disabled={page >= totalPages}
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-          >
-            Next
-          </button>
-        </div>
+        <Pagination
+          page={page}
+          totalPages={totalPages}
+          shownCount={logs.length}
+          totalCount={totalCount}
+          noun="entries"
+          onPageChange={setPage}
+        />
       )}
     </section>
   );

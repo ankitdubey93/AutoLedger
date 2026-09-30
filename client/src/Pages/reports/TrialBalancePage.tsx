@@ -3,6 +3,7 @@ import { CheckCircle2, XCircle } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getTrialBalance, type AccountType, type TrialBalanceRow } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
+import LoadingState from '../../components/ui/LoadingState';
 
 /**
  * The trial balance — the report that proves the books balance.
@@ -104,7 +105,7 @@ export default function TrialBalancePage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {report === null && error === null && <p className="muted">Loading…</p>}
+      {report === null && error === null && <LoadingState />}
 
       {report !== null && (
         <>
