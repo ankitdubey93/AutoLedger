@@ -1,5 +1,7 @@
 import { parseMoneyText } from '../../utils/money.js';
-import { isAccountType, type AccountType } from '../../types/accounting.js';
+import { parseImportCell } from '../../utils/importValues.js';
+import type { DateFormat } from '../../utils/dateParse.js';
+import { isAccountType, type AccountType, type ImportColumnDef } from '../../types/accounting.js';
 
 /**
  * Row parsers for the staged migration importers (Phase 9b, rekeyed in Phase 36).
@@ -25,6 +27,9 @@ export interface StagedRowInput {
   partyTaxNumber: string | null;
   partyPaymentTerms: string | null;
   partyNotes: string | null;
+  /** storage:'data' kinds only: parsed cell values by column key. */
+  data: Record<string, string | number | null> | null;
+  groupKey: string | null;
 }
 
 export type ResolvedImportColumns = Readonly<Record<string, number | null>>;
@@ -134,6 +139,8 @@ export function parseChartRow(
     debitCents: null,
     creditCents: null,
     ...NULL_PARTY_FIELDS,
+    data: null,
+    groupKey: null,
   };
 }
 
@@ -191,6 +198,8 @@ export function parseOpeningRow(
     debitCents,
     creditCents,
     ...NULL_PARTY_FIELDS,
+    data: null,
+    groupKey: null,
   };
 }
 
@@ -237,5 +246,55 @@ export function parsePartyRow(
     partyTaxNumber: taxNumberRaw === '' ? null : taxNumberRaw.slice(0, 64),
     partyPaymentTerms: paymentTermsRaw === '' ? null : paymentTermsRaw.slice(0, 500),
     partyNotes: notesRaw === '' ? null : notesRaw.slice(0, 1000),
+    data: null,
+    groupKey: null,
   };
+}
+
+/** Generic parser for storage:'data' kinds: raw[key] = trimmed cell text; data[key] = parsed value (null on '' or parse failure). */
+export function parseDataRow(
+  columns: readonly ImportColumnDef[],
+  cells: readonly string[],
+  resolved: ResolvedImportColumns,
+  rowNumber: number,
+  dateFormat: DateFormat,
+): StagedRowInput {
+  const raw: Record<string, string> = {};
+  const data: Record<string, string | number | null> = {};
+  for (const col of columns) {
+    const text = cellText(cells, resolved, col.key);
+    raw[col.key] = text;
+    const parsed = parseImportCell(col, text, dateFormat);
+    data[col.key] = parsed.ok ? parsed.value : null;
+  }
+  return {
+    rowNumber,
+    raw,
+    accountCode: null,
+    accountName: null,
+    accountType: null,
+    parentCode: null,
+    description: null,
+    debitCents: null,
+    creditCents: null,
+    ...NULL_PARTY_FIELDS,
+    data,
+    groupKey: null,
+  };
+}
+
+/** Parse errors for one data row, in column order: for each column whose raw text is non-empty and whose parseImportCell result is not ok, its error. */
+export function dataRowParseErrors(
+  columns: readonly ImportColumnDef[],
+  raw: Readonly<Record<string, string>>,
+  dateFormat: DateFormat,
+): string[] {
+  const errors: string[] = [];
+  for (const col of columns) {
+    const text = (raw[col.key] ?? '').trim();
+    if (text === '') continue;
+    const parsed = parseImportCell(col, text, dateFormat);
+    if (!parsed.ok) errors.push(parsed.error);
+  }
+  return errors;
 }

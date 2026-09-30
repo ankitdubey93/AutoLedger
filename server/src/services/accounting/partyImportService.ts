@@ -1,6 +1,7 @@
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
-import type { MigrationCommitPreview, MigrationImportRow } from '../../types/accounting.js';
+import type { MigrationImportRow } from '../../types/accounting.js';
+import type { LegacyCommitPreview } from './importRowStore.js';
 
 /**
  * Customer/vendor import — the validate, preview and commit halves for the
@@ -93,7 +94,7 @@ async function existingVendors(client: PoolClient, orgId: string): Promise<Exist
   return rows;
 }
 
-export async function preview(client: PoolClient, orgId: string, importId: string): Promise<MigrationCommitPreview> {
+export async function preview(client: PoolClient, orgId: string, importId: string): Promise<LegacyCommitPreview> {
   const { rows: importRows } = await client.query<{ kind: string; status: string; error_count: number }>(
     'SELECT kind, status, error_count FROM migration_imports WHERE id = $1 AND org_id = $2',
     [importId, orgId],

@@ -24,14 +24,15 @@ function fieldValue(row: MigrationImportRow, field: ImportEditFieldMeta): unknow
   return record[field.key];
 }
 
-function editText(row: MigrationImportRow, field: ImportEditFieldMeta): string {
+function editText(row: MigrationImportRow, field: ImportEditFieldMeta, isData: boolean): string {
+  if (isData) return row.raw[field.key] ?? '';
   const v = fieldValue(row, field);
   if (field.input === 'money') return typeof v === 'number' && v > 0 ? formatCents(v) : '';
   return typeof v === 'string' ? v : '';
 }
 
-function displayText(row: MigrationImportRow, field: ImportEditFieldMeta): string {
-  const text = editText(row, field);
+function displayText(row: MigrationImportRow, field: ImportEditFieldMeta, isData: boolean): string {
+  const text = editText(row, field, isData);
   return text === '' ? '—' : text;
 }
 
@@ -47,14 +48,15 @@ export default function ImportRowsTable({
   rows: MigrationImportRow[];
   readOnly: boolean;
   savingRowId: string | null;
-  onSave: (row: MigrationImportRow, body: Record<string, string | number | null>) => void;
+  onSave: (row: MigrationImportRow, body: Record<string, string | number | null | Record<string, string | null>>) => void;
   onError: (message: string) => void;
 }) {
   // Only rows the user has touched hold an edit; the rest read from the row.
+  const isData = meta.storage === 'data';
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
 
   function currentText(row: MigrationImportRow, field: ImportEditFieldMeta): string {
-    return edits[row.id]?.[field.key] ?? editText(row, field);
+    return edits[row.id]?.[field.key] ?? editText(row, field, isData);
   }
 
   function setText(row: MigrationImportRow, field: ImportEditFieldMeta, text: string) {
@@ -62,6 +64,20 @@ export default function ImportRowsTable({
   }
 
   function save(row: MigrationImportRow) {
+    if (isData) {
+      const values: Record<string, string | null> = {};
+      for (const field of meta.editFields) {
+        const trimmed = currentText(row, field).trim();
+        values[field.key] = trimmed === '' ? null : trimmed;
+      }
+      onSave(row, { values });
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[row.id];
+        return next;
+      });
+      return;
+    }
     const body: Record<string, string | number | null> = {};
     for (const field of meta.editFields) {
       const text = currentText(row, field);
@@ -114,7 +130,21 @@ export default function ImportRowsTable({
               {meta.editFields.map((field) => (
                 <td key={field.key} className="p-2">
                   {readOnly ? (
-                    displayText(row, field)
+                    displayText(row, field, isData)
+                  ) : field.input === 'enum' ? (
+                    <select
+                      aria-label={`${field.label}, row ${String(row.rowNumber)}`}
+                      value={currentText(row, field)}
+                      onChange={(e) => setText(row, field, e.target.value)}
+                      className={cellInputClass}
+                    >
+                      <option value="">—</option>
+                      {(field.options ?? []).map((o) => (
+                        <option key={o} value={o}>
+                          {o}
+                        </option>
+                      ))}
+                    </select>
                   ) : field.input === 'accountType' ? (
                     <select
                       aria-label={`${field.label}, row ${String(row.rowNumber)}`}

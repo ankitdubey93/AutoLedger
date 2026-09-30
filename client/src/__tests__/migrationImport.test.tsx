@@ -33,6 +33,7 @@ function baseImport(overrides: Partial<MigrationImport> = {}): MigrationImport {
     createdAt: new Date().toISOString(),
     columnMap: null,
     result: null,
+    dateFormat: 'ISO',
     ...overrides,
   };
 }
@@ -42,6 +43,8 @@ function baseRow(overrides: Partial<MigrationImportRow> = {}): MigrationImportRo
     id: 'row-1',
     rowNumber: 2,
     raw: {},
+    values: {},
+    groupKey: null,
     accountCode: '1110',
     accountName: null,
     accountType: null,
@@ -90,7 +93,7 @@ describe('MigrationImportDetailPage', () => {
         );
       }
       if (url.includes('/preview')) {
-        return Promise.resolve(jsonResponse(200, { success: true, preview }));
+        return Promise.resolve(jsonResponse(200, { success: true, preview: { summary: [], warnings: [], ...preview } }));
       }
       if (url.includes('/rows')) {
         return Promise.resolve(jsonResponse(200, { success: true, count: rows.length, totalCount: rows.length, currentPage: 1, totalPages: 1, rows }));
@@ -298,5 +301,107 @@ describe('MigrationImportDetailPage', () => {
     renderPage(imp.id);
 
     expect(await screen.findByText('Committed: 3 created, 1 merged.')).toBeInTheDocument();
+  });
+
+  const EMPTY_PREVIEW = {
+    canCommit: true,
+    blockingErrorCount: 0,
+    accountsToCreate: 0,
+    accountsToMerge: 0,
+    totalDebitCents: 0,
+    totalCreditCents: 0,
+    plugCents: 0,
+    plugAccountCode: '',
+    entryDate: null,
+    partiesToCreate: 0,
+    partiesToMerge: 0,
+  };
+
+  it('a data-kind row edits raw text and saves values', async () => {
+    const imp = baseImport({ kind: 'ITEMS', status: 'DRAFT', errorCount: 1 });
+    mockRoutes(
+      imp,
+      [
+        baseRow({
+          accountCode: null,
+          status: 'INVALID',
+          errors: ['sale price is not a valid amount'],
+          raw: { itemCode: 'A1', itemName: 'Widget', salePrice: 'abc' },
+        }),
+      ],
+      { ...EMPTY_PREVIEW, kind: 'ITEMS', canCommit: false, blockingErrorCount: 1 },
+    );
+    const user = userEvent.setup();
+    renderPage(imp.id);
+
+    const input = await screen.findByLabelText('Sale price, row 2');
+    expect((input as HTMLInputElement).value).toBe('abc');
+    await user.clear(input);
+    await user.type(input, '99.50');
+    await user.click(screen.getByRole('button', { name: 'Save row 2' }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => (c[1] as RequestInit | undefined)?.method === 'PATCH');
+      expect(call).toBeDefined();
+      expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+        values: {
+          itemCode: 'A1',
+          itemName: 'Widget',
+          itemType: null,
+          description: null,
+          salePrice: '99.50',
+          salesAccount: null,
+          salesTaxRate: null,
+          purchasePrice: null,
+          purchasesAccount: null,
+          purchasesTaxRate: null,
+        },
+      });
+    });
+  });
+
+  it('the Type column is a select of options', async () => {
+    const imp = baseImport({ kind: 'ITEMS', status: 'VALIDATED' });
+    mockRoutes(imp, [baseRow({ accountCode: null, raw: { itemCode: 'A1', itemName: 'Widget', itemType: 'Service' } })], {
+      ...EMPTY_PREVIEW,
+      kind: 'ITEMS',
+    });
+    renderPage(imp.id);
+
+    const select = (await screen.findByLabelText('Type, row 2')) as HTMLSelectElement;
+    expect(select.tagName).toBe('SELECT');
+    expect(select.value).toBe('Service');
+    expect(Array.from(select.options).map((o) => o.value)).toEqual(['', 'Service', 'Non-inventory']);
+  });
+
+  it('the preview renders summary items with money formatting', async () => {
+    const imp = baseImport({ kind: 'INVENTORY_ITEMS', status: 'VALIDATED' });
+    mockRoutes(imp, [baseRow({ accountCode: null })], {
+      ...EMPTY_PREVIEW,
+      kind: 'INVENTORY_ITEMS',
+      summary: [
+        { label: 'Items to create', value: 3, format: 'count' },
+        { label: 'Opening stock value', value: 123456, format: 'money' },
+      ],
+    });
+    renderPage(imp.id);
+
+    expect(await screen.findByText('Items to create')).toBeInTheDocument();
+    expect(screen.getByText('Items to create').nextElementSibling).toHaveTextContent('3');
+    expect(screen.getByText('Opening stock value')).toBeInTheDocument();
+    expect(screen.getByText('1,234.56')).toBeInTheDocument();
+  });
+
+  it('a committed inventory import shows created and opening counts', async () => {
+    const imp = baseImport({
+      kind: 'INVENTORY_ITEMS',
+      status: 'COMMITTED',
+      committedAt: new Date().toISOString(),
+      result: { kind: 'INVENTORY_ITEMS', createdCount: 4, openingStockCount: 2 },
+    });
+    mockRoutes(imp, [baseRow({ accountCode: null })], { ...EMPTY_PREVIEW, kind: 'INVENTORY_ITEMS', canCommit: false });
+    renderPage(imp.id);
+
+    expect(await screen.findByText('Committed: 4 items created, opening stock posted for 2.')).toBeInTheDocument();
   });
 });

@@ -3,9 +3,12 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { parseCsv } from '../../utils/csv.js';
+import { isDateFormat, type DateFormat } from '../../utils/dateParse.js';
+import { parseImportCell, suggestDateFormat } from '../../utils/importValues.js';
 import { compactHeader, findMissingRequired, resolveColumnIndexes } from '../../utils/importColumns.js';
 import { MAX_IMPORT_ROWS } from '../../config/constants.js';
 import { getImportKind } from './importKinds.js';
+import { importDateFormatOnClient } from './importRowStore.js';
 import {
   canTransitionMigrationImport,
   isAccountType,
@@ -33,8 +36,9 @@ import {
  *
  * Column resolution goes through the kind registry (`importKinds.ts`): the
  * template header, then synonyms, unless the caller supplies a `columnMap`
- * (column key -> file header) that overrides the automatic match. There is
- * no `dateFormat` yet — no kind has a date column. Every function takes `orgId` first and every statement carries an
+ * (column key -> file header) that overrides the automatic match. A data-storage
+ * kind (Phase 36b) parses typed cells into `data` using the import's
+ * `dateFormat`. Every function takes `orgId` first and every statement carries an
  * `org_id` predicate (guardrails rule 1).
  */
 
@@ -70,6 +74,7 @@ interface ImportRow {
   created_at: Date;
   column_map: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
+  date_format: string;
 }
 
 const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, i.row_count, i.error_count,
@@ -79,7 +84,8 @@ const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, 
                                  WHERE r.org_id = i.org_id AND r.import_id = i.id AND r.status = 'EXCLUDED') AS excluded_count,
                                i.journal_entry_id, i.committed_at,
                                i.created_by, u.name AS created_by_name, i.created_at,
-                               i.column_map, i.result
+                               i.column_map, i.result,
+                               COALESCE(i.options->>'dateFormat', 'ISO') AS date_format
                           FROM migration_imports i
                           LEFT JOIN users u ON u.id = i.created_by`;
 
@@ -107,6 +113,7 @@ function toImport(row: ImportRow): MigrationImport {
     createdAt: row.created_at.toISOString(),
     columnMap: row.column_map,
     result: row.result,
+    dateFormat: isDateFormat(row.date_format) ? row.date_format : 'ISO',
   };
 }
 
@@ -130,6 +137,8 @@ interface RowRow {
   party_notes: string | null;
   errors: string[];
   status: string;
+  data: Record<string, string | number | null> | null;
+  group_key: string | null;
 }
 
 function toRow(row: RowRow): MigrationImportRow {
@@ -168,13 +177,15 @@ function toRow(row: RowRow): MigrationImportRow {
     partyNotes: row.party_notes,
     errors: row.errors,
     status,
+    values: row.data ?? {},
+    groupKey: row.group_key,
   };
 }
 
 const ROW_COLUMNS = `id, row_number, raw, account_code, account_name, account_type, parent_code,
                      description, debit_cents, credit_cents,
                      party_name, party_email, party_phone, party_address, party_tax_number,
-                     party_payment_terms, party_notes, errors, status`;
+                     party_payment_terms, party_notes, errors, status, data, group_key`;
 
 // ---------------------------------------------------------------------- reads
 
@@ -376,6 +387,7 @@ export interface CreateImportInput {
   fileName: string;
   content: string;
   columnMap: Record<string, string | null> | null;
+  dateFormat: DateFormat;
 }
 
 /** Shared by `createImport` and `inspectImport`: parse, cap rows, resolve columns. */
@@ -406,6 +418,21 @@ export function inspectImport(input: { kind: MigrationImportKind; content: strin
     suggestedMap[col.key] = idx === null || idx === undefined ? null : (table.headers[idx] ?? null);
   }
   const templateCompacts = new Set(def.columns.map((col) => compactHeader(col.header)));
+  let suggestedDateFormat: DateFormat | null = null;
+  const dateIdxs = def.columns
+    .filter((col) => col.type === 'date')
+    .map((col) => columns[col.key])
+    .filter((idx): idx is number => idx !== null && idx !== undefined);
+  if (def.columns.some((col) => col.type === 'date')) {
+    const samples: string[] = [];
+    for (const cells of table.rows) {
+      for (const idx of dateIdxs) {
+        const text = (cells[idx] ?? '').trim();
+        if (text !== '') samples.push(text);
+      }
+    }
+    suggestedDateFormat = suggestDateFormat(samples);
+  }
   return {
     kind: input.kind,
     headers: table.headers,
@@ -415,6 +442,7 @@ export function inspectImport(input: { kind: MigrationImportKind; content: strin
     suggestedMap,
     missingRequired,
     exactMatch: missingRequired.length === 0 && table.headers.every((h) => templateCompacts.has(compactHeader(h))),
+    suggestedDateFormat,
   };
 }
 
@@ -434,15 +462,15 @@ export async function createImport(
       const label = def.columns.find((c) => c.key === firstMissing)?.label ?? firstMissing;
       throw new ApiError(422, def.missingMessages[firstMissing] ?? `Could not find a "${label}" column in the file`);
     }
-    const parsed = table.rows.map((cells, i) => def.parseRow(cells, columns, i + 2));
+    const parsed = table.rows.map((cells, i) => def.parseRow(cells, columns, i + 2, { dateFormat: input.dateFormat }));
 
     if (parsed.length === 0) {
       throw new ApiError(422, 'The file contains no data rows');
     }
 
     const { rows: importRows } = await client.query<{ id: string }>(
-      `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by, column_map)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
+      `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by, column_map, options)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, jsonb_build_object('dateFormat', $8::text))
        RETURNING id`,
       [
         orgId,
@@ -452,6 +480,7 @@ export async function createImport(
         parsed.length,
         createdBy,
         input.columnMap === null ? null : JSON.stringify(input.columnMap),
+        input.dateFormat,
       ],
     );
     const importId = importRows[0]?.id;
@@ -461,19 +490,21 @@ export async function createImport(
       `INSERT INTO migration_import_rows
          (org_id, import_id, row_number, raw, account_code, account_name, account_type, parent_code,
           description, debit_cents, credit_cents,
-          party_name, party_email, party_phone, party_address, party_tax_number, party_payment_terms, party_notes)
+          party_name, party_email, party_phone, party_address, party_tax_number, party_payment_terms, party_notes, data, group_key)
        SELECT $1, $2, v.row_number, v.raw::jsonb, v.account_code, v.account_name, v.account_type,
               v.parent_code, v.description, v.debit_cents, v.credit_cents,
               v.party_name, v.party_email, v.party_phone, v.party_address, v.party_tax_number,
-              v.party_payment_terms, v.party_notes
+              v.party_payment_terms, v.party_notes,
+              v.data::jsonb, v.group_key
          FROM unnest(
                 $3::int[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[], $9::text[],
                 $10::bigint[], $11::bigint[],
-                $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[]
+                $12::text[], $13::text[], $14::text[], $15::text[], $16::text[], $17::text[], $18::text[],
+                $19::text[], $20::text[]
               ) AS v(row_number, raw, account_code, account_name, account_type, parent_code, description,
                       debit_cents, credit_cents,
                       party_name, party_email, party_phone, party_address, party_tax_number,
-                      party_payment_terms, party_notes)`,
+                      party_payment_terms, party_notes, data, group_key)`,
       [
         orgId,
         importId,
@@ -493,6 +524,8 @@ export async function createImport(
         parsed.map((r) => r.partyTaxNumber),
         parsed.map((r) => r.partyPaymentTerms),
         parsed.map((r) => r.partyNotes),
+        parsed.map((r) => (r.data === null ? null : JSON.stringify(r.data))),
+        parsed.map((r) => r.groupKey),
       ],
     );
 
@@ -530,6 +563,8 @@ export interface PatchRowInput {
   partyPaymentTerms?: string | null | undefined;
   partyNotes?: string | null | undefined;
   status?: 'VALID' | 'EXCLUDED' | undefined;
+  /** storage:'data' kinds: column key -> new cell text. */
+  values?: Record<string, string | null> | undefined;
 }
 
 /** Applies one row fix, then re-validates the whole import. Refused on COMMITTED. */
@@ -540,13 +575,16 @@ export async function patchRow(
   input: PatchRowInput,
 ): Promise<{ import: MigrationImport; row: MigrationImportRow }> {
   return withTransaction(async (client) => {
-    const { rows: statusRows } = await client.query<{ status: string }>(
-      'SELECT status FROM migration_imports WHERE id = $1 AND org_id = $2',
+    const { rows: statusRows } = await client.query<{ status: string; kind: string }>(
+      'SELECT status, kind FROM migration_imports WHERE id = $1 AND org_id = $2',
       [importId, orgId],
     );
     const importStatus = statusRows[0]?.status;
-    if (importStatus === undefined) throw new ApiError(404, 'Migration import not found');
+    const importKind = statusRows[0]?.kind;
+    if (importStatus === undefined || importKind === undefined) throw new ApiError(404, 'Migration import not found');
     if (importStatus === 'COMMITTED') throw new ApiError(409, 'This import has already been committed');
+    if (!isMigrationImportKind(importKind)) throw new Error(`Unknown migration import kind "${importKind}"`);
+    const def = getImportKind(importKind);
 
     // Column names come from this frozen map, never from the request — rule 4
     // forbids interpolating an identifier a caller could influence.
@@ -571,11 +609,38 @@ export async function patchRow(
     const assignments: string[] = [];
     const values: unknown[] = [rowId, orgId, importId];
 
+    const legacyKeys = (Object.keys(COLUMNS) as (keyof typeof COLUMNS)[]).filter(
+      (key) => key !== 'status' && input[key] !== undefined,
+    );
+    if (def.storage === 'data' && legacyKeys.length > 0) {
+      throw new ApiError(400, 'Edit this import with "values"');
+    }
+    if (def.storage === 'typed' && input.values !== undefined) {
+      throw new ApiError(400, 'This import kind does not take "values"');
+    }
+
     for (const key of Object.keys(COLUMNS) as (keyof typeof COLUMNS)[]) {
       const value = input[key];
       if (value === undefined) continue;
       values.push(value);
       assignments.push(`${COLUMNS[key]} = $${String(values.length)}`);
+    }
+
+    if (input.values !== undefined) {
+      const dateFormat = await importDateFormatOnClient(client, orgId, importId);
+      const rawPatch: Record<string, string> = {};
+      const dataPatch: Record<string, string | number | null> = {};
+      for (const [key, text] of Object.entries(input.values)) {
+        const col = def.columns.find((c) => c.key === key);
+        if (col === undefined) throw new ApiError(400, `Unknown field "${key}"`);
+        rawPatch[key] = text ?? '';
+        const parsed = parseImportCell(col, text ?? '', dateFormat);
+        dataPatch[key] = parsed.ok ? parsed.value : null;
+      }
+      values.push(JSON.stringify(dataPatch));
+      assignments.push(`data = COALESCE(data, '{}'::jsonb) || $${String(values.length)}::jsonb`);
+      values.push(JSON.stringify(rawPatch));
+      assignments.push(`raw = raw || $${String(values.length)}::jsonb`);
     }
 
     if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
@@ -636,6 +701,12 @@ export async function commit(
   createdBy: string,
   importId: string,
 ): Promise<{ import: MigrationImport; result: CommitResult }> {
+  // Pre-transaction reads (rule 5): the kind, and whatever its prepareCommit
+  // needs from the pool. Nothing below BEGIN may touch `pool`.
+  const kindRow = await getImportById(orgId, importId);
+  const def = getImportKind(kindRow.kind);
+  const context = (await def.prepareCommit?.(orgId)) ?? { inventoryProfile: null };
+
   const client = await pool.connect();
   try {
     await beginTransaction(client);
@@ -655,9 +726,28 @@ export async function commit(
     if (!isMigrationImportKind(locked.kind)) {
       throw new Error(`Unknown migration import kind "${locked.kind}"`);
     }
-    const kind = locked.kind;
+    if (locked.kind !== kindRow.kind) throw new Error('import kind changed');
 
-    const result = await getImportKind(kind).commitOnClient(client, orgId, importId, createdBy);
+    // A data kind's rows can go stale between validation and commit (an account
+    // deactivated, a code taken), so they are re-validated under the lock.
+    if (def.storage === 'data') {
+      const { rows: rowRows } = await client.query<RowRow>(
+        `SELECT ${ROW_COLUMNS} FROM migration_import_rows
+          WHERE org_id = $1 AND import_id = $2 AND status <> 'EXCLUDED'
+          ORDER BY row_number ASC`,
+        [orgId, importId],
+      );
+      const results = await def.validateRows(client, orgId, rowRows.map(toRow));
+      const invalid = results.filter((r) => r.errors.length > 0).length;
+      if (invalid > 0) {
+        throw new ApiError(
+          409,
+          `${String(invalid)} row(s) became invalid since validation — re-validate to see them`,
+        );
+      }
+    }
+
+    const result = await def.commitOnClient(client, orgId, importId, createdBy, context);
 
     await client.query('UPDATE migration_imports SET result = $1::jsonb WHERE id = $2 AND org_id = $3', [
       JSON.stringify(result),

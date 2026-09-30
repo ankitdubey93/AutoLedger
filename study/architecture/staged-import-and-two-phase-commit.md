@@ -165,6 +165,102 @@ A: The outcome has a different shape per kind — chart and parties produce coun
 - "What if the commit takes a minute and the client times out?" The transaction continues on the server; the client's retry blocks on the lock and then gets the 409, and the persisted `result` tells the detail page what happened. There is no partial state to clean up.
 - "Why a 409 and not a 200 for the loser, since the work was done?" The loser did not do it, and the caller cannot tell from a 200 which request caused the effect. A 409 is honest, and the `COMMITTED` import's `result` is one `GET` away.
 
+## Phase 36b additions — typed cells in JSONB, revalidate-at-commit, a pre-transaction hook, merge vs create-only
+
+Phase 36b added the first two **JSONB-staged** kinds (`ITEMS` — Products & Services; `INVENTORY_ITEMS` — tracked stock with opening stock) and the generic machinery every later kind reuses. **Verified against:** PostgreSQL 16 (`READ COMMITTED`), Node 22, `pg` 8; every claim below was read in the named file, and the behaviours are pinned by `itemImport.test.ts` and `inventoryItemImport.test.ts`. One number is unmeasured: only the 2-row case was timed (about 111 ms end to end); a 1000-row import, which posts 1000 opening journal entries in one transaction, has not been.
+
+### `storage: 'typed' | 'data'` and keeping the raw text next to the parsed value
+
+The four 36a kinds stage into **typed columns** (`account_code`, `debit_cents`, …) because their shape is fixed and the columns carry CHECKs. A kind with thirty optional columns would need thirty nullable columns that mostly stay empty, so a kind declares `storage: 'data'` and its row goes into two JSONB columns that migration 078 had already added:
+
+- `raw` — `{ key: trimmed cell text }`, exactly what the user typed.
+- `data` — `{ key: parsed value }`, produced by `parseImportCell` (`utils/importValues.ts`): money becomes integer cents, a percentage basis points, a quantity milli-units, a date an ISO string, an enum its canonical value (`SERVICE`). An empty cell and an **unparseable cell are both `null`** in `data`.
+
+Keeping `raw` is what makes that second case recoverable. The row's error list says `Sale price "abc" is not an amount`, the edit box shows `abc` (`raw`), and the validator regenerates the error from `raw` every time (`dataRowParseErrors(columns, row.raw, dateFormat)`), so a parse error is never a value that silently became `null`. This is the 36a gotcha "a parse failure and a validation failure are staged identically" fixed for the data kinds: the distinction is now `raw` non-empty with `data` null.
+
+`parseDataRow` (`importRowParsers.ts`) is the one generic parser; a data kind's `parseRow` is a one-liner over its column list. `migrationImportService.createImport` passes `{ dateFormat }` in and inserts `data`/`group_key` through two more `unnest` arrays (each row's object travels as a JSON string and is cast per element with `v.data::jsonb`, the same array-per-row trick as `errors`).
+
+### Partial edits: `PATCH { values }`
+
+A fix sends `{ values: { salePrice: '99.50' } }` — text, never a parsed number, so the server stays the only parser. `patchRow` re-parses each key with the same `parseImportCell`, then runs one UPDATE that **merges** both columns: `data = COALESCE(data, '{}'::jsonb) || $n::jsonb` and `raw = raw || $m::jsonb` (see [the JSONB note](../postgresql/jsonb-user-defined-attributes.md#phase-36b-additions--coalescedata--patch-for-partial-row-edits)). Three guards come first: a data kind refuses the legacy typed keys (`400 Edit this import with "values"`), a typed kind refuses `values`, and a key that is not one of the kind's columns is a `400 Unknown field` — the key is looked up in `def.columns` and only then placed in a JSON *parameter*, never in SQL text (rule 4). Then the normal `revalidateOnClient` runs over the whole import, exactly as for typed kinds.
+
+### Revalidate-at-commit: a time-of-check/time-of-use gap between validate and commit
+
+Validation happens at stage time and after every patch. The user may commit an hour later. In between, **other tables change**: an account the row names is deactivated, a product code is taken by another user, a stock item is created through the normal form. The `FOR UPDATE` lock on the import row (36a) serializes two commits of *this import*; it does nothing about the `accounts` or `items` rows the validation read. So the import's stored `VALIDATED` status is a cache of a judgement about the past.
+
+`migrationImportService.commit` therefore, for `storage === 'data'` kinds, loads the non-EXCLUDED rows **after taking the lock and on the same client** and runs `def.validateRows` again. If any row now has errors it throws `409 N row(s) became invalid since validation — re-validate to see them`; the transaction rolls back, the import stays `VALIDATED`, and nothing has been created. The named test is `commit revalidates: an account deactivated after validation blocks commit` — it deactivates the Revenue account directly through `pool` between validate and commit and asserts the 409 and that no item exists.
+
+This is not decoration: `itemService.assertAccount` (the domain check `createItemOnClient` runs) verifies existence, type and `is_postable` but **not `is_active`**, so without the re-run a deactivated account would pass straight through the commit. Be precise about what it does not do: it narrows the window to "between the re-validate statement and the last INSERT of this transaction" rather than closing it. A concurrent writer in that interval is caught only by whatever the domain function and the database constraints enforce (the item code's unique constraint surfaces as a 23505 that `itemImportService` maps to `409 Row N (CODE): Item code already exists`). Closing it fully would take row locks on every referenced account, which was judged not worth it for an import operated by one person.
+
+The legacy typed kinds are not re-validated at commit: the plan scoped the re-run to `storage === 'data'` kinds so their behaviour would not move, and the `chartImport`/`openingBalanceImport`/`partyImport` tests were the regression gate and stayed unedited. Whether they deserve the same re-run is an open question, not something verified here.
+
+### A pre-transaction hook for pool reads (rule 5)
+
+Some commits need a value that comes from a **pool** read — inventory's suggested industry profile (`setupService.suggestedProfileFor`, which reads organisation and settings data through `pool` and accounting's `settingsService`). Doing that inside the transaction would be a stray `pool.query` inside a transaction (rule 5): it runs on a different connection, cannot see the transaction's uncommitted writes, and survives a rollback. Doing it *after* `COMMIT` is forbidden too (no post-commit work). So `ImportKindDef` gained an optional `prepareCommit?: (orgId) => Promise<ImportCommitContext>`, and `commit` does, in order:
+
+1. `getImportById` (a pool read) to learn the kind,
+2. `def.prepareCommit?.(orgId)` — the **only** pool read in the commit flow — producing `{ inventoryProfile }`,
+3. `pool.connect()`, `BEGIN`, `SELECT … FOR UPDATE`,
+4. `if (locked.kind !== kindRow.kind) throw new Error('import kind changed')`,
+5. revalidate (data kinds), `def.commitOnClient(client, orgId, importId, createdBy, context)`.
+
+Step 4 exists because step 1 read the kind *before* the lock. The kind column is immutable, so the check is unreachable today; it is there so a future change that makes it reachable fails loudly instead of running kind A's strategy against kind B's rows. `inventoryItemImportService.commitOnClient` throws `prepareCommit did not run` if the context is empty, and narrows the string with `isStockIndustryKey` rather than a cast.
+
+The cost of the pattern: the profile is read once, before the lock, so it could in principle differ from what a concurrent settings change would produce by the time the first item is created. That is harmless here (it is only a *suggestion* used the first time inventory is silently set up) but it is a real property: a pre-transaction value is a snapshot, not part of the transaction's consistent view.
+
+### Fill-blanks merge (`ITEMS`) vs create-only (`INVENTORY_ITEMS`)
+
+Two different answers to "what if the code already exists", each chosen for what a wrong answer costs:
+
+- **`ITEMS` merges by filling blanks.** `fillMissingItemFieldsOnClient` runs `SET col = COALESCE(col, $n)` for exactly five columns (description, both prices, both accounts). It never touches name, type or tax rates. Why those last three are excluded: a blank `SalesTaxRate` cell is indistinguishable from "0%", so "fill if blank" cannot be applied to a rate without either overwriting a real 10% with 0 or never filling anything; and a name or type change on a product already used by posted documents is exactly the kind of edit a migration import should not make silently. Re-importing the same file is therefore idempotent and safe. The test `commit fills only blank fields of an existing product` creates a product with a price but no description, imports a different name, a different price and a description, and asserts the name and price are unchanged and only the description is set.
+- **`INVENTORY_ITEMS` is create-only.** An existing code is a row error pointing at the product form's Track inventory tick. Creating a stock item does more than fill a field — it creates stock-side rows, the linked product and an opening journal entry — so "merge" would mean retro-fitting inventory onto a product with history, which the product form already does deliberately and forward-only (`POST /inventory/items/from-product/:id`). The importer refuses rather than duplicate that decision.
+
+Duplicate codes inside the file are a row error on *every* row that shares the code (`appears more than once in this file (rows 2, 5)`), because the importer, unlike a person, cannot tell which of two rows was meant.
+
+### Where the new code lives
+
+- `server/src/utils/importValues.ts` — `parseImportCell`, `parsePercentBp`, `parseQuantityMilli`, `suggestDateFormat`; `server/src/__tests__/importValues.test.ts`
+- `server/src/services/accounting/importRowStore.ts` — `loadDataRowsOnClient`, `markCommittedOnClient`, `importDateFormatOnClient`, `importDateFormatForRowOnClient`
+- `server/src/services/accounting/importRowParsers.ts` — `parseDataRow`, `dataRowParseErrors`
+- `server/src/services/accounting/importAccountLookup.ts` — one `code = ANY($2::text[])` query per import, `accountCodeError`
+- `server/src/services/accounting/itemImportService.ts`, `inventoryItemImportService.ts`, and their column lists `importItemColumns.ts` / `importInventoryItemColumns.ts` (split out to avoid an `importKinds` ↔ service import cycle)
+- `server/src/services/accounting/migrationImportService.ts` — `patchRow`, `commit`, `inspectImport`
+- `server/src/__tests__/accounting/itemImport.test.ts`, `inventoryItemImport.test.ts`
+
+### Gotchas (36b)
+
+- **`validateRows` receives rows, not an import id**, so a validator that needs the import's `dateFormat` cannot call `importDateFormatOnClient(importId)`. The plan assumed it could; the implementation added `importDateFormatForRowOnClient(client, orgId, rowId)` (an org-scoped join from a row to its import). The `ITEMS` validator passes `'ISO'` because it has no date column.
+- **Validation is deliberately weaker than commit for some rules.** Barcode *uniqueness against existing stock* and the lot/serial opening-stock check when the Category cell is blank (the seam exposes no "default category") are only caught at commit, as a 409/422 that rolls the whole transaction back. The test `all-or-nothing: a bad barcode caught at commit rolls back every row` stages two rows, the second colliding with an existing item's barcode, and asserts the commit is 409, *neither* item exists, and the import is still `VALIDATED`. A rule checked only at commit means the user hears about it late — a real UX trade against a cross-module lookup.
+- **Every thrown row error is re-wrapped with `Row N (CODE):`**, preserving the `ApiError` status, so a 422 from deep inside inventory still names the line in the file.
+- **A dated column needs the format before it parses.** The same text `01/02/2026` is two dates. `dateFormat` is stored in `migration_imports.options` and read by both the parser and the patch path, and `inspect` returns `suggestedDateFormat` (see the integer-parsing note for the algorithm) so the wizard can preselect it — and refuse to stage while it is ambiguous.
+- **A pre-existing bug was found, not fixed:** `parseMoneyText` turns a digit-free word like `abc` into 0 (it strips a trailing three-letter currency code), and the legacy opening-balance and bank importers share it. `parseImportCell` guards against it for data kinds only; it was reported as out of scope.
+
+### Interview Q&A (36b)
+
+**Q: A row was valid when you staged it. Why validate it again at commit?**
+A: Because the validation read other tables, and nothing holds those rows still between "validated" and "commit". The import's stored `VALIDATED` status is a cached judgement about the past — the user may commit hours later, after someone deactivated an account the row names or created the product through the normal form. The `FOR UPDATE` on the import row only serializes commits of that import; it cannot protect rows in `accounts` or `items`. So commit re-runs `validateRows` after taking the lock, on the same client, and rolls back with a 409 if anything went stale. It is a classic time-of-check/time-of-use gap. It matters concretely here because the domain function the commit calls (`assertAccount`) checks type and postability but not `is_active`, so without the re-run a deactivated account would be accepted. It narrows the window rather than closing it; the residue is covered by domain checks and unique constraints.
+
+**Q: Where do you do a read that needs the pool when the rest of the operation is a transaction?**
+A: Before it. The rule is that inside a transaction every query uses the checked-out client, because a `pool.query` is another connection: it cannot see uncommitted work and it survives a rollback. After `COMMIT` is not allowed either, since follow-up work is queued rather than done inline. So the strategy interface has an optional `prepareCommit(orgId)` that the generic `commit` calls before `pool.connect()`, and whatever it returns is passed into `commitOnClient` as a context object. The price is that the value is a snapshot taken outside the transaction's consistent view, which is fine for a suggestion like a default industry profile and would not be fine for something the commit must agree with, such as a balance.
+
+**Q: Why store both `raw` and `data` for each staged row?**
+A: `data` is what commit uses, parsed into integers and canonical enums; `raw` is what the user typed. When parsing fails, `data` holds `null` and `raw` holds `abc`, so the UI can show the text in the edit box and the validator can regenerate `Sale price "abc" is not an amount` from it. With only the parsed value, "the user left it blank" and "the user typed something I couldn't read" would look identical. It also means a `PATCH` sends text and the server remains the only place that parses.
+
+**Q: When should an import merge into an existing record and when should it refuse?**
+A: Decide by what a wrong guess costs and whether the target field can distinguish "unset" from "zero". Products can be filled in safely — `COALESCE(col, $n)` on five columns is idempotent, and I exclude name, type and tax rates because a blank rate is indistinguishable from 0% and changing a name or type under posted documents is not something an import should do silently. Tracked inventory items are create-only because creating one has side effects (stock rows, a linked product, an opening journal) that would amount to retro-fitting inventory onto a product with history; the product form already does that as a deliberate, forward-only action, so the importer points the user there.
+
+**Q: Tell me about a time a plan's contract was wrong and how you handled it.**
+A: In 36b the plan had `validateRows` call `importDateFormatOnClient(client, orgId, importId)`, but the strategy signature receives rows, not an import id, so it could not. I did not change the interface for every kind; I added a small org-scoped helper that finds an import's date format from a row id and recorded the deviation in the plan's defect log. Two other findings went the same way: the `parseMoneyText("abc") === 0` bug, which I guarded in the new path and reported as a pre-existing defect in other importers rather than changing shared behaviour mid-step, and a hard-coded "four kinds" assertion in a 36a test that I replaced with one that tracks the exported kinds tuple, with the orchestrator's approval.
+
+**Q: Why is the all-or-nothing commit still right when one row in a thousand fails?**
+A: Because commit here writes real products, stock and journal entries, and a half-imported catalogue is worse than none: the user cannot tell which rows landed, and re-running creates duplicates or hits "already exists". Staging is where partial success is useful — bad rows sit as `INVALID` and can be fixed or excluded. Once `VALIDATED`, commit either does everything in one transaction or nothing, and a failure names the row (`Row 7 (WIDGET-02): …`). The bad-barcode test proves the atomicity: the first row is perfectly valid and still does not exist after the second fails.
+
+### Follow-ups they'll dig into (36b)
+
+- "Could you take row locks on the referenced accounts to close the revalidate window fully?" Yes — `SELECT … FOR SHARE` on the distinct account ids inside the transaction would block a concurrent deactivation. It was not done because an import is a one-operator action and the cost is a lock per referenced account; it would be the next step if imports ever run concurrently with heavy editing.
+- "What happens to a 5000-row inventory import?" It is one transaction and each opening receipt is its own journal entry, so the cost is linear and held under one connection; the row cap (5000) is the bound. Measured only for two rows so far.
+- "Why not commit in batches and resume?" Because that reintroduces partial state for exactly the data (GL entries) where partial state is hardest to reason about; you would need per-row idempotency keys and a resumable cursor, a different design.
+
 ## See also
 
 - [partial-unique-indexes.md](../postgresql/partial-unique-indexes.md) — the constraint that makes a second commit of an opening-balance import physically impossible.

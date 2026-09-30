@@ -1,7 +1,8 @@
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import * as accountService from './accountService.js';
-import type { AccountType, MigrationCommitPreview, MigrationImportRow } from '../../types/accounting.js';
+import type { AccountType, MigrationImportRow } from '../../types/accounting.js';
+import type { LegacyCommitPreview } from './importRowStore.js';
 
 /**
  * Chart-of-accounts import — the validate and commit halves, delegated to
@@ -100,7 +101,7 @@ export async function preview(
   client: PoolClient,
   orgId: string,
   importId: string,
-): Promise<MigrationCommitPreview> {
+): Promise<LegacyCommitPreview> {
   const { rows: importRows } = await client.query<{ status: string; error_count: number }>(
     'SELECT status, error_count FROM migration_imports WHERE id = $1 AND org_id = $2',
     [importId, orgId],

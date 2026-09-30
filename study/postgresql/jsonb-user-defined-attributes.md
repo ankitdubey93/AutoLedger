@@ -157,6 +157,68 @@ A: Because the database can cheaply enforce the *kind* of value (object versus a
 - "How would you prove the batched update is equivalent to the loop?" The legacy import tests (`chartImport`, `openingBalanceImport`, `partyImport`) were left unedited as the regression gate and pass against the batched statement; they assert per-row statuses and error text after staging and after a `PATCH`.
 - "Does `UPDATE … FROM` lock rows in a deterministic order?" Not specified — it follows the join plan. For a single import's rows, edited by one operator, concurrent lockers are not a realistic hazard here; for a workload where two batches could overlap rows, sort by key and lock in a fixed order (this codebase does that for stock balances, see `inventory-valuation-and-perpetual-stock.md`).
 
+## Phase 36b additions — COALESCE(data, '{}') || patch for partial row edits
+
+**Verified against:** PostgreSQL 16; the statement is in `migrationImportService.patchRow`, exercised by `itemImport.test.ts` (`PATCH values fixes a bad cell and revalidates`). Phase 36b is the first place **staged rows** live in JSONB: a `storage: 'data'` import kind writes `migration_import_rows.data` (parsed values) and `.raw` (the user's text) instead of typed columns. The column shapes were added by migration 078 (no migration in 36b).
+
+### The statement
+
+```sql
+UPDATE migration_import_rows
+   SET data = COALESCE(data, '{}'::jsonb) || $1::jsonb,
+       raw  = raw || $2::jsonb
+       [, status = $n]
+ WHERE id = $a AND org_id = $b AND import_id = $c
+ RETURNING id
+```
+
+Both parameters are `JSON.stringify`'d objects containing **only the keys the user edited** — `{ "salePrice": 9950 }` and `{ "salePrice": "99.50" }`. Everything else in the row is untouched.
+
+### Mechanism, and three details that bite
+
+- **`a || b` is a shallow, right-biased merge for two jsonb objects.** Top-level keys of `b` replace the same keys of `a`; keys only in `a` survive. It is a single expression evaluated by the executor against the row's current version, so the update is atomic per row. Two concurrent patches to *different* keys of the same row both apply: the second `UPDATE` waits on the row lock, and under `READ COMMITTED` re-evaluates its expression against the row version the first one committed (Postgres's "EvalPlanQual" recheck). The same fix written as read-the-row-in-Node, edit, write-the-whole-object would lose one of them. (Two patches to the *same* key are last-write-wins, as with any update.)
+- **`NULL || jsonb` is `NULL`.** A row staged by a typed kind has `data IS NULL`, and even for a data kind the column is nullable; without the `COALESCE(data, '{}'::jsonb)` the merge would set `data` to `NULL` and silently throw away the edit. `raw` needs no `COALESCE` because it is `NOT NULL DEFAULT '{}'` (migration 029); `data` is nullable with `CHECK (data IS NULL OR jsonb_typeof(data) = 'object')` (migration 078).
+- **Setting a key to JSON `null` does not remove it.** `{"a":1} || {"a":null}` is `{"a":null}` — the key stays, with a JSON null value. That is what this design wants: an unparseable or cleared cell is `null` in `data` (`values.salePrice === null` in JS, `data->>'salePrice' IS NULL` in SQL, both readings agree). Removing a key would need `-` (`data - 'salePrice'`), which would make "not edited" and "edited to blank" indistinguishable in the stored row.
+- **Numbers stay numbers here, unlike the attributes above.** The earlier section on this note argues for storing decimal attributes as strings because a JSON number round-trips through a 64-bit float. `data` holds *integers* — cents up to 1e15-ish, basis points, milli-units capped at 1 000 000 000 — all far inside 2^53−1, so they round-trip exactly through `JSON.parse`. The rule is "integers that fit are fine; arbitrary decimals are not".
+
+### Why JSONB for staged rows, and what stays typed
+
+| Option | Trade-off | Verdict |
+|---|---|---|
+| One nullable typed column per field across all kinds | Checked types; but thirty mostly-NULL columns per kind, a migration for every new kind | Rejected for new kinds; kept for the four 36a kinds |
+| A second table per kind | Clean types | Rejected — a table and a migration per kind for throwaway staging data |
+| **`data`/`raw` JSONB, shape owned by the kind's column definitions** | The database cannot type the keys | **Chosen** — the registry's `columns` list (`key`, `type`) is the contract; the DB enforces only `jsonb_typeof(data) = 'object'` |
+
+The keys come from that registry list and never from the request: `patchRow` looks each edited key up in `def.columns` (`400 Unknown field` otherwise) and puts the key inside a JSON *parameter* — identifiers are never interpolated into SQL text (rule 4). The value's validity is enforced by `parseImportCell` in application code, the same split of responsibility as the attribute definitions earlier in this note.
+
+### Gotchas (36b)
+
+- **`raw` and `data` can disagree only by design.** `raw` is the trimmed text, `data` the parse; a cell that fails to parse is `raw: "abc"`, `data: null`. Code that reads `data` alone cannot tell "blank" from "unreadable" — the validator reads `raw` for that (`dataRowParseErrors`).
+- **The `||` merge does not validate.** It will happily merge a key that is not a column. The `Unknown field` check in the service is the only thing preventing junk keys from accumulating in `data`.
+- **No GIN index on these columns, deliberately.** Staged rows are read by `import_id` and `row_number`, never searched by content, so a `jsonb_path_ops` index would be write cost for nothing.
+
+### Interview Q&A (36b)
+
+**Q: How do you update one field of a JSONB object without rewriting the rest?**
+A: With the `||` operator: `col = COALESCE(col, '{}'::jsonb) || $1::jsonb`, where the parameter is an object of only the changed keys. It is a shallow merge — keys in the right operand replace the left's, the rest stay — and it runs inside the UPDATE against the row's current version, so two concurrent edits of different keys both land (the second waits on the row lock and is re-evaluated on the committed version under `READ COMMITTED`). The alternative, reading the object into Node, editing it and writing it back, is a lost-update race. For a nested path you would use `jsonb_set(col, '{a,b}', …)` instead, since `||` does not merge recursively.
+
+**Q: Why the `COALESCE`?**
+A: Because `NULL || anything` is `NULL` in SQL, and the column is nullable (typed import kinds never write it). Without the `COALESCE`, the first edit of a NULL `data` would set it back to NULL and lose the edit without an error. It is the kind of bug that passes a test with a pre-filled row and fails on the first real one.
+
+**Q: Does merging `{"a": null}` remove the key?**
+A: No. `||` keeps the key with a JSON `null`. Removing it is `col - 'a'`. Here the difference is meaningful: a cleared or unparseable cell is stored as `null` so that "the user edited this to blank" stays distinguishable from "never touched", and `data->>'a'` returns SQL NULL either way, so readers do not care.
+
+**Q: You store integers in JSONB and an earlier note says decimals should be strings. Consistent?**
+A: Yes — the rule is about what survives `JSON.parse`, which produces a 64-bit float. Cents, basis points and milli-units are integers well below 2^53−1 (9.007e15), so they round-trip exactly; a high-precision decimal might not. I store the user's original text next to it in `raw`, so nothing depends on the float anyway.
+
+**Q: Why not just add typed columns for the new kinds?**
+A: Because the set of fields differs per kind and grows with each one (products have thirty, a later kind will have others), and the staging table is scratch data, not something other tables reference or query by content. Typed columns buy CHECK-enforced types, which matter for the ledger tables and for the four early kinds with their fixed shape; for scratch rows the type contract lives in the kind's column definitions and in one parser, and the database keeps only the `jsonb_typeof = 'object'` check.
+
+### Follow-ups they'll dig into (36b)
+
+- "What about a nested patch?" `||` is top-level only; nested would be `jsonb_set` or `jsonb_insert`. Staged cells are flat, so `||` suffices.
+- "Would you index `data`?" No: rows are fetched by `(org_id, import_id)`; nothing filters on cell content. Indexing would only slow the bulk staging insert.
+
 ## See also
 
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md) — the same "don't trust a JSON number for a precision-sensitive value" reasoning, applied to money

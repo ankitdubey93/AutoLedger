@@ -110,6 +110,7 @@ Phase 28 posted nothing to the GL. **Phase 32 adds the bridge, in both direction
 
 - **Inventory → accounting** (`services/inventory/stockGlService.ts`, `itemService.ts`): calls `accounting/itemService` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`), `settingsService.resolveInventoryPostingAccountsOnClient` and `journalService.createEntryOnClient` (`sourceType 'stock'`) on its own transaction client. It creates the linked product when an item is created and posts a journal for a linked item's manual movement.
 - **Accounting → inventory**: `invoiceService` and `billService` import exactly one module, `services/inventory/documentStockService.ts` (`receiveForDocumentOnClient`, `issueForDocumentOnClient`, `reverseDocumentOnClient`, `validateDocumentLinesOnClient`). Accounting builds its own journal from the values it returns; inventory writes no journal line for a document.
+- **Accounting's CSV importer (Phase 36b)** is a third caller of the same seam. `documentStockService.ts` gains `loadImportReferencesOnClient` (categories/units/locations keyed by upper-cased code and lower-cased name, plus which item codes already exist — five org-scoped reads on the caller's client), `createItemForImportOnClient` (the extracted `itemService.createItemOnClient`, a unique violation mapped to its 409), `suggestedProfileForImport` (a **pool** read — called before `BEGIN`) and `isStockIndustryKey`, and re-exports the `CreateStockItemInput` type so accounting imports no other inventory file.
 - The link is `stock_items.ledger_item_id` (no FK — rule 16 over rule 8; unique, frozen once set). Movements carry `source_type`/`source_id`/`gl_account_id`/`reverses_movement_id`.
 
 Verify the boundary with:
@@ -215,6 +216,10 @@ Tests: `server/src/__tests__/inventory/productTracking.test.ts` has 15 integrati
 The client tests are in `products.test.tsx`, `stockLines.test.tsx`, `inventoryGate.test.tsx` and `inventoryMovement.test.tsx`.
 
 ---
+
+### Import as a creation path — Phase 36b
+
+Tracked items can now also be created in bulk from **Inventory → Items → Import** (the `INVENTORY_ITEMS` kind of the accounting module's staged importer, [api.md § Migration imports](api.md)). One row = one tracked item + its linked product + optional `OPENING` receipt, created through exactly the path `POST /items` uses, so codes, barcodes, the default category/location and the GL posting behave identically; inventory is set up silently (suggested profile) when it is not yet. Create-only — an existing product is tracked from its own form. Opening stock is for `QUANTITY`-tracked items; lot/serial opening stock is refused and goes under Stock movements → Receive. All rows commit in one transaction, so a failure (for instance a barcode colliding with existing stock) rolls back every row.
 
 ## Deliberately not built
 

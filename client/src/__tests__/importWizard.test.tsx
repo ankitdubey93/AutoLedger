@@ -23,6 +23,7 @@ function inspection(overrides: Partial<MigrationImportInspection> = {}): Migrati
     suggestedMap: { partyName: '*ContactName', partyEmail: 'EmailAddress' },
     missingRequired: [],
     exactMatch: true,
+    suggestedDateFormat: null,
     ...overrides,
   };
 }
@@ -217,5 +218,49 @@ describe('NewMigrationImportPage wizard', () => {
 
     const panel = await screen.findByRole('complementary', { name: 'How to import' });
     expect(within(panel).getByText(/matched by email/)).toBeInTheDocument();
+  });
+
+  it('a date-bearing kind shows the date-format select, preset from inspect', async () => {
+    mockApi(
+      inspection({
+        kind: 'INVENTORY_ITEMS',
+        headers: ['*ItemName'],
+        sampleRows: [['Widget']],
+        suggestedMap: { itemName: '*ItemName' },
+        exactMatch: true,
+        suggestedDateFormat: 'DMY',
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage('/migration-imports/new?kind=INVENTORY_ITEMS&returnTo=%2Finventory%2Fitems');
+
+    await uploadCsv(user, '*ItemName\nWidget');
+
+    const select = (await screen.findByLabelText('Date format in your file')) as HTMLSelectElement;
+    expect(select.value).toBe('DMY');
+
+    await user.click(screen.getByRole('button', { name: 'Stage import' }));
+    await waitFor(() => expect(postBody('/migration-imports')).toBeDefined());
+    expect(postBody('/migration-imports')).toMatchObject({ kind: 'INVENTORY_ITEMS', dateFormat: 'DMY' });
+  });
+
+  it('an ambiguous date format must be chosen before staging', async () => {
+    mockApi(
+      inspection({
+        kind: 'INVENTORY_ITEMS',
+        headers: ['*ItemName'],
+        sampleRows: [['Widget']],
+        suggestedMap: { itemName: '*ItemName' },
+        exactMatch: true,
+        suggestedDateFormat: null,
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage('/migration-imports/new?kind=INVENTORY_ITEMS&returnTo=%2Finventory%2Fitems');
+
+    await uploadCsv(user, '*ItemName\nWidget');
+
+    expect(await screen.findByText('Choose the date format your file uses')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Stage import' })).toBeDisabled();
   });
 });

@@ -4,6 +4,7 @@ import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
+import { MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
 
 /**
  * Accounting — the staged importer's registry, column mapping, inspect
@@ -39,7 +40,7 @@ async function stage(content: string, kind = 'CUSTOMERS', columnMap?: Record<str
   return agentA.post(IMPORTS).send({ kind, fileName: 'f.csv', content, ...(columnMap ? { columnMap } : {}) });
 }
 
-it('GET /kinds lists the four kinds with template metadata', async () => {
+it('GET /kinds lists every kind with template metadata', async () => {
   const res = await agentA.get(`${IMPORTS}/kinds`);
 
   expect(res.status).toBe(200);
@@ -48,7 +49,7 @@ it('GET /kinds lists the four kinds with template metadata', async () => {
     columns: { header: string; required: boolean }[];
     requiredOneOf: string[][];
   }[];
-  expect(kinds.map((k) => k.kind)).toEqual(['CHART_OF_ACCOUNTS', 'OPENING_BALANCES', 'CUSTOMERS', 'VENDORS']);
+  expect(kinds.map((k) => k.kind)).toEqual([...MIGRATION_IMPORT_KINDS]);
   const customers = kinds.find((k) => k.kind === 'CUSTOMERS');
   expect(customers?.columns[0]?.header).toBe('*ContactName');
   expect(customers?.columns[0]?.required).toBe(true);

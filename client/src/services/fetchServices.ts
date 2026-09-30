@@ -2810,7 +2810,14 @@ export async function resumeOnboarding(module: string): Promise<OnboardingState>
 
 /* ---------------------------------------------- accounting: migration imports (9b) */
 
-export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS';
+export type MigrationImportKind =
+  | 'CHART_OF_ACCOUNTS'
+  | 'OPENING_BALANCES'
+  | 'CUSTOMERS'
+  | 'VENDORS'
+  | 'ITEMS'
+  | 'INVENTORY_ITEMS';
+export type ImportDateFormat = 'ISO' | 'DMY' | 'MDY';
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
 
@@ -2824,15 +2831,20 @@ export interface ImportColumnMeta {
   note: string;
   example: string;
   inTemplate: boolean;
+  type: 'text' | 'money' | 'percent' | 'quantity' | 'date' | 'enum';
+  maxLength: number | null;
+  enumAliases: Record<string, string> | null;
+  enumLabels: string[] | null;
 }
 
 /** One field the review page lets a user fix on a staged row. */
 export interface ImportEditFieldMeta {
   key: string;
   label: string;
-  input: 'text' | 'money' | 'accountType';
+  input: 'text' | 'money' | 'accountType' | 'enum';
   maxLength: number | null;
   nullable: boolean;
+  options: string[] | null;
 }
 
 export interface ImportKindMeta {
@@ -2843,6 +2855,7 @@ export interface ImportKindMeta {
   requiredOneOf: (string[])[];
   missingMessages: Record<string, string>;
   editFields: ImportEditFieldMeta[];
+  storage: 'typed' | 'data';
 }
 
 export interface MigrationImportInspection {
@@ -2854,6 +2867,7 @@ export interface MigrationImportInspection {
   suggestedMap: Record<string, string | null>;
   missingRequired: string[];
   exactMatch: boolean;
+  suggestedDateFormat: ImportDateFormat | null;
 }
 
 /** Mirrors server/src/types/accounting.ts's MigrationImport. */
@@ -2874,6 +2888,7 @@ export interface MigrationImport {
   createdAt: string;
   columnMap: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
+  dateFormat: ImportDateFormat;
 }
 
 /** Mirrors server/src/types/accounting.ts's MigrationImportRow. */
@@ -2898,6 +2913,9 @@ export interface MigrationImportRow {
   partyNotes: string | null;
   errors: string[];
   status: MigrationRowStatus;
+  /** Data-storage kinds: parsed cell values by column key. */
+  values: Record<string, string | number | null>;
+  groupKey: string | null;
 }
 
 /** Mirrors server/src/types/accounting.ts's MigrationCommitPreview. */
@@ -2916,12 +2934,22 @@ export interface MigrationCommitPreview {
   /** CUSTOMERS and VENDORS only. */
   partiesToCreate: number;
   partiesToMerge: number;
+  summary: PreviewSummaryItem[];
+  warnings: string[];
+}
+
+export interface PreviewSummaryItem {
+  label: string;
+  value: number;
+  format: 'count' | 'money';
 }
 
 export type MigrationCommitResult =
   | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
   | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
-  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
+  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
+  | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
+  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number };
 
 /** POST /migration-imports — OWNER, ADMIN or ACCOUNTANT. */
 export function createMigrationImport(body: {
@@ -2929,6 +2957,7 @@ export function createMigrationImport(body: {
   fileName: string;
   content: string;
   columnMap?: Record<string, string | null> | null;
+  dateFormat?: ImportDateFormat;
 }): Promise<{ success: boolean; import: MigrationImport; rows: MigrationImportRow[] }> {
   return apiFetch('/migration-imports', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -2987,7 +3016,8 @@ export function getMigrationImportRows(
 export function patchMigrationImportRow(
   id: string,
   rowId: string,
-  body: Record<string, string | number | null>, // keys are ImportEditFieldMeta keys from GET /migration-imports/kinds
+  // Typed kinds: flat ImportEditFieldMeta keys. Data kinds: { values: { key: text | null } }.
+  body: Record<string, string | number | null | Record<string, string | null>>,
 ): Promise<{ success: boolean; import: MigrationImport; row: MigrationImportRow }> {
   return apiFetch(`/migration-imports/${id}/rows/${rowId}`, {
     method: 'PATCH',

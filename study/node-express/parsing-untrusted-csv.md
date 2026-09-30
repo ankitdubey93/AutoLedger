@@ -93,6 +93,75 @@ A: The current parser is whole-string, in-memory — fine for a CSV under `MAX_C
 - *"Why not just use a well-known library and save the code?"* Guardrails rule 14 (no dependency before the phase that needs it) is the stated reason, but the practical one is that a hand-written parser gives exact control over error messages tied to a specific row number — a library's generic parse error wouldn't say "row 3: unterminated quote" in the vocabulary `bankImportService`'s all-or-nothing import failure message needs.
 - *"How would you test that the delimiter detection doesn't get fooled by a quoted field?"* Exactly the case `csv.test.ts`'s `'does not detect a delimiter that only appears inside quotes'` covers — a header like `"a;b",c` must detect comma, not semicolon, proving the quote-tracking in `detectDelimiter` actually excludes quoted content rather than just counting raw character occurrences.
 
+## Phase 36b additions — parsing human decimals to integers: percent → basis points, quantity → milli-units, and the date-format guess
+
+`parseCsv` (above) turns bytes into cells of text. The next layer turns a cell into a **typed value**, and for a money-adjacent number that layer must not go through a float. **Verified against:** Node 22 / V8 (IEEE-754 doubles); the code is `server/src/utils/importValues.ts` and its unit tests in `server/src/__tests__/importValues.test.ts`. This section is here rather than in a new note because it is the second half of the same pipeline (text → cells → typed cells); the sibling `parseMoneyText` (text → cents) is covered in [branded-types-for-money.md](../typescript/branded-types-for-money.md).
+
+### Why not `Math.round(parseFloat(x) * 100)`
+
+A double cannot represent most decimal fractions, so scaling can land a hair off an integer boundary — `1.005 * 100` is `100.49999999999999` in JavaScript, and `0.07 * 100` is `7.000000000000001`. `Math.round` papers over some of those and gets others wrong; which ones depends on the value, which is the worst property a money/tax path can have. The project's rule (guardrail 3) is integers only, and the importer applies it to *inputs*, not just storage.
+
+### The technique: split the digit string, scale with integers
+
+`parsePercentBp` and `parseQuantityMilli` never convert the decimal to a double. They match the text with an anchored regex that captures the **integer digits** and the **fraction digits** separately, pad the fraction to a fixed width, and combine with integer arithmetic:
+
+- **Percent → basis points (1 bp = 0.01%), 2 decimals max.** `bp = Number(int) * 100 + Number(frac.padEnd(2, '0'))`. So `12.5%` → int `12`, frac `5` → `'50'` → `1250`. Range `0..10000`; above that is `null`. The pad is the trick: `.5` means `.50`, not `.05`, which is exactly the bug `Number(frac)` alone would have.
+- **Quantity → milli-units, 3 decimals max.** `milli = Number(int) * 1000 + Number(frac.padEnd(3, '0'))`. `1,250.125` → `1250125`. Range `0..1_000_000_000`. This matches how the stock engine stores quantity (integer milli-units) and what `stock_uoms.decimal_places` (0–3) can express.
+
+Every `Number(...)` there is applied to a string of digits, and the result is range-checked **after** the multiplication — a 25-digit integer part loses precision as a double but is then rejected by the bound, so it can never reach the database as a wrong-but-plausible number. The `bp` and `milli` maxima are far below 2^53−1 (9 007 199 254 740 991).
+
+### What the parsers deliberately accept, and what they refuse
+
+- **Percent accepts human export shapes:** `10`, `10%`, `12.5 %`, and Xero-style labels such as `GST on Income (15%)` (a `%`-suffixed number found *anywhere* in the text), plus zero words (`exempt`, `tax exempt`, `no tax`, `none`, `zero rated`, `n/a`, or any text containing `exempt`) → `0`. More than 2 decimals on a bare number (`10.125`) is `null`, not rounded: silently changing a tax rate is worse than asking.
+- **Quantity strips commas only when they are unambiguous thousands separators** — the text must match `/^\d{1,3}(,\d{3})+(\.\d+)?$/`. `1,250.125` is one thousand two hundred fifty; `1,25` does **not** match, keeps its comma, fails the decimal regex and becomes `null`. Stripping every comma would read a European decimal comma as `125`, an order-of-magnitude error that looks like a valid number.
+- **Negatives and 4+ decimals are `null`** (`-1`, `1.2345`): the `-` and the fourth digit fail the anchored regex. A reorder point or an opening quantity is never negative, and a quantity that cannot be stored exactly should be refused, not rounded.
+- **Empty is not an error for any type** — `parseImportCell` returns `{ ok: true, value: null }` first; *required* is a separate rule in the validator. That split lets an optional column be blank while a required one is reported as `Name is required`, rather than every type inventing its own "empty" error.
+- **Money goes through `parseMoneyText`**, with two guards in `parseImportCell`: a negative result is an error (`cannot be negative`), and text with no digit at all (other than `-`, `—`, `n/a`) is rejected, because `parseMoneyText` strips a trailing three-letter currency code and therefore turns the word `abc` into `0`. That last case was found while writing the tests; the guard is only in the data-kind path, and the legacy opening-balance and bank importers still share the unguarded function (reported as a pre-existing defect, not fixed here).
+
+### Guessing the date format from the file
+
+`01/02/2026` is 1 February or 2 January; the text cannot say. `suggestDateFormat(samples)` looks at **every non-empty date cell in the file** (not just the first few) and answers from what is *provably* true:
+
+1. no samples, or all match `YYYY-MM-DD` → `ISO`;
+2. any `a/b/c`-shaped value (separators `/`, `-`, `.`) whose **first** part is > 12 → `DMY` (a month cannot be 31);
+3. else any whose **second** part is > 12 → `MDY`;
+4. else `null` — ambiguous.
+
+`null` is the honest answer and the UI respects it: the wizard shows an unset `Choose…` select, adds the problem `Choose the date format your file uses`, and disables staging until the user picks. The chosen format is stored in `migration_imports.options.dateFormat` and used by both the parser and the `PATCH` path. Tests: `inspect suggests DMY for an unambiguous day-first file` and `DMY dates parse with dateFormat`.
+
+### Gotchas (36b)
+
+- **A known defect in the embedded-percent regex.** The `%`-anywhere pattern is unanchored, so `5.005%` (three decimals) matches its tail `005%` and parses as 500 bp, while the bare `10.125` is correctly refused. Real exports rarely have 3-decimal percentages; the planned fix is a `(?<![\d.])` lookbehind so a match cannot start mid-number. Left unfixed and logged in the plan; do not claim the parser rejects all over-precise percentages.
+- **`suggestDateFormat` does not detect contradictions.** A file mixing a `31/01` row and a `01/31` row returns `DMY` (rule 2 fires first); the day-last rows then fail parsing and appear as row errors. Loud, not silent, but not detected up front.
+- **Two-digit years, month names and other separators** are whatever `parseFlexibleDate` handles; `suggestDateFormat` only reasons about three numeric parts.
+- **`parseQuantityMilli` returns `0` for `0`**, so "more than zero" is a separate row rule (`Opening quantity must be more than zero`).
+
+### Interview Q&A (36b)
+
+**Q: Why not multiply by 100 and round?**
+A: Because the multiplication happens in binary floating point, where most decimal fractions are not exactly representable. `1.005 * 100` evaluates to `100.49999999999999`, so `Math.round` gives 100 where a human expects 101, and `0.07 * 100` is `7.000000000000001`. Whether rounding rescues you depends on the particular value, which is unacceptable for tax rates and quantities. I parse the digit string instead: capture integer and fraction digits with an anchored regex, pad the fraction to the fixed width, and compute `int * 100 + frac` in integer arithmetic. No double ever holds the decimal.
+
+**Q: What does `padEnd` do in that, and what goes wrong without it?**
+A: It aligns the fraction to its place value. `12.5` has fraction digits `5`, which means 50 hundredths. `Number('5')` would add 5, reading it as `.05`, giving 1205 bp instead of 1250. Padding to the fixed width (2 for basis points, 3 for milli-units) makes the digit string mean what it means to the reader.
+
+**Q: A quantity cell says `1,25`. What should a parser do?**
+A: Refuse it. In some locales that is one and a quarter, in others a malformed thousands group; guessing a meaning produces a number that is wrong by 100x and still valid-looking. The parser strips commas only when the whole text matches the strict thousands pattern (groups of exactly three digits after a 1–3 digit head), so `1,250.125` works and `1,25` becomes a row error the user can fix or re-export.
+
+**Q: Why return `null` instead of a best guess for an ambiguous date format?**
+A: A wrong guess imports every date in the file wrongly and plausibly: 3 February posted as 2 March is valid, and nothing downstream can tell. So inference only fires when a value proves the format (a day of 31 cannot be a month), and otherwise the UI makes the user choose, blocking the stage button until they do. The cost is one extra click on genuinely ambiguous files; the benefit is that no date is ever silently transposed.
+
+**Q: You found a bug in a shared function while writing this. What did you do?**
+A: `parseMoneyText` turns a digit-free word like `abc` into 0 because it strips a trailing three-letter currency code first. The new importer's test for "an unparseable sale price is a row error" exposed it. I added a guard inside `parseImportCell` so the new path is correct, did not change the shared function because two other importers (opening balances and bank statements) depend on its current behaviour and have their own unedited tests, and reported it as a pre-existing defect for the owner to schedule. Fixing in place would have widened the step's blast radius beyond what the plan's regression gate covered.
+
+**Q: Why is a parse error stored as `null` and not thrown?**
+A: Staging is meant to hold bad rows so a human can fix them, so a parse failure must not abort the file. The staged row keeps the user's text in `raw` and `null` in the typed value; the validator re-derives the error message from `raw`. Throwing would bring back the abort-on-first-error shape this importer was built to avoid.
+
+### Follow-ups they'll dig into (36b)
+
+- "Would you use a decimal library?" Possibly in a larger domain; here rule 14 (no dependency before the phase that needs it) and the fact that the required transform is a fixed-width digit split make a dependency unnecessary. A library would also not remove the need to decide what `1,25` means.
+- "What is the largest quantity you accept, and why?" `1_000_000_000` milli-units (a million units), the cap in the plan's contract. It sits far below 2^53−1; the plan does not record a deeper rationale, so do not invent one in an interview.
+- "How is `10` read — 10% or 0.10?" As 10%, 1000 bp; a bare number in a column labelled `Sales tax %` is a percent, not a fraction, and the template header and note say so.
+
 ---
 
 ## See also

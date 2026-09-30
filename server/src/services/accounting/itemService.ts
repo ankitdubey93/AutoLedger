@@ -209,6 +209,105 @@ async function assertAccount(
   }
 }
 
+/**
+ * The body of `createItem`'s transaction, on the caller's client (rule 5). Same
+ * account checks, same INSERT, same 422s; a unique violation (23505) is left to
+ * the caller so a batch importer can name the row.
+ */
+export async function createItemOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  input: CreateItemInput,
+): Promise<Item> {
+  if (input.revenueAccountId !== null) await assertAccount(client, orgId, input.revenueAccountId, 'Revenue');
+  if (input.expenseAccountId !== null) await assertAccount(client, orgId, input.expenseAccountId, 'Expense');
+
+  const { rows } = await client.query<ItemRow>(
+    `INSERT INTO items
+       (org_id, created_by, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
+        revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     RETURNING ${ITEM_COLUMNS}`,
+    [
+      orgId,
+      createdBy,
+      input.code,
+      input.name,
+      input.description,
+      kindFor(input.itemType),
+      input.itemType,
+      input.salePriceCents,
+      input.purchasePriceCents,
+      input.revenueAccountId,
+      input.expenseAccountId,
+      input.saleTaxRateBp,
+      input.purchaseTaxRateBp,
+    ],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
+  return toItem(row);
+}
+
+/**
+ * Fills ONLY currently-NULL columns (COALESCE), for the importer's merge of an
+ * existing product. Name, type and tax rates are never touched: a blank tax
+ * rate in a file is indistinguishable from 0%.
+ */
+export async function fillMissingItemFieldsOnClient(
+  client: PoolClient,
+  orgId: string,
+  itemId: string,
+  fields: {
+    description: string | null;
+    salePriceCents: number | null;
+    purchasePriceCents: number | null;
+    revenueAccountId: string | null;
+    expenseAccountId: string | null;
+  },
+): Promise<void> {
+  if (fields.revenueAccountId !== null) await assertAccount(client, orgId, fields.revenueAccountId, 'Revenue');
+  if (fields.expenseAccountId !== null) await assertAccount(client, orgId, fields.expenseAccountId, 'Expense');
+  await client.query(
+    `UPDATE items
+        SET description = COALESCE(description, $3),
+            sale_price_cents = COALESCE(sale_price_cents, $4),
+            purchase_price_cents = COALESCE(purchase_price_cents, $5),
+            revenue_account_id = COALESCE(revenue_account_id, $6),
+            expense_account_id = COALESCE(expense_account_id, $7)
+      WHERE id = $1 AND org_id = $2`,
+    [
+      itemId,
+      orgId,
+      fields.description,
+      fields.salePriceCents,
+      fields.purchasePriceCents,
+      fields.revenueAccountId,
+      fields.expenseAccountId,
+    ],
+  );
+}
+
+/** Exact code match, scoped to the org. */
+export async function findItemsByCodesOnClient(
+  client: PoolClient,
+  orgId: string,
+  codes: readonly string[],
+): Promise<Map<string, { id: string; itemType: ItemType; isActive: boolean }>> {
+  const out = new Map<string, { id: string; itemType: ItemType; isActive: boolean }>();
+  if (codes.length === 0) return out;
+  const { rows } = await client.query<{ id: string; code: string; item_type: string; is_active: boolean }>(
+    'SELECT id, code, item_type, is_active FROM items WHERE org_id = $1 AND code = ANY($2::text[])',
+    [orgId, [...codes]],
+  );
+  for (const row of rows) {
+    if (!isItemType(row.item_type)) throw new Error(`Unknown item type "${row.item_type}" on item ${row.id}`);
+    out.set(row.code, { id: row.id, itemType: row.item_type, isActive: row.is_active });
+  }
+  return out;
+}
+
 export async function createItem(orgId: string, createdBy: string, input: CreateItemInput): Promise<Item> {
   // Stock-managed types are created in Inventory, which creates the linked
   // product here in the same transaction (createLinkedItemOnClient).
@@ -216,36 +315,7 @@ export async function createItem(orgId: string, createdBy: string, input: Create
     throw new ApiError(422, 'Create inventory and asset items under Products & inventory → Stock — they appear here automatically');
   }
   try {
-    const { rows } = await withTransaction(async (client) => {
-      if (input.revenueAccountId !== null) await assertAccount(client, orgId, input.revenueAccountId, 'Revenue');
-      if (input.expenseAccountId !== null) await assertAccount(client, orgId, input.expenseAccountId, 'Expense');
-
-      return client.query<ItemRow>(
-        `INSERT INTO items
-           (org_id, created_by, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
-            revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-         RETURNING ${ITEM_COLUMNS}`,
-        [
-          orgId,
-          createdBy,
-          input.code,
-          input.name,
-          input.description,
-          kindFor(input.itemType),
-          input.itemType,
-          input.salePriceCents,
-          input.purchasePriceCents,
-          input.revenueAccountId,
-          input.expenseAccountId,
-          input.saleTaxRateBp,
-          input.purchaseTaxRateBp,
-        ],
-      );
-    });
-    const row = rows[0];
-    if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
-    return toItem(row);
+    return await withTransaction((client) => createItemOnClient(client, orgId, createdBy, input));
   } catch (err) {
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) throw new ApiError(409, 'Item code already exists');
     throw err;

@@ -99,6 +99,73 @@ A: Nothing. The change is forward-only by design. Posted invoice and bill lines 
 - "How do you know the two ledgers agree?" — a reconciliation query in the integrity script, per document, run after every test scenario.
 - "What about the worker process?" — bill approval also runs there (AP-Flow auto-post); because the seam is an ordinary import rather than a runtime registration, both processes get it.
 
+## Phase 36b additions — the seam's second caller: the CSV importer
+
+**Verified against:** PostgreSQL 16, Node 22; read in `documentStockService.ts` (the "Phase 36b: CSV import" section), `inventoryItemImportService.ts` and `inventory/itemService.ts`. Until 36b the seam's callers were *documents* (invoice and bill posting, reconciliation). The `INVENTORY_ITEMS` importer is the first caller that **creates inventory master data** from accounting, and it also has to read inventory's reference data (categories, units, locations, existing codes) to validate a row. Both needs cross the same module boundary, and rule 16 is unchanged: accounting imports exactly one inventory file.
+
+### What crosses, and how
+
+| Need | Seam export | Shape |
+|---|---|---|
+| Validate `Category`/`Unit`/`OpeningLocation` cells, detect an existing stock code, know whether inventory is set up | `loadImportReferencesOnClient(client, orgId, codes)` | Five org-scoped `SELECT`s returning plain maps, so accounting never writes a `stock_*` query |
+| Create the stock item, its linked product and opening stock atomically | `createItemForImportOnClient(client, orgId, userId, input, profile)` | Wraps inventory's own `createItemOnClient`; maps a unique violation to inventory's `ApiError` via its `uniqueViolationToApiError` |
+| Know the industry profile for silent first-time setup | `suggestedProfileForImport(orgId)` | A **pool** read, documented "call BEFORE a transaction" |
+| Narrow a string to the profile type | `isStockIndustryKey` | Type guard, delegating to `types/inventory.ts` |
+| The input type | `export type { CreateStockItemInput }` | Re-exported so accounting does not import `inventory/itemService.ts` for a type |
+
+The lookup maps are keyed **twice** onto one entry — `UPPER(code)` and `LOWER(name)` — so a cell may be a code or a name; the importer does `map.get(text.toUpperCase()) ?? map.get(text.toLowerCase())`. Codes are upper-case by constraint and the name key is lower-cased, so the two key spaces do not normally collide; I reasoned that rather than testing a pathological pair, so treat it as unproven.
+
+### Why the importer imports one module and re-exports the type
+
+The verifiable form of rule 16 is a grep: `grep -n "inventory/" server/src/services/accounting/inventoryItemImportService.ts` shows `import * as documentStockService from '../inventory/documentStockService.js'` and nothing else. The import is a namespace import on purpose — every inventory call reads `documentStockService.x`, so a reviewer sees the boundary at each use. The type re-export matters for the same reason: TypeScript imports are erased at runtime but are still *edges in the dependency graph*. If accounting imported `CreateStockItemInput` from `inventory/itemService.ts`, the boundary would hold at runtime and be violated in the import list; re-exporting keeps "one inventory import" literally true and lets inventory move the type without touching accounting.
+
+### The extraction that made it possible
+
+`inventory/itemService.createItem` used to be one function: `suggestedProfileFor` (a pool read), then `withTransaction`, then `getItem`. The transaction body is now `createItemOnClient(client, …, suggestedProfile)`; `createItem` is the composition of the same three steps, behaviour unchanged (the existing inventory item tests stayed unedited as the proof). Two decisions in that refactor:
+
+- The **pool read moved out of the function that runs on a client.** `createItemOnClient` *takes* the profile as a parameter instead of computing it, which lets a caller that already holds a transaction (the importer) supply a value computed earlier in `prepareCommit` (see the [staged-import note](staged-import-and-two-phase-commit.md#phase-36b-additions--typed-cells-in-jsonb-revalidate-at-commit-a-pre-transaction-hook-merge-vs-create-only)). The general move: push non-transactional I/O to the edge and make the core a function of a client plus plain values.
+- Accounting's own `itemService` got the parallel extraction (`createItemOnClient`, `fillMissingItemFieldsOnClient`, `findItemsByCodesOnClient`), so the `ITEMS` importer and the REST controller share one INSERT and one set of 422s instead of the importer re-implementing item creation.
+
+Opening stock then reuses the existing path: the extracted body ends in `postOpeningOnClient` → `receiveManualOnClient` with purpose OPENING, which posts the journal entry through the normal movement engine. The importer never computes a posted value; its preview's "Opening stock value" is `Math.round(qtyMilli × unitCostCents / 1000)` and is documented as preview-only.
+
+### Why a seam and not a duplicate query
+
+| Option | Trade-off | Verdict |
+|---|---|---|
+| Accounting queries `stock_categories` etc. directly for validation | Fewer files | Rejected — rule 16; the day inventory renames a column, accounting breaks and nothing in the type system says so |
+| Inventory owns the importer as an inventory-side import kind | Natural module ownership | Rejected — the machinery (staging, FSM, `FOR UPDATE`, mapper) is accounting's; inventory would have to import it, inverting the direction the code uses everywhere else |
+| A provider registry inverted into inventory | Cleaner direction | Rejected for the same reason as the Phase 32 "port" option above: registration must happen in every process |
+| **Extend the existing seam with import-specific functions** | The seam gains a second purpose | **Chosen** — one file to grep, one dependency direction, the same `*OnClient` contract |
+
+### Gotchas (36b)
+
+- **A seam function that does a pool read must say so.** `suggestedProfileForImport` is the single exception to "every function takes `client` first", and its comment says *call before a transaction*. The safeguard is structural too: the importer reaches it only from `prepareCommit`, which the generic commit runs before `pool.connect()`.
+- **A seam return value is a snapshot.** `loadImportReferencesOnClient` runs in validate and again in commit; between them a category may be deactivated. Revalidate-at-commit is what covers that.
+- **The seam now has two kinds of caller with different lock needs.** Document calls hold the document row's lock and follow the global lock order; the importer holds the *import* row's lock and creates items one at a time, never touching an existing balance. The lock-order header in the file describes documents — do not cite it for importer paths.
+- **Validation cannot see everything the seam will check.** Barcode uniqueness against existing stock is enforced by inventory's own insert and surfaces at commit (409, whole transaction rolled back), not in `validateRows`.
+
+### Interview Q&A (36b)
+
+**Q: Your accounting module needs inventory's categories and units to validate an import. How do you do that without reading its tables?**
+A: Through the one file accounting is allowed to import from inventory. I added `loadImportReferencesOnClient(client, orgId, codes)`, which runs org-scoped queries on the caller's client and returns plain maps, and `createItemForImportOnClient` for the write. Accounting never names a `stock_*` table, so inventory can change its schema without accounting noticing, and the dependency is greppable: one import line in the importer. Modules are code namespaces and `org_id` stays the only access boundary, so every seam function still takes `orgId` and scopes every statement by it.
+
+**Q: Why re-export a type through the seam rather than import it from where it is defined?**
+A: Type imports disappear at runtime but are still edges in the dependency graph, and a boundary that holds at runtime and is violated in the import list is not a boundary. Re-exporting `CreateStockItemInput` from the seam keeps "accounting imports exactly one inventory module" literally true and lets inventory relocate the type freely. The cost is a little indirection in the seam file.
+
+**Q: How did you make item creation callable from a transaction you already hold?**
+A: I split it. The original `createItem` did a pool read for a suggested profile, opened its own transaction, then re-read the item. I extracted the transaction body as `createItemOnClient(client, …, suggestedProfile)` and made the profile a parameter. `createItem` is now the composition of the three steps with unchanged behaviour, and the importer supplies a profile it computed before `BEGIN`. The general principle is to push non-transactional I/O to the edge so the core is a function of a client and plain values.
+
+**Q: The importer creates stock and posts to the GL. What guarantees the ledger and the stock agree afterwards?**
+A: The importer computes no posted value. It calls inventory's normal creation path, whose opening-stock step goes through the same receive function and movement engine as every other receipt, so the balance, the movement and the journal entry are produced together on one client. A test runs the platform's integrity checks after an import — `stock_balances_match_movements`, `stock_movements_reconcile_with_gl`, `inventory_accounts_reconcile_with_gl` — and asserts they pass. The preview's opening value is an integer-arithmetic estimate and is labelled as such.
+
+**Q: What would you change if inventory became a separate service?**
+A: The importer's atomicity would go: one transaction covers the item, product, opening movement and journal only because they share a connection. I would turn the seam calls into API calls plus a saga with compensation, or stage the import as a resumable job with per-row idempotency keys. The seam being one file with one calling convention is what makes that a bounded piece of work.
+
+### Follow-ups they'll dig into (36b)
+
+- "Isn't a namespace import a leaky way to enforce a boundary?" It enforces nothing by itself; it makes violations visible. The enforcement is a review grep (the guardrail-review skill checks it). A lint rule restricting imports from `services/inventory/**` to that one file would make it mechanical; that has not been added.
+- "Why does the importer get the profile from a pool read and not from the transaction?" Covered in the staged-import note: the seam function uses `pool`, which is forbidden on a checked-out connection's behalf, so it runs before `BEGIN` and is passed in as context.
+
 ## See also
 
 - [inventory-valuation-and-perpetual-stock.md](inventory-valuation-and-perpetual-stock.md)

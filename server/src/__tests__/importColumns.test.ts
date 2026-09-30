@@ -29,6 +29,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
 
@@ -48,6 +52,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'partyEmail',
@@ -58,6 +66,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Email',
         example: 'a@x.test',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
 
@@ -78,6 +90,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'partyEmail',
@@ -88,6 +104,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Email',
         example: 'a@x.test',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const columnMap = { partyName: 'Customer Title', partyEmail: 'Mail' };
@@ -109,6 +129,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'partyEmail',
@@ -119,6 +143,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Email',
         example: 'a@x.test',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const columnMap = { partyName: null };
@@ -140,6 +168,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const columnMap = { bogus: 'Name' };
@@ -166,6 +198,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const columnMap = { partyName: 'Nope' };
@@ -192,6 +228,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Customer name',
         example: 'Acme',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'partyEmail',
@@ -202,6 +242,10 @@ describe('resolveColumnIndexes', () => {
         note: 'Email',
         example: 'a@x.test',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const columnMap = { partyName: 'Name', partyEmail: 'Name' };
@@ -229,6 +273,10 @@ describe('findMissingRequired', () => {
         note: 'Account code',
         example: '1000',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'debit',
@@ -239,6 +287,10 @@ describe('findMissingRequired', () => {
         note: 'Debit amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'credit',
@@ -249,6 +301,10 @@ describe('findMissingRequired', () => {
         note: 'Credit amount',
         example: '50',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'amount',
@@ -259,6 +315,10 @@ describe('findMissingRequired', () => {
         note: 'Amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const resolved = {
@@ -284,6 +344,10 @@ describe('findMissingRequired', () => {
         note: 'Account code',
         example: '1000',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'debit',
@@ -294,6 +358,10 @@ describe('findMissingRequired', () => {
         note: 'Debit amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'credit',
@@ -304,6 +372,10 @@ describe('findMissingRequired', () => {
         note: 'Credit amount',
         example: '50',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'amount',
@@ -314,6 +386,10 @@ describe('findMissingRequired', () => {
         note: 'Amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const resolved = {
@@ -339,6 +415,10 @@ describe('findMissingRequired', () => {
         note: 'Debit amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'credit',
@@ -349,6 +429,10 @@ describe('findMissingRequired', () => {
         note: 'Credit amount',
         example: '50',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
       {
         key: 'amount',
@@ -359,6 +443,10 @@ describe('findMissingRequired', () => {
         note: 'Amount',
         example: '100',
         inTemplate: true,
+        type: 'text',
+        maxLength: null,
+        enumAliases: null,
+        enumLabels: null,
       },
     ];
     const resolved = {

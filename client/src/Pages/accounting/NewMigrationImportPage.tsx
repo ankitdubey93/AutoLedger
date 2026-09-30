@@ -4,6 +4,7 @@ import { Download } from 'lucide-react';
 import {
   createMigrationImport,
   inspectMigrationImport,
+  type ImportDateFormat,
   type MigrationImportInspection,
   type MigrationImportKind,
 } from '../../services/fetchServices';
@@ -45,6 +46,7 @@ export default function NewMigrationImportPage() {
   const [inspection, setInspection] = useState<MigrationImportInspection | null>(null);
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
   const [showMapper, setShowMapper] = useState(false);
+  const [dateFormat, setDateFormat] = useState<ImportDateFormat | ''>('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -87,6 +89,7 @@ export default function NewMigrationImportPage() {
           setInspection(res.inspection);
           setMapping(res.inspection.suggestedMap);
           setShowMapper(!res.inspection.exactMatch);
+          setDateFormat(res.inspection.suggestedDateFormat ?? '');
           setStage('map');
         })
         .catch((err: unknown) => {
@@ -106,7 +109,9 @@ export default function NewMigrationImportPage() {
     setError(null);
   }
 
-  const problems = meta !== undefined && stage === 'map' ? mappingProblems(meta, mapping) : [];
+  const hasDates = meta.columns.some((c) => c.type === 'date');
+  const problems = stage === 'map' ? mappingProblems(meta, mapping) : [];
+  if (stage === 'map' && hasDates && dateFormat === '') problems.push('Choose the date format your file uses');
 
   async function handleStage() {
     if (busy || problems.length > 0) return;
@@ -118,6 +123,7 @@ export default function NewMigrationImportPage() {
         fileName: fileName.trim(),
         content,
         columnMap: showMapper ? mapping : null,
+        ...(hasDates && dateFormat !== '' ? { dateFormat } : {}),
       });
       const suffix = returnTo !== null ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
       navigate(`/migration-imports/${res.import.id}${suffix}`, { replace: true });
@@ -221,6 +227,22 @@ export default function NewMigrationImportPage() {
               <p className="text-sm m-0">
                 {`${fileName} · ${String(inspection.rowCount)} row(s)`}
               </p>
+
+              {hasDates && (
+                <label className="flex flex-col gap-1 text-sm max-w-xs">
+                  <span className="text-[var(--muted)]">Date format in your file</span>
+                  <select
+                    value={dateFormat}
+                    onChange={(e) => setDateFormat(e.target.value as ImportDateFormat | '')}
+                    className={inputClass}
+                  >
+                    <option value="">Choose…</option>
+                    <option value="ISO">YYYY-MM-DD</option>
+                    <option value="DMY">DD/MM/YYYY</option>
+                    <option value="MDY">MM/DD/YYYY</option>
+                  </select>
+                </label>
+              )}
 
               {!showMapper ? (
                 <div className="flex items-center gap-3 flex-wrap">

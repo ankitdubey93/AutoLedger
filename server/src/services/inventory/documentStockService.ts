@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto';
 import { ApiError } from '../../utils/apiError.js';
 import { MODULE_TAGS } from '../../config/modules.js';
 import { getLocationOnClient } from './locationService.js';
+import { createItemOnClient, uniqueViolationToApiError } from './itemService.js';
+import type { CreateStockItemInput } from './itemService.js';
+import { suggestedProfileFor } from './setupService.js';
+import { isStockIndustryKey as isStockIndustryKeyImpl } from '../../types/inventory.js';
+import type { StockIndustryKey } from '../../types/inventory.js';
 import {
   issueOnClient,
   lockBalances,
@@ -15,6 +20,8 @@ import type { MovementOptions, OriginalMovement, ReclassMove } from './movementS
 /**
  * Inventory's document seam (Phase 32) — the ONE module Accounting's
  * invoice and bill services import from Inventory (guardrails rule 16).
+ * Phase 36b: the same seam now also serves Accounting's CSV importer (see the
+ * "Phase 36b: CSV import" section at the end) — still the only inventory import.
  *
  * A bill line for an INVENTORY product receives stock; an invoice line issues
  * it. Accounting owns the documents and builds its own journal entry; this
@@ -609,4 +616,116 @@ export async function listLinkedLedgerItemIdsWithValueOnClient(client: PoolClien
     [orgId],
   );
   return rows.map((r) => r.ledger_item_id);
+}
+
+// ---------------------------------------------------------------------------
+// Phase 36b: CSV import
+//
+// Accounting's INVENTORY_ITEMS importer validates rows against Inventory's
+// reference data and creates tracked items through these functions only — it
+// never reads a stock_* table or imports another inventory file (rule 16).
+// ---------------------------------------------------------------------------
+
+export type { CreateStockItemInput };
+
+export interface ImportStockReferences {
+  /** stock_settings row exists for this org. */
+  configured: boolean;
+  defaultLocationId: string | null;
+  /** Keyed by UPPER(code) AND by LOWER(name) — both keys point at the same entry. */
+  categories: Map<string, { id: string; code: string; defaultTracking: 'QUANTITY' | 'LOT' | 'SERIAL'; isActive: boolean }>;
+  uoms: Map<string, { id: string; code: string; decimalPlaces: number; isActive: boolean }>;
+  locations: Map<string, { id: string; code: string; isActive: boolean }>;
+  /** UPPER(code) of existing stock_items among the given codes. */
+  existingCodes: Set<string>;
+}
+
+/** Type guard for the industry key `suggestedProfileForImport` returns as a string (e.g. through a commit context). */
+export function isStockIndustryKey(value: string): value is StockIndustryKey {
+  return isStockIndustryKeyImpl(value);
+}
+
+/** The importer's read-only view of inventory's reference data, on the caller's client. Every query is org-scoped. */
+export async function loadImportReferencesOnClient(
+  client: PoolClient,
+  orgId: string,
+  codes: readonly string[],
+): Promise<ImportStockReferences> {
+  const settings = await client.query<{ default_location_id: string | null }>(
+    'SELECT default_location_id FROM stock_settings WHERE org_id = $1',
+    [orgId],
+  );
+  const categoryRows = await client.query<{
+    id: string;
+    code: string;
+    name: string;
+    default_tracking: 'QUANTITY' | 'LOT' | 'SERIAL';
+    is_active: boolean;
+  }>('SELECT id, code, name, default_tracking, is_active FROM stock_categories WHERE org_id = $1', [orgId]);
+  const uomRows = await client.query<{
+    id: string;
+    code: string;
+    name: string;
+    decimal_places: number;
+    is_active: boolean;
+  }>('SELECT id, code, name, decimal_places, is_active FROM stock_uoms WHERE org_id = $1', [orgId]);
+  const locationRows = await client.query<{ id: string; code: string; name: string; is_active: boolean }>(
+    'SELECT id, code, name, is_active FROM stock_locations WHERE org_id = $1',
+    [orgId],
+  );
+  const itemRows = await client.query<{ code: string }>(
+    'SELECT code FROM stock_items WHERE org_id = $1 AND UPPER(code) = ANY($2::text[])',
+    [orgId, codes.map((c) => c.toUpperCase())],
+  );
+
+  const categories: ImportStockReferences['categories'] = new Map();
+  for (const r of categoryRows.rows) {
+    const entry = { id: r.id, code: r.code, defaultTracking: r.default_tracking, isActive: r.is_active };
+    categories.set(r.code.toUpperCase(), entry);
+    categories.set(r.name.toLowerCase(), entry);
+  }
+  const uoms: ImportStockReferences['uoms'] = new Map();
+  for (const r of uomRows.rows) {
+    const entry = { id: r.id, code: r.code, decimalPlaces: r.decimal_places, isActive: r.is_active };
+    uoms.set(r.code.toUpperCase(), entry);
+    uoms.set(r.name.toLowerCase(), entry);
+  }
+  const locations: ImportStockReferences['locations'] = new Map();
+  for (const r of locationRows.rows) {
+    const entry = { id: r.id, code: r.code, isActive: r.is_active };
+    locations.set(r.code.toUpperCase(), entry);
+    locations.set(r.name.toLowerCase(), entry);
+  }
+
+  return {
+    configured: settings.rows[0] !== undefined,
+    defaultLocationId: settings.rows[0]?.default_location_id ?? null,
+    categories,
+    uoms,
+    locations,
+    existingCodes: new Set(itemRows.rows.map((r) => r.code.toUpperCase())),
+  };
+}
+
+/** Inventory's `createItemOnClient`, with a unique violation mapped to its ApiError (409) and re-thrown. */
+export async function createItemForImportOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  input: CreateStockItemInput,
+  suggestedProfile: StockIndustryKey,
+): Promise<{ id: string; code: string }> {
+  try {
+    return await createItemOnClient(client, orgId, userId, input, suggestedProfile);
+  } catch (err) {
+    throw uniqueViolationToApiError(err);
+  }
+}
+
+/**
+ * Pool read — call BEFORE a transaction (rule 5), never on a checked-out
+ * client's behalf. Delegates to setupService.suggestedProfileFor.
+ */
+export async function suggestedProfileForImport(orgId: string): Promise<StockIndustryKey> {
+  return suggestedProfileFor(orgId);
 }

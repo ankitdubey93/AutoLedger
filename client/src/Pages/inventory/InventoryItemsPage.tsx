@@ -17,6 +17,7 @@ import {
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
 import { useDebouncedValue } from '../../utils/useDebouncedValue';
+import ImportButton from '../../components/imports/ImportButton';
 import PageHeader from '../../components/ui/PageHeader';
 import EmptyState from '../../components/ui/EmptyState';
 import Pagination from '../../components/ui/Pagination';
@@ -112,6 +113,7 @@ export default function InventoryItemsPage() {
                 <Tags size={15} aria-hidden="true" /> Print {selectedIds.length} label{selectedIds.length === 1 ? '' : 's'}
               </button>
             )}
+            {canWrite && <ImportButton kind="INVENTORY_ITEMS" returnTo="/inventory/items" />}
             {canWrite && (
               <Link
                 to={`${base}/items/new`}

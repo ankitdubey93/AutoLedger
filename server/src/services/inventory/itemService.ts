@@ -18,6 +18,7 @@ import type {
   StockAttributeDefinition,
   StockAttributes,
   StockItem,
+  StockIndustryKey,
   StockItemType,
   StockTrackingMode,
 } from '../../types/inventory.js';
@@ -240,7 +241,7 @@ const EMPTY_PRODUCT: StockItemProductInput = {
   purchaseTaxRateBp: 0,
 };
 
-function uniqueViolationToApiError(err: unknown): unknown {
+export function uniqueViolationToApiError(err: unknown): unknown {
   if (pgErrorCode(err) !== PG_UNIQUE_VIOLATION) return err;
   if (pgConstraint(err) === 'ux_stock_items_org_barcode') return new ApiError(409, 'Barcode already used by another item');
   return new ApiError(409, 'Item code already exists');
@@ -387,6 +388,56 @@ async function postOpeningOnClient(
 }
 
 /**
+ * The body of `createItem`'s transaction, on the caller's client: readies
+ * inventory (applying `suggestedProfile` the first time), inserts the stock item,
+ * creates its linked product and posts any opening stock. A unique violation is
+ * left to the caller (`uniqueViolationToApiError`). `suggestedProfile` is read
+ * BEFORE the transaction by the caller (`suggestedProfileFor` is a pool read).
+ */
+export async function createItemOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  input: CreateStockItemInput,
+  suggestedProfile: StockIndustryKey,
+): Promise<{ id: string; code: string }> {
+  const defaults = await ensureInventoryReadyOnClient(client, orgId, userId, suggestedProfile);
+  const categoryId = input.categoryId ?? defaults.defaultCategoryId;
+  if (categoryId === null) throw new ApiError(422, 'Choose a category');
+
+  const created = await insertStockItemOnClient(client, orgId, userId, { ...input, categoryId });
+
+  // Phase 32: every stock item is born linked to a Accounting product, in the
+  // SAME transaction — a code collision in Products & Services rolls back this
+  // insert and the code-counter bump above with it (rule 5).
+  const product = input.product ?? EMPTY_PRODUCT;
+  const ledgerItem = await ledgerItemService.createLinkedItemOnClient(client, orgId, userId, {
+    code: created.code,
+    name: input.name,
+    itemType: 'INVENTORY',
+    ...product,
+  });
+  await client.query('UPDATE stock_items SET ledger_item_id = $3 WHERE id = $1 AND org_id = $2', [
+    created.id,
+    orgId,
+    ledgerItem.id,
+  ]);
+
+  if (input.opening !== undefined) {
+    await postOpeningOnClient(
+      client,
+      orgId,
+      userId,
+      created,
+      input.opening,
+      product.purchasePriceCents,
+      defaults.defaultLocationId,
+    );
+  }
+  return { id: created.id, code: created.code };
+}
+
+/**
  * Creates a stock item and its linked Products & Services entry — and, when
  * asked, its opening stock — in ONE transaction. Inventory need not be set up
  * first: `ensureInventoryReadyOnClient` applies the org's suggested industry
@@ -396,39 +447,7 @@ export async function createItem(orgId: string, userId: string, input: CreateSto
   const suggestedProfile = await suggestedProfileFor(orgId);
   try {
     const id = await withTransaction(async (client) => {
-      const defaults = await ensureInventoryReadyOnClient(client, orgId, userId, suggestedProfile);
-      const categoryId = input.categoryId ?? defaults.defaultCategoryId;
-      if (categoryId === null) throw new ApiError(422, 'Choose a category');
-
-      const created = await insertStockItemOnClient(client, orgId, userId, { ...input, categoryId });
-
-      // Phase 32: every stock item is born linked to a Accounting product, in the
-      // SAME transaction — a code collision in Products & Services rolls back this
-      // insert and the code-counter bump above with it (rule 5).
-      const product = input.product ?? EMPTY_PRODUCT;
-      const ledgerItem = await ledgerItemService.createLinkedItemOnClient(client, orgId, userId, {
-        code: created.code,
-        name: input.name,
-        itemType: 'INVENTORY',
-        ...product,
-      });
-      await client.query('UPDATE stock_items SET ledger_item_id = $3 WHERE id = $1 AND org_id = $2', [
-        created.id,
-        orgId,
-        ledgerItem.id,
-      ]);
-
-      if (input.opening !== undefined) {
-        await postOpeningOnClient(
-          client,
-          orgId,
-          userId,
-          created,
-          input.opening,
-          product.purchasePriceCents,
-          defaults.defaultLocationId,
-        );
-      }
+      const created = await createItemOnClient(client, orgId, userId, input, suggestedProfile);
       return created.id;
     });
 

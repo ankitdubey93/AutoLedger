@@ -14,6 +14,8 @@ export interface MigrationStep {
   kind: MigrationImportKind | null;
 }
 
+// Step D (open invoices and bills) is inserted before `stock`: opening stock posts inventory
+// directly, so it comes last, after every document that might name a product.
 export const MIGRATION_STEPS: MigrationStep[] = [
   {
     key: 'conversion-date',
@@ -44,11 +46,25 @@ export const MIGRATION_STEPS: MigrationStep[] = [
     kind: 'VENDORS',
   },
   {
+    key: 'products',
+    label: 'Products & services',
+    hint: 'What you sell and buy, before documents that name them.',
+    to: '/migration-imports/new?kind=ITEMS',
+    kind: 'ITEMS',
+  },
+  {
     key: 'opening',
     label: 'Opening balances',
     hint: 'Your trial balance on the conversion date, without receivables, payables or inventory.',
     to: '/migration-imports/new?kind=OPENING_BALANCES',
     kind: 'OPENING_BALANCES',
+  },
+  {
+    key: 'stock',
+    label: 'Inventory items & opening stock',
+    hint: 'Tracked stock and the quantity on hand at your conversion date.',
+    to: '/migration-imports/new?kind=INVENTORY_ITEMS',
+    kind: 'INVENTORY_ITEMS',
   },
 ];
 
@@ -114,6 +130,40 @@ export const IMPORT_GUIDES: Record<MigrationImportKind, ImportGuide> = {
       'Names and emails must be unique within the file.',
       'Payment terms are free text, e.g. "Net 30".',
       'Import vendors before bills that name them.',
+    ],
+  },
+  ITEMS: {
+    intro: 'Bring in the products and services you sell or buy.',
+    steps: [
+      'Download the template — keep the column headings exactly as they are. Headings starting with * are required.',
+      'Fill it in with Excel, Google Sheets or Numbers, one row per record, then save or download it as CSV.',
+      'Upload the file. If your headings differ (for example an export from another system), match each of our fields to one of your columns.',
+      'Review the rows. Fix or exclude anything flagged in red — nothing is saved to your books yet.',
+      'Commit. An owner or admin commits; the import is then final.',
+    ],
+    rules: [
+      'A code that already exists only has its blank fields filled — names, types and tax rates are never overwritten.',
+      'Type is Service or Non-inventory. Leave it blank and a product with a purchase price or purchases account becomes Non-inventory, anything else a Service.',
+      'Accounts are account codes: a Revenue account for sales, an Expense account for purchases.',
+      'Tax rates are percentages, such as 10 or 12.5%. Xero-style names like "GST on Income (15%)" work too.',
+      'Tracked stock goes through Inventory → Import instead, so its opening quantity and cost are recorded.',
+    ],
+  },
+  INVENTORY_ITEMS: {
+    intro: 'Create tracked stock items — each with its product and, optionally, the stock you already hold.',
+    steps: [
+      'Download the template — keep the column headings exactly as they are. Headings starting with * are required.',
+      'Fill it in with Excel, Google Sheets or Numbers, one row per record, then save or download it as CSV.',
+      'Upload the file. If your headings differ (for example an export from another system), match each of our fields to one of your columns.',
+      'Review the rows. Fix or exclude anything flagged in red — nothing is saved to your books yet.',
+      'Commit. An owner or admin commits; the import is then final.',
+    ],
+    rules: [
+      'Each row creates a tracked item and its product. Existing codes are refused — to track an existing product, open it and tick Track inventory.',
+      'OpeningQuantity with OpeningUnitCost (or the purchase price) posts opening stock on OpeningDate — your conversion date when blank — debiting your inventory account.',
+      "Don't also include inventory in opening balances; the opening-balance import refuses inventory accounts for this reason.",
+      "Category, Unit and OpeningLocation accept a code or a name; leave them blank to use your defaults. Inventory is set up automatically if it isn't yet.",
+      'Lot- and serial-tracked stock is received under Stock movements → Receive, not here.',
     ],
   },
 };

@@ -2,7 +2,8 @@ import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import * as journalService from './journalService.js';
 import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
-import type { MigrationCommitPreview, MigrationImportRow } from '../../types/accounting.js';
+import type { MigrationImportRow } from '../../types/accounting.js';
+import type { LegacyCommitPreview } from './importRowStore.js';
 
 /**
  * Opening-balance import — the validate and commit halves, delegated to by
@@ -166,7 +167,7 @@ export async function preview(
   client: PoolClient,
   orgId: string,
   importId: string,
-): Promise<MigrationCommitPreview> {
+): Promise<LegacyCommitPreview> {
   const { rows: importRows } = await client.query<{ status: string; error_count: number }>(
     'SELECT status, error_count FROM migration_imports WHERE id = $1 AND org_id = $2',
     [importId, orgId],

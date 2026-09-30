@@ -10,6 +10,8 @@
  * `utils/money.ts`.
  */
 
+import type { DateFormat } from '../utils/dateParse.js';
+import type { ImportCellType } from '../utils/importValues.js';
 import type {
   INVOICE_TEMPLATE_IDS,
   INVOICE_FONT_FAMILIES,
@@ -1233,6 +1235,8 @@ export const MIGRATION_IMPORT_KINDS = [
   'OPENING_BALANCES',
   'CUSTOMERS',
   'VENDORS',
+  'ITEMS',
+  'INVENTORY_ITEMS',
 ] as const;
 export type MigrationImportKind = (typeof MIGRATION_IMPORT_KINDS)[number];
 
@@ -1278,7 +1282,9 @@ export function isMigrationImportStatus(value: string): value is MigrationImport
 export type MigrationCommitResult =
   | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
   | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
-  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
+  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
+  | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
+  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number };
 
 /** One CSV column an import kind understands (Phase 36). */
 export interface ImportColumnDef {
@@ -1293,15 +1299,37 @@ export interface ImportColumnDef {
   example: string;
   /** false = accepted on upload but left out of the downloadable template. */
   inTemplate: boolean;
+  /** How the cell text is parsed (Phase 36b). `text` for every legacy column. */
+  type: ImportCellType;
+  maxLength: number | null;
+  /** enum only: lowercase alias -> canonical value. */
+  enumAliases: Readonly<Record<string, string>> | null;
+  /** enum only: what an error message lists. */
+  enumLabels: readonly string[] | null;
+}
+
+export type ImportStorage = 'typed' | 'data';
+
+export interface PreviewSummaryItem {
+  label: string;
+  value: number;
+  format: 'count' | 'money';
+}
+
+/** Built before BEGIN by the kind's prepareCommit (pool reads allowed there), passed into commitOnClient. */
+export interface ImportCommitContext {
+  inventoryProfile: string | null;
 }
 
 /** One field the review page lets a user fix on a staged row (a PATCH body key). */
 export interface ImportEditFieldDef {
   key: string;
   label: string;
-  input: 'text' | 'money' | 'accountType';
+  input: 'text' | 'money' | 'accountType' | 'enum';
   maxLength: number | null;
   nullable: boolean;
+  /** enum select's written values, e.g. ['Service', 'Non-inventory']. */
+  options: readonly string[] | null;
 }
 
 export interface ImportKindMeta {
@@ -1315,6 +1343,7 @@ export interface ImportKindMeta {
   /** 422 text per column key when that column cannot be resolved. */
   missingMessages: Readonly<Record<string, string>>;
   editFields: readonly ImportEditFieldDef[];
+  storage: ImportStorage;
 }
 
 export interface MigrationImportInspection {
@@ -1330,6 +1359,8 @@ export interface MigrationImportInspection {
   missingRequired: string[];
   /** True when nothing is missing and every file header is one of the kind's template headers. */
   exactMatch: boolean;
+  /** Date format the file's date cells suggest; null when ambiguous or the kind has no date column. */
+  suggestedDateFormat: DateFormat | null;
 }
 
 export interface MigrationImport {
@@ -1349,6 +1380,7 @@ export interface MigrationImport {
   createdAt: string;
   columnMap: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
+  dateFormat: DateFormat;
 }
 
 export interface MigrationImportRow {
@@ -1372,6 +1404,9 @@ export interface MigrationImportRow {
   partyNotes: string | null;
   errors: string[];
   status: MigrationRowStatus;
+  /** storage:'data' kinds: parsed cell values by column key (data ?? {}). */
+  values: Record<string, string | number | null>;
+  groupKey: string | null;
 }
 
 /** What POST /:id/preview returns, and what commit will do if run now. */
@@ -1392,6 +1427,8 @@ export interface MigrationCommitPreview {
   /** CUSTOMERS and VENDORS only. */
   partiesToCreate: number;
   partiesToMerge: number;
+  summary: PreviewSummaryItem[];
+  warnings: string[];
 }
 
 /**

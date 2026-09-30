@@ -1,12 +1,13 @@
 import { z } from 'zod';
 import { MAX_CSV_CHARS } from '../../config/constants.js';
+import { DATE_FORMATS } from '../../utils/dateParse.js';
 import { ACCOUNT_TYPES, MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
 
 /**
  * Request schemas for Accounting's staged migration importers (Phase 9b, 36a).
  *
  * `columnMap` is supplied on create (Phase 36) to override automatic header
- * matching. `dateFormat` arrives with Step C. Every column key is validated
+ * matching. `dateFormat` (Phase 36b) says how date cells are written. Every column key is validated
  * server-side against the kind's registry.
  */
 
@@ -15,6 +16,7 @@ export const createMigrationImportSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
   content: z.string().min(1).max(MAX_CSV_CHARS),
   columnMap: z.record(z.string().min(1).max(64), z.string().trim().min(1).max(200).nullable()).nullable().default(null),
+  dateFormat: z.enum(DATE_FORMATS).default('ISO'),
 });
 
 export const inspectMigrationImportSchema = z.object({
@@ -48,6 +50,8 @@ export const patchMigrationRowSchema = z
     partyPaymentTerms: z.string().trim().max(500).nullable().optional(),
     partyNotes: z.string().trim().max(1000).nullable().optional(),
     status: z.enum(['VALID', 'EXCLUDED']).optional(),
+    // storage:'data' kinds (Phase 36b): column key -> new cell text.
+    values: z.record(z.string().min(1).max(64), z.string().max(1000).nullable()).optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: 'No fields to update' })
   .refine(

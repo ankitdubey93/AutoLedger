@@ -98,7 +98,10 @@ export default function MigrationImportDetailPage() {
   const readOnly = imp.status === 'COMMITTED';
   const returnTo = safeReturnTo(searchParams.get('returnTo'));
 
-  async function saveRow(row: MigrationImportRow, body: Record<string, string | number | null>) {
+  async function saveRow(
+    row: MigrationImportRow,
+    body: Record<string, string | number | null | Record<string, string | null>>,
+  ) {
     setSavingRowId(row.id);
     setError(null);
     try {
@@ -172,7 +175,11 @@ export default function MigrationImportDetailPage() {
       {readOnly && imp.result !== null && imp.result.kind !== 'OPENING_BALANCES' && (
         <div className="card">
           <p className="text-sm m-0">
-            {`Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} merged.`}
+            {imp.result.kind === 'ITEMS'
+              ? `Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} filled in.`
+              : imp.result.kind === 'INVENTORY_ITEMS'
+                ? `Committed: ${String(imp.result.createdCount)} items created, opening stock posted for ${String(imp.result.openingStockCount)}.`
+                : `Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} merged.`}
           </p>
         </div>
       )}
@@ -180,7 +187,16 @@ export default function MigrationImportDetailPage() {
       {preview !== null && !readOnly && (
         <div className="card flex flex-col gap-2">
           <h3 className="text-sm font-semibold m-0">Preview</h3>
-          {imp.kind === 'CHART_OF_ACCOUNTS' ? (
+          {preview.summary.length > 0 ? (
+            <dl className="text-sm m-0 grid grid-cols-[auto_auto] gap-x-4 gap-y-1 justify-start">
+              {preview.summary.map((item) => (
+                <div key={item.label} className="contents">
+                  <dt className="text-[var(--muted)]">{item.label}</dt>
+                  <dd className="m-0">{item.format === 'money' ? formatCents(item.value) : String(item.value)}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : imp.kind === 'CHART_OF_ACCOUNTS' ? (
             <p className="text-sm m-0">
               {preview.accountsToCreate} account{preview.accountsToCreate === 1 ? '' : 's'} will be created,{' '}
               {preview.accountsToMerge} merged into an existing account.
@@ -198,6 +214,11 @@ export default function MigrationImportDetailPage() {
               {preview.plugAccountCode} Opening Balance Equity.
             </p>
           )}
+          {preview.warnings.map((w) => (
+            <p key={w} className="status status--warn">
+              {w}
+            </p>
+          ))}
           {!preview.canCommit && (
             <p className="text-sm text-[var(--muted)] m-0">
               Fix {preview.blockingErrorCount} invalid row{preview.blockingErrorCount === 1 ? '' : 's'} first.

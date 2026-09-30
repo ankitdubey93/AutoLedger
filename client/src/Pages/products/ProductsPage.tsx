@@ -13,6 +13,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import ProductFormDialog from './ProductFormDialog';
+import ImportButton from '../../components/imports/ImportButton';
 import TabBar from '../../components/ui/TabBar';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
 import { useTableSort } from '../../utils/useTableSort';
@@ -154,13 +155,16 @@ export default function ProductsPage() {
             Everything you buy or sell. Tick “Track inventory” on a product to keep count of stock and its cost.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
-        >
-          <Plus size={15} aria-hidden="true" /> New product or service
-        </button>
+        <div className="flex items-center gap-2">
+          <ImportButton kind="ITEMS" returnTo="/products" />
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          >
+            <Plus size={15} aria-hidden="true" /> New product or service
+          </button>
+        </div>
       </header>
 
       <TabBar ariaLabel="Item type" variant="buttons" items={TABS} active={tab} onChange={(id) => setTab(id as TabId)} />
