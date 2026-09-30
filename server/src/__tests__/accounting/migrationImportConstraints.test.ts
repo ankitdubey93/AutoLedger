@@ -116,3 +116,38 @@ it('deleting an import cascades its rows', async () => {
   );
   expect(rows[0]?.count).toBe('0');
 });
+
+it('the widened kind CHECK admits ITEMS and rejects BOGUS', async () => {
+  const insert = (kind: string) =>
+    pool.query(
+      `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by)
+       VALUES ($1, $2, 'fixture.csv', ',', 0, $3)`,
+      [orgId, kind, user.id],
+    );
+
+  await insert('ITEMS');
+  expect(await errorCode(() => insert('BOGUS'))).toBe(CHECK_VIOLATION);
+});
+
+it('data must be a JSON object', async () => {
+  const importId = await insertImport('OPENING_BALANCES');
+  const code = await errorCode(() =>
+    pool.query(
+      `INSERT INTO migration_import_rows (org_id, import_id, row_number, data)
+       VALUES ($1, $2, 2, '[]'::jsonb)`,
+      [orgId, importId],
+    ),
+  );
+  expect(code).toBe(CHECK_VIOLATION);
+});
+
+it('column_map must be a JSON object', async () => {
+  const importId = await insertImport();
+  const code = await errorCode(() =>
+    pool.query(`UPDATE migration_imports SET column_map = '"x"'::jsonb WHERE id = $1 AND org_id = $2`, [
+      importId,
+      orgId,
+    ]),
+  );
+  expect(code).toBe(CHECK_VIOLATION);
+});

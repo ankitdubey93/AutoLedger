@@ -2814,6 +2814,48 @@ export type MigrationImportKind = 'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CU
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
 
+/** One CSV column an import kind understands (Phase 36). */
+export interface ImportColumnMeta {
+  key: string;
+  header: string;
+  label: string;
+  required: boolean;
+  synonyms: string[];
+  note: string;
+  example: string;
+  inTemplate: boolean;
+}
+
+/** One field the review page lets a user fix on a staged row. */
+export interface ImportEditFieldMeta {
+  key: string;
+  label: string;
+  input: 'text' | 'money' | 'accountType';
+  maxLength: number | null;
+  nullable: boolean;
+}
+
+export interface ImportKindMeta {
+  kind: MigrationImportKind;
+  label: string;
+  noun: string;
+  columns: ImportColumnMeta[];
+  requiredOneOf: (string[])[];
+  missingMessages: Record<string, string>;
+  editFields: ImportEditFieldMeta[];
+}
+
+export interface MigrationImportInspection {
+  kind: MigrationImportKind;
+  headers: string[];
+  delimiter: string;
+  rowCount: number;
+  sampleRows: string[][];
+  suggestedMap: Record<string, string | null>;
+  missingRequired: string[];
+  exactMatch: boolean;
+}
+
 /** Mirrors server/src/types/accounting.ts's MigrationImport. */
 export interface MigrationImport {
   id: string;
@@ -2830,6 +2872,8 @@ export interface MigrationImport {
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
+  columnMap: Record<string, string | null> | null;
+  result: MigrationCommitResult | null;
 }
 
 /** Mirrors server/src/types/accounting.ts's MigrationImportRow. */
@@ -2884,13 +2928,14 @@ export function createMigrationImport(body: {
   kind: MigrationImportKind;
   fileName: string;
   content: string;
+  columnMap?: Record<string, string | null> | null;
 }): Promise<{ success: boolean; import: MigrationImport; rows: MigrationImportRow[] }> {
   return apiFetch('/migration-imports', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /** GET /migration-imports */
 export function listMigrationImports(
-  params: { page?: number; limit?: number; kind?: MigrationImportKind } = {},
+  params: { page?: number; limit?: number; kind?: MigrationImportKind; status?: MigrationImportStatus } = {},
   signal?: AbortSignal,
 ): Promise<{
   success: boolean;
@@ -2904,6 +2949,7 @@ export function listMigrationImports(
   if (params.page !== undefined) query.set('page', String(params.page));
   if (params.limit !== undefined) query.set('limit', String(params.limit));
   if (params.kind !== undefined) query.set('kind', params.kind);
+  if (params.status !== undefined) query.set('status', params.status);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
   return apiFetch(`/migration-imports${suffix}`, { signal: signal ?? null });
 }
@@ -2941,23 +2987,7 @@ export function getMigrationImportRows(
 export function patchMigrationImportRow(
   id: string,
   rowId: string,
-  body: Partial<{
-    accountCode: string;
-    accountName: string;
-    accountType: AccountType;
-    parentCode: string | null;
-    description: string | null;
-    debitCents: number;
-    creditCents: number;
-    partyName: string;
-    partyEmail: string | null;
-    partyPhone: string | null;
-    partyAddress: string | null;
-    partyTaxNumber: string | null;
-    partyPaymentTerms: string | null;
-    partyNotes: string | null;
-    status: 'VALID' | 'EXCLUDED';
-  }>,
+  body: Record<string, string | number | null>, // keys are ImportEditFieldMeta keys from GET /migration-imports/kinds
 ): Promise<{ success: boolean; import: MigrationImport; row: MigrationImportRow }> {
   return apiFetch(`/migration-imports/${id}/rows/${rowId}`, {
     method: 'PATCH',
@@ -2988,6 +3018,18 @@ export function commitMigrationImport(
 /** DELETE /migration-imports/:id — refused once COMMITTED. */
 export async function deleteMigrationImport(id: string): Promise<void> {
   await apiFetch(`/migration-imports/${id}`, { method: 'DELETE' });
+}
+
+/** GET /migration-imports/kinds */
+export function getMigrationImportKinds(signal?: AbortSignal): Promise<{ success: boolean; kinds: ImportKindMeta[] }> {
+  return apiFetch('/migration-imports/kinds', { signal: signal ?? null });
+}
+
+/** POST /migration-imports/inspect — OWNER, ADMIN or ACCOUNTANT. Persists nothing. */
+export function inspectMigrationImport(
+  body: { kind: MigrationImportKind; content: string },
+): Promise<{ success: boolean; inspection: MigrationImportInspection }> {
+  return apiFetch('/migration-imports/inspect', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /* --------------------------------------------------- document vault (9.5) */

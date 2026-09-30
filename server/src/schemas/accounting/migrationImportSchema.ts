@@ -3,18 +3,22 @@ import { MAX_CSV_CHARS } from '../../config/constants.js';
 import { ACCOUNT_TYPES, MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
 
 /**
- * Request schemas for Accounting's staged migration importers (Phase 9b).
+ * Request schemas for Accounting's staged migration importers (Phase 9b, 36a).
  *
- * There is no `dateFormat` and no `columnMap` here, unlike
- * `schemas/accounting/bankSchema.ts`: neither importer has a date column —
- * a chart has no dates, and every opening balance posts at
- * `ledger_settings.books_start_date` — and column resolution is by header
- * synonym only.
+ * `columnMap` is supplied on create (Phase 36) to override automatic header
+ * matching. `dateFormat` arrives with Step C. Every column key is validated
+ * server-side against the kind's registry.
  */
 
 export const createMigrationImportSchema = z.object({
   kind: z.enum(MIGRATION_IMPORT_KINDS),
   fileName: z.string().trim().min(1).max(200),
+  content: z.string().min(1).max(MAX_CSV_CHARS),
+  columnMap: z.record(z.string().min(1).max(64), z.string().trim().min(1).max(200).nullable()).nullable().default(null),
+});
+
+export const inspectMigrationImportSchema = z.object({
+  kind: z.enum(MIGRATION_IMPORT_KINDS),
   content: z.string().min(1).max(MAX_CSV_CHARS),
 });
 

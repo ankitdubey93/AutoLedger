@@ -11,6 +11,7 @@ import {
 import { formatCents } from '../../utils/money';
 import NewAccountForm from './NewAccountForm';
 import LoadingState from '../../components/ui/LoadingState';
+import ImportButton from '../../components/imports/ImportButton';
 
 /**
  * The chart of accounts, as a tree.
@@ -231,6 +232,7 @@ export default function AccountsPage() {
           {roots !== null && (
             <span className="text-sm text-[var(--muted)] tabular-nums">{count} accounts</span>
           )}
+          <ImportButton kind="CHART_OF_ACCOUNTS" returnTo="/accounts" />
           <button
             type="button"
             onClick={() => setShowForm((open) => !open)}

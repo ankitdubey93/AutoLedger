@@ -2,17 +2,19 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { parseMoneyText } from '../../utils/money.js';
-import { parseCsv, type CsvTable } from '../../utils/csv.js';
-import { normalizeForMatching } from '../../utils/matchScore.js';
-import * as chartImportService from './chartImportService.js';
-import * as openingBalanceImportService from './openingBalanceImportService.js';
-import * as partyImportService from './partyImportService.js';
+import { parseCsv } from '../../utils/csv.js';
+import { compactHeader, findMissingRequired, resolveColumnIndexes } from '../../utils/importColumns.js';
+import { MAX_IMPORT_ROWS } from '../../config/constants.js';
+import { getImportKind } from './importKinds.js';
 import {
   canTransitionMigrationImport,
   isAccountType,
+  isMigrationImportKind,
   type AccountType,
+  type MigrationCommitResult,
   type MigrationImport,
+  type MigrationImportInspection,
+  type MigrationImportStatus,
   type MigrationImportKind,
   type MigrationImportRow,
   type MigrationRowStatus,
@@ -29,9 +31,10 @@ import {
  * chart export is normal on a first try, and discovering one error per
  * re-upload is a bad workflow.
  *
- * There is no `dateFormat` and no `columnMap`, unlike bank import: neither
- * importer has a date column, and column resolution is by header synonym
- * only. Every function takes `orgId` first and every statement carries an
+ * Column resolution goes through the kind registry (`importKinds.ts`): the
+ * template header, then synonyms, unless the caller supplies a `columnMap`
+ * (column key -> file header) that overrides the automatic match. There is
+ * no `dateFormat` yet — no kind has a date column. Every function takes `orgId` first and every statement carries an
  * `org_id` predicate (guardrails rule 1).
  */
 
@@ -46,325 +49,6 @@ function pgErrorCode(err: unknown): string | undefined {
 function pgConstraint(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('constraint' in err)) return undefined;
   return typeof err.constraint === 'string' ? err.constraint : undefined;
-}
-
-// ------------------------------------------------------------- column maps
-
-const CODE_SYNONYMS = ['code', 'account code', 'account', 'account number', 'gl code'];
-const NAME_SYNONYMS = ['name', 'account name', 'description', 'title'];
-const TYPE_SYNONYMS = ['type', 'account type', 'category'];
-const PARENT_SYNONYMS = ['parent', 'parent code', 'parent account'];
-const DESCRIPTION_SYNONYMS = ['notes', 'memo', 'long description'];
-const DEBIT_SYNONYMS = ['debit', 'dr', 'debit amount'];
-const CREDIT_SYNONYMS = ['credit', 'cr', 'credit amount'];
-const AMOUNT_SYNONYMS = ['amount', 'balance', 'opening balance'];
-
-// CUSTOMERS / VENDORS (Phase 24) — a party row is name-shaped, not
-// account-shaped, so it gets its own synonym set. Written already-normalized
-// (lowercase, no punctuation) to match findColumnBySynonyms's use of
-// normalizeForMatching on the header row.
-const PARTY_NAME_SYNONYMS = [
-  'name', 'customer', 'vendor', 'supplier', 'company', 'display name',
-  'customer name', 'vendor name', 'company name',
-];
-const PARTY_EMAIL_SYNONYMS = ['email', 'e mail', 'email address', 'contact email'];
-const PARTY_PHONE_SYNONYMS = ['phone', 'telephone', 'phone number', 'contact phone', 'mobile'];
-const PARTY_ADDRESS_SYNONYMS = ['address', 'billing address', 'street', 'postal address'];
-const PARTY_TAX_SYNONYMS = ['tax number', 'tax id', 'vat', 'vat number', 'gst', 'gstin', 'abn', 'ein'];
-const PARTY_TERMS_SYNONYMS = ['terms', 'payment terms', 'payment term'];
-const PARTY_NOTES_SYNONYMS = ['notes', 'memo', 'comment', 'comments'];
-
-interface ResolvedColumns {
-  /** null for CUSTOMERS/VENDORS — a party row has no account code. */
-  codeIdx: number | null;
-  nameIdx: number | null;
-  typeIdx: number | null;
-  parentIdx: number | null;
-  descriptionIdx: number | null;
-  debitIdx: number | null;
-  creditIdx: number | null;
-  amountIdx: number | null;
-  /** CUSTOMERS and VENDORS only. */
-  partyNameIdx: number | null;
-  partyEmailIdx: number | null;
-  partyPhoneIdx: number | null;
-  partyAddressIdx: number | null;
-  partyTaxNumberIdx: number | null;
-  partyPaymentTermsIdx: number | null;
-  partyNotesIdx: number | null;
-}
-
-function findColumnBySynonyms(headers: string[], synonyms: string[]): number | null {
-  const normalizedHeaders = headers.map(normalizeForMatching);
-  for (const synonym of synonyms) {
-    const idx = normalizedHeaders.indexOf(synonym);
-    if (idx !== -1) return idx;
-  }
-  return null;
-}
-
-/** Every account-shaped index null, every party-shaped index resolved — shared by the CUSTOMERS/VENDORS branch. */
-function nullAccountColumns(): Pick<
-  ResolvedColumns,
-  'codeIdx' | 'typeIdx' | 'parentIdx' | 'descriptionIdx' | 'debitIdx' | 'creditIdx' | 'amountIdx'
-> {
-  return { codeIdx: null, typeIdx: null, parentIdx: null, descriptionIdx: null, debitIdx: null, creditIdx: null, amountIdx: null };
-}
-
-function resolveColumns(headers: string[], kind: MigrationImportKind): ResolvedColumns {
-  if (kind === 'CUSTOMERS' || kind === 'VENDORS') {
-    const partyNameIdx = findColumnBySynonyms(headers, PARTY_NAME_SYNONYMS);
-    if (partyNameIdx === null) throw new ApiError(422, 'Could not find a name column in the file');
-    return {
-      ...nullAccountColumns(),
-      nameIdx: null,
-      partyNameIdx,
-      partyEmailIdx: findColumnBySynonyms(headers, PARTY_EMAIL_SYNONYMS),
-      partyPhoneIdx: findColumnBySynonyms(headers, PARTY_PHONE_SYNONYMS),
-      partyAddressIdx: findColumnBySynonyms(headers, PARTY_ADDRESS_SYNONYMS),
-      partyTaxNumberIdx: findColumnBySynonyms(headers, PARTY_TAX_SYNONYMS),
-      partyPaymentTermsIdx: findColumnBySynonyms(headers, PARTY_TERMS_SYNONYMS),
-      partyNotesIdx: findColumnBySynonyms(headers, PARTY_NOTES_SYNONYMS),
-    };
-  }
-
-  const partyColumnsNull = {
-    partyNameIdx: null,
-    partyEmailIdx: null,
-    partyPhoneIdx: null,
-    partyAddressIdx: null,
-    partyTaxNumberIdx: null,
-    partyPaymentTermsIdx: null,
-    partyNotesIdx: null,
-  } as const;
-
-  const codeIdx = findColumnBySynonyms(headers, CODE_SYNONYMS);
-  if (codeIdx === null) throw new ApiError(422, 'Could not find an account code column in the file');
-  const nameIdx = findColumnBySynonyms(headers, NAME_SYNONYMS);
-
-  if (kind === 'CHART_OF_ACCOUNTS') {
-    const typeIdx = findColumnBySynonyms(headers, TYPE_SYNONYMS);
-    if (typeIdx === null) throw new ApiError(422, 'Could not find an account type column in the file');
-    const parentIdx = findColumnBySynonyms(headers, PARENT_SYNONYMS);
-    const descriptionIdx = findColumnBySynonyms(headers, DESCRIPTION_SYNONYMS);
-    return {
-      codeIdx,
-      nameIdx,
-      typeIdx,
-      parentIdx,
-      descriptionIdx,
-      debitIdx: null,
-      creditIdx: null,
-      amountIdx: null,
-      ...partyColumnsNull,
-    };
-  }
-
-  const debitIdx = findColumnBySynonyms(headers, DEBIT_SYNONYMS);
-  const creditIdx = findColumnBySynonyms(headers, CREDIT_SYNONYMS);
-  const amountIdx = findColumnBySynonyms(headers, AMOUNT_SYNONYMS);
-  if (amountIdx === null && (debitIdx === null || creditIdx === null)) {
-    throw new ApiError(422, 'Could not find an amount column, or a debit/credit pair, in the file');
-  }
-  return {
-    codeIdx,
-    nameIdx,
-    typeIdx: null,
-    parentIdx: null,
-    descriptionIdx: null,
-    debitIdx,
-    creditIdx,
-    amountIdx,
-    ...partyColumnsNull,
-  };
-}
-
-// ------------------------------------------------------- account type alias
-
-const ACCOUNT_TYPE_ALIASES: Record<string, AccountType> = {
-  asset: 'Asset',
-  assets: 'Asset',
-  liability: 'Liability',
-  liabilities: 'Liability',
-  equity: 'Equity',
-  revenue: 'Revenue',
-  income: 'Revenue',
-  sales: 'Revenue',
-  expense: 'Expense',
-  expenses: 'Expense',
-  'cost of goods sold': 'Expense',
-  cogs: 'Expense',
-};
-
-function normalizeAccountType(raw: string): AccountType | null {
-  const key = raw.trim().toLowerCase();
-  const candidate = ACCOUNT_TYPE_ALIASES[key];
-  return candidate !== undefined && isAccountType(candidate) ? candidate : null;
-}
-
-// ---------------------------------------------------------------- row parsing
-
-interface StagedRowInput {
-  rowNumber: number;
-  raw: Record<string, string>;
-  accountCode: string | null;
-  accountName: string | null;
-  accountType: AccountType | null;
-  parentCode: string | null;
-  description: string | null;
-  debitCents: number | null;
-  creditCents: number | null;
-  /** CUSTOMERS and VENDORS only. */
-  partyName: string | null;
-  partyEmail: string | null;
-  partyPhone: string | null;
-  partyAddress: string | null;
-  partyTaxNumber: string | null;
-  partyPaymentTerms: string | null;
-  partyNotes: string | null;
-}
-
-const NULL_PARTY_FIELDS = {
-  partyName: null,
-  partyEmail: null,
-  partyPhone: null,
-  partyAddress: null,
-  partyTaxNumber: null,
-  partyPaymentTerms: null,
-  partyNotes: null,
-} as const;
-
-function parseChartRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
-  const codeRaw = (cells[columns.codeIdx ?? -1] ?? '').trim();
-  const nameRaw = columns.nameIdx !== null ? (cells[columns.nameIdx] ?? '').trim() : '';
-  const typeRaw = columns.typeIdx !== null ? (cells[columns.typeIdx] ?? '').trim() : '';
-  const parentRaw = columns.parentIdx !== null ? (cells[columns.parentIdx] ?? '').trim() : '';
-  const descriptionRaw = columns.descriptionIdx !== null ? (cells[columns.descriptionIdx] ?? '').trim() : '';
-
-  return {
-    rowNumber,
-    raw: {
-      accountCode: codeRaw,
-      accountName: nameRaw,
-      accountType: typeRaw,
-      parentCode: parentRaw,
-      description: descriptionRaw,
-    },
-    accountCode: codeRaw === '' ? null : codeRaw.slice(0, 20),
-    accountName: nameRaw === '' ? null : nameRaw.slice(0, 120),
-    accountType: typeRaw === '' ? null : normalizeAccountType(typeRaw),
-    parentCode: parentRaw === '' ? null : parentRaw.slice(0, 20),
-    description: descriptionRaw === '' ? null : descriptionRaw.slice(0, 500),
-    debitCents: null,
-    creditCents: null,
-    ...NULL_PARTY_FIELDS,
-  };
-}
-
-function parseOpeningRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
-  const codeRaw = (cells[columns.codeIdx ?? -1] ?? '').trim();
-  const nameRaw = columns.nameIdx !== null ? (cells[columns.nameIdx] ?? '').trim() : '';
-
-  let debitCents: number | null = null;
-  let creditCents: number | null = null;
-  let debitRaw = '';
-  let creditRaw = '';
-
-  if (columns.amountIdx !== null) {
-    debitRaw = (cells[columns.amountIdx] ?? '').trim();
-    creditRaw = debitRaw;
-    try {
-      const amount = parseMoneyText(debitRaw);
-      if (amount >= 0) {
-        debitCents = amount;
-        creditCents = 0;
-      } else {
-        debitCents = 0;
-        creditCents = -amount;
-      }
-    } catch {
-      // Left null — validateRows reports the parse failure against `raw`.
-    }
-  } else if (columns.debitIdx !== null && columns.creditIdx !== null) {
-    debitRaw = (cells[columns.debitIdx] ?? '').trim();
-    creditRaw = (cells[columns.creditIdx] ?? '').trim();
-    try {
-      debitCents = parseMoneyText(debitRaw);
-    } catch {
-      debitCents = null;
-    }
-    try {
-      creditCents = parseMoneyText(creditRaw);
-    } catch {
-      creditCents = null;
-    }
-  }
-
-  return {
-    rowNumber,
-    raw: { accountCode: codeRaw, accountName: nameRaw, debit: debitRaw, credit: creditRaw },
-    accountCode: codeRaw === '' ? null : codeRaw.slice(0, 20),
-    accountName: nameRaw === '' ? null : nameRaw.slice(0, 120),
-    accountType: null,
-    parentCode: null,
-    description: null,
-    debitCents,
-    creditCents,
-    ...NULL_PARTY_FIELDS,
-  };
-}
-
-/**
- * Trims each cell and truncates to the target column's limit, matching
- * `parseChartRow`'s idiom; the untruncated originals live in `raw` so
- * `validateRows` can report against exactly what the file contained.
- */
-function parseCustomerRow(cells: string[], columns: ResolvedColumns, rowNumber: number): StagedRowInput {
-  const nameRaw = columns.partyNameIdx !== null ? (cells[columns.partyNameIdx] ?? '').trim() : '';
-  const emailRaw = columns.partyEmailIdx !== null ? (cells[columns.partyEmailIdx] ?? '').trim() : '';
-  const phoneRaw = columns.partyPhoneIdx !== null ? (cells[columns.partyPhoneIdx] ?? '').trim() : '';
-  const addressRaw = columns.partyAddressIdx !== null ? (cells[columns.partyAddressIdx] ?? '').trim() : '';
-  const taxNumberRaw = columns.partyTaxNumberIdx !== null ? (cells[columns.partyTaxNumberIdx] ?? '').trim() : '';
-  const paymentTermsRaw =
-    columns.partyPaymentTermsIdx !== null ? (cells[columns.partyPaymentTermsIdx] ?? '').trim() : '';
-  const notesRaw = columns.partyNotesIdx !== null ? (cells[columns.partyNotesIdx] ?? '').trim() : '';
-
-  return {
-    rowNumber,
-    raw: {
-      name: nameRaw,
-      email: emailRaw,
-      phone: phoneRaw,
-      address: addressRaw,
-      taxNumber: taxNumberRaw,
-      paymentTerms: paymentTermsRaw,
-      notes: notesRaw,
-    },
-    accountCode: null,
-    accountName: null,
-    accountType: null,
-    parentCode: null,
-    description: null,
-    debitCents: null,
-    creditCents: null,
-    partyName: nameRaw === '' ? null : nameRaw.slice(0, 200),
-    partyEmail: emailRaw === '' ? null : emailRaw.slice(0, 254),
-    partyPhone: phoneRaw === '' ? null : phoneRaw.slice(0, 40),
-    partyAddress: addressRaw === '' ? null : addressRaw.slice(0, 500),
-    partyTaxNumber: taxNumberRaw === '' ? null : taxNumberRaw.slice(0, 64),
-    partyPaymentTerms: paymentTermsRaw === '' ? null : paymentTermsRaw.slice(0, 500),
-    partyNotes: notesRaw === '' ? null : notesRaw.slice(0, 1000),
-  };
-}
-
-function parseRows(table: CsvTable, columns: ResolvedColumns, kind: MigrationImportKind): StagedRowInput[] {
-  return table.rows.map((cells, index) => {
-    // 1-based, header row counted — matches bankImportService's convention.
-    const rowNumber = index + 2;
-    if (kind === 'CHART_OF_ACCOUNTS') return parseChartRow(cells, columns, rowNumber);
-    if (kind === 'CUSTOMERS' || kind === 'VENDORS') return parseCustomerRow(cells, columns, rowNumber);
-    return parseOpeningRow(cells, columns, rowNumber);
-  });
 }
 
 // ---------------------------------------------------------------- row mapping
@@ -384,6 +68,8 @@ interface ImportRow {
   created_by: string;
   created_by_name: string | null;
   created_at: Date;
+  column_map: Record<string, string | null> | null;
+  result: MigrationCommitResult | null;
 }
 
 const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, i.row_count, i.error_count,
@@ -392,17 +78,13 @@ const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, 
                                (SELECT count(*) FROM migration_import_rows r
                                  WHERE r.org_id = i.org_id AND r.import_id = i.id AND r.status = 'EXCLUDED') AS excluded_count,
                                i.journal_entry_id, i.committed_at,
-                               i.created_by, u.name AS created_by_name, i.created_at
+                               i.created_by, u.name AS created_by_name, i.created_at,
+                               i.column_map, i.result
                           FROM migration_imports i
                           LEFT JOIN users u ON u.id = i.created_by`;
 
 function toImport(row: ImportRow): MigrationImport {
-  if (
-    row.kind !== 'CHART_OF_ACCOUNTS' &&
-    row.kind !== 'OPENING_BALANCES' &&
-    row.kind !== 'CUSTOMERS' &&
-    row.kind !== 'VENDORS'
-  ) {
+  if (!isMigrationImportKind(row.kind)) {
     throw new Error(`Unknown migration import kind "${row.kind}"`);
   }
   if (row.status !== 'DRAFT' && row.status !== 'VALIDATED' && row.status !== 'COMMITTED') {
@@ -423,6 +105,8 @@ function toImport(row: ImportRow): MigrationImport {
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdAt: row.created_at.toISOString(),
+    columnMap: row.column_map,
+    result: row.result,
   };
 }
 
@@ -508,6 +192,7 @@ export interface ListImportsOptions {
   page: number;
   limit: number;
   kind: MigrationImportKind | null;
+  status: MigrationImportStatus | null;
 }
 
 export async function listImports(
@@ -520,6 +205,10 @@ export async function listImports(
   if (options.kind !== null) {
     values.push(options.kind);
     clauses.push(`i.kind = $${String(values.length)}`);
+  }
+  if (options.status !== null) {
+    values.push(options.status);
+    clauses.push(`i.status = $${String(values.length)}`);
   }
   const where = clauses.join(' AND ');
 
@@ -633,29 +322,36 @@ async function revalidateOnClient(client: PoolClient, orgId: string, importId: s
   );
   const stagedRows = rowRows.map(toRow);
 
-  let results: { rowId: string; errors: string[] }[];
-  if (importKind === 'CHART_OF_ACCOUNTS') {
-    results = await chartImportService.validateRows(client, orgId, stagedRows);
-  } else if (importKind === 'OPENING_BALANCES') {
-    results = await openingBalanceImportService.validateRows(client, orgId, stagedRows);
-  } else if (importKind === 'CUSTOMERS' || importKind === 'VENDORS') {
-    results = await partyImportService.validateRows(client, orgId, importKind, stagedRows);
-  } else {
+  if (!isMigrationImportKind(importKind)) {
     throw new Error(`Unknown migration import kind "${importKind}"`);
   }
+  const results = await getImportKind(importKind).validateRows(client, orgId, stagedRows);
   const errorsByRowId = new Map(results.map((r) => [r.rowId, r.errors]));
 
   let errorCount = 0;
+  const rowStatuses: MigrationRowStatus[] = [];
   for (const row of stagedRows) {
     const errors = errorsByRowId.get(row.id) ?? [];
     const status: MigrationRowStatus = errors.length === 0 ? 'VALID' : 'INVALID';
     if (status === 'INVALID') errorCount += 1;
-    await client.query('UPDATE migration_import_rows SET errors = $1, status = $2 WHERE id = $3 AND org_id = $4', [
-      errors,
-      status,
-      row.id,
-      orgId,
-    ]);
+    rowStatuses.push(status);
+  }
+
+  if (stagedRows.length > 0) {
+    await client.query(
+      `UPDATE migration_import_rows AS r
+          SET errors = ARRAY(SELECT jsonb_array_elements_text(v.errors_json::jsonb)),
+              status = v.status
+         FROM unnest($1::uuid[], $2::text[], $3::text[]) AS v(id, errors_json, status)
+        WHERE r.id = v.id AND r.org_id = $4 AND r.import_id = $5`,
+      [
+        stagedRows.map((r) => r.id),
+        stagedRows.map((r) => JSON.stringify(errorsByRowId.get(r.id) ?? [])),
+        rowStatuses,
+        orgId,
+        importId,
+      ],
+    );
   }
 
   const targetStatus = errorCount === 0 ? 'VALIDATED' : 'DRAFT';
@@ -679,6 +375,47 @@ export interface CreateImportInput {
   kind: MigrationImportKind;
   fileName: string;
   content: string;
+  columnMap: Record<string, string | null> | null;
+}
+
+/** Shared by `createImport` and `inspectImport`: parse, cap rows, resolve columns. */
+function parseAndResolve(input: { kind: MigrationImportKind; content: string; columnMap: Record<string, string | null> | null }) {
+  const def = getImportKind(input.kind);
+  const table = parseCsv(input.content);
+  if (table.rows.length > MAX_IMPORT_ROWS) {
+    throw new ApiError(
+      422,
+      `This file has ${String(table.rows.length)} data rows; one import takes at most ${String(MAX_IMPORT_ROWS)} — split it into smaller files`,
+    );
+  }
+  const columns = resolveColumnIndexes(table.headers, def.columns, input.columnMap ?? null, def.label);
+  return { def, table, columns };
+}
+
+/**
+ * Reads a file and reports how its headers would resolve — without touching
+ * the database, and without rejecting a missing required column (the wizard's
+ * mapping step fixes that).
+ */
+export function inspectImport(input: { kind: MigrationImportKind; content: string }): MigrationImportInspection {
+  const { def, table, columns } = parseAndResolve({ ...input, columnMap: null });
+  const missingRequired = findMissingRequired(def.columns, def.requiredOneOf, columns);
+  const suggestedMap: Record<string, string | null> = {};
+  for (const col of def.columns) {
+    const idx = columns[col.key];
+    suggestedMap[col.key] = idx === null || idx === undefined ? null : (table.headers[idx] ?? null);
+  }
+  const templateCompacts = new Set(def.columns.map((col) => compactHeader(col.header)));
+  return {
+    kind: input.kind,
+    headers: table.headers,
+    delimiter: table.delimiter,
+    rowCount: table.rows.length,
+    sampleRows: table.rows.slice(0, 5),
+    suggestedMap,
+    missingRequired,
+    exactMatch: missingRequired.length === 0 && table.headers.every((h) => templateCompacts.has(compactHeader(h))),
+  };
 }
 
 export async function createImport(
@@ -690,19 +427,32 @@ export async function createImport(
   try {
     await beginTransaction(client);
 
-    const table = parseCsv(input.content);
-    const columns = resolveColumns(table.headers, input.kind);
-    const parsed = parseRows(table, columns, input.kind);
+    const { def, table, columns } = parseAndResolve(input);
+    const missing = findMissingRequired(def.columns, def.requiredOneOf, columns);
+    const firstMissing = missing[0];
+    if (firstMissing !== undefined) {
+      const label = def.columns.find((c) => c.key === firstMissing)?.label ?? firstMissing;
+      throw new ApiError(422, def.missingMessages[firstMissing] ?? `Could not find a "${label}" column in the file`);
+    }
+    const parsed = table.rows.map((cells, i) => def.parseRow(cells, columns, i + 2));
 
     if (parsed.length === 0) {
       throw new ApiError(422, 'The file contains no data rows');
     }
 
     const { rows: importRows } = await client.query<{ id: string }>(
-      `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6)
+      `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by, column_map)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
        RETURNING id`,
-      [orgId, input.kind, input.fileName, table.delimiter, parsed.length, createdBy],
+      [
+        orgId,
+        input.kind,
+        input.fileName,
+        table.delimiter,
+        parsed.length,
+        createdBy,
+        input.columnMap === null ? null : JSON.stringify(input.columnMap),
+      ],
     );
     const importId = importRows[0]?.id;
     if (importId === undefined) throw new Error('no import id');
@@ -875,17 +625,10 @@ export async function deleteImport(orgId: string, importId: string): Promise<voi
 /** Read-only preview of what commit will do, delegated by kind. */
 export async function preview(orgId: string, importId: string) {
   const imp = await getImportById(orgId, importId);
-  return withTransaction((client) => {
-    if (imp.kind === 'CHART_OF_ACCOUNTS') return chartImportService.preview(client, orgId, importId);
-    if (imp.kind === 'OPENING_BALANCES') return openingBalanceImportService.preview(client, orgId, importId);
-    return partyImportService.preview(client, orgId, importId);
-  });
+  return withTransaction((client) => getImportKind(imp.kind).preview(client, orgId, importId));
 }
 
-export type CommitResult =
-  | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
-  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
-  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
+export type CommitResult = MigrationCommitResult;
 
 /** Commits a VALIDATED import, delegated by kind. All-or-nothing. */
 export async function commit(
@@ -893,31 +636,34 @@ export async function commit(
   createdBy: string,
   importId: string,
 ): Promise<{ import: MigrationImport; result: CommitResult }> {
-  const imp = await getImportById(orgId, importId);
-  if (imp.status !== 'VALIDATED') {
-    throw new ApiError(409, `Fix ${String(imp.errorCount)} invalid row(s) before committing`);
-  }
-
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    let result: CommitResult;
-    if (imp.kind === 'CHART_OF_ACCOUNTS') {
-      const { created, merged } = await chartImportService.commitOnClient(client, orgId, importId);
-      result = { kind: 'CHART_OF_ACCOUNTS', createdCount: created, mergedCount: merged };
-    } else if (imp.kind === 'OPENING_BALANCES') {
-      const { journalEntryId, plugCents } = await openingBalanceImportService.commitOnClient(
-        client,
-        orgId,
-        importId,
-        createdBy,
-      );
-      result = { kind: 'OPENING_BALANCES', journalEntryId, plugCents };
-    } else {
-      const { created, merged } = await partyImportService.commitOnClient(client, orgId, importId);
-      result = { kind: imp.kind, createdCount: created, mergedCount: merged };
+    const { rows: lockedRows } = await client.query<{ kind: string; status: string; error_count: number }>(
+      'SELECT kind, status, error_count FROM migration_imports WHERE id = $1 AND org_id = $2 FOR UPDATE',
+      [importId, orgId],
+    );
+    const locked = lockedRows[0];
+    if (locked === undefined) throw new ApiError(404, 'Migration import not found');
+    if (locked.status === 'COMMITTED') {
+      throw new ApiError(409, 'This import has already been committed');
     }
+    if (locked.status !== 'VALIDATED') {
+      throw new ApiError(409, `Fix ${String(locked.error_count)} invalid row(s) before committing`);
+    }
+    if (!isMigrationImportKind(locked.kind)) {
+      throw new Error(`Unknown migration import kind "${locked.kind}"`);
+    }
+    const kind = locked.kind;
+
+    const result = await getImportKind(kind).commitOnClient(client, orgId, importId, createdBy);
+
+    await client.query('UPDATE migration_imports SET result = $1::jsonb WHERE id = $2 AND org_id = $3', [
+      JSON.stringify(result),
+      importId,
+      orgId,
+    ]);
 
     await client.query('COMMIT');
     return { import: await getImportById(orgId, importId), result };

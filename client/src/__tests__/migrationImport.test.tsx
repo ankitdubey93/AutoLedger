@@ -2,9 +2,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import NewMigrationImportPage from '../Pages/accounting/NewMigrationImportPage';
 import MigrationImportDetailPage from '../Pages/accounting/MigrationImportDetailPage';
 import type { MigrationImport, MigrationImportRow } from '../services/fetchServices';
+import { IMPORT_KINDS_FIXTURE } from './fixtures/importKinds';
 
 /**
  * The staged migration importers' client pages (Phase 9b) — the new-import
@@ -13,11 +13,6 @@ import type { MigrationImport, MigrationImportRow } from '../services/fetchServi
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-}
-
-function makeCsvFile(): File {
-  const content = 'Code,Name,Type,Parent\n9100,Custom Root,Asset,';
-  return new File([content], 'chart.csv', { type: 'text/csv' });
 }
 
 function baseImport(overrides: Partial<MigrationImport> = {}): MigrationImport {
@@ -36,6 +31,8 @@ function baseImport(overrides: Partial<MigrationImport> = {}): MigrationImport {
     createdBy: 'u1',
     createdByName: 'Ada',
     createdAt: new Date().toISOString(),
+    columnMap: null,
+    result: null,
     ...overrides,
   };
 }
@@ -76,68 +73,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('NewMigrationImportPage', () => {
-  function renderPage() {
-    return render(
-      <MemoryRouter initialEntries={['/migration-imports/new']}>
-        <Routes>
-          <Route path="/migration-imports/new" element={<NewMigrationImportPage />} />
-        </Routes>
-      </MemoryRouter>,
-    );
-  }
-
-  it('posts CSV text as a JSON string body, never FormData', async () => {
-    fetchMock.mockResolvedValue(
-      jsonResponse(201, { success: true, import: baseImport({ id: 'imp-new' }), rows: [] }),
-    );
-    const user = userEvent.setup();
-    renderPage();
-
-    const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
-    await user.upload(fileInput, makeCsvFile());
-    await waitFor(() => expect(fileInput.files?.length).toBe(1));
-
-    await user.click(screen.getByRole('button', { name: 'Stage import' }));
-
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find((c) => {
-        const [, init] = c as [RequestInfo | URL, RequestInit?];
-        return init?.method === 'POST';
-      });
-      expect(call).toBeDefined();
-      const init = call?.[1] as RequestInit;
-      expect(init.body).not.toBeInstanceOf(FormData);
-      const parsed = JSON.parse(init.body as string) as { content: string };
-      expect(typeof parsed.content).toBe('string');
-      expect(parsed.content).toContain('9100');
-    });
-  });
-
-  it('the kind selector offers Customers and Vendors', () => {
-    renderPage();
-
-    const select = screen.getByLabelText('What are you importing?') as HTMLSelectElement;
-    const optionValues = Array.from(select.options).map((o) => o.value);
-    expect(optionValues).toEqual(['CHART_OF_ACCOUNTS', 'OPENING_BALANCES', 'CUSTOMERS', 'VENDORS']);
-  });
-
-  it('the Customers template lists Name as required', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await user.selectOptions(screen.getByLabelText('What are you importing?'), 'CUSTOMERS');
-
-    const row = screen.getByText('Name').closest('tr');
-    expect(row).not.toBeNull();
-    expect(row?.textContent).toContain('Yes');
-  });
-});
-
 describe('MigrationImportDetailPage', () => {
   function mockRoutes(imp: MigrationImport, rows: MigrationImportRow[], preview: Record<string, unknown>) {
     fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/migration-imports/kinds')) {
+        return Promise.resolve(jsonResponse(200, { success: true, kinds: IMPORT_KINDS_FIXTURE }));
+      }
       if (init?.method === 'POST' && url.includes('/commit')) {
         return Promise.resolve(
           jsonResponse(200, {
@@ -308,5 +250,53 @@ describe('MigrationImportDetailPage', () => {
     renderPage(imp.id);
 
     expect(await screen.findByText(/2 will be created, 1 will be merged into existing records/)).toBeInTheDocument();
+  });
+
+  it('the header names the kind, not "Opening balances", for a customer import', async () => {
+    const imp = baseImport({ kind: 'CUSTOMERS', status: 'VALIDATED' });
+    mockRoutes(imp, [baseRow({ accountCode: null, partyName: 'Northwind Traders' })], {
+      kind: 'CUSTOMERS',
+      canCommit: true,
+      blockingErrorCount: 0,
+      accountsToCreate: 0,
+      accountsToMerge: 0,
+      totalDebitCents: 0,
+      totalCreditCents: 0,
+      plugCents: 0,
+      plugAccountCode: '',
+      entryDate: null,
+      partiesToCreate: 1,
+      partiesToMerge: 0,
+    });
+    renderPage(imp.id);
+
+    const subtitle = await screen.findByText(/Customers · VALIDATED/);
+    expect(subtitle.textContent).not.toContain('Opening balances');
+  });
+
+  it('a committed party import shows created and merged counts from result', async () => {
+    const imp = baseImport({
+      kind: 'CUSTOMERS',
+      status: 'COMMITTED',
+      committedAt: new Date().toISOString(),
+      result: { kind: 'CUSTOMERS', createdCount: 3, mergedCount: 1 },
+    });
+    mockRoutes(imp, [baseRow({ accountCode: null, partyName: 'Northwind Traders' })], {
+      kind: 'CUSTOMERS',
+      canCommit: false,
+      blockingErrorCount: 0,
+      accountsToCreate: 0,
+      accountsToMerge: 0,
+      totalDebitCents: 0,
+      totalCreditCents: 0,
+      plugCents: 0,
+      plugAccountCode: '',
+      entryDate: null,
+      partiesToCreate: 0,
+      partiesToMerge: 0,
+    });
+    renderPage(imp.id);
+
+    expect(await screen.findByText('Committed: 3 created, 1 merged.')).toBeInTheDocument();
   });
 });

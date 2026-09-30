@@ -48,6 +48,48 @@ A `NUMBER`-typed attribute (`carpet_area_sqft`) is stored **as a JSON string**, 
 | Default GIN JSONB opclass | Supports `@>`, `?`, `?|`, `?&` | Rejected in favor of `jsonb_path_ops` — nothing here ever queries key-existence independent of value, and the narrower opclass is smaller/faster for the one operator actually used |
 | JSON number for `NUMBER`-typed values | Terser | Rejected — JSON numbers parse to 64-bit floats with no precision guarantee; stored as a validated string instead |
 
+## Batched `UPDATE … FROM unnest()`, and passing an array-per-row as JSON
+
+*(Phase 36a. This note is about JSONB as a value store, but the technique here uses JSON as a **transport** for a column that is itself `text[]`; it lives here rather than in `transactions-isolation-pooling.md` or `idempotent-ingestion-and-dedupe-hashes.md` because the crux is the JSON/array boundary. Verified against PostgreSQL 16 and `node-postgres` (`pg`) 8.)*
+
+### The problem: N round trips to write N rows' validation result
+
+After every validation pass the staged importer must write each row's new `status` and `errors` (a `text[]`). The first implementation issued one `UPDATE … WHERE id = $1` per row inside the transaction. With a 5,000-row cap (`MAX_IMPORT_ROWS`) and a full revalidation on *every* `PATCH`, that is up to 5,000 sequential round trips per edit. The fix is one statement:
+
+```sql
+UPDATE migration_import_rows AS r
+   SET errors = ARRAY(SELECT jsonb_array_elements_text(v.errors_json::jsonb)),
+       status = v.status
+  FROM unnest($1::uuid[], $2::text[], $3::text[]) AS v(id, errors_json, status)
+ WHERE r.id = v.id AND r.org_id = $4 AND r.import_id = $5
+```
+
+### Mechanism
+
+- **Multi-argument `unnest` in `FROM`.** `unnest(a, b, c)` in the `FROM` clause is a set-returning function that walks the arrays *in lockstep*, producing one row per index with one column per array. (If the arrays differ in length the shorter ones are padded with NULLs — so keeping the three parameter arrays built from the same `stagedRows` list matters.) The result is a derived table aliased `v(id, errors_json, status)` that can be joined like any other.
+- **`UPDATE … FROM` is a join.** The planner treats `v` as another relation: for each target row matching `r.id = v.id` it computes the `SET` expressions against the joined row. One statement, one plan, one round trip. The `org_id` and `import_id` predicates stay in the `WHERE` (rule 1) — so even if a forged id were in the array, a row from another tenant is not matched.
+- **Parameters are arrays, not interpolation.** `pg` serialises a JS array into a Postgres array literal (`{…}`), and the `$1::uuid[]` cast tells the server how to parse it. Nothing is concatenated into the SQL (rule 4). An array of *values* is exactly the shape `unnest` wants.
+
+### The wrinkle: an array per row cannot be a parameter array-of-arrays
+
+Each row's `errors` is itself a `text[]`. The obvious move — pass `text[][]` and `unnest` it — fails for two reasons. A multi-dimensional Postgres array must be **rectangular** (every sub-array the same length), and row error lists are ragged (0, 1, or several messages). And even a rectangular one would be flattened by `unnest` into individual scalars, losing the row boundaries.
+
+So each row's errors travel as **one JSON string**: `JSON.stringify(errorsByRowId.get(r.id) ?? [])` → a `text[]` parameter whose elements look like `["Code already exists","Parent not found"]`. In SQL, `v.errors_json::jsonb` parses it and `jsonb_array_elements_text(...)` turns the JSON array back into a set of text rows; `ARRAY(SELECT …)` collects them into a `text[]`. Properties worth stating:
+
+- JSON quoting and escaping handle commas, braces and quotes inside a message, which a hand-built `{a,b}` array literal would have to escape carefully (a real injection-adjacent bug class, even though it is parameterised).
+- An empty list is `[]` → the subquery yields no rows → `ARRAY(...)` yields an empty array, not NULL. That is what a `VALID` row needs.
+- **Ordering.** `jsonb_array_elements_text` returns elements in array order in practice and `ARRAY(subquery)` preserves the subquery's row order, but the SQL standard does not promise order without `ORDER BY`. The error text is displayed as a list, so a reordering would be cosmetic; if order ever mattered, use `jsonb_array_elements_text(...) WITH ORDINALITY` and `ORDER BY ordinality`. (I have not seen a reorder; I am flagging it as the documented-guarantee gap, not an observed bug.)
+
+### Rejected alternatives
+
+| Option | Why not |
+|---|---|
+| One `UPDATE` per row in a loop | N round trips inside a transaction that holds locks the whole time; latency scales with file size. |
+| `VALUES` list built by string concatenation | Violates rule 4 outright. |
+| Pass `text[][]` | Must be rectangular and `unnest` flattens it. |
+| `jsonb_to_recordset($1::jsonb)` — send *one* JSON document of `[{id,errors,status},…]` | A good alternative and arguably cleaner (one parameter, real nested arrays, no lockstep-length concern). Not chosen because the codebase's existing bulk inserts (`createImport`'s staging `INSERT … SELECT FROM unnest(...)`, the bank importer) already use parallel typed arrays, and staying with one idiom was worth more than the marginal tidiness. If asked "how else", name it. |
+| Delete-and-reinsert the rows | Changes ids and `created_at`, breaks the row ids the client is holding, and needs the rest of the row's columns round-tripped. |
+
 ## Where it lives in this codebase
 
 - `server/src/db/migrations/065_stock_setup.sql` — `stock_attribute_definitions` (the normal relational table: `key`, `label`, `data_type`, `scope`, `required`, per-category)
@@ -56,12 +98,20 @@ A `NUMBER`-typed attribute (`carpet_area_sqft`) is stored **as a JSON string**, 
 - `server/src/utils/stockAttributes.ts` — `validateAttributes(definitions, input)`, the entire enforcement layer: required-field check, per-`data_type` coercion/validation, unknown-key rejection
 - `server/src/services/inventory/itemService.ts`, `server/src/services/inventory/serialService.ts` — the `||` merge-patch on update
 
+- `server/src/services/accounting/migrationImportService.ts` — `revalidateOnClient`'s batched `UPDATE … FROM unnest(...)`, and `createImport`'s staging `INSERT … SELECT … FROM unnest(...)` (the same parallel-array idiom, 16 parallel arrays)
+- `server/src/db/migrations/078_ledger-core_migration_import_kinds.sql` — `migration_import_rows.data JSONB` and `migration_imports.column_map` / `options` / `commit_options` / `result`, each with a `jsonb_typeof(...) = 'object'` CHECK (the same thin-contract idea this note opens with); `server/src/__tests__/accounting/migrationImportConstraints.test.ts` asserts `data = '[]'` and `column_map = '"x"'` each fail with SQLSTATE `23514`
+
 ## Gotchas
 
 - The CHECK constraint (`jsonb_typeof = 'object'`) stops `attributes` from ever being an array or a bare string, but it says nothing about which keys are present or what type each value is — every one of those checks is in `validateAttributes`, and skipping that call (writing `attributes` directly from a controller, say) would bypass every rule silently.
 - `jsonb_path_ops` cannot serve a query for "does this item have an attribute named `tower`, regardless of value" — only exact-value containment. If a future feature needs "any item with a `tower` field set to anything," the index would need to be rebuilt with the default opclass (or a second index added).
 - `||`'s shallow merge means a `NUMBER`-typed attribute value stored as a string still needs re-validating on every patch — merging doesn't type-check what it's merging in.
 - Removing an attribute definition doesn't retroactively strip that key from every existing item's `attributes` JSONB — old rows keep the now-undefined key until they're next updated, which is a deliberate non-destructive choice (data isn't silently deleted by a schema change) but means a query relying on "every item's attributes only has defined keys" would be wrong for stale rows.
+
+- **Parallel arrays must be the same length.** In a multi-argument `unnest` the shorter array is NULL-padded, not rejected. Build every parameter array by `.map` over the *same* source list, as `revalidateOnClient` does; never build them from independent collections.
+- **Skip the statement on an empty list.** `unnest` of empty arrays is fine, but the code guards `stagedRows.length > 0` anyway, which avoids a pointless round trip.
+- **Keep the tenant predicate in the batched statement.** The `FROM unnest` join supplies ids from application code; the `org_id`/`import_id` predicates are what stop a wrong id from touching another tenant's row.
+- **A JSON-typed CHECK is the whole database contract.** `jsonb_typeof(x) = 'object'` rejects `[]` and `"x"` but nothing about the keys; shape validation for `column_map` lives in the zod schema and `resolveColumnIndexes`, the same split as the attribute definitions above.
 
 ## Interview Q&A
 
@@ -83,14 +133,34 @@ A: Because the whole point of letting a tenant define their own fields is that a
 **Q: What's a concrete failure mode of this design you'd want a reviewer to check for?**
 A: Deleting or renaming an attribute definition doesn't touch existing rows' JSONB — a "removed" custom field silently lingers in every item that already had it set, since JSONB storage isn't tied to the definitions table by any foreign key (it can't be; JSONB keys aren't rows). That's a deliberate choice — you don't want a schema change to destructively rewrite tenant data — but it does mean any code reading `attributes` should treat unknown keys as ignorable rather than assuming every key present corresponds to a currently-defined attribute.
 
+**Q: How do you update a few thousand rows with different values in one statement, safely?**
+A: Pass each column as a parameter array and join against `unnest($1::uuid[], $2::text[], …) AS v(id, …)` in an `UPDATE … FROM`. The arrays are walked in lockstep into a derived table, the planner joins it to the target on the key, and the `SET` clause reads from the joined row. It is one round trip and one plan, it is fully parameterised (the driver serialises the JS arrays), and the tenant predicate stays in the `WHERE`. In AutoLedger this replaced a per-row loop in the staged importer's revalidation.
+
+**Q: Each row needs to set a `text[]` column. Why send JSON strings instead of a two-dimensional array?**
+A: A multi-dimensional Postgres array has to be rectangular — every sub-array the same length — and validation error lists are ragged; and `unnest` on a 2-D array flattens it to scalars, so the per-row grouping is lost anyway. Wrapping each row's list in a JSON string makes the row boundary a single array element, and `jsonb_array_elements_text` inside `ARRAY(SELECT …)` rebuilds the `text[]`. JSON also escapes quotes and commas for free, which hand-building array literals would not.
+
+**Q: What does `unnest` do if the arrays you give it have different lengths?**
+A: In the `FROM` clause form, it produces as many rows as the longest array and fills the shorter ones with NULLs; it does not error. So a length mismatch from a bug would write NULL statuses or ids rather than fail loudly, which is why the parameter arrays are all produced by mapping over one list — and why the `status` column's NOT NULL / CHECK would be the backstop that turns such a bug into a hard error.
+
+**Q: Would `jsonb_to_recordset` be better here?**
+A: It is a reasonable alternative: send one JSONB array of `{id, errors, status}` objects and expand it with `jsonb_to_recordset($1::jsonb) AS v(id uuid, errors jsonb, status text)`. You get true nested arrays with no lockstep-length risk and a single parameter. The trade-off is parse cost for a big JSON document and, here, consistency — the importer's bulk insert already uses parallel typed arrays, so we kept one idiom. If I were starting from scratch with no existing idiom I would seriously consider the recordset form.
+
+**Q: Why does a column typed `JSONB` get `CHECK (jsonb_typeof(col) = 'object')` and nothing more?**
+A: Because the database can cheaply enforce the *kind* of value (object versus array versus scalar) and cannot usefully enforce per-tenant or per-kind key shapes without a trigger. The `data` column will hold different fields per import kind in the later steps, and `column_map` is validated by the zod schema plus the resolver. The CHECK catches the category of bug that an ORM-less raw update can produce — writing `[]` or a bare string — and our constraint test asserts exactly those two fail with `23514`.
+
 ## Follow-ups they'll dig into
 
 - "How would you query 'every item missing a required attribute for its category'?" — would need to join items to their category's required-attribute-definitions and check `NOT (attributes ? key)` per key, which is exactly the key-existence operator `jsonb_path_ops` doesn't support — a case for the default GIN opclass, or (better) enforcing this at write time instead of querying for violations after the fact, which is what this codebase actually does.
 - "What if two attribute definitions needed the same key name in different categories?" — `stock_attribute_definitions` scopes `key` uniqueness per category, so this is allowed by design; the JSONB itself has no idea which category's definition a key belongs to, that mapping only exists by joining through the item's `category_id`.
 - "How would this change if attributes needed to be searched full-text, not just exact-match?" — JSONB's GIN indexing is containment/existence only; a text-search need would call for `pg_trgm` or `tsvector` on specific extracted values, a genuinely different indexing strategy layered on top.
 
+- "How would you prove the batched update is equivalent to the loop?" The legacy import tests (`chartImport`, `openingBalanceImport`, `partyImport`) were left unedited as the regression gate and pass against the batched statement; they assert per-row statuses and error text after staging and after a `PATCH`.
+- "Does `UPDATE … FROM` lock rows in a deterministic order?" Not specified — it follows the join plan. For a single import's rows, edited by one operator, concurrent lockers are not a realistic hazard here; for a workload where two batches could overlap rows, sort by key and lock in a fixed order (this codebase does that for stock balances, see `inventory-valuation-and-perpetual-stock.md`).
+
 ## See also
 
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md) — the same "don't trust a JSON number for a precision-sensitive value" reasoning, applied to money
 - [../typescript/discriminated-unions-and-parsers.md](../typescript/discriminated-unions-and-parsers.md) — the code-pattern parser that consumes these same attribute definitions when rendering an item code
 - [audit-triggers-and-session-variables.md](audit-triggers-and-session-variables.md) — the other place this codebase stores a JSONB blob (a `to_jsonb(NEW)` audit snapshot) whose shape the database is deliberately agnostic to
+- [../architecture/staged-import-and-two-phase-commit.md](../architecture/staged-import-and-two-phase-commit.md#phase-36a-additions--one-registry-inspect-then-stage-and-a-lock-on-commit) — the importer this statement belongs to, and the `FOR UPDATE` commit guard
+- [idempotent-ingestion-and-dedupe-hashes.md](idempotent-ingestion-and-dedupe-hashes.md) — the bank importer's `INSERT … FROM unnest(...)`, the insert-side cousin of this technique

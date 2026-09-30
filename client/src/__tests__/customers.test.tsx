@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -111,7 +111,7 @@ describe('CustomersPage', () => {
     renderCustomersPage();
 
     await screen.findByText('Alpha Mills');
-    const names = () => screen.getAllByRole('link').map((l) => l.textContent);
+    const names = () => within(screen.getByRole('table')).getAllByRole('link').map((l) => l.textContent);
     expect(names()).toEqual(['Alpha Mills', 'Northwind Traders', 'Zeta Freight']);
     expect(screen.getByRole('columnheader', { name: /Name/ })).toHaveAttribute('aria-sort', 'ascending');
 

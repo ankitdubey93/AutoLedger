@@ -1,32 +1,74 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Download } from 'lucide-react';
-import { createMigrationImport, type MigrationImportKind } from '../../services/fetchServices';
-import { IMPORT_TEMPLATES, templateCsv } from './importTemplates';
+import {
+  createMigrationImport,
+  inspectMigrationImport,
+  type MigrationImportInspection,
+  type MigrationImportKind,
+} from '../../services/fetchServices';
+import { templateCsv, templateFileName } from './importTemplates';
+import { safeReturnTo } from '../../utils/safeReturnTo';
 import BackLink from '../../components/BackLink';
+import LoadingState from '../../components/ui/LoadingState';
+import { inputClass, primaryButtonClass, secondaryButtonClass } from '../../components/ui/formClasses';
+import ColumnMapper, { mappingProblems } from './imports/ColumnMapper';
+import ImportGuidePanel from './imports/ImportGuidePanel';
+import ImportSteps from './imports/ImportSteps';
+import { useImportKinds } from './imports/useImportKinds';
 
 /**
- * Stages a new chart-of-accounts, opening-balance, customer or vendor CSV
- * (Phase 9b; CUSTOMERS/VENDORS added Phase 24).
+ * The import wizard's first two steps: Upload, then Map columns (Phase 9b;
+ * rebuilt Phase 36a). Templates, columns and notes all come from the server's
+ * kind registry (`GET /migration-imports/kinds`), so this page holds no
+ * per-kind knowledge. The file is inspected (nothing persisted) before it is
+ * staged, so a mismatched header row can be mapped by hand.
  *
  * The CSV's text goes straight into the JSON body — never a multipart
- * upload — the same shape `BankImportPage` uses, and for the same reason:
- * file storage belongs to a later phase, not this one.
+ * upload — the same shape `BankImportPage` uses.
  */
 
 const MAX_CSV_CHARS = 900_000;
 
-const inputClass =
-  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
-
 export default function NewMigrationImportPage() {
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const { kinds, error: kindsError } = useImportKinds();
 
-  const [kind, setKind] = useState<MigrationImportKind>('CHART_OF_ACCOUNTS');
+  const kindParam = params.get('kind');
+  const returnTo = safeReturnTo(params.get('returnTo'));
+
+  const [kindState, setKindState] = useState<MigrationImportKind | null>(null);
+  const [stage, setStage] = useState<'upload' | 'map'>('upload');
   const [fileName, setFileName] = useState('');
   const [content, setContent] = useState('');
+  const [inspection, setInspection] = useState<MigrationImportInspection | null>(null);
+  const [mapping, setMapping] = useState<Record<string, string | null>>({});
+  const [showMapper, setShowMapper] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  if (kindsError !== null) return <p className="status status--bad">{kindsError}</p>;
+  if (kinds === null) return <LoadingState />;
+
+  const locked = kinds.find((k) => k.kind === kindParam);
+  const kind: MigrationImportKind = kindState ?? locked?.kind ?? 'CHART_OF_ACCOUNTS';
+  const meta = kinds.find((k) => k.kind === kind);
+  if (meta === undefined) return <p className="status status--bad">Unknown import kind.</p>;
+
+  function downloadTemplate() {
+    if (meta === undefined) return;
+    const blob = new Blob([templateCsv(meta)], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = templateFileName(kind);
+      link.click();
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
 
   function handleFile(file: File) {
     setError(null);
@@ -40,6 +82,16 @@ export default function NewMigrationImportPage() {
         return;
       }
       setContent(text);
+      inspectMigrationImport({ kind, content: text })
+        .then((res) => {
+          setInspection(res.inspection);
+          setMapping(res.inspection.suggestedMap);
+          setShowMapper(!res.inspection.exactMatch);
+          setStage('map');
+        })
+        .catch((err: unknown) => {
+          setError(err instanceof Error ? err.message : 'Could not read that file');
+        });
     };
     reader.onerror = () => {
       setError('Could not read that file.');
@@ -47,31 +99,28 @@ export default function NewMigrationImportPage() {
     reader.readAsText(file);
   }
 
-  const canSubmit = fileName.trim() !== '' && content !== '' && !busy;
-  const template = IMPORT_TEMPLATES[kind];
-
-  function downloadTemplate() {
-    const blob = new Blob([templateCsv(kind)], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    try {
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `autoledger-${kind.toLowerCase()}-template.csv`;
-      link.click();
-    } finally {
-      URL.revokeObjectURL(url);
-    }
+  function backToUpload() {
+    setStage('upload');
+    setContent('');
+    setInspection(null);
+    setError(null);
   }
 
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    if (!canSubmit) return;
+  const problems = meta !== undefined && stage === 'map' ? mappingProblems(meta, mapping) : [];
+
+  async function handleStage() {
+    if (busy || problems.length > 0) return;
     setBusy(true);
     setError(null);
-
     try {
-      const res = await createMigrationImport({ kind, fileName: fileName.trim(), content });
-      navigate(`/migration-imports/${res.import.id}`, { replace: true });
+      const res = await createMigrationImport({
+        kind,
+        fileName: fileName.trim(),
+        content,
+        columnMap: showMapper ? mapping : null,
+      });
+      const suffix = returnTo !== null ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
+      navigate(`/migration-imports/${res.import.id}${suffix}`, { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not stage the import');
       setBusy(false);
@@ -80,94 +129,141 @@ export default function NewMigrationImportPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <BackLink to="/migration-imports" label="Back to imports" />
+      <BackLink to={returnTo ?? '/migration-imports'} label={returnTo !== null ? 'Back' : 'Back to imports'} />
+      <ImportSteps current={stage === 'upload' ? 1 : 2} />
 
-      <header>
-        <h2 className="text-lg font-semibold m-0">New import</h2>
-        <p className="text-sm text-[var(--muted)] m-0 mt-1">
-          Every row stages, good and bad — fix what's wrong before committing.
-        </p>
-      </header>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="flex flex-col gap-4">
+          <header>
+            <h2 className="text-lg font-semibold m-0">
+              {locked !== undefined ? `Import ${meta.label.toLowerCase()}` : 'New import'}
+            </h2>
+            <p className="text-sm text-[var(--muted)] m-0 mt-1">
+              Every row stages, good and bad — fix what's wrong before committing.
+            </p>
+          </header>
 
-      <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">What are you importing?</span>
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as MigrationImportKind)}
-            className={inputClass}
-          >
-            <option value="CHART_OF_ACCOUNTS">Chart of accounts</option>
-            <option value="OPENING_BALANCES">Opening balances</option>
-            <option value="CUSTOMERS">Customers</option>
-            <option value="VENDORS">Vendors</option>
-          </select>
-        </label>
+          {stage === 'upload' && (
+            <>
+              {locked === undefined && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-[var(--muted)]">What are you importing?</span>
+                  <select
+                    value={kind}
+                    onChange={(e) => {
+                      const next = kinds.find((k) => k.kind === e.target.value);
+                      if (next !== undefined) setKindState(next.kind);
+                    }}
+                    className={inputClass}
+                  >
+                    {kinds.map((k) => (
+                      <option key={k.kind} value={k.kind}>
+                        {k.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
-        <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-4">
-            <p className="text-sm font-medium m-0">{template.label} columns</p>
-            <button
-              type="button"
-              onClick={downloadTemplate}
-              className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer p-0"
-            >
-              <Download size={14} aria-hidden="true" /> Download template CSV
-            </button>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-xs">
-              <thead>
-                <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
-                  <th className="py-1 pr-3 font-medium">Column</th>
-                  <th className="py-1 pr-3 font-medium">Required</th>
-                  <th className="py-1 font-medium">Notes</th>
-                </tr>
-              </thead>
-              <tbody>
-                {template.columns.map((column) => (
-                  <tr key={column.header} className="border-t border-[var(--border)]">
-                    <td className="py-1 pr-3">{column.header}</td>
-                    <td className="py-1 pr-3">{column.required ? 'Yes' : 'No'}</td>
-                    <td className="py-1 text-[var(--muted)]">{column.note}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-4">
+                  <h3 className="text-sm font-medium m-0">{`${meta.label} template`}</h3>
+                  <button
+                    type="button"
+                    onClick={downloadTemplate}
+                    className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border-0 cursor-pointer p-0"
+                  >
+                    <Download size={14} aria-hidden="true" /> Download template
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-xs">
+                    <thead>
+                      <tr className="text-left text-[var(--muted)] uppercase tracking-wide">
+                        <th className="py-1 pr-3 font-medium">Column</th>
+                        <th className="py-1 pr-3 font-medium">Required</th>
+                        <th className="py-1 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {meta.columns.map((column) => (
+                        <tr key={column.key} className="border-t border-[var(--border)]">
+                          <td className="py-1 pr-3">{column.header}</td>
+                          <td className="py-1 pr-3">{column.required ? 'Yes' : 'No'}</td>
+                          <td className="py-1 text-[var(--muted)]">{column.note}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="text-xs text-[var(--muted)] m-0">
+                  Headings starting with * are required. Keep headings unchanged to skip the mapping step.
+                </p>
+              </div>
+
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-[var(--muted)]">CSV file</span>
+                <input
+                  type="file"
+                  accept=".csv,text/csv"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file !== undefined) handleFile(file);
+                  }}
+                  className={inputClass}
+                />
+              </label>
+            </>
+          )}
+
+          {stage === 'map' && inspection !== null && (
+            <>
+              <p className="text-sm m-0">
+                {`${fileName} · ${String(inspection.rowCount)} row(s)`}
+              </p>
+
+              {!showMapper ? (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <p className="status status--good m-0">
+                    {`Every column matches the ${meta.label.toLowerCase()} template.`}
+                  </p>
+                  <button type="button" className="btn btn--ghost" onClick={() => setShowMapper(true)}>
+                    Review column mapping
+                  </button>
+                </div>
+              ) : (
+                <ColumnMapper meta={meta} inspection={inspection} value={mapping} onChange={setMapping} />
+              )}
+
+              {problems.length > 0 && (
+                <ul className="status status--bad">
+                  {problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              )}
+
+              <div className="flex items-center gap-3">
+                <button type="button" className={secondaryButtonClass} onClick={backToUpload}>
+                  Choose a different file
+                </button>
+                <button
+                  type="button"
+                  className={primaryButtonClass}
+                  disabled={problems.length > 0 || busy}
+                  onClick={() => void handleStage()}
+                >
+                  {busy ? 'Staging…' : 'Stage import'}
+                </button>
+              </div>
+            </>
+          )}
+
+          {error !== null && <p className="status status--bad">{error}</p>}
         </div>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">CSV file</span>
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file !== undefined) handleFile(file);
-            }}
-            className={inputClass}
-          />
-        </label>
-
-        {content !== '' && (
-          <p className="text-xs text-[var(--muted)] m-0">
-            {fileName} loaded ({content.length.toLocaleString()} characters).
-          </p>
-        )}
-
-        {error !== null && <p className="status status--bad">{error}</p>}
-
-        <div>
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-          >
-            {busy ? 'Staging…' : 'Stage import'}
-          </button>
-        </div>
-      </form>
+        <ImportGuidePanel kind={kind} />
+      </div>
     </section>
   );
 }

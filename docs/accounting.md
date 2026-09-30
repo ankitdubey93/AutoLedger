@@ -441,6 +441,23 @@ A direct feature request, numbered like 24/30/32/34, closing the three items Pha
 - Acceptance ✅ — `inventoryControlAccount.test.ts`, `inventoryReconciliation.test.ts`, `inventoryValuation.test.ts`, `reclassConcurrency.test.ts`; `npm run verify:integrity` passes all 7 checks. 1708 server tests (2 skipped) + 451 client tests (0 skipped), up from 1673/439.
 - **Not built:** class/category-level sub-accounts (35b), bills of materials/production orders (35c), NRV write-downs/credit-note restocking/landed cost (35d), valuation still in processing order not `occurred_on`.
 
+### Phase 36 — CSV import throughout (36a foundation)
+
+A direct feature request, numbered like 24/30/32/34/35a. Phase 36 is four steps; **36a is built**, 36b (products and inventory items), 36c (journals) and 36d (open invoices and bills, conversion mode) are planned and unbuilt. 36a adds **no new import kind** — it rebuilds the four existing ones on shared machinery. Full detail: [roadmap.md § Phase 36a, as delivered](roadmap.md#phase-36a-as-delivered).
+
+- [x] **Kind registry** — `services/accounting/importKinds.ts` holds one `ImportKindDef` per kind (`satisfies Record<MigrationImportKind, ImportKindDef>`): column metadata (key, template header with a leading `*` when required, synonyms, note, example), `requiredOneOf`, per-column 422 text, editable row fields, and the parse/validate/preview/commit handlers. `migrationImportService` dispatches through `getImportKind`; the per-kind if/else chains and synonym arrays are gone. Row parsers moved to `importRowParsers.ts`, keyed by column key.
+- [x] **Column resolution** — `utils/importColumns.ts` (pure): `compactHeader`, `resolveColumnIndexes` (explicit `columnMap` first, then template header, then synonyms; a file column feeds at most one field), `findMissingRequired`.
+- [x] **Server-driven templates** — `GET /migration-imports/kinds`; `importTemplates.ts` on the client only builds a CSV from that metadata.
+- [x] **Inspect, then stage** — `POST /migration-imports/inspect` reports headers, sample rows, a suggested map and what is missing without persisting; `POST /` accepts the chosen `columnMap`.
+- [x] **Commit hardening** — commit locks the import row `FOR UPDATE` inside its transaction (two concurrent commits: one 200, one 409), persists `result`, and revalidation is one batched `UPDATE ... FROM unnest(...)` instead of one per row. One import takes at most `MAX_IMPORT_ROWS = 5000` data rows.
+- [x] Account-type aliases widened (Xero/QuickBooks names such as Bank, Direct Costs, Overhead, Other Income); customer/vendor files also resolve `Contact Name` and `PO/SA Address Line 1`.
+- [x] **Client wizard** — `Pages/accounting/imports/`: Upload → Map columns → Review & fix → Commit (`ImportSteps`), a `ColumnMapper` shown only when the file is not an exact template match, a metadata-driven `ImportRowsTable` (paged 50 at a time), an `ImportGuidePanel` beside each screen and a migration checklist on the Imports page. `ImportButton` on Accounts, Customers and Vendors starts a locked-kind import and returns to the list (`?returnTo=`, validated by `safeReturnTo`).
+- [x] Migration `078` — see [schema.md § Phase 36a](schema.md#phase-36a--staged-importer-foundation-accounting--applied).
+
+**Behaviour changes to know about.** A chart file with no name column is now `422` (was: every row staged `INVALID`). A customer file's payment-terms column is still accepted (appended to the customer's notes as a `Payment terms: …` line) but is not part of the customer template. A file column can no longer fill two fields. **Copy duplication:** the client guide text (`imports/importGuides.ts`) restates server rules (merge semantics, refused accounts); the server's messages stay authoritative.
+
+**Acceptance ✅ — verified.** Our own template uploads as an exact match and stages with no map; a foreign-header file resolves by synonym or explicit map; bad maps are `400`; 5001 rows is `422`; two concurrent commits produce one commit; another org's import is `404` on read, fix and commit (`importMapping.test.ts`, `importColumns.test.ts`, `importWizard.test.tsx`). The legacy `chartImport`/`openingBalanceImport`/`partyImport` tests pass unedited. **Not built:** products/items, journals, invoices/bills import, `dateFormat` (36b–d).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

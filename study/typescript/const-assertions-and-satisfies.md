@@ -121,12 +121,47 @@ The alternative to `satisfies` is a plain annotation (`const APPS: AppDefinition
 
 The same pattern already existed in this codebase before Phase 2: `types/auth.ts`'s `ROLES = [...] as const` deriving `Role`, and the FSM transition-table example in `docs/guardrails.md` rule 10 uses `satisfies Partial<Record<Status, Status[]>>`. `config/apps.ts` is the first place both techniques compose on the same declaration.
 
+## Phase 36a additions — `satisfies Record<Kind, Def>` as an exhaustive registry
+
+Phase 36a's import registry (`IMPORT_KINDS` in `server/src/services/accounting/importKinds.ts`) is a third shape of the same operator, and it is the one that finally ties together the two halves of this note: *exhaustiveness over keys* and *literal preservation*. **Verified against:** TypeScript 5.x (`satisfies` shipped in 4.9); the declaration reads `} satisfies Record<MigrationImportKind, ImportKindDef>;` with no `as const` on the outer object.
+
+### What it checks, precisely
+
+`MigrationImportKind` is derived from the `MIGRATION_IMPORT_KINDS` tuple. `satisfies Record<MigrationImportKind, ImportKindDef>` does three checks on the object literal, then discards the target type:
+
+1. **Missing key → error.** Every member of the union must be a property. Add `'ITEMS'` to the tuple and the registry stops compiling, naming the missing property, until an entry exists. This is the whole point: the registry cannot silently lag the kind list.
+2. **Extra key → error.** An object literal is checked for excess properties against the target, so a typo'd kind (`CUSTOMER`) fails rather than becoming an unreachable entry.
+3. **Each value must be a full `ImportKindDef`** — every column field, every strategy function with the right signature. A handler whose `commitOnClient` returns `{ created, merged }` instead of a `MigrationCommitResult` fails here, at the entry, not at a call site.
+
+### Why `satisfies` and not `: Record<MigrationImportKind, ImportKindDef>`
+
+Both give the exhaustiveness check. The difference is what the variable's type is *afterwards*. With an annotation every entry is widened to `ImportKindDef`; with `satisfies` the object keeps its own inferred type — each key maps to that entry's specific type. That matters little for the `getImportKind(kind)` call (which returns `ImportKindDef` by annotation on the function), but it does matter for the literals inside: `satisfies` applies the target as a **contextual type**, so a property written `input: 'text'` infers the literal `'text'` where the target expects a string-literal union, without an `as const` on the outer object. (The `PARTY_EDIT_FIELDS` array *is* declared `as const` because it is a standalone value shared by two entries and has no contextual type at its declaration site; `as const` there is what makes it assignable to `readonly ImportEditFieldDef[]` with literal `input` values.) My honest summary: here the annotation would have worked almost as well; `satisfies` was chosen because it is the codebase's house idiom for registries (see `MIGRATION_IMPORT_TRANSITIONS`) and costs nothing.
+
+### Two-level typing: `ImportKindDef extends ImportKindMeta`
+
+The registry entry is the metadata the client needs **plus** the functions it must never see. `ImportKindDef extends ImportKindMeta` and `listImportKindMeta()` builds the wire shape by explicitly destructuring the metadata fields — not by `JSON.stringify` dropping functions, and not by spread of the whole entry. Two reasons: a future non-serialisable or sensitive field added to `ImportKindDef` would otherwise leak to every client by default, and `ImportKindMeta[]` is a type the client can mirror exactly. This is the "allow-list a projection" habit in type form.
+
+### The narrowing step the type system cannot skip
+
+The database stores `kind` as `TEXT` with a CHECK, so a row comes back as `string`. `getImportKind` takes `MigrationImportKind`, so each call site first runs `isMigrationImportKind(row.kind)` (a hand-written type predicate over the tuple) and throws on a value outside the union — exactly the `isAppSlug` situation earlier in this note. `satisfies` guarantees the registry covers the *compile-time* union; it says nothing about what a string from a query is.
+
+### Rejected
+
+| Option | Why not |
+|---|---|
+| `Record<string, ImportKindDef>` | No exhaustiveness and `IMPORT_KINDS[kind]` could be `undefined` under `noUncheckedIndexedAccess`. |
+| A `switch (kind)` with a `never` default in every call site | Correct, but repeated three times; the registry is one place. See [discriminated-unions-and-parsers.md](discriminated-unions-and-parsers.md) for when the switch *is* the right tool (when the branches return different shapes of one union). |
+| A `Map<MigrationImportKind, ImportKindDef>` | Populated at runtime, so nothing forces completeness; a missing kind is a runtime `undefined`. |
+
 ## Where it lives in this codebase
 
 - `server/src/config/apps.ts` — `APPS` (`as const satisfies readonly AppDefinition[]`), `AppSlug` (derived union), `isAppSlug` (the type predicate that narrows a runtime string back down to `AppSlug`)
 - `server/src/types/auth.ts` — `ROLES` / `Role`, the earlier instance of the `as const` → `typeof X[number]` half of the pattern (no `satisfies` there, because `ROLES` is a flat string array with nothing to validate a shape against)
 - `server/src/config/inventoryIndustryProfiles.ts` — `STOCK_INDUSTRY_PROFILES` (`as const satisfies readonly StockIndustryProfile[]`), the same pattern applied through several levels of nested arrays
 - `server/src/types/inventory.ts` — `STOCK_SERIAL_TRANSITIONS` (a plain `Readonly<Record<StockSerialStatus, ...>>` annotation, deliberately *not* `as const satisfies` — see above), `canTransitionSerial`
+
+- `server/src/services/accounting/importKinds.ts` — `IMPORT_KINDS` (`satisfies Record<MigrationImportKind, ImportKindDef>`), `listImportKindMeta` (explicit projection)
+- `server/src/types/accounting.ts` — `MIGRATION_IMPORT_KINDS`, `isMigrationImportKind`, `MIGRATION_IMPORT_TRANSITIONS` (the earlier `satisfies Record<…>` precedent)
 
 ## Gotchas
 
@@ -136,6 +171,10 @@ The same pattern already existed in this codebase before Phase 2: `types/auth.ts
 - **`(typeof X)[number]` needs `X` to be an array or tuple type.** Indexing a plain object type by `number` doesn't do this — it only works because `APPS` is an array literal.
 - **`Record<Key, Value>` gives exhaustiveness over keys "for free," but `as const satisfies Record<Key, Value>` does not automatically give you the same thing back** — `satisfies` still requires the object to conform to the target type, so a missing key is still caught, but reaching for `as const satisfies` when what you actually wanted was exhaustiveness-checking (not literal-value preservation) is more ceremony than the plain-annotation form for no extra benefit — pick based on whether anything downstream needs the literals, not by default habit.
 - **Mixing `as const` with a spread can re-widen.** `[...APPS]` (used in `appService.listApps()` to avoid handing out the frozen array by reference) has type `AppDefinition[]`, not the literal tuple — which is fine there, since the function's return type is deliberately the wider `AppSummary[]`, but it's worth noticing that widening happened.
+
+- **`satisfies Record<Kind, Def>` is only as exhaustive as `Kind`.** Migration 078 lets the *database* accept nine kinds, but the TypeScript tuple still lists four, deliberately, so the compiler only demands entries for kinds that have handlers. Widening the CHECK ahead of the tuple is safe; widening the tuple ahead of the entry is a compile error — by design.
+- **Excess-property checking applies to fresh object literals only.** If an entry were built elsewhere and referenced by identifier, a stray key would not be flagged. The registry writes its entries inline (plus the `partyDef` factory, whose return type is an explicit `Pick<ImportKindDef, …>` for the same reason).
+- **Stripping functions by serialisation is a trap.** `JSON.stringify` silently drops function-valued properties, so it *appears* to work for `GET /kinds`; it stops being a projection the day a non-function secret is added. Prefer the explicit destructure.
 
 ## Interview Q&A
 
@@ -163,11 +202,26 @@ A: No — they're solving different problems. `as const satisfies` is for when y
 **Q: What would go wrong if `STOCK_SERIAL_TRANSITIONS` were missing a status as a key, and how does the type system catch it?**
 A: `STOCK_SERIAL_TRANSITIONS[from]` where `from` is a valid `StockSerialStatus` but the object literal never defined an entry for it would, at runtime, read `undefined` off the object — and the very next thing `canTransitionSerial` does is call `.some(...)` on that value, which throws a `TypeError: Cannot read properties of undefined`. The `Record<StockSerialStatus, ...>` annotation prevents this from ever compiling in the first place: TypeScript requires an object literal assigned to a `Record<K, V>` type to have an entry for every member of `K`, so leaving out a status is a compile error naming the missing key, not a runtime crash discovered by whichever status happens to hit that code path first in production.
 
+**Q: `satisfies Record<K, V>` versus a `: Record<K, V>` annotation — when does the difference matter?**
+A: Both refuse a missing or extra key and both check every value against `V`. The difference is the variable's type afterwards: an annotation replaces it with `Record<K, V>` (every value widened to `V`), `satisfies` keeps the inferred type and only *validates*. It matters when downstream code reads something narrower than `V` from a specific entry — a literal field, a tuple length, a specific function's return type. For our import registry nothing downstream needs that, so either works and I would say so if asked; we use `satisfies` for consistency with the other registries and because it is the safer default if someone later derives a type from `typeof IMPORT_KINDS`.
+
+**Q: A teammate adds a tenth import kind to the database CHECK but forgets the TypeScript side. What happens? And if they add it to the tuple but not the registry?**
+A: The first case compiles and deploys; the new kind is unreachable from the API because the zod `z.enum(MIGRATION_IMPORT_KINDS)` rejects it, and `isMigrationImportKind` would throw if a row with it were ever read — a loud failure, not a silent wrong behaviour. The second case is a compile error at the `satisfies` line, naming the missing property. That asymmetry is intentional: the database is permissive so later steps need no migration, and the code is strict so a kind cannot exist half-implemented.
+
+**Q: Why is the `kind` read from the database narrowed with a predicate instead of cast with `as MigrationImportKind`?**
+A: A cast asserts without checking; if the column ever held a value outside the union (a bad migration, a manual update) the cast would compile and then `IMPORT_KINDS[kind]` would be `undefined` and crash with a `TypeError` far from the cause. The predicate compares against the tuple at runtime and throws an error naming the bad value, which is debuggable. Type erasure means the compiler can only trust what a runtime function actually checked.
+
+**Q: Why does `listImportKindMeta` destructure each field instead of spreading or `omit`-ing the functions?**
+A: A spread copies whatever the entry has, including any field added later; an allow-list copies exactly what the wire type names. Because `ImportKindDef extends ImportKindMeta`, the destructure is also checked: if `ImportKindMeta` gains a required field the function stops compiling until it is projected, and if the entry gains a server-only field it stays server-only by default.
+
 ## Follow-ups they'll dig into
 
 - "Does `as const` have any runtime cost?" (None — it's erased entirely, same as every other TypeScript type annotation. The `readonly` it implies is a compile-time-only restriction; nothing stops a `as any as MutableType` bypass, same as any TS immutability.)
 - "What if two array elements need different shapes — how does `satisfies` handle a union of object shapes?" (Same mechanism; the target type would be a union, and each element gets checked against `AppDefinition | OtherShape` while keeping its own narrower inferred type — `satisfies` doesn't care whether the target is a single interface or a union.)
 - "Could you use an enum instead of a string-literal union for `AppStatus`?" (Could, but TypeScript enums have runtime footprint and are a common interview trap — string literal unions plus `as const` give the same exhaustiveness checking with zero emitted JS and a value that's already the string you want to send over JSON.)
+
+- "Would `enum` have given you the same exhaustiveness?" A `Record<MyEnum, V>` does, but the enum emits runtime code and its values are not plain strings by default in the numeric case; a string-literal tuple plus `typeof X[number]` gives the same key set with zero emit and a value that is already the string in the database and in JSON.
+- "Could you generate the registry's key list from the object instead of the tuple?" Yes, `keyof typeof IMPORT_KINDS`, but then the *object* defines the set and nothing ties it to the CHECK constraint or the zod enum; keeping the tuple as the source of truth and making the object conform to it puts the compiler on the side of completeness.
 
 ## See also
 
@@ -176,3 +230,4 @@ A: `STOCK_SERIAL_TRANSITIONS[from]` where `from` is a valid `StockSerialStatus` 
 - [discriminated-unions-and-parsers.md](discriminated-unions-and-parsers.md) — a different corner of this same FSM's neighborhood: `CodeSegment`, a discriminated union rather than a transition table
 - [../architecture/document-lifecycle-fsm.md](../architecture/document-lifecycle-fsm.md) — the codebase's other FSM transition tables, and the `satisfies Partial<Record<...>>` shape `docs/guardrails.md` rule 10 documents for them
 - `docs/architecture.md#product-structure` — why the registry is a static list rather than a database table in this phase
+- [../architecture/staged-import-and-two-phase-commit.md](../architecture/staged-import-and-two-phase-commit.md#phase-36a-additions--one-registry-inspect-then-stage-and-a-lock-on-commit) — the importer that dispatches through this registry

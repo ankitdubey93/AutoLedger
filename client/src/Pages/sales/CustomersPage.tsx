@@ -15,6 +15,7 @@ import { useClientPage } from '../../utils/useClientPage';
 import SortableHeader from '../../components/ui/SortableHeader';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
+import ImportButton from '../../components/imports/ImportButton';
 
 /**
  * The customer list — the parties sales invoices are issued to.
@@ -228,13 +229,16 @@ export default function CustomersPage() {
             The parties sales invoices are issued to.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((open) => !open)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
-        >
-          <Plus size={15} aria-hidden="true" /> New customer
-        </button>
+        <div className="flex items-center gap-2">
+          <ImportButton kind="CUSTOMERS" returnTo="/customers" />
+          <button
+            type="button"
+            onClick={() => setShowForm((open) => !open)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          >
+            <Plus size={15} aria-hidden="true" /> New customer
+          </button>
+        </div>
       </header>
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">

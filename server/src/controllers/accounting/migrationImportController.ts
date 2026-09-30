@@ -3,15 +3,28 @@ import * as migrationImportService from '../../services/accounting/migrationImpo
 import {
   createMigrationImportSchema,
   patchMigrationRowSchema,
+  inspectMigrationImportSchema,
 } from '../../schemas/accounting/migrationImportSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
 import { readPagination } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
-import { isMigrationImportKind, isMigrationRowStatus } from '../../types/accounting.js';
+import { isMigrationImportKind, isMigrationRowStatus, isMigrationImportStatus, MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
+import { listImportKindMeta } from '../../services/accounting/importKinds.js';
 
 /** Thin adapters over migrationImportService. Zero SQL (guardrails rule 2). */
+
+/** GET /migration-imports/kinds */
+export const kinds: RequestHandler = async (_req, res) => {
+  res.json({ success: true, kinds: listImportKindMeta() });
+};
+
+/** POST /migration-imports/inspect */
+export const inspect: RequestHandler = async (req, res) => {
+  const input = parseBody(inspectMigrationImportSchema, req.body);
+  res.json({ success: true, inspection: migrationImportService.inspectImport(input) });
+};
 
 /** POST /migration-imports */
 export const create: RequestHandler = async (req, res) => {
@@ -30,12 +43,21 @@ export const list: RequestHandler = async (req, res) => {
   let kind = null;
   if (kindParam !== undefined) {
     if (typeof kindParam !== 'string' || !isMigrationImportKind(kindParam)) {
-      throw new ApiError(400, 'kind must be CHART_OF_ACCOUNTS, OPENING_BALANCES, CUSTOMERS or VENDORS');
+      throw new ApiError(400, `kind must be one of ${MIGRATION_IMPORT_KINDS.join(', ')}`);
     }
     kind = kindParam;
   }
 
-  const { imports, totalCount } = await migrationImportService.listImports(user.orgId, { page, limit, kind });
+  const statusParam = req.query.status;
+  let status = null;
+  if (statusParam !== undefined) {
+    if (typeof statusParam !== 'string' || !isMigrationImportStatus(statusParam)) {
+      throw new ApiError(400, 'status must be DRAFT, VALIDATED or COMMITTED');
+    }
+    status = statusParam;
+  }
+
+  const { imports, totalCount } = await migrationImportService.listImports(user.orgId, { page, limit, kind, status });
 
   res.json({
     success: true,

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus } from 'lucide-react';
+import { MIGRATION_STEPS } from './imports/importGuides';
+import { useImportKinds } from './imports/useImportKinds';
 import { listMigrationImports, type MigrationImport } from '../../services/fetchServices';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
@@ -16,14 +18,9 @@ const STATUS_LABEL: Record<MigrationImport['status'], string> = {
   COMMITTED: 'Committed',
 };
 
-const KIND_LABEL: Record<MigrationImport['kind'], string> = {
-  CHART_OF_ACCOUNTS: 'Chart of accounts',
-  OPENING_BALANCES: 'Opening balances',
-  CUSTOMERS: 'Customers',
-  VENDORS: 'Vendors',
-};
-
 export default function MigrationImportsPage() {
+  const { kinds } = useImportKinds();
+  const [committed, setCommitted] = useState<Set<string>>(new Set());
   const [imports, setImports] = useState<MigrationImport[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Paged on the server (20 by default). Until 2026-09-30 this page never
@@ -49,14 +46,31 @@ export default function MigrationImportsPage() {
     };
   }, [page]);
 
+  useEffect(() => {
+    let ignore = false;
+    listMigrationImports({ status: 'COMMITTED', limit: 100 })
+      .then((res) => {
+        if (!ignore) setCommitted(new Set(res.imports.map((i) => i.kind)));
+      })
+      .catch(() => {
+        // The checklist is a convenience; its failure must not block the register.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  function kindLabel(kind: MigrationImport['kind']): string {
+    return kinds?.find((k) => k.kind === kind)?.label ?? kind;
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold m-0">Data migration</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            A business moving off another system's way in — stage a chart-of-accounts or
-            opening-balance CSV, fix what's wrong, then commit once.
+            Bring your data in from another system — stage a CSV, fix what's wrong, then commit.
           </p>
         </div>
         <Link
@@ -66,6 +80,21 @@ export default function MigrationImportsPage() {
           <Plus size={15} aria-hidden="true" /> New import
         </Link>
       </header>
+
+      <div className="card flex flex-col gap-2">
+        <h3 className="text-sm font-semibold m-0">Migration checklist</h3>
+        <ol className="list-none p-0 m-0 flex flex-col gap-1 text-sm">
+          {MIGRATION_STEPS.map((step) => (
+            <li key={step.key} className="flex items-baseline gap-2">
+              <span className="w-4 text-[var(--good)]">
+                {step.kind !== null && committed.has(step.kind) ? <span aria-label="done">✓</span> : null}
+              </span>
+              <Link to={step.to}>{step.label}</Link>
+              <span className="text-[var(--muted)]">{step.hint}</span>
+            </li>
+          ))}
+        </ol>
+      </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
       {imports === null && error === null && <LoadingState />}
@@ -98,7 +127,7 @@ export default function MigrationImportsPage() {
             <tbody>
               {imports.map((imp) => (
                 <tr key={imp.id} className="border-t border-[var(--border)]">
-                  <td className="p-3">{KIND_LABEL[imp.kind]}</td>
+                  <td className="p-3">{kindLabel(imp.kind)}</td>
                   <td className="p-3">
                     <Link to={`/migration-imports/${imp.id}`}>{imp.fileName}</Link>
                   </td>

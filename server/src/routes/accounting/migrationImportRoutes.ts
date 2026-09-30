@@ -16,6 +16,8 @@ const router = Router();
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), migrationImportController.create);
 router.get('/', authenticate, migrationImportController.list);
+router.get('/kinds', authenticate, migrationImportController.kinds);
+router.post('/inspect', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), migrationImportController.inspect);
 router.get('/:id', authenticate, migrationImportController.getOne);
 router.get('/:id/rows', authenticate, migrationImportController.listRows);
 router.patch(

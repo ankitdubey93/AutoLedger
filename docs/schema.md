@@ -736,6 +736,16 @@ A direct feature request, numbered like Phase 24/30/32/34. Migration `076`, one 
 
 **Integrity check #7 — `inventory_accounts_reconcile_with_gl`** (`db/integrity.ts`). Control accounts = every `gl_account_id` any `stock_movements` row has ever posted to, plus every `INVENTORY` product's `asset_account_id`, plus (when any `INVENTORY` product has no override) the resolved default inventory account. For each, Σ `stock_movements.value_cents` on that account must equal Σ `ledger_lines.base_debit_cents - base_credit_cents` on it. An organization with pre-35a drift (a manual journal to the account, or a product remapped before the guard existed) fails this check until an `OWNER`/`ADMIN`/`ACCOUNTANT` runs `POST /inventory/reconcile/true-up` — by design; the check exists to surface exactly that, not to hide it. `stock_movements_reconcile_with_gl` (check 6, per-document) is unchanged; this is the whole-account version its own docblock now points readers at.
 
+## Phase 36a — staged-importer foundation (accounting) — applied
+
+`078_ledger-core_migration_import_kinds.sql`, additive and idempotent, extends the Phase 9b/24 importer tables (`029`, `062`); no table is created and `029`/`062` are not edited (rule 13).
+
+- **`chk_migration_imports_kind`** is dropped and re-added admitting nine kinds: the four built (`CHART_OF_ACCOUNTS`, `OPENING_BALANCES`, `CUSTOMERS`, `VENDORS`) plus `ITEMS`, `INVENTORY_ITEMS`, `INVOICES`, `BILLS`, `JOURNALS`, ahead of the code. The TypeScript `MIGRATION_IMPORT_KINDS` tuple still lists four; steps 36b–d widen it, so they need no kind migration.
+- **`migration_imports`** gains `column_map` JSONB nullable (the user's column-to-header map, `CHECK IS NULL OR jsonb_typeof = 'object'`) · `options` JSONB NOT NULL DEFAULT `'{}'` (object) · `commit_options` JSONB nullable (object) · `result` JSONB nullable (object) — the commit's outcome (`{kind, createdCount, mergedCount}` or `{kind, journalEntryId, plugCents}`), written in the commit transaction. `result` replaces a per-kind id column, which would be a polymorphic reference and break rule 8. `options`/`commit_options` exist for 36b–d; 36a writes neither.
+- **`migration_import_rows`** gains `data` JSONB nullable (object) and `group_key` TEXT nullable (`length <= 220`) for the later kinds, whose rows are too different for fixed typed columns (36a writes neither; the four legacy kinds keep their typed columns). `idx_migration_rows_group` — `(org_id, import_id, group_key) WHERE group_key IS NOT NULL`.
+
+No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.md#phase-36--csv-import-throughout-36a-foundation) and [api.md](api.md#migration-imports--apiv1migration-imports--phase-9b-phase-24-phase-36a).
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

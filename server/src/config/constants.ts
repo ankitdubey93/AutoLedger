@@ -124,6 +124,9 @@ export const AUTH_RATE_LIMIT_MAX = env.isTest ? 1000 : 10;
  */
 export const MAX_CSV_CHARS = 900_000;
 
+// Phase 36 — one staged import's data-row cap; bounds revalidation and commit time.
+export const MAX_IMPORT_ROWS = 5000;
+
 // ------------------------------------------------ background jobs (7)
 
 /**

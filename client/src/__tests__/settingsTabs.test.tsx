@@ -529,7 +529,7 @@ describe('ConversionBalancesPage', () => {
     expect(body.kind).toBe('OPENING_BALANCES');
     const content = body.content as string;
     const lines = content.split('\n');
-    expect(lines[0]).toBe('Code,Debit,Credit');
+    expect(lines[0]).toBe('*Code,Debit,Credit');
     // The money bridge: 500000 cents typed as "5000.00" must serialise back
     // to the decimal string "5000.00", never the raw-cents integer "500000".
     expect(lines).toContain('1110,5000.00,0.00');

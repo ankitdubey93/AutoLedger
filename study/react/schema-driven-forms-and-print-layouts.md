@@ -97,6 +97,41 @@ This whole stylesheet lives alongside, but conceptually separate from, this code
 | Sizing label print CSS in `px`/`rem` | Consistent with every other stylesheet in the app | Rejected — a screen pixel unit does not correspond to a fixed physical size when printed; `mm` is what makes a "50mm × 30mm" label preset actually print at 50mm × 30mm |
 | Inline QR SVG via `dangerouslySetInnerHTML` | Slightly simpler than a data-URI `<img>` | Rejected — see `barcodes-and-qr-codes.md`; an `<img src="data:...">` never lets the DOM parse the string as live markup |
 
+## Phase 36a additions — a server-metadata-driven mapper and row editor
+
+*(Verified against React 19 and Vite 8 as used in this repo; all behaviour below is read from the components, and `importWizard.test.tsx` covers the flow.)* The first half of this note renders a form from a per-org definitions list. The CSV import wizard applies the same idea one step further: **the schema is not per-org data but the server's own code registry**, fetched once, and three components render entirely from it.
+
+### One fetch, one hook, abort on unmount
+
+`useImportKinds()` (`client/src/Pages/accounting/imports/useImportKinds.ts`) calls `GET /migration-imports/kinds` in an effect with an `AbortController` **and** an `ignore` flag. They guard different things: `abort()` cancels the in-flight request, but a response that has already resolved can still call `.then` after unmount or (in React 19 StrictMode development) after the effect's first simulated unmount/remount, so the `ignore` flag makes the stale callback a no-op. An abort rejects with an `AbortError`, which the catch deliberately swallows — an abort is not a user-visible failure. The hook returns `{ kinds, error }`; callers find their kind's metadata with `kinds.find(k => k.kind === kind)` and render nothing kind-specific until it arrives.
+
+### The mapper renders from `meta.columns`
+
+`ColumnMapper` takes `meta` (an `ImportKindMeta`), the `inspection` returned by `POST /inspect`, and a controlled `value: Record<string, string | null>` — column key → chosen file header. It renders one row per `meta.columns` entry: the label, a `*` if `required`, the server-written `note`, a `<select>` whose options are `inspection.headers`, plus a "Don't import" option that maps to `null`, and a sample-values cell built from `inspection.sampleRows` by looking up the chosen header's index. It contains **no kind-specific branch**; adding Products as a kind changes zero client lines here. The value is **controlled** and lifted to `NewMigrationImportPage`, which seeds it from `inspection.suggestedMap` so the user starts from the server's best guess and edits only what is wrong. `onChange` spreads a new object (`{ ...value, [key]: … }`) — state is never mutated, so React sees a new reference.
+
+### Keeping a client pre-check honest: `mappingProblems`
+
+`mappingProblems(meta, value)` returns human-readable blockers (required field unmapped, no `requiredOneOf` set satisfied, one header used twice) and the page disables Continue while the list is non-empty. This **duplicates** the server's `findMissingRequired` and duplicate-header rule. That is a deliberate UX-only duplicate, not a second source of truth: the server re-resolves at stage time and answers 400/422 if the two ever disagree. The inputs it needs (`required`, `requiredOneOf`, the labels) all come from the same metadata, so the duplicate cannot drift in *data*, only in logic — which is why it is a small exported pure function rather than inline in the component.
+
+### The skip-the-mapper decision comes from the server
+
+After upload the page calls `inspectMigrationImport`, sets `mapping` from `suggestedMap` and `showMapper = !inspection.exactMatch`. On stage it sends `columnMap: showMapper ? mapping : null`. A file from our own template (`exactMatch`) therefore never sees the mapping screen and posts `null`; a foreign file lands on the mapper pre-filled. The client does not re-derive "does this match" — it would need header-compaction, required rules and the one-of sets, and could disagree with the stage call.
+
+### The row editor: `editFields` with a discriminating `input`
+
+`ImportRowsTable` renders the review table from `meta.editFields` (`{key, label, input: 'text' | 'money' | 'accountType', maxLength, nullable}`). The header cells and the per-row editors are both a `.map` over that list; an `input === 'money'` cell shows `formatCents`, an `accountType` cell is a `<select>` of the five account types, everything else is a text input with `maxLength`. The edit state is a local `Record<rowId, Record<fieldKey, string>>` of *text*, read through `currentText` (`edits[row.id]?.[field.key] ?? editText(row, field)`), so unedited fields show the server value and edited ones show the draft. On save it builds the PATCH body by the same metadata: money goes through `parseCentsInput` to **integer cents** (a bad amount is reported client-side and nothing is sent — rule 3 lives in the UI too), blank nullable text becomes `null`, blank non-nullable text is omitted. The component reads a row's value by key through a `Record<string, unknown>` copy of the row, because the keys are data, not compile-time names — the price of rendering from metadata is that `field.key` is a string and TypeScript cannot check it against `MigrationImportRow`. The server's frozen PATCH whitelist (rule 4) is what makes that safe: an unknown key is rejected there.
+
+After a save the page **refreshes the whole row list** rather than patching local state, for the reason in the staged-import note: one fix can change other rows' validity.
+
+### Rejected alternatives
+
+| Option | Why not |
+|---|---|
+| A hand-written form per kind (what the old page did, with `IMPORT_TEMPLATES` hand-synced to the server's synonyms) | Drifted; every new kind is a new page; the "template" the user downloads and the parser's real synonyms could disagree. |
+| A generic form library (react-hook-form, JSON-schema form) | No dependency is justified for a select-per-column table and a per-row editor (rule 14); the rendering is thirty lines. |
+| Client-side header matching | A second copy of the matching algorithm. The server owns it and returns `suggestedMap`. |
+| Fetching metadata per page | `useImportKinds` fetches once per mount of the wizard/detail page; the metadata is static per deploy, so no cache layer or context was built — if more pages start needing it, lift it into a provider rather than copy the effect. |
+
 ## Where it lives in this codebase
 
 - `client/src/Pages/inventory/AttributeFields.tsx` — the schema-driven field renderer
@@ -108,6 +143,12 @@ This whole stylesheet lives alongside, but conceptually separate from, this code
 - `client/src/__tests__/inventoryNewItem.test.tsx` — includes the 422-message-shown-verbatim test that fills every required custom field precisely because native HTML5 `required` would otherwise block the fetch the test is trying to exercise
 - `client/src/__tests__/inventoryLabels.test.tsx` — `'size preset switches the class'`, asserting the label-size class swap on selection
 
+- `client/src/Pages/accounting/imports/useImportKinds.ts` — the one-fetch hook
+- `client/src/Pages/accounting/imports/ColumnMapper.tsx` — the controlled mapper and `mappingProblems`
+- `client/src/Pages/accounting/imports/ImportRowsTable.tsx` — the `editFields`-driven review table
+- `client/src/Pages/accounting/NewMigrationImportPage.tsx` — upload → inspect → map → stage, `showMapper = !exactMatch`
+- `client/src/__tests__/importWizard.test.tsx`, `client/src/__tests__/fixtures/importKinds.ts` — the wizard test and the `IMPORT_KINDS_FIXTURE` that stands in for `GET /kinds`
+
 ## Gotchas
 
 - **Forgetting the `idPrefix` on a page rendering more than one `AttributeFields` instance** produces duplicate DOM ids — silently breaking `<label htmlFor>` associations (a screen reader announces the wrong label, or none) with no visible error, since browsers don't reject duplicate ids outright.
@@ -115,6 +156,11 @@ This whole stylesheet lives alongside, but conceptually separate from, this code
 - **A debounced effect's cleanup function must actually run for debouncing to work at all** — if the effect's dependency array is wrong (missing a value that should trigger a new debounce cycle, or including one that shouldn't), either stale data gets previewed or every keystroke fires a fresh request with no debouncing, silently defeating the whole point.
 - **`px`/`rem` sizing anywhere inside a print-only block is a common mistake** that looks correct in a browser's print preview at default zoom (because most browsers default to treating 96 CSS px as 1 inch, matching the eventual physical inch) but drifts the moment print scaling, a different OS DPI setting, or "fit to page" is involved — `mm`/`in` sizing is immune to all of that because it's resolved against the physical page, not the screen's pixel density.
 - **`break-inside: avoid` is a request, not a guarantee** — if a single element is taller than one physical page, the browser has no choice but to split it regardless of the property; it only prevents *unnecessary* splits when the element would otherwise fit whole.
+
+- **A metadata-driven UI needs a fixture that looks like the server.** `IMPORT_KINDS_FIXTURE` is a hand-copied `GET /kinds` response; if the real registry changes a field name the fixture would keep the test green. The mitigation is that both sides share the exact type shapes (`ImportKindMeta`), so a renamed property fails typecheck in the fixture.
+- **`field.key` is a string, so the row lookup is unchecked.** The editor reads `record[field.key]` off a widened copy of the row; a typo in the *server's* `editFields` would render an empty cell, not a compile error. Nothing automatically cross-checks `editFields` keys against the server's PATCH whitelist — a gap worth knowing about.
+- **Controlled selects with a `null` mapping need `value={chosen ?? ''}`.** A `<select>` cannot hold `null`; the empty-string option stands for "don't import", converted back to `null` in `onChange`. Forgetting either half makes React warn about a controlled/uncontrolled flip or sends `""` as a header name.
+- **Two headers with the same text.** The mapper's `<option key={header}>` and the `indexOf(header)` sample lookup both assume unique header text; a CSV with two identical headers would map to the first. The server's duplicate-claim check is the backstop, and `mappingProblems` flags one header feeding two fields.
 
 ## Interview Q&A
 
@@ -139,11 +185,33 @@ A: Because CSS pixels (and units derived from them, like `rem`) are a *screen* c
 **Q: What does `break-inside: avoid` actually do, and when would it fail to help?**
 A: It tells the browser's print pagination engine not to split a given element across two physical pages if it can be avoided — if the element doesn't fit in the remaining space on the current page, push it whole onto the next page rather than slicing it at the page boundary. It's a request the layout engine honors when it can, not an absolute guarantee: an element taller than one entire physical page has to be split regardless, because there's no valid layout that keeps it whole on a single page.
 
+**Q: The fields of your import form come from the server. How do you keep a generic component from becoming an unreadable pile of `if (kind === …)`?**
+A: By moving every kind-specific fact into data the server sends and letting the component switch only on a small closed set of *input types*. `ColumnMapper` has no kind branch at all — it maps `meta.columns`. `ImportRowsTable` switches on `field.input` (`text`, `money`, `accountType`), a three-member union, not on the import kind. A new kind is a new server registry entry; the client only changes if a genuinely new input type is needed, and then it is one more case in one place.
+
+**Q: Why both an `AbortController` and an `ignore` flag in the same effect?**
+A: They cover different failure modes. `abort()` cancels the network request and makes the promise reject with `AbortError`, which we deliberately ignore. The `ignore` flag covers a response that resolved just before cleanup ran, whose `.then` would still call `setState` on an unmounted or re-mounted component, and covers React 19 StrictMode's dev-only mount → unmount → mount sequence. Using only the flag leaves the request running; using only the abort can still let an already-resolved callback through.
+
+**Q: The client has a `mappingProblems` function and the server has `findMissingRequired`. Isn't that duplicated logic?**
+A: Yes, on purpose, and I can say exactly where the line is. The client copy is a UX affordance — it disables Continue and explains why without a round trip. The server is the authority: stage re-resolves the map and answers 400/422, and the client cannot bypass it. Both read the same metadata (`required`, `requiredOneOf`, labels), so the *data* cannot drift; only the small logic can, which is why it is one small exported pure function. If I had to remove one, I would keep the server's and accept a round trip.
+
+**Q: How does the wizard decide whether to show the column mapper?**
+A: It does not decide. The inspect call returns `exactMatch`, computed server-side by the same code that stage uses (nothing required missing and every file header is one of the kind's own template headers). The page shows the mapper when it is false and sends `columnMap: null` when it is true. That keeps header-normalisation rules in one place; if the client computed it, it would need its own copy of the compaction and required rules and would eventually disagree with the stage call.
+
+**Q: Why does the row editor keep edits as text in its own state and convert on save, instead of storing numbers?**
+A: A half-typed amount (`12.`) is not a valid number, so a number-typed controlled input would either reject keystrokes or show `NaN`. Keeping text and converting with `parseCentsInput` at save time turns the amount into integer cents exactly once, at the boundary, and lets the component show a precise "must be a valid amount" message instead of sending a bad value. It is the same reason the attribute form above keeps `NUMBER` as a string end to end — the UI holds what the user typed and the contract holds the exact value.
+
+**Q: After saving one row, why refetch the whole list instead of updating that row locally?**
+A: Because the server revalidates the entire import on every PATCH: fixing one row's duplicate code can turn another row from invalid to valid, and the import's own status can flip between `DRAFT` and `VALIDATED`. An optimistic local update of one row would show stale errors on its neighbours. The refetch is the simplest correct answer at the sizes involved (the detail page is paginated).
+
 ## Follow-ups they'll dig into
 
 - "What if two custom field definitions had the same `key` in different categories?" — fine by design; `key` uniqueness is scoped per-category server-side, and the client only ever renders the definitions for the one category currently selected, so a collision across categories never actually appears on the same page.
 - "How would you test a debounced effect without waiting 300ms in every test run?" — fake timers (`vi.useFakeTimers()` / `vi.advanceTimersByTime()`), advancing virtual time instead of real time so the test runs instantly but still exercises the debounce logic itself.
 - "What's the accessibility story for a dynamically-generated form field?" — the same as any form field: a `<label htmlFor>` paired to the input's `id`, `required` reflected as a real HTML attribute (not just a visual asterisk), and a `SELECT`-typed custom field using a real `<select>` rather than a styled `<div>` so screen readers and keyboard navigation get native behavior for free.
+
+- "What happens if `GET /kinds` fails?" The hook sets `error` (`Could not load import settings` for a non-`Error` rejection) and the page shows it instead of the wizard; there is no hard-coded fallback metadata, because a stale fallback would reintroduce exactly the drift this design removed.
+- "How would you render a *new* input type, say a date?" Add `'date'` to the server's `ImportEditFieldDef.input` union and the mirrored client type, then add one branch in `ImportRowsTable`. The compiler flags every `switch`/`if` over `input` that is exhaustive, which is the argument for keeping that set closed rather than free-form.
+- "Why not generate the UI from JSON Schema?" It would bring a dependency and a mapping layer for one select-per-column table; our metadata is also carrying non-schema things (notes, examples, synonyms, the one-of rule) a JSON Schema does not express.
 
 ## See also
 
@@ -152,3 +220,6 @@ A: It tells the browser's print pagination engine not to split a given element a
 - [../typescript/discriminated-unions-and-parsers.md](../typescript/discriminated-unions-and-parsers.md) — the pure code-pattern renderer the live preview effect calls
 - [hand-rolled-svg-charts.md](hand-rolled-svg-charts.md) — the other place in this codebase a component's shape is driven entirely by runtime data rather than hardcoded JSX
 - [../typescript/branded-types-for-money.md](../typescript/branded-types-for-money.md) — the money-as-integer-cents rule this note's NUMBER-as-string contract generalizes
+- [../architecture/staged-import-and-two-phase-commit.md](../architecture/staged-import-and-two-phase-commit.md#phase-36a-additions--one-registry-inspect-then-stage-and-a-lock-on-commit) — the server registry and resolver this UI renders from
+- [../typescript/const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md#phase-36a-additions--satisfies-recordkind-def-as-an-exhaustive-registry) — how `ImportKindDef extends ImportKindMeta` keeps the wire shape a strict projection
+- [context-effects-and-data-fetching.md](context-effects-and-data-fetching.md) — the fetch-in-effect / `ignore` flag pattern `useImportKinds` follows

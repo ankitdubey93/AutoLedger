@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import {
   commitMigrationImport,
   deleteMigrationImport,
@@ -7,16 +7,21 @@ import {
   getMigrationImportRows,
   patchMigrationImportRow,
   previewMigrationImport,
-  type AccountType,
   type MigrationCommitPreview,
   type MigrationImport,
   type MigrationImportRow,
   type MigrationRowStatus,
 } from '../../services/fetchServices';
-import { formatCents, parseCentsInput } from '../../utils/money';
+import { formatCents } from '../../utils/money';
+import { safeReturnTo } from '../../utils/safeReturnTo';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import LoadingState from '../../components/ui/LoadingState';
+import Pagination from '../../components/ui/Pagination';
+import ImportGuidePanel from './imports/ImportGuidePanel';
+import ImportRowsTable from './imports/ImportRowsTable';
+import ImportSteps from './imports/ImportSteps';
+import { useImportKinds } from './imports/useImportKinds';
 
 /**
  * One staged migration import — its rows, per-row fixes, the commit preview,
@@ -28,51 +33,25 @@ import LoadingState from '../../components/ui/LoadingState';
  * irreversible action in this app.
  */
 
-const ACCOUNT_TYPES: AccountType[] = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'];
 const STATUS_FILTERS: (MigrationRowStatus | '')[] = ['', 'INVALID', 'VALID', 'EXCLUDED'];
 const STATUS_LABEL: Record<MigrationRowStatus, string> = { VALID: 'Valid', INVALID: 'Invalid', EXCLUDED: 'Excluded' };
 
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-sm text-[var(--text)] w-full';
 
-interface RowEdits {
-  accountCode: string;
-  accountName: string;
-  accountType: AccountType | '';
-  parentCode: string;
-  debit: string;
-  credit: string;
-  partyName: string;
-  partyEmail: string;
-  partyPhone: string;
-  partyTaxNumber: string;
-}
-
-function toEdits(row: MigrationImportRow): RowEdits {
-  return {
-    accountCode: row.accountCode ?? '',
-    accountName: row.accountName ?? '',
-    accountType: row.accountType ?? '',
-    parentCode: row.parentCode ?? '',
-    debit: row.debitCents !== null && row.debitCents > 0 ? formatCents(row.debitCents) : '',
-    credit: row.creditCents !== null && row.creditCents > 0 ? formatCents(row.creditCents) : '',
-    partyName: row.partyName ?? '',
-    partyEmail: row.partyEmail ?? '',
-    partyPhone: row.partyPhone ?? '',
-    partyTaxNumber: row.partyTaxNumber ?? '',
-  };
-}
-
 export default function MigrationImportDetailPage() {
   const { importId } = useParams<{ importId: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const { kinds } = useImportKinds();
 
   const [imp, setImp] = useState<MigrationImport | null>(null);
   const [rows, setRows] = useState<MigrationImportRow[] | null>(null);
   const [preview, setPreview] = useState<MigrationCommitPreview | null>(null);
   const [statusFilter, setStatusFilter] = useState<MigrationRowStatus | ''>('');
   const [error, setError] = useState<string | null>(null);
-  const [edits, setEdits] = useState<Record<string, RowEdits>>({});
+  const [page, setPage] = useState(1);
+  const [paging, setPaging] = useState({ totalCount: 0, totalPages: 1 });
   const [savingRowId, setSavingRowId] = useState<string | null>(null);
   const [showCommitConfirm, setShowCommitConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
@@ -84,13 +63,13 @@ export default function MigrationImportDetailPage() {
       .then((res) => setImp(res.import))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load the import'));
 
-    const rowOptions: Parameters<typeof getMigrationImportRows>[1] = { limit: 100 };
+    const rowOptions: Parameters<typeof getMigrationImportRows>[1] = { page, limit: 50 };
     if (statusFilter !== '') rowOptions.status = statusFilter;
 
     getMigrationImportRows(importId, rowOptions)
       .then((res) => {
         setRows(res.rows);
-        setEdits(Object.fromEntries(res.rows.map((r) => [r.id, toEdits(r)])));
+        setPaging({ totalCount: res.totalCount, totalPages: res.totalPages });
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load rows'));
 
@@ -100,7 +79,7 @@ export default function MigrationImportDetailPage() {
         // Preview is a convenience panel — its own failure should not block
         // the rest of the page from rendering.
       });
-  }, [importId, statusFilter]);
+  }, [importId, statusFilter, page]);
 
   useEffect(() => {
     refresh();
@@ -108,46 +87,20 @@ export default function MigrationImportDetailPage() {
 
   if (importId === undefined) return <p className="status status--bad">Missing import id.</p>;
   if (error !== null && imp === null) return <p className="status status--bad">{error}</p>;
-  if (imp === null || rows === null) return <LoadingState />;
+  const meta = imp === null ? undefined : kinds?.find((k) => k.kind === imp.kind);
+  if (imp === null || rows === null || meta === undefined) return <LoadingState />;
 
   // A fresh const, not `importId` itself: TS's narrowing of a destructured
   // `useParams()` field does not reliably survive into the nested async
   // functions defined below, even though this check already ran.
   const id = importId;
-  const isChart = imp.kind === 'CHART_OF_ACCOUNTS';
   const isParty = imp.kind === 'CUSTOMERS' || imp.kind === 'VENDORS';
   const readOnly = imp.status === 'COMMITTED';
+  const returnTo = safeReturnTo(searchParams.get('returnTo'));
 
-  async function saveRow(row: MigrationImportRow) {
-    const edit = edits[row.id];
-    if (edit === undefined) return;
+  async function saveRow(row: MigrationImportRow, body: Record<string, string | number | null>) {
     setSavingRowId(row.id);
     setError(null);
-
-    const body: Parameters<typeof patchMigrationImportRow>[2] = {};
-    if (isChart) {
-      body.accountCode = edit.accountCode.trim();
-      body.accountName = edit.accountName.trim();
-      if (edit.accountType !== '') body.accountType = edit.accountType;
-      body.parentCode = edit.parentCode.trim() === '' ? null : edit.parentCode.trim();
-    } else if (isParty) {
-      body.partyName = edit.partyName.trim();
-      body.partyEmail = edit.partyEmail.trim() === '' ? null : edit.partyEmail.trim();
-      body.partyPhone = edit.partyPhone.trim() === '' ? null : edit.partyPhone.trim();
-      body.partyTaxNumber = edit.partyTaxNumber.trim() === '' ? null : edit.partyTaxNumber.trim();
-    } else {
-      body.accountCode = edit.accountCode.trim();
-      const debitCents = parseCentsInput(edit.debit);
-      const creditCents = parseCentsInput(edit.credit);
-      if (debitCents === null || creditCents === null) {
-        setError('Debit and credit must be valid amounts');
-        setSavingRowId(null);
-        return;
-      }
-      body.debitCents = debitCents;
-      body.creditCents = creditCents;
-    }
-
     try {
       await patchMigrationImportRow(id, row.id, body);
       refresh();
@@ -186,13 +139,16 @@ export default function MigrationImportDetailPage() {
 
   return (
     <section className="flex flex-col gap-4">
-      <BackLink to="/migration-imports" label="Back to imports" />
+      <BackLink to={returnTo ?? '/migration-imports'} label={returnTo !== null ? 'Back' : 'Back to imports'} />
+      <ImportSteps current={imp.status === 'COMMITTED' ? 4 : 3} />
 
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-lg font-semibold m-0">{imp.fileName}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            {imp.kind === 'CHART_OF_ACCOUNTS' ? 'Chart of accounts' : 'Opening balances'} · {imp.status} ·{' '}
+            {meta.label} · {imp.status} ·{' '}
             {imp.rowCount} row{imp.rowCount === 1 ? '' : 's'}, {imp.errorCount} error
             {imp.errorCount === 1 ? '' : 's'}
           </p>
@@ -209,6 +165,14 @@ export default function MigrationImportDetailPage() {
           <p className="text-sm m-0">
             Committed. Posted as{' '}
             <a href={`/journals/${imp.journalEntryId}`}>journal entry</a>.
+          </p>
+        </div>
+      )}
+
+      {readOnly && imp.result !== null && imp.result.kind !== 'OPENING_BALANCES' && (
+        <div className="card">
+          <p className="text-sm m-0">
+            {`Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} merged.`}
           </p>
         </div>
       )}
@@ -258,7 +222,10 @@ export default function MigrationImportDetailPage() {
         <span className="text-[var(--muted)]">Filter by status</span>
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as MigrationRowStatus | '')}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as MigrationRowStatus | '');
+            setPage(1);
+          }}
           className={inputClass}
         >
           {STATUS_FILTERS.map((s) => (
@@ -269,205 +236,26 @@ export default function MigrationImportDetailPage() {
         </select>
       </label>
 
-      <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
-        <table className="w-full border-collapse text-sm min-w-[50rem]">
-          <thead>
-            <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
-              <th className="p-2 font-medium">Row</th>
-              {!isParty && <th className="p-2 font-medium">Code</th>}
-              {isChart ? (
-                <>
-                  <th className="p-2 font-medium">Name</th>
-                  <th className="p-2 font-medium">Type</th>
-                  <th className="p-2 font-medium">Parent</th>
-                </>
-              ) : isParty ? (
-                <>
-                  <th className="p-2 font-medium">Name</th>
-                  <th className="p-2 font-medium">Email</th>
-                  <th className="p-2 font-medium">Phone</th>
-                  <th className="p-2 font-medium">Tax number</th>
-                </>
-              ) : (
-                <>
-                  <th className="p-2 font-medium">Debit</th>
-                  <th className="p-2 font-medium">Credit</th>
-                </>
-              )}
-              <th className="p-2 font-medium">Status</th>
-              <th className="p-2 font-medium">Errors</th>
-              {!readOnly && <th className="p-2 font-medium" />}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => {
-              const edit = edits[row.id] ?? toEdits(row);
-              return (
-                <tr key={row.id} className="border-t border-[var(--border)] align-top">
-                  <td className="p-2">{row.rowNumber}</td>
-                  {!isParty && (
-                    <td className="p-2">
-                      {readOnly ? (
-                        row.accountCode ?? '—'
-                      ) : (
-                        <input
-                          type="text"
-                          value={edit.accountCode}
-                          onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, accountCode: e.target.value } }))}
-                          className={inputClass}
-                        />
-                      )}
-                    </td>
-                  )}
-                  {isChart ? (
-                    <>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.accountName ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.accountName}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, accountName: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.accountType ?? '—'
-                        ) : (
-                          <select
-                            value={edit.accountType}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, accountType: e.target.value as AccountType | '' } }))}
-                            className={inputClass}
-                          >
-                            <option value="">—</option>
-                            {ACCOUNT_TYPES.map((t) => (
-                              <option key={t} value={t}>
-                                {t}
-                              </option>
-                            ))}
-                          </select>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.parentCode ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.parentCode}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, parentCode: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                    </>
-                  ) : isParty ? (
-                    <>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.partyName ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.partyName}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyName: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.partyEmail ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.partyEmail}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyEmail: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.partyPhone ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.partyPhone}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyPhone: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.partyTaxNumber ?? '—'
-                        ) : (
-                          <input
-                            type="text"
-                            value={edit.partyTaxNumber}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, partyTaxNumber: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                    </>
-                  ) : (
-                    <>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.debitCents !== null && row.debitCents > 0 ? formatCents(row.debitCents) : '—'
-                        ) : (
-                          <input
-                            inputMode="decimal"
-                            value={edit.debit}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, debit: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {readOnly ? (
-                          row.creditCents !== null && row.creditCents > 0 ? formatCents(row.creditCents) : '—'
-                        ) : (
-                          <input
-                            inputMode="decimal"
-                            value={edit.credit}
-                            onChange={(e) => setEdits((prev) => ({ ...prev, [row.id]: { ...edit, credit: e.target.value } }))}
-                            className={inputClass}
-                          />
-                        )}
-                      </td>
-                    </>
-                  )}
-                  <td className="p-2">
-                    <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">
-                      {STATUS_LABEL[row.status]}
-                    </span>
-                  </td>
-                  <td className="p-2 text-xs text-[var(--bad)]">
-                    {row.errors.length === 0 ? '—' : row.errors.join('; ')}
-                  </td>
-                  {!readOnly && (
-                    <td className="p-2">
-                      <button
-                        type="button"
-                        disabled={savingRowId === row.id}
-                        onClick={() => void saveRow(row)}
-                        className="btn btn--ghost"
-                      >
-                        {savingRowId === row.id ? 'Saving…' : 'Save'}
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <ImportRowsTable
+        meta={meta}
+        rows={rows}
+        readOnly={readOnly}
+        savingRowId={savingRowId}
+        onSave={(row, body) => void saveRow(row, body)}
+        onError={setError}
+      />
+
+      <Pagination
+        page={page}
+        totalPages={paging.totalPages}
+        shownCount={rows.length}
+        totalCount={paging.totalCount}
+        noun="rows"
+        onPageChange={setPage}
+      />
+      </div>
+
+      <ImportGuidePanel kind={imp.kind} />
       </div>
 
       {showCommitConfirm && (

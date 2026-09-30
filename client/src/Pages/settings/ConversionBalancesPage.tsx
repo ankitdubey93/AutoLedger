@@ -12,7 +12,7 @@ import {
 } from '../../services/fetchServices';
 import { formatCents, formatCentsPlain, parseCentsInput } from '../../utils/money';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
-import { IMPORT_TEMPLATES, csvField } from '../accounting/importTemplates';
+import { csvField } from '../accounting/importTemplates';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass, primaryButtonClass } from '../../components/ui/formClasses';
@@ -224,7 +224,7 @@ export default function ConversionBalancesPage() {
     setSubmitting(true);
     setSubmitError(null);
     try {
-      const header = IMPORT_TEMPLATES.OPENING_BALANCES.columns.map((c) => csvField(c.header)).join(',');
+      const header = '*Code,Debit,Credit';
       const csvRows: string[] = [];
       for (const row of rows) {
         const parsed = parsedRow(row);

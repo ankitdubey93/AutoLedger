@@ -1271,6 +1271,67 @@ export function isMigrationRowStatus(value: string): value is MigrationRowStatus
   return (MIGRATION_ROW_STATUSES as readonly string[]).includes(value);
 }
 
+export function isMigrationImportStatus(value: string): value is MigrationImportStatus {
+  return (MIGRATION_IMPORT_STATUSES as readonly string[]).includes(value);
+}
+
+export type MigrationCommitResult =
+  | { kind: 'CHART_OF_ACCOUNTS'; createdCount: number; mergedCount: number }
+  | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
+  | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number };
+
+/** One CSV column an import kind understands (Phase 36). */
+export interface ImportColumnDef {
+  key: string;
+  /** The template header. Required columns carry a leading '*', Xero-style. */
+  header: string;
+  label: string;
+  required: boolean;
+  /** Already-lowercased synonyms; compared through compactHeader. */
+  synonyms: readonly string[];
+  note: string;
+  example: string;
+  /** false = accepted on upload but left out of the downloadable template. */
+  inTemplate: boolean;
+}
+
+/** One field the review page lets a user fix on a staged row (a PATCH body key). */
+export interface ImportEditFieldDef {
+  key: string;
+  label: string;
+  input: 'text' | 'money' | 'accountType';
+  maxLength: number | null;
+  nullable: boolean;
+}
+
+export interface ImportKindMeta {
+  kind: MigrationImportKind;
+  label: string;
+  /** Plural noun for counts, lowercase: 'accounts', 'customers'. */
+  noun: string;
+  columns: readonly ImportColumnDef[];
+  /** At least one of these key sets must be fully mapped. Empty = no such rule. */
+  requiredOneOf: readonly (readonly string[])[];
+  /** 422 text per column key when that column cannot be resolved. */
+  missingMessages: Readonly<Record<string, string>>;
+  editFields: readonly ImportEditFieldDef[];
+}
+
+export interface MigrationImportInspection {
+  kind: MigrationImportKind;
+  headers: string[];
+  delimiter: string;
+  rowCount: number;
+  /** First 5 data rows, cells aligned to `headers`. */
+  sampleRows: string[][];
+  /** Column key -> the file header it resolved to, or null. Every key of the kind is present. */
+  suggestedMap: Record<string, string | null>;
+  /** Column keys a stage attempt would reject as missing, in rejection order. */
+  missingRequired: string[];
+  /** True when nothing is missing and every file header is one of the kind's template headers. */
+  exactMatch: boolean;
+}
+
 export interface MigrationImport {
   id: string;
   kind: MigrationImportKind;
@@ -1286,6 +1347,8 @@ export interface MigrationImport {
   createdBy: string;
   createdByName: string | null;
   createdAt: string;
+  columnMap: Record<string, string | null> | null;
+  result: MigrationCommitResult | null;
 }
 
 export interface MigrationImportRow {

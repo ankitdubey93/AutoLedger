@@ -15,6 +15,7 @@ import { useClientPage } from '../../utils/useClientPage';
 import SortableHeader from '../../components/ui/SortableHeader';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
+import ImportButton from '../../components/imports/ImportButton';
 
 /**
  * The vendor list — the parties bills are entered against.
@@ -239,13 +240,16 @@ export default function VendorsPage() {
           <h2 className="text-lg font-semibold m-0">Vendors</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">The parties expenses are entered against.</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((open) => !open)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
-        >
-          <Plus size={15} aria-hidden="true" /> New vendor
-        </button>
+        <div className="flex items-center gap-2">
+          <ImportButton kind="VENDORS" returnTo="/vendors" />
+          <button
+            type="button"
+            onClick={() => setShowForm((open) => !open)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          >
+            <Plus size={15} aria-hidden="true" /> New vendor
+          </button>
+        </div>
       </header>
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">
