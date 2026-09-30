@@ -128,9 +128,9 @@ function mockRoutes() {
   });
 }
 
-function renderPage() {
+function renderPage(path = '/inventory/movements') {
   return render(
-    <MemoryRouter initialEntries={['/inventory/movements']}>
+    <MemoryRouter initialEntries={[path]}>
       <AuthProvider>
         <Routes>
           <Route path="/inventory/movements" element={<InventoryMovementsPage />} />
@@ -304,5 +304,38 @@ describe('InventoryMovementsPage', () => {
     await user.click(screen.getByRole('button', { name: 'Post' }));
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Insufficient stock for item CMP-00001 at location MAIN');
+  });
+});
+
+describe('receiving from a stock item\u2019s "Receive stock" link', () => {
+  it('preselects the item, the default location, and the product\u2019s purchase price as the unit cost', async () => {
+    const linked = makeItem({ id: 'item-9', code: 'LAMP', name: 'Desk lamp', uomCode: 'EA', uomDecimalPlaces: 0, ledgerItemId: 'prod-9' });
+    mockRoutes();
+    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.endsWith('/api/v1/inventory/settings')) {
+        return Promise.resolve(
+          jsonResponse(200, { success: true, settings: { configured: true, defaultLocationId: 'loc-main', industryProfile: 'GENERAL', suggestedProfile: 'GENERAL', updatedAt: null } }),
+        );
+      }
+      if (url.endsWith('/api/v1/inventory/items/item-9')) {
+        return Promise.resolve(jsonResponse(200, { success: true, item: linked, attributes: [], serialAttributes: [] }));
+      }
+      if (url.endsWith('/api/v1/items/prod-9')) {
+        return Promise.resolve(jsonResponse(200, { success: true, item: { id: 'prod-9', purchasePriceCents: 6000 } }));
+      }
+      return base(input, init);
+    });
+    const user = userEvent.setup();
+    renderPage('/inventory/movements?item=item-9');
+
+    await waitFor(() => expect(screen.getByLabelText('Location')).toHaveValue('loc-main'));
+    await waitFor(() => expect(screen.getByLabelText('Unit cost')).toHaveValue('60.00'));
+    await user.type(screen.getByLabelText('Quantity'), '5');
+    await user.click(screen.getByRole('button', { name: 'Post' }));
+
+    await waitFor(() => expect(receiptBody).not.toBeNull());
+    expect(receiptBody).toMatchObject({ locationId: 'loc-main', lines: [{ itemId: 'item-9', quantityMilli: 5000, unitCostCents: 6000 }] });
   });
 });

@@ -1,14 +1,18 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import AttributeFields from './AttributeFields';
 import { parseQuantityToMilli } from '../../utils/quantity';
-import { parseCentsInput } from '../../utils/money';
+import { formatCents, parseCentsInput } from '../../utils/money';
 import {
   fetchStockCategory,
+  fetchStockItem,
   fetchStockItemLots,
   fetchStockItemSerials,
   fetchStockItems,
   fetchStockLocations,
+  fetchStockSettings,
+  getItem,
   listAccounts,
   postStockAdjustment,
   postStockIssue,
@@ -91,7 +95,12 @@ export default function InventoryMovementsPage() {
   const role = auth.status === 'authenticated' ? auth.role : null;
   const canWrite = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
 
-  const [tab, setTab] = useState<Tab>('RECEIVE');
+  // `?item=<stockItemId>&tab=ADJUST` — deep link from a stock item's "Receive / adjust stock".
+  const [params] = useSearchParams();
+  const initialTab = params.get('tab');
+  const [tab, setTab] = useState<Tab>(
+    initialTab === 'ISSUE' || initialTab === 'TRANSFER' || initialTab === 'ADJUST' ? initialTab : 'RECEIVE',
+  );
   const [occurredOn, setOccurredOn] = useState(todayIsoDate());
   const [reference, setReference] = useState('');
   const [reason, setReason] = useState('');
@@ -114,6 +123,27 @@ export default function InventoryMovementsPage() {
     listAccounts()
       .then((res) => setAccounts(res.accounts))
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load accounts'));
+    // Start at the default location, the one bills and invoices use — never override a choice already made.
+    fetchStockSettings()
+      .then((res) => {
+        const defaultId = res.settings.defaultLocationId;
+        if (defaultId === null) return;
+        setLocationId((current) => (current === '' ? defaultId : current));
+        setFromLocationId((current) => (current === '' ? defaultId : current));
+      })
+      .catch(() => undefined);
+    const itemId = params.get('item');
+    if (itemId !== null) {
+      fetchStockItem(itemId)
+        .then((res) => {
+          const first = emptyLine();
+          setLines([first]);
+          selectItem(first, res.item);
+        })
+        .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load the item'));
+    }
+    // Mount-only: the deep link is read once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const activeLocations = locations.filter((l) => l.isActive);
@@ -155,6 +185,19 @@ export default function InventoryMovementsPage() {
       availableSerials: [],
       serialAttributeDefs: [],
     });
+
+    // A receipt's unit cost starts at the product's purchase price — the person only confirms it.
+    if ((tab === 'RECEIVE' || tab === 'ADJUST') && item.ledgerItemId !== null) {
+      getItem(item.ledgerItemId)
+        .then((res) => {
+          const price = res.item.purchasePriceCents;
+          if (price === null) return;
+          setLines((current) =>
+            current.map((l) => (l.key === line.key && l.unitCostText === '' ? { ...l, unitCostText: formatCents(price) } : l)),
+          );
+        })
+        .catch(() => undefined);
+    }
 
     const currentLocationId = tab === 'ISSUE' || tab === 'ADJUST' ? locationId : tab === 'TRANSFER' ? fromLocationId : locationId;
 

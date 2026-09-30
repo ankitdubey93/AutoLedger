@@ -3,7 +3,7 @@
 > A transaction is a property of a *session*, and a pool hands out sessions — which is the whole reason `pool.query` inside a `BEGIN` block silently corrupts your atomicity.
 
 **Category:** PostgreSQL
-**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim. Extended Phase 28 — StockLedger's multi-row balance/serial locking: deterministic lock ordering, upsert-then-lock, and a `FULL JOIN` across a derived cache and its source ledger. Extended Phase 34a — `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` as per-row error recovery inside a batch bank-rule apply. Extended Phase 35a — `FOR SHARE` vs `FOR UPDATE` as a read-mapping/write-mapping locking protocol across accounting and inventory, and `pg_advisory_xact_lock` for serializing a concept (an org's whole true-up state) that has no row of its own.
+**Introduced by:** Phase 1 — `db/connect.ts`, `authService.register`. Extended Phase 7 — the outbox drain's batch `SKIP LOCKED` claim. Extended Phase 28 — StockLedger's multi-row balance/serial locking: deterministic lock ordering, upsert-then-lock, and a `FULL JOIN` across a derived cache and its source ledger. Extended Phase 34a — `SAVEPOINT`/`ROLLBACK TO SAVEPOINT` as per-row error recovery inside a batch bank-rule apply. Extended Phase 35a — `FOR SHARE` vs `FOR UPDATE` as a read-mapping/write-mapping locking protocol across accounting and inventory, and `pg_advisory_xact_lock` for serializing a concept (an org's whole true-up state) that has no row of its own. Extended 2026-09-30 (one product form) — check → lock → re-check to provision a missing singleton (an org's inventory setup) *inside the caller's transaction*, and why the re-check depends on READ COMMITTED's per-statement snapshot.
 **Verified against:** PostgreSQL 16, `pg` (node-postgres) 8.x
 
 ---
@@ -290,6 +290,43 @@ SELECT pg_advisory_xact_lock(hashtextextended('stock_true_up:' || $1::text, 0));
 
 **Why an advisory lock instead of `SELECT ... FOR UPDATE` on some existing row, or a `UNIQUE` constraint plus `ON CONFLICT`.** A `UNIQUE` constraint (on `vendors.name`, say) would work for the vendor case specifically, but wasn't chosen because vendor-name uniqueness is a business rule this codebase doesn't otherwise want to enforce database-wide (two orgs, or even the same org, may have legitimate reasons the model doesn't currently forbid duplicate display names outside this one race). Locking some *other*, already-existing row as a stand-in (e.g. the organization's own row) would work too, but it borrows a lock whose real purpose is unrelated and would serialize this operation against every other thing that happens to lock the same stand-in row for its own reasons — an advisory lock's key space is deliberately unconnected to any table, so it only ever contends with other callers using that exact same conceptual key.
 
+
+### Check → lock → re-check: provisioning a missing singleton inside someone else's transaction (2026-09-30)
+
+Creating the first tracked product must also set inventory up: one `stock_settings` row per org, plus the catalogue an industry profile seeds. Two rules shape this.
+
+- **It must happen in the product's own transaction.** If the product create fails, for example on a bad opening-stock line, the setup must roll back with it. Otherwise a failed request leaves a half-configured org behind.
+- **It must happen exactly once,** even when two people create their first product at the same moment.
+
+`setupService.ensureInventoryReadyOnClient` does this in three steps on the caller's client:
+
+```sql
+SELECT 1 FROM stock_settings WHERE org_id = $1;                     -- 1. unlocked check (fast path)
+SELECT pg_advisory_xact_lock(hashtextextended('stock_setup:' || $1::text, 0));  -- 2. only if missing
+SELECT 1 FROM stock_settings WHERE org_id = $1;                     -- 3. re-check, then apply if still missing
+```
+
+**Why the re-check works: READ COMMITTED takes a new snapshot per statement.** Suppose transaction B blocks in step 2 while A applies the profile. When A commits, B's lock call returns. B's *next* statement, the re-check, takes a fresh snapshot, so it sees A's committed row and B skips the apply.
+
+Under REPEATABLE READ the snapshot is fixed at the transaction's first statement. B's re-check would still see "missing", and B would try to apply the profile again. What happens then is not a silent no-op. I checked it on PostgreSQL 16.15 with two `psql` sessions:
+- Session A, in REPEATABLE READ, read the table and slept.
+- Session B inserted and committed the key.
+- A's `INSERT … ON CONFLICT DO NOTHING` for that key then failed with `ERROR: could not serialize access due to concurrent update`. It did not quietly do nothing: at REPEATABLE READ and above, Postgres refuses to "do nothing" about a conflicting row its snapshot cannot see.
+
+So this pattern is correct *because* the app runs at the default READ COMMITTED. It would need a retry loop at a stricter level.
+
+**Why the unlocked first check is safe.** The fast path skips the lock whenever the row exists. That is only sound because the state is *monotonic*: there is no path that deletes a `stock_settings` row, so "exists" can never become false again. Without step 1, every item create in every org would serialize on one advisory key for the rest of the org's life. This is Java's double-checked locking, and it is sound here for the same reason it is sound there: the state never goes back.
+
+**Why not `SELECT … FOR UPDATE`.** The row may not exist yet, and you can't lock a missing row. See *Upsert-then-lock* above.
+
+**The alternative I didn't take.** Upsert-then-lock would also work here. Make the settings `INSERT … ON CONFLICT DO NOTHING RETURNING org_id` the *first* statement:
+- A second inserter blocks on the unique index until the first commits, then gets no row back.
+- Whoever got a row back is the winner and applies the rest.
+
+The advisory lock was chosen so the profile-apply function stays exactly the one `POST /inventory/setup` uses. That function's first statement is an `ON CONFLICT DO UPDATE` (re-applying a profile updates `industry_profile`), which returns a row for both callers and so can't pick a winner.
+
+**Rollback releases everything.** `pg_advisory_xact_lock` is released at `ROLLBACK` as well as `COMMIT`. A failed product create therefore leaves no setup rows and no held lock. The integration test asserts that `stock_settings` is still empty after a `422` on opening stock.
+
 ## Why we chose it here
 
 | Decision | Reasoning |
@@ -340,6 +377,7 @@ Phase 35a:
 - `server/src/services/accounting/itemService.ts` — `resolveStockAccountsOnClient`'s `FOR SHARE` on `items`; `lockInventoryItemsOnClient`/`lockDefaultedInventoryItemsOnClient`'s `FOR UPDATE ... ORDER BY id`
 - `server/src/services/accounting/inventoryAccountingService.ts` — the header docblock stating the full lock order this section documents
 - `server/src/services/accounting/vendorService.ts` — `findOrCreateVendorByNameOnClient`'s `pg_advisory_xact_lock(hashtext(...))`, the earlier (Phase 19) advisory-lock precedent
+- `server/src/services/inventory/setupService.ts` — `ensureInventoryReadyOnClient` (check → advisory lock → re-check → `applyIndustryProfileOnClient`), called first inside `itemService.createItem` / `createFromProduct`; the concurrent-first-create and rollback cases are in `__tests__/inventory/productTracking.test.ts`
 - `server/src/services/inventory/valuationService.ts` — `trueUp`'s `pg_advisory_xact_lock(hashtextextended(...))`
 - `server/src/__tests__/inventory/reclassConcurrency.test.ts` — the repeated product-account-change-vs-bill-approval race asserting zero `40P01`s
 
@@ -410,6 +448,9 @@ A: The order has to be the *same* across every code path that ever needs to lock
 
 **Q: Why would you reach for `pg_advisory_xact_lock` instead of `SELECT ... FOR UPDATE`?**
 A: `FOR UPDATE` locks a row that exists. Sometimes what needs to serialize isn't a row at all — a brand-new entity that doesn't exist yet (so two concurrent "find or create" calls could both find nothing and both create), or a whole cross-cutting operation with no single natural row to represent it (an organization's entire inventory-reconciliation state, in this codebase's case). `pg_advisory_xact_lock` takes an application-defined numeric key and blocks any other transaction requesting the *same* key, released automatically at commit or rollback — no table involved at all. Since the natural key is usually a string (an org id, a normalized name), I hash it into the `bigint` the function wants, and I always namespace the hashed string with a purpose tag rather than hashing a bare id, so two unrelated features that both happen to key off "this org" don't collide and serialize against each other for no reason.
+
+**Q: You need to create a per-tenant singleton (a settings row plus seed data) lazily, inside a request's existing transaction, exactly once under concurrency. How?**
+A: Check, lock, re-check. First an unlocked `SELECT`. If the row exists you're done, which is the common path, and it takes no lock. That shortcut is only safe because the row is never deleted. If the row is missing, take `pg_advisory_xact_lock` on a hash of "setup:" plus the tenant id, then `SELECT` again, and create only if it is still missing. The re-check works because at READ COMMITTED each statement gets a fresh snapshot. If another transaction created the row while you waited on the lock, your re-check sees its commit. The lock is transaction-scoped, so a rollback releases it and undoes the half-done setup together with the rest of the request. At REPEATABLE READ the re-check would still see the old snapshot. The duplicate `INSERT … ON CONFLICT DO NOTHING` then fails with a serialization error rather than doing nothing (I checked this on PG 16.15), so you would need a retry loop. An alternative is to make the singleton's own `INSERT … ON CONFLICT DO NOTHING RETURNING` the first statement and let whoever gets a row back do the seeding.
 
 ## Follow-ups they'll dig into
 

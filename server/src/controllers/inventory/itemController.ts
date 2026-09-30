@@ -1,6 +1,11 @@
 import type { RequestHandler } from 'express';
 import * as itemService from '../../services/inventory/itemService.js';
-import { createStockItemSchema, linkProductSchema, updateStockItemSchema } from '../../schemas/inventory/itemSchema.js';
+import {
+  createFromProductSchema,
+  createStockItemSchema,
+  linkProductSchema,
+  updateStockItemSchema,
+} from '../../schemas/inventory/itemSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -71,4 +76,12 @@ export const linkProduct: RequestHandler = async (req, res) => {
   const input = parseBody(linkProductSchema, req.body ?? {});
   const item = await itemService.linkProduct(user.orgId, user.id, requireParam(req, 'id'), input);
   res.json({ success: true, item });
+};
+
+/** POST /inventory/items/from-product/:productId — start tracking inventory for an existing non-inventory product. */
+export const createFromProduct: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(createFromProductSchema, req.body ?? {});
+  const item = await itemService.createFromProduct(user.orgId, user.id, requireParam(req, 'productId'), input);
+  res.status(201).json({ success: true, item });
 };

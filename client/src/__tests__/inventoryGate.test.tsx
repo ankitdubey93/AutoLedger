@@ -49,8 +49,12 @@ describe('InventoryGate', () => {
   it('shows a set-up invitation, not the page, when inventory is not configured', async () => {
     renderGate(false);
 
-    expect(await screen.findByText('Inventory is not set up yet')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Set up inventory' })).toHaveAttribute('href', '/inventory/setup');
+    expect(await screen.findByText('You are not tracking stock yet')).toBeInTheDocument();
+    // First choice: the plain product form with tracking ticked (inventory sets itself up).
+    expect(screen.getByRole('link', { name: 'Add a tracked product' })).toHaveAttribute('href', '/products?new=1&track=1');
+    expect(screen.getByRole('link', { name: 'Choose an industry template' }).getAttribute('href')).toMatch(
+      /^\/inventory\/setup\?returnTo=%2F/,
+    );
     expect(screen.queryByText('STOCK LIST')).not.toBeInTheDocument();
   });
 
@@ -58,6 +62,6 @@ describe('InventoryGate', () => {
     renderGate(true);
 
     expect(await screen.findByText('STOCK LIST')).toBeInTheDocument();
-    expect(screen.queryByText('Inventory is not set up yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('You are not tracking stock yet')).not.toBeInTheDocument();
   });
 });

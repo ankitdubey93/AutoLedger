@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { INVENTORY_BASE } from '../../routes/paths';
 import AttributeFields from './AttributeFields';
 import { parseQuantityToMilli } from '../../utils/quantity';
-import { parseCentsInput } from '../../utils/money';
+import { parseCentsInput, parseRateInput } from '../../utils/money';
 import {
   createStockItem,
   listAccounts,
@@ -69,6 +69,12 @@ export default function InventoryNewItemPage() {
   const [revenueAccountId, setRevenueAccountId] = useState('');
   const [assetAccountId, setAssetAccountId] = useState('');
   const [cogsAccountId, setCogsAccountId] = useState('');
+  const [saleTaxText, setSaleTaxText] = useState('');
+  const [purchaseTaxText, setPurchaseTaxText] = useState('');
+  // Opening stock posted with the item (quantity-tracked only). Blank cost = the purchase price.
+  const [openingQtyText, setOpeningQtyText] = useState('');
+  const [openingCostText, setOpeningCostText] = useState('');
+  const [openingDate, setOpeningDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   useEffect(() => {
     Promise.all([fetchStockCategories(), fetchStockUoms(), fetchStockCodeSchemes()])
@@ -144,6 +150,32 @@ export default function InventoryNewItemPage() {
       return;
     }
 
+    const saleTaxBp = saleTaxText.trim() === '' ? 0 : parseRateInput(saleTaxText);
+    const purchaseTaxBp = purchaseTaxText.trim() === '' ? 0 : parseRateInput(purchaseTaxText);
+    if (saleTaxBp === null || purchaseTaxBp === null || saleTaxBp > 10_000 || purchaseTaxBp > 10_000) {
+      setError('Tax rates must be a percentage between 0 and 100');
+      return;
+    }
+
+    let opening: { quantityMilli: number; unitCostCents: number | null; occurredOn: string } | undefined;
+    if (tracking === 'QUANTITY' && openingQtyText.trim() !== '') {
+      const quantityMilli = parseQuantityToMilli(openingQtyText, uomDecimalPlaces);
+      const unitCostCents = openingCostText.trim() === '' ? null : parseCentsInput(openingCostText);
+      if (quantityMilli === null || quantityMilli <= 0) {
+        setError(`Opening quantity must be above zero, with at most ${uomDecimalPlaces} decimal places`);
+        return;
+      }
+      if (openingCostText.trim() !== '' && unitCostCents === null) {
+        setError('Opening unit cost must be an amount like 12.50');
+        return;
+      }
+      if (unitCostCents === null && purchasePriceCents === null) {
+        setError('Enter a unit cost for the opening stock, or a purchase price');
+        return;
+      }
+      opening = { quantityMilli, unitCostCents, occurredOn: openingDate };
+    }
+
     setSubmitting(true);
     try {
       const res = await createStockItem({
@@ -163,9 +195,10 @@ export default function InventoryNewItemPage() {
           revenueAccountId: revenueAccountId === '' ? null : revenueAccountId,
           assetAccountId: assetAccountId === '' ? null : assetAccountId,
           cogsAccountId: cogsAccountId === '' ? null : cogsAccountId,
-          saleTaxRateBp: 0,
-          purchaseTaxRateBp: 0,
+          saleTaxRateBp: saleTaxBp,
+          purchaseTaxRateBp: purchaseTaxBp,
         },
+        ...(opening === undefined ? {} : { opening }),
       });
       navigate(`${base}/items/${res.item.id}`);
     } catch (err) {
@@ -364,6 +397,32 @@ export default function InventoryNewItemPage() {
               className={`${inputClass} text-right tabular-nums`}
             />
           </div>
+          <div>
+            <label htmlFor="new-item-sale-tax" className="block text-sm text-[var(--text)] mb-1">
+              Sales tax %
+            </label>
+            <input
+              id="new-item-sale-tax"
+              inputMode="decimal"
+              placeholder="0"
+              value={saleTaxText}
+              onChange={(e) => setSaleTaxText(e.target.value)}
+              className={`${inputClass} text-right tabular-nums w-24`}
+            />
+          </div>
+          <div>
+            <label htmlFor="new-item-purchase-tax" className="block text-sm text-[var(--text)] mb-1">
+              Purchase tax %
+            </label>
+            <input
+              id="new-item-purchase-tax"
+              inputMode="decimal"
+              placeholder="0"
+              value={purchaseTaxText}
+              onChange={(e) => setPurchaseTaxText(e.target.value)}
+              className={`${inputClass} text-right tabular-nums w-24`}
+            />
+          </div>
         </div>
         {(
           [
@@ -389,6 +448,55 @@ export default function InventoryNewItemPage() {
           </div>
         ))}
       </fieldset>
+
+      {tracking === 'QUANTITY' ? (
+        <fieldset className="space-y-3 rounded-md border border-[var(--border)] p-3">
+          <legend className="px-1 text-sm text-[var(--text)]">Opening stock (optional)</legend>
+          <p className="text-xs text-[var(--muted)] m-0">
+            What you already hold, received at your default location. Unit cost defaults to the purchase price.
+          </p>
+          <div className="flex flex-wrap gap-4">
+            <div>
+              <label htmlFor="new-item-opening-qty" className="block text-sm text-[var(--text)] mb-1">
+                Quantity
+              </label>
+              <input
+                id="new-item-opening-qty"
+                inputMode="decimal"
+                placeholder="0"
+                value={openingQtyText}
+                onChange={(e) => setOpeningQtyText(e.target.value)}
+                className={`${inputClass} text-right tabular-nums w-28`}
+              />
+            </div>
+            <div>
+              <label htmlFor="new-item-opening-cost" className="block text-sm text-[var(--text)] mb-1">
+                Unit cost
+              </label>
+              <input
+                id="new-item-opening-cost"
+                inputMode="decimal"
+                placeholder={purchasePriceText.trim() === '' ? '0.00' : purchasePriceText}
+                value={openingCostText}
+                onChange={(e) => setOpeningCostText(e.target.value)}
+                className={`${inputClass} text-right tabular-nums w-32`}
+              />
+            </div>
+            <div>
+              <label htmlFor="new-item-opening-date" className="block text-sm text-[var(--text)] mb-1">
+                As of
+              </label>
+              <input
+                id="new-item-opening-date"
+                type="date"
+                value={openingDate}
+                onChange={(e) => setOpeningDate(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </div>
+        </fieldset>
+      ) : null}
 
       <button
         type="submit"

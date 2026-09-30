@@ -15,7 +15,7 @@ The inventory module (StockLedger before Phase 33) is perpetual inventory for re
 
 ### A. Industry setup
 
-`POST /stock/setup` applies one of ten industry profiles (`config/inventoryIndustryProfiles.ts`) — `RETAIL`, `WHOLESALE_DISTRIBUTION`, `MANUFACTURING`, `FOOD_BEVERAGE`, `PHARMA_HEALTHCARE`, `APPAREL_FOOTWEAR`, `ELECTRONICS`, `AUTOMOTIVE`, `REAL_ESTATE`, `GENERAL` — by **copying** its units of measure, categories (with their custom-field definitions), code schemes and a default location into the organization's own tables. After that copy, the org owns and can freely edit every row; the profile file is never read again at request time except to render the list and a suggestion. `GET /stock/setup/profiles` returns the full list with each one's `industryKeywords`, used to pre-highlight a likely match against the organization's own business-category text from platform onboarding — a suggestion, never an automatic or forced choice.
+`POST /stock/setup` applies one of ten industry profiles (`config/inventoryIndustryProfiles.ts`) — `RETAIL`, `WHOLESALE_DISTRIBUTION`, `MANUFACTURING`, `FOOD_BEVERAGE`, `PHARMA_HEALTHCARE`, `APPAREL_FOOTWEAR`, `ELECTRONICS`, `AUTOMOTIVE`, `REAL_ESTATE`, `GENERAL` — by **copying** its units of measure, categories (with their custom-field definitions), code schemes and a default location into the organization's own tables. After that copy, the org owns and can freely edit every row; the profile file is never read again at request time except to render the list and a suggestion. `GET /stock/setup/profiles` returns the full list with each one's `industryKeywords`, used to pre-highlight a likely match against the organization's own business-category text from platform onboarding. On the setup page it is a suggestion, never forced. **Since 2026-09-30 the suggestion is also applied automatically** when someone creates a tracked product before inventory was ever set up (Products & Services → "Track inventory", or `POST /inventory/items` from any entry point). It is applied silently, in the product's own transaction, under a per-org advisory lock. That is Xero's model: ticking a box is the whole setup. See [One product form](#one-product-form--2026-09-30) below.
 
 | Profile | Example categories |
 |---|---|
@@ -185,6 +185,34 @@ Phase 32 made a linked item's movement post a journal entry; it did not make the
 **Acceptance ✅ — verified.** 1708 server tests (2 skipped, unchanged), up from 1673, plus 451 client tests (0 skipped), up from 439. `npm run verify:integrity` passes all 7 checks. Full detail: [roadmap.md § Phase 35a, as delivered](roadmap.md#phase-35a-as-delivered).
 
 **Study notes** — extended [inventory-valuation-and-perpetual-stock.md](../study/architecture/inventory-valuation-and-perpetual-stock.md), [subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md), [transactions-isolation-pooling.md](../study/postgresql/transactions-isolation-pooling.md).
+
+### One product form — 2026-09-30
+
+A direct request: adding stock should feel like Xero or QuickBooks, one form with a purchase price, a sale price and a "Track inventory" box. Before this, a trading business needed about five screens for its first product: inventory setup, an industry template, a category, a code scheme, the stock item form, then a separate Stock movements receipt, re-typing the cost. Products also had **no edit UI at all**, and tax was hard-coded to 0 on every create form.
+
+- [x] **Silent setup.** `setupService.applyIndustryProfileOnClient` (the old `applyIndustryProfile` body, now on the caller's client) plus `ensureInventoryReadyOnClient` (check → advisory lock → re-check → apply the suggested profile).
+- [x] **Simpler `POST /inventory/items`.** `categoryId` is optional, falling back to a default category a plain form can satisfy: no required item fields, quantity-tracked, trading goods first. There is a new `opening` block that posts opening stock through `movementService.receiveManualOnClient` (the `receive` body, extracted) in the same transaction. Unit cost defaults to the purchase price.
+- [x] **Tracking switched on later.** `POST /inventory/items/from-product/:productId` turns tracking on for an existing `NON_INVENTORY` product. It is forward-only: past documents stay expensed. Accounting's `convertToInventoryOnClient` is the one permitted item-type transition (`ITEM_TYPE_TRANSITIONS`, rule 10).
+- [x] **Client.**
+  - `ProductFormDialog` is the one create/edit form for every product, used by Products & Services and by the invoice/bill quick-add. It has "I purchase this" / "I sell this" sections with tax, "Track inventory", opening stock (quantity, unit cost prefilled from the purchase price, as-of date), and optional inventory/COGS accounts.
+  - Products get an Edit action.
+  - The stock item page gets "Receive stock" / "Adjust stock" deep links. The movements page prefills the default location and the product's purchase price.
+  - The inventory gate leads with "Add a tracked product". Setup success honours `?returnTo=`.
+  - A bill line for an inventory product with no account of its own now fills in the default inventory account instead of leaving it blank.
+- **Not built:** CSV import of products with opening quantities (a follow-up), and switching tracking back off. The latter is refused by design, because it would orphan the stock ledger's GL value.
+
+Tests: `server/src/__tests__/inventory/productTracking.test.ts` has 15 integration cases:
+- silent setup
+- opening stock at the purchase price
+- COGS on the sale
+- the concurrent first create
+- rollback on a bad opening
+- forward-only conversion
+- code normalisation
+- refusals
+- cross-tenant
+
+The client tests are in `products.test.tsx`, `stockLines.test.tsx`, `inventoryGate.test.tsx` and `inventoryMovement.test.tsx`.
 
 ---
 

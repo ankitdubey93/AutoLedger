@@ -17,6 +17,12 @@ router.get('/', authenticate, itemController.list);
 router.get('/:id', authenticate, itemController.getOne);
 
 router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.create);
+router.post(
+  '/from-product/:productId',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  itemController.createFromProduct,
+);
 router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.update);
 router.post('/:id/link-product', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.linkProduct);
 

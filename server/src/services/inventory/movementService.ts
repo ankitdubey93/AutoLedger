@@ -1346,18 +1346,30 @@ async function manualOptions(
 }
 
 export async function receive(orgId: string, userId: string, input: ReceiveInput): Promise<MovementResult> {
+  return withTransaction((client) => receiveManualOnClient(client, orgId, userId, input));
+}
+
+/**
+ * A manual receipt (opening stock or a count gain) and its journal, on the
+ * caller's transaction — `receive` wraps it, and creating a tracked product
+ * with opening stock calls it directly so the product and its opening
+ * balance commit or roll back together.
+ */
+export async function receiveManualOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  input: ReceiveInput,
+): Promise<MovementResult> {
   assertNotFuture(input.occurredOn);
   const movementGroupId = randomUUID();
   const purpose = input.purpose ?? 'OPENING';
   const description = purpose === 'OPENING' ? 'Opening stock' : 'Stock found — count gain';
-  const movements = await withTransaction(async (client) => {
-    const opts = await manualOptions(client, orgId, movementGroupId, input.lines.map((l) => l.itemId));
-    const created = await receiveOnClient(client, orgId, userId, movementGroupId, input, opts);
-    await postManualMovementsOnClient(client, orgId, userId, movementGroupId, created, input.occurredOn, description, {
-      receiptPurpose: purpose,
-      issueExpenseAccountId: null,
-    });
-    return created;
+  const opts = await manualOptions(client, orgId, movementGroupId, input.lines.map((l) => l.itemId));
+  const movements = await receiveOnClient(client, orgId, userId, movementGroupId, input, opts);
+  await postManualMovementsOnClient(client, orgId, userId, movementGroupId, movements, input.occurredOn, description, {
+    receiptPurpose: purpose,
+    issueExpenseAccountId: null,
   });
   return { movementGroupId, movements };
 }

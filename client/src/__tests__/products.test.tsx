@@ -61,9 +61,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+function urlOf(input: RequestInfo | URL): string {
+  return typeof input === 'string' ? input : input.toString();
+}
+
+const account1140: Account = { ...account4100, id: 'acc-1140', code: '1140', name: 'Inventory', type: 'Asset' };
+const account6600: Account = { ...account4100, id: 'acc-6600', code: '6600', name: 'Office supplies', type: 'Expense' };
+
 function mockItemsPageRoutes(items: Item[], balances: StockProductBalance[] = []) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString();
+    const url = urlOf(input);
+    if (init?.method === 'POST' && url.includes('/api/v1/inventory/items/from-product/')) {
+      return Promise.resolve(jsonResponse(201, { success: true, item: { id: 'stock-new', ledgerItemId: 'item-lamp' } }));
+    }
+    if (init?.method === 'PATCH' && url.includes('/api/v1/inventory/items/')) {
+      return Promise.resolve(jsonResponse(200, { success: true, item: { id: 'stock-widget', ledgerItemId: 'item-widget' } }));
+    }
+    if (init?.method === 'POST' && url.includes('/api/v1/inventory/items')) {
+      return Promise.resolve(jsonResponse(201, { success: true, item: { id: 'stock-new', ledgerItemId: 'item-tracked' } }));
+    }
     if (init?.method === 'POST' && url.includes('/api/v1/items')) {
       const body = JSON.parse(init.body as string) as { salePriceCents: number | null };
       return Promise.resolve(
@@ -73,11 +89,22 @@ function mockItemsPageRoutes(items: Item[], balances: StockProductBalance[] = []
         }),
       );
     }
+    if (init?.method === 'PATCH' && url.includes('/api/v1/items/')) {
+      const id = url.split('/api/v1/items/')[1] ?? '';
+      const current = items.find((i) => i.id === id) ?? consultingItem;
+      return Promise.resolve(jsonResponse(200, { success: true, item: { ...current, ...(JSON.parse(init.body as string) as object) } }));
+    }
+    if (url.includes('/api/v1/items/')) {
+      const id = url.split('/api/v1/items/')[1] ?? '';
+      const found = items.find((i) => i.id === id) ?? { ...consultingItem, id, itemType: 'INVENTORY', kind: 'GOODS', stockManaged: true };
+      return Promise.resolve(jsonResponse(200, { success: true, item: found }));
+    }
     if (url.includes('/api/v1/items')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: items.length, items }));
     }
     if (url.includes('/api/v1/accounts')) {
-      return Promise.resolve(jsonResponse(200, { success: true, count: 1, accounts: [account4100] }));
+      const accounts = [account4100, account1140, account6600];
+      return Promise.resolve(jsonResponse(200, { success: true, count: accounts.length, accounts }));
     }
     if (url.includes('/api/v1/inventory/product-balances')) {
       return Promise.resolve(jsonResponse(200, { success: true, count: balances.length, balances }));
@@ -86,9 +113,18 @@ function mockItemsPageRoutes(items: Item[], balances: StockProductBalance[] = []
   });
 }
 
-function renderItemsPage() {
+function sentBody<T>(method: string, match: (url: string) => boolean): T | undefined {
+  const call = fetchMock.mock.calls.find((c) => {
+    const [input, init] = c as [RequestInfo | URL, RequestInit?];
+    return init?.method === method && match(urlOf(input));
+  });
+  if (call === undefined) return undefined;
+  return JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as T;
+}
+
+function renderItemsPage(path = '/products') {
   return render(
-    <MemoryRouter initialEntries={['/products']}>
+    <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/products" element={<ProductsPage />} />
       </Routes>
@@ -105,38 +141,129 @@ describe('ProductsPage', () => {
     expect(screen.getByText('150.00')).toBeInTheDocument();
   });
 
-  it('creating an item posts integer cents', async () => {
+  it('creating a service posts integer cents, a code derived from the name, and tax in basis points', async () => {
     mockItemsPageRoutes([]);
     const user = userEvent.setup();
     renderItemsPage();
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalled());
     await user.click(screen.getByRole('button', { name: 'New product or service' }));
-    await user.type(screen.getByLabelText('Code'), 'CONSULT');
     await user.type(screen.getByLabelText('Name'), 'Consulting hour');
+    expect(screen.getByLabelText('Code')).toHaveValue('CONSULTING-HOUR');
+    await user.click(screen.getByRole('radio', { name: 'Service' }));
     await user.type(screen.getByLabelText('Sale price'), '150.00');
-    await user.click(screen.getByRole('button', { name: 'Create item' }));
+    await user.type(screen.getAllByLabelText('Tax %')[1] as HTMLElement, '18.5');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
 
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find((c) => {
-        const [input, init] = c as [RequestInfo | URL, RequestInit?];
-        const url = typeof input === 'string' ? input : input.toString();
-        return init?.method === 'POST' && url.includes('/api/v1/items');
-      });
-      expect(call).toBeDefined();
-    });
+    await waitFor(() => expect(sentBody('POST', (u) => u.endsWith('/api/v1/items'))).toBeDefined());
+    const body = sentBody<{ code: string; salePriceCents: number; itemType: string; saleTaxRateBp: number }>(
+      'POST',
+      (u) => u.endsWith('/api/v1/items'),
+    );
+    expect(body).toMatchObject({ code: 'CONSULTING-HOUR', salePriceCents: 15000, itemType: 'SERVICE', saleTaxRateBp: 1850 });
+  });
 
-    const call = fetchMock.mock.calls.find((c) => {
-      const [input, init] = c as [RequestInfo | URL, RequestInit?];
-      const url = typeof input === 'string' ? input : input.toString();
-      return init?.method === 'POST' && url.includes('/api/v1/items');
+  it('an untracked product is created as NON_INVENTORY', async () => {
+    mockItemsPageRoutes([]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'New product or service' }));
+    await user.type(screen.getByLabelText('Name'), 'Printer paper');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(sentBody('POST', (u) => u.endsWith('/api/v1/items'))).toMatchObject({ itemType: 'NON_INVENTORY' }));
+  });
+
+  it('ticking "Track inventory" creates the product through inventory with its opening stock — no category needed', async () => {
+    mockItemsPageRoutes([]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    await user.click(screen.getByRole('button', { name: 'New product or service' }));
+    await user.type(screen.getByLabelText('Name'), 'Desk lamp');
+    await user.click(screen.getByRole('checkbox', { name: /Track inventory/ }));
+    await user.type(screen.getByLabelText('Purchase price'), '60.00');
+    await user.type(screen.getByLabelText('Sale price'), '100.00');
+    await user.type(screen.getByLabelText('Quantity'), '10');
+    // Unit cost left blank: the placeholder shows the purchase price it will default to.
+    expect(screen.getByLabelText('Unit cost')).toHaveAttribute('placeholder', '60.00');
+    await user.click(screen.getByRole('button', { name: 'Create' }));
+
+    await waitFor(() => expect(sentBody('POST', (u) => u.endsWith('/api/v1/inventory/items'))).toBeDefined());
+    const body = sentBody<Record<string, unknown>>('POST', (u) => u.endsWith('/api/v1/inventory/items'));
+    expect(body).toMatchObject({
+      name: 'Desk lamp',
+      code: 'DESK-LAMP',
+      product: { purchasePriceCents: 6000, salePriceCents: 10000 },
+      opening: { quantityMilli: 10000, unitCostCents: null },
     });
-    const body = JSON.parse((call as [RequestInfo | URL, RequestInit])[1].body as string) as {
-      salePriceCents: number;
-      itemType: string;
-    };
-    expect(body.salePriceCents).toBe(15000);
-    expect(body.itemType).toBe('SERVICE');
+    expect(body).not.toHaveProperty('categoryId');
+    expect(sentBody('POST', (u) => u.endsWith('/api/v1/items'))).toBeUndefined();
+  });
+
+  it('?new=1&track=1 opens the form with "Track inventory" ticked', async () => {
+    mockItemsPageRoutes([]);
+    renderItemsPage('/products?new=1&track=1');
+
+    expect(await screen.findByRole('checkbox', { name: /Track inventory/ })).toBeChecked();
+    expect(screen.getByLabelText('Quantity')).toBeInTheDocument();
+  });
+
+  const lamp: Item = {
+    ...consultingItem,
+    id: 'item-lamp',
+    code: 'LAMP-01',
+    name: 'Desk lamp',
+    kind: 'GOODS',
+    itemType: 'NON_INVENTORY',
+    salePriceCents: 10000,
+    purchasePriceCents: 6000,
+    expenseAccountId: account6600.id,
+  };
+
+  it('Edit sends a PATCH with the changed price, and the code cannot change', async () => {
+    mockItemsPageRoutes([lamp]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await screen.findByText('LAMP-01');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByLabelText('Code')).toBeDisabled();
+    await user.clear(screen.getByLabelText('Sale price'));
+    await user.type(screen.getByLabelText('Sale price'), '120.00');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(sentBody('PATCH', (u) => u.endsWith('/api/v1/items/item-lamp'))).toBeDefined());
+    expect(sentBody('PATCH', (u) => u.endsWith('/api/v1/items/item-lamp'))).toMatchObject({
+      salePriceCents: 12000,
+      purchasePriceCents: 6000,
+      expenseAccountId: account6600.id,
+    });
+    expect(sentBody('POST', (u) => u.includes('/from-product/'))).toBeUndefined();
+  });
+
+  it('ticking "Track inventory" on an existing product converts it (forward-only) with its opening stock', async () => {
+    mockItemsPageRoutes([lamp]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await screen.findByText('LAMP-01');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.click(screen.getByRole('checkbox', { name: /Track inventory/ }));
+    expect(screen.getByText(/Documents already posted stay as they are/)).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Quantity'), '4');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(sentBody('POST', (u) => u.endsWith('/api/v1/inventory/items/from-product/item-lamp'))).toMatchObject({
+        opening: { quantityMilli: 4000, unitCostCents: null },
+      }),
+    );
+    // The expense account is not sent while converting — the product's stock lines post to inventory.
+    expect(sentBody('PATCH', (u) => u.endsWith('/api/v1/items/item-lamp'))).not.toHaveProperty('expenseAccountId');
   });
 
   const widget: Item = {
@@ -170,7 +297,28 @@ describe('ProductsPage', () => {
     expect(screen.getAllByRole('button', { name: 'Deactivate' })).toHaveLength(1);
   });
 
-  it('the type tabs filter the list, and the create form offers only services and non-inventory items', async () => {
+  it('editing a tracked product: tracking stays on, and a rename goes to its stock item', async () => {
+    mockItemsPageRoutes([widget], [widgetBalance]);
+    const user = userEvent.setup();
+    renderItemsPage();
+
+    await screen.findByText('12 EA');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    const track = screen.getByRole('checkbox', { name: /Track inventory/ });
+    expect(track).toBeChecked();
+    expect(track).toBeDisabled();
+    expect(screen.queryByLabelText('Quantity')).not.toBeInTheDocument();
+    await user.clear(screen.getByLabelText('Name'));
+    await user.type(screen.getByLabelText('Name'), 'Widget XL');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(sentBody('PATCH', (u) => u.endsWith('/api/v1/inventory/items/stock-widget'))).toEqual({ name: 'Widget XL' }),
+    );
+    expect(sentBody('PATCH', (u) => u.endsWith('/api/v1/items/item-widget'))).not.toHaveProperty('name');
+  });
+
+  it('the type tabs filter the list', async () => {
     mockItemsPageRoutes([consultingItem, widget], [widgetBalance]);
     const user = userEvent.setup();
     renderItemsPage();
@@ -179,13 +327,6 @@ describe('ProductsPage', () => {
     await user.click(screen.getByRole('tab', { name: 'Services' }));
     expect(screen.getByText('CONSULT')).toBeInTheDocument();
     expect(screen.queryByText('GEN-00001')).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'New product or service' }));
-    const options = screen.getAllByRole('option').map((o) => o.textContent);
-    expect(options).toContain('Service');
-    expect(options).toContain('Non-inventory (not stocked)');
-    expect(options).not.toContain('Inventory');
-    expect(screen.getByRole('link', { name: 'New stock item' })).toHaveAttribute('href', '/inventory/items/new');
   });
 });
 

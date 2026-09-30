@@ -72,6 +72,19 @@ function isStockManaged(itemType: ItemType): boolean {
   return itemType === 'INVENTORY' || itemType === 'FIXED_ASSET';
 }
 
+/**
+ * The only `item_type` changes ever allowed (rule 10). Turning tracking on for
+ * a bought-and-sold good is the one Xero-style move; everything else is frozen
+ * — a service never becomes stock, and tracking is never switched back off
+ * (the stock ledger and its GL value would be orphaned).
+ */
+const ITEM_TYPE_TRANSITIONS: Record<ItemType, readonly ItemType[]> = {
+  SERVICE: [],
+  NON_INVENTORY: ['INVENTORY'],
+  INVENTORY: [],
+  FIXED_ASSET: [],
+};
+
 function toItem(row: ItemRow): Item {
   if (!isItemKind(row.kind)) throw new Error(`Unknown item kind "${row.kind}" on item ${row.id}`);
   if (!isItemType(row.item_type)) throw new Error(`Unknown item type "${row.item_type}" on item ${row.id}`);
@@ -391,6 +404,54 @@ export async function createLinkedItemOnClient(
     }
     throw err;
   }
+}
+
+/**
+ * Turns "track inventory" on for an existing NON_INVENTORY product — the one
+ * sanctioned `item_type` transition (NON_INVENTORY → INVENTORY; see
+ * ITEM_TYPE_TRANSITIONS). Called by Inventory inside the transaction that
+ * creates the linked stock item. Forward-only: posted documents hold their
+ * own copies of every line (migration 060), so past bills stay expensed and
+ * past invoices carry no COGS; only documents posted from now on move stock.
+ * The expense account is cleared because a stock line debits the inventory
+ * account instead (billService); omitted inventory/COGS accounts resolve
+ * from settings at posting time, exactly like a product born in Inventory.
+ */
+export async function convertToInventoryOnClient(
+  client: PoolClient,
+  orgId: string,
+  itemId: string,
+  accounts: { assetAccountId: string | null; cogsAccountId: string | null },
+): Promise<Item> {
+  const { rows: current } = await client.query<{ item_type: string; name: string; is_active: boolean }>(
+    'SELECT item_type, name, is_active FROM items WHERE id = $1 AND org_id = $2 FOR UPDATE',
+    [itemId, orgId],
+  );
+  const row = current[0];
+  if (row === undefined) throw new ApiError(404, 'Product not found');
+  if (!isItemType(row.item_type) || !ITEM_TYPE_TRANSITIONS[row.item_type].includes('INVENTORY')) {
+    throw new ApiError(
+      row.item_type === 'INVENTORY' ? 409 : 422,
+      row.item_type === 'INVENTORY'
+        ? 'This product already tracks inventory'
+        : 'Only a non-inventory product can start tracking inventory',
+    );
+  }
+  if (!row.is_active) throw new ApiError(422, 'Reactivate the product before tracking its inventory');
+  if (accounts.assetAccountId !== null) await assertAccount(client, orgId, accounts.assetAccountId, 'Asset');
+  if (accounts.cogsAccountId !== null) await assertAccount(client, orgId, accounts.cogsAccountId, 'Expense');
+
+  const { rows } = await client.query<ItemRow>(
+    `UPDATE items
+        SET item_type = 'INVENTORY', kind = 'GOODS', expense_account_id = NULL,
+            asset_account_id = $3, cogs_account_id = $4
+      WHERE id = $1 AND org_id = $2
+      RETURNING ${ITEM_COLUMNS}`,
+    [itemId, orgId, accounts.assetAccountId, accounts.cogsAccountId],
+  );
+  const updated = rows[0];
+  if (updated === undefined) throw new ApiError(404, 'Product not found');
+  return toItem(updated);
 }
 
 /** Pushes a Inventory rename / (de)activation onto the linked product. No-op when nothing changes. */

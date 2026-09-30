@@ -1092,6 +1092,49 @@ Not a numbered phase — an audit of what an evaluator sees first, then fixes in
 
 **Study notes:** new [docker-images-and-ci.md](../study/tooling/docker-images-and-ci.md) (the owed multi-stage note); extended [deterministic-demo-fixtures.md](../study/architecture/deterministic-demo-fixtures.md) (one replay, two consumers).
 
+
+## One product form (2026-09-30)
+
+A direct request, not a numbered phase: "adding stock should work like Xero — add an item, enter its cost price, done". Before this, a trading business needed about five screens and twenty-five interactions for its first stocked product:
+1. inventory setup,
+2. an industry template,
+3. a required category and code scheme on the stock item form,
+4. a separate Stock movements receipt, re-typing the cost,
+5. then the invoice.
+
+Also found:
+- **Products had no edit UI at all.** The stock item page pointed to one that didn't exist.
+- **Every create form hard-coded tax to 0.**
+- **An untracked product could never start tracking.**
+- **On a bill, an inventory product with default accounts left the line's account blank.**
+
+**Server (no migration):**
+- **`POST /inventory/items`.**
+  - Only `name` is required. An omitted category resolves to a default one a plain form can satisfy.
+  - An org that never set inventory up gets its onboarding-suggested industry profile applied silently, in the same transaction, under a per-org advisory lock (`setupService.ensureInventoryReadyOnClient`).
+  - A new `opening` block posts opening stock through `movementService.receiveManualOnClient` in the same transaction, with the unit cost defaulting to the purchase price.
+- **`POST /inventory/items/from-product/:productId`** turns tracking on for a `NON_INVENTORY` product. It is forward-only, and past documents are untouched. It goes through `ITEM_TYPE_TRANSITIONS`, the one permitted item-type transition, in accounting's `itemService`.
+
+**Client:**
+- `ProductFormDialog` is the single create/edit form for Products & Services and for the invoice/bill quick-add. It has:
+  - "I purchase this" / "I sell this" sections with tax;
+  - a "Track inventory" box;
+  - opening quantity, unit cost and as-of date;
+  - optional inventory/COGS accounts.
+- An Edit action on every product.
+- Receive/Adjust stock deep links from a stock item.
+- The movements page prefills the default location and the product's purchase price.
+- The inventory gate leads with "Add a tracked product". Setup success honours `?returnTo=`.
+- The global "+" menu's "Stock item" became "Tracked product".
+
+Detail: [inventory.md § One product form](inventory.md#one-product-form--2026-09-30), [api.md](api.md).
+
+**Deliberately not built:** CSV import of products with opening quantities (the next step), and switching tracking off (refused by design).
+
+**Tests.** 1746 server tests passing (2 skipped, the gated live-provider cases), up from 1731. The 15 new ones are in `productTracking.test.ts`. 498 client tests passing, up from 490. Lint and typecheck are clean in both packages. `guardrail-review` found no violations.
+
+**Study notes:** extended [transactions-isolation-pooling.md](../study/postgresql/transactions-isolation-pooling.md) (check → lock → re-check inside a caller's transaction; the REPEATABLE READ failure mode verified on PG 16.15) and [cross-app-transactional-bridge.md](../study/architecture/cross-app-transactional-bridge.md) (one form fanning out across modules; a forward-only type transition across the boundary).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

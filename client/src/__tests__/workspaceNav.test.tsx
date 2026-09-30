@@ -76,7 +76,7 @@ describe('the product sidebar', () => {
 
     expect(screen.getByRole('menuitem', { name: 'Invoice' })).toHaveAttribute('href', '/invoices/new');
     expect(screen.getByRole('menuitem', { name: 'Upload a bill' })).toHaveAttribute('href', '/inbox');
-    expect(screen.getByRole('menuitem', { name: 'Stock item' })).toHaveAttribute('href', '/inventory/items/new');
+    expect(screen.getByRole('menuitem', { name: 'Tracked product' })).toHaveAttribute('href', '/products?new=1&track=1');
     expect(screen.getByRole('menuitem', { name: 'Product or service' })).toHaveAttribute('href', '/products?new=1');
   });
 });

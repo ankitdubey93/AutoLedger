@@ -183,7 +183,7 @@ export default function InventoryItemDetailPage() {
         </p>
       ) : null}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-lg font-semibold text-[var(--text)]">
             {item.code} — {item.name}
@@ -193,13 +193,31 @@ export default function InventoryItemDetailPage() {
             {item.barcode !== null ? ` · ${item.barcode}` : ''}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={printItemLabel}
-          className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)]"
-        >
-          Print label
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {canWrite && item.tracking === 'QUANTITY' ? (
+            <>
+              <Link
+                to={`/inventory/movements?item=${item.id}`}
+                className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--panel-2)]"
+              >
+                Receive stock
+              </Link>
+              <Link
+                to={`/inventory/movements?item=${item.id}&tab=ADJUST`}
+                className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)] hover:bg-[var(--panel-2)]"
+              >
+                Adjust stock
+              </Link>
+            </>
+          ) : null}
+          <button
+            type="button"
+            onClick={printItemLabel}
+            className="rounded-md border border-[var(--border)] px-3 py-1.5 text-sm text-[var(--text)]"
+          >
+            Print label
+          </button>
+        </div>
       </div>
 
       <section aria-label="Products and services" className="space-y-2">
@@ -207,9 +225,9 @@ export default function InventoryItemDetailPage() {
         {item.ledgerItemId !== null ? (
           <p className="text-sm text-[var(--muted)]">
             Linked to Products &amp; Services. Stock movements of this item post to your inventory account, and it can be bought on
-            a bill and sold on an invoice. Prices and accounts are edited in{' '}
-            <Link to="/products" className="underline">
-              Products &amp; Services
+            a bill and sold on an invoice.{' '}
+            <Link to={`/products?edit=${item.ledgerItemId}`} className="underline">
+              Edit prices, tax and accounts
             </Link>
             .
           </p>

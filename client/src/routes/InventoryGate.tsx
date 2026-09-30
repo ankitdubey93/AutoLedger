@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, Outlet } from 'react-router-dom';
+import { Link, Outlet, useLocation } from 'react-router-dom';
 import { Boxes } from 'lucide-react';
 import EmptyState from '../components/ui/EmptyState';
 import { fetchStockSettings, type StockSettings } from '../services/fetchServices';
@@ -7,11 +7,14 @@ import { fetchStockSettings, type StockSettings } from '../services/fetchService
 /**
  * Inventory is optional. An organization that has never applied an industry
  * template has no categories to put an item in, so every inventory page
- * shows one "set up inventory" state. Before Phase 33 this was a hard redirect
+ * shows one "not tracking stock yet" state. Its first action is the plain
+ * product form with "Track inventory" ticked — creating a tracked product sets
+ * inventory up silently — and the template picker is the second. Before Phase 33 this was a hard redirect
  * to the setup page, which made a Products & inventory link look broken to
  * someone who does not keep stock.
  */
 export default function InventoryGate() {
+  const location = useLocation();
   const [settings, setSettings] = useState<StockSettings | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,15 +47,21 @@ export default function InventoryGate() {
   }
 
   if (!settings.configured) {
+    const returnTo = encodeURIComponent(`${location.pathname}${location.search}`);
     return (
       <EmptyState
         icon={Boxes}
-        title="Inventory is not set up yet"
-        body="Choose an industry template to get categories, item codes and a first location. Services and non-stock products work without it."
+        title="You are not tracking stock yet"
+        body="Add a product and tick “Track inventory” — AutoLedger sets inventory up for you. Or start from an industry template with ready-made categories and item codes."
         action={
-          <Link to="/inventory/setup" className="btn no-underline">
-            Set up inventory
-          </Link>
+          <div className="flex flex-wrap justify-center gap-2">
+            <Link to="/products?new=1&track=1" className="btn no-underline">
+              Add a tracked product
+            </Link>
+            <Link to={`/inventory/setup?returnTo=${returnTo}`} className="btn btn--ghost no-underline">
+              Choose an industry template
+            </Link>
+          </div>
         }
       />
     );

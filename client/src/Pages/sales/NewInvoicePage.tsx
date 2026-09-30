@@ -110,6 +110,8 @@ export default function NewInvoicePage() {
 
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [revenueAccounts, setRevenueAccounts] = useState<Account[]>([]);
+  /** Every account — the quick-add product form picks revenue, expense and inventory accounts. */
+  const [allAccounts, setAllAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const stockData = useStockLineData();
   const [quickAddLine, setQuickAddLine] = useState<number | null>(null);
@@ -147,6 +149,7 @@ export default function NewInvoicePage() {
       .then(([customersRes, accountsRes, itemsRes, paymentTermsRes, settingsRes]) => {
         if (ignore) return;
         setCustomers(customersRes.customers);
+        setAllAccounts(accountsRes.accounts);
         setRevenueAccounts(
           accountsRes.accounts.filter((a) => a.isPostable && a.type === 'Revenue'),
         );
@@ -683,13 +686,15 @@ export default function NewInvoicePage() {
       {quickAddLine !== null && (
         <QuickAddProductDialog
           mode="sale"
-          accounts={revenueAccounts}
+          accounts={allAccounts}
           defaultAccountId={lines[quickAddLine]?.revenueAccountId ?? ''}
           onCancel={() => setQuickAddLine(null)}
           onCreated={(item) => {
             setItems((current) => [...current, item].sort((a, b) => a.code.localeCompare(b.code)));
             applyItemRecord(quickAddLine, item);
             setQuickAddLine(null);
+            // A tracked product may have just set Inventory up and received opening stock.
+            if (item.itemType === 'INVENTORY') stockData.reload();
           }}
         />
       )}

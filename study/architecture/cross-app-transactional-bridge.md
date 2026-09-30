@@ -3,7 +3,7 @@
 > Two modules that own different tables must still commit one business event atomically — the pattern is a public `*OnClient` service function that runs on the *caller's* transaction, plus a fixed lock order, plus a pointer that lives on the dependent side.
 
 **Category:** Architecture
-**Introduced by:** Phase 32 — a bill or invoice line for a stock item moves inventory and posts to the ledger in one transaction, across the LedgerCore and StockLedger apps
+**Introduced by:** Phase 32 — a bill or invoice line for a stock item moves inventory and posts to the ledger in one transaction, across the LedgerCore and StockLedger apps. Extended 2026-09-30 (one product form) — one user action ("save product, track inventory, 10 on hand") fanning out across three steps and two modules on one client, and a forward-only type transition that crosses the module boundary
 **Verified against:** PostgreSQL 16.15, Node 22 (behaviour verified by integration tests, including a repeated concurrent-issue test)
 
 ---
@@ -25,6 +25,27 @@ The reverse direction works identically: StockLedger's `createItem` calls Ledger
 
 **Where the pointer lives.** The stock item points at its product (`stock_items.ledger_item_id`), not the reverse. StockLedger *requires* LedgerCore, so the dependent app holds the reference; LedgerCore only ever passes its own `items.id` across and never stores an id it cannot check. The column has **no `REFERENCES`** — rule 8 (every `*_id` gets an FK) collides with rule 16 (no app reads another app's tables) and rule 16 wins, the same ruling made for AP-Flow's account ids. The database still enforces what it can: the id is unique per org and a trigger freezes it once set; the service validates it and items are never deleted.
 
+
+**One form, many steps, one transaction (2026-09-30).** Products & Services has a Xero-style "Track inventory" box. Saving a tracked product with opening stock is one click for the user and five steps for the server, all on one client inside `inventory/itemService.createItem`:
+
+1. Set inventory up if it never was (`setupService.ensureInventoryReadyOnClient`).
+2. Insert the stock item.
+3. Create the accounting product (`accounting/itemService.createLinkedItemOnClient`).
+4. Link the two.
+5. Receive the opening stock and post its journal (`movementService.receiveManualOnClient`).
+
+Any failure rolls back all five: a bad opening location, a future date, or a product-code collision. The orchestrator lives in **inventory** because inventory is the module that depends on accounting (it holds the pointer). Putting it in accounting would have made accounting import inventory's item service, a second import direction beyond the one sanctioned seam (`documentStockService`). The HTTP shape follows from this. The client's product form calls `POST /inventory/items` when the box is ticked, and `POST /items` when it isn't.
+
+**A type change that crosses the boundary: turning tracking on later.** The route is `POST /inventory/items/from-product/:id`. The product row lives in accounting and the new stock item lives in inventory, so inventory's `createFromProduct` does three things on one client:
+1. It calls accounting's `convertToInventoryOnClient`, which locks the product `FOR UPDATE`, checks the transition, and flips `item_type` while clearing the now-meaningless expense account.
+2. It inserts the stock item pointing at that product.
+3. It optionally posts opening stock.
+
+Three decisions shape it:
+- **The transition is a one-row FSM in accounting's code** (`ITEM_TYPE_TRANSITIONS`: `NON_INVENTORY → INVENTORY` only). The module that owns the column owns the rule (rule 10), and inventory only asks.
+- **It is forward-only.** Nothing rewrites history, because posted invoice and bill lines hold *copies* of the item's defaults (migration 060), not references that read through. Past bills stay expensed, and past invoices carry no COGS. Only documents posted afterwards move stock. The alternative, back-filling stock from old bills, would have had to re-cost every later sale, so it was rejected.
+- **Switching tracking back off is refused by design.** It would leave stock movements and their GL value pointing at a product that no longer claims to be stock, which would break the inventory-equals-subledger integrity check.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -42,6 +63,7 @@ The reverse direction works identically: StockLedger's `createItem` calls Ledger
 - `server/src/services/accounting/itemService.ts` (`createLinkedItemOnClient`, `syncLinkedItemOnClient`, `resolveStockAccountsOnClient`) — StockLedger calling back the other way
 - `server/src/services/inventory/movementService.ts` — the `*OnClient` cores behind thin `withTransaction` wrappers
 - `server/src/__tests__/inventory/documentConcurrency.test.ts` — a last-unit race and opposite line orders, run repeatedly
+- `server/src/services/inventory/itemService.ts` (`createItem`, `createFromProduct`) and `accounting/itemService.ts` (`convertToInventoryOnClient`, `ITEM_TYPE_TRANSITIONS`) — the one-form fan-out and the cross-module type transition; `__tests__/inventory/productTracking.test.ts` covers rollback, forward-only conversion and cross-tenant refusal
 
 ## Gotchas
 
@@ -67,6 +89,9 @@ A: On the dependent app's row (`stock_items.ledger_item_id`), because StockLedge
 
 **Q: Tell me about a design decision you rejected in this work.**
 A: Voiding a bill for stock by removing the units at the *current* moving average. It looks natural but is wrong in the simplest case — 10 @ $5, then a receipt of 10 @ $10, void the second: it should leave $50, the average leaves $75. I remove the original receipt's value instead, clamped to what the balance can hold, refuse if the units are already gone, and post any clamped difference as a variance entry so stock and ledger stay equal.
+
+**Q: A user turns "track inventory" on for a product they have already bought and sold. What happens to the history?**
+A: Nothing. The change is forward-only by design. Posted invoice and bill lines copy the product's price and accounts when they are saved, so they never read through to the product afterwards. The earlier bills stay as expenses and the earlier sales carry no cost of goods sold. From that moment, bills add stock and invoices book COGS at the moving average. The conversion itself is atomic across two modules. Inventory locks the accounting product, and accounting's one-entry transition table decides whether `NON_INVENTORY → INVENTORY` is allowed. The product flips type, the linked stock item is created, and any opening stock is posted, all on the same transaction client. Back-filling stock from past bills was rejected because it would mean re-costing every later sale. Turning tracking off again is refused, because it would orphan the stock ledger's value in the GL.
 
 ## Follow-ups they'll dig into
 

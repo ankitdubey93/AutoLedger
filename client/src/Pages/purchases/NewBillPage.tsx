@@ -103,9 +103,16 @@ export default function NewBillPage() {
 
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
+  /** Every account — the quick-add product form picks revenue, expense and inventory accounts. */
+  const [allAccounts, setAllAccounts] = useState<Account[]>([]);
   const [items, setItems] = useState<Item[]>([]);
   const stockData = useStockLineData();
   const [quickAddLine, setQuickAddLine] = useState<number | null>(null);
+  const [chartInventoryAccountId, setChartInventoryAccountId] = useState('');
+  // The account an inventory product with no account of its own posts to — the
+  // settings default, else the chart's 1140 (the server's same fallback).
+  const defaultInventoryAccountId =
+    (ledgerSettings.status === 'ready' ? ledgerSettings.settings.inventoryAccountId : null) ?? chartInventoryAccountId;
   const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
 
   const [vendorId, setVendorId] = useState('');
@@ -139,6 +146,8 @@ export default function NewBillPage() {
       .then(([vendorsRes, accountsRes, itemsRes, paymentTermsRes]) => {
         if (ignore) return;
         setVendors(vendorsRes.vendors);
+        setChartInventoryAccountId(accountsRes.accounts.find((a) => a.code === '1140')?.id ?? '');
+        setAllAccounts(accountsRes.accounts);
         setExpenseAccounts(
           accountsRes.accounts.filter(
             (a) => a.isPostable && (a.type === 'Expense' || a.type === 'Asset'),
@@ -299,7 +308,8 @@ export default function NewBillPage() {
       description: item.name,
       unitPrice: formatCents(item.purchasePriceCents ?? 0),
       // An INVENTORY item posts to its inventory (asset) account, not an expense one.
-      expenseAccountId: (item.itemType === 'INVENTORY' ? item.assetAccountId : item.expenseAccountId) ?? '',
+      expenseAccountId:
+        (item.itemType === 'INVENTORY' ? (item.assetAccountId ?? defaultInventoryAccountId) : item.expenseAccountId) ?? '',
       taxRate: item.purchaseTaxRateBp === 0 ? '' : formatRate(item.purchaseTaxRateBp),
       stockLocationId: '',
     });
@@ -667,13 +677,15 @@ export default function NewBillPage() {
       {quickAddLine !== null && (
         <QuickAddProductDialog
           mode="purchase"
-          accounts={expenseAccounts}
+          accounts={allAccounts}
           defaultAccountId={lines[quickAddLine]?.expenseAccountId ?? ''}
           onCancel={() => setQuickAddLine(null)}
           onCreated={(item) => {
             setItems((current) => [...current, item].sort((a, b) => a.code.localeCompare(b.code)));
             applyItemRecord(quickAddLine, item);
             setQuickAddLine(null);
+            // A tracked product may have just set Inventory up and received opening stock.
+            if (item.itemType === 'INVENTORY') stockData.reload();
           }}
         />
       )}

@@ -994,6 +994,11 @@ export function listItems(
   return apiFetch(`/items${suffix}`, { signal: signal ?? null });
 }
 
+/** GET /items/:id */
+export function getItem(id: string, signal?: AbortSignal): Promise<{ success: boolean; item: Item }> {
+  return apiFetch(`/items/${id}`, { signal: signal ?? null });
+}
+
 /** POST /items */
 export function createItem(body: {
   code: string;
@@ -1021,6 +1026,9 @@ export function updateItem(
     purchasePriceCents: number | null;
     revenueAccountId: string | null;
     expenseAccountId: string | null;
+    /** Inventory items only. */
+    assetAccountId: string | null;
+    cogsAccountId: string | null;
     saleTaxRateBp: number;
     purchaseTaxRateBp: number;
     isActive: boolean;
@@ -4455,22 +4463,52 @@ export function updateStockSettings(input: {
   return apiFetch('/inventory/settings', { method: 'PATCH', body: JSON.stringify(input) });
 }
 
-/** POST /inventory/items */
+/**
+ * Opening stock posted with a new tracked product (Dr Inventory / Cr Opening
+ * stock). Omitted unit cost = the product's purchase price; omitted location =
+ * the default location.
+ */
+export interface OpeningStockInput {
+  quantityMilli: number;
+  unitCostCents?: number | null;
+  occurredOn: string;
+  locationId?: string | null;
+}
+
+/**
+ * POST /inventory/items. Everything but `name` is optional: with no category
+ * or code, the server uses the default category and code scheme, and it sets
+ * inventory up silently the first time.
+ */
 export function createStockItem(input: {
   name: string;
-  description: string | null;
-  categoryId: string;
-  uomId: string | null;
-  tracking: StockTrackingMode | null;
-  code: string | null;
-  codeSchemeId: string | null;
-  barcode: string | null;
-  attributes: Record<string, unknown>;
-  reorderPointMilli: number | null;
+  description?: string | null;
+  categoryId?: string | null;
+  uomId?: string | null;
+  tracking?: StockTrackingMode | null;
+  code?: string | null;
+  codeSchemeId?: string | null;
+  barcode?: string | null;
+  attributes?: Record<string, unknown>;
+  reorderPointMilli?: number | null;
   /** Phase 32 — prices/accounts of the linked product; omitted = defaults. */
   product?: StockItemProductInput;
+  opening?: OpeningStockInput;
 }): Promise<{ success: boolean; item: StockItem }> {
   return apiFetch('/inventory/items', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /inventory/items/from-product/:productId — start tracking a non-inventory product (forward-only). */
+export function createStockItemFromProduct(
+  productId: string,
+  input: {
+    categoryId?: string | null;
+    assetAccountId?: string | null;
+    cogsAccountId?: string | null;
+    opening?: OpeningStockInput;
+  } = {},
+): Promise<{ success: boolean; item: StockItem }> {
+  return apiFetch(`/inventory/items/from-product/${productId}`, { method: 'POST', body: JSON.stringify(input) });
 }
 
 /** PATCH /inventory/items/:id */

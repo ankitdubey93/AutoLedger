@@ -91,11 +91,13 @@ let fetchMock: ReturnType<typeof vi.fn>;
 let posted: { url: string; body: Record<string, unknown> } | null;
 let itemPosts: Record<string, unknown>[];
 let itemPostStatuses: number[];
+let stockPosts: Record<string, unknown>[];
 
 beforeEach(() => {
   posted = null;
   itemPosts = [];
   itemPostStatuses = [];
+  stockPosts = [];
   fetchMock = vi.fn();
   vi.stubGlobal('fetch', fetchMock);
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
@@ -125,6 +127,14 @@ beforeEach(() => {
           }),
         }),
       );
+    }
+    if (init?.method === 'POST' && url.endsWith('/api/v1/inventory/items')) {
+      stockPosts.push(JSON.parse(init.body as string) as Record<string, unknown>);
+      return Promise.resolve(jsonResponse(201, { success: true, item: { id: 'stock-lamp', ledgerItemId: 'lamp' } }));
+    }
+    if (url.endsWith('/api/v1/items/lamp')) {
+      const lamp = item({ id: 'lamp', code: 'DESK-LAMP', name: 'Desk lamp', itemType: 'INVENTORY', stockManaged: true, salePriceCents: 10_000, purchasePriceCents: 6_000, expenseAccountId: null });
+      return Promise.resolve(jsonResponse(200, { success: true, item: lamp }));
     }
     if (url.includes('/api/v1/customers')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, customers: [customer] }));
     if (url.includes('/api/v1/vendors')) return Promise.resolve(jsonResponse(200, { success: true, count: 1, vendors: [vendor] }));
@@ -259,6 +269,7 @@ describe('quick add from a document line', () => {
     await user.selectOptions(screen.getByLabelText('Item for line 1'), '＋ New product or service…');
     const dialog = await screen.findByRole('dialog', { name: 'New product or service' });
     await user.type(within(dialog).getByLabelText('Name'), 'Web design');
+    await user.click(within(dialog).getByRole('radio', { name: 'Service' }));
     expect(within(dialog).getByLabelText('Code')).toHaveValue('WEB-DESIGN');
     await user.type(within(dialog).getByLabelText('Sale price'), '120');
     await user.selectOptions(within(dialog).getByLabelText('Revenue account'), 'acc-4100');
@@ -317,7 +328,6 @@ describe('quick add from a document line', () => {
     await user.selectOptions(screen.getByLabelText('Item for line 1'), '＋ New product or service…');
     const dialog = await screen.findByRole('dialog');
     await user.type(within(dialog).getByLabelText('Name'), 'Paper');
-    await user.selectOptions(within(dialog).getByLabelText('Type'), 'NON_INVENTORY');
     await user.type(within(dialog).getByLabelText('Purchase price'), '4.50');
     await user.selectOptions(within(dialog).getByLabelText('Expense account'), 'acc-6100');
     await user.click(within(dialog).getByRole('button', { name: 'Create and use' }));
@@ -332,6 +342,49 @@ describe('quick add from a document line', () => {
     expect(screen.getByLabelText('Account for line 1')).toHaveValue('acc-6100');
     expect(screen.getByLabelText('Unit price for line 1')).toHaveValue('4.50');
     expect(posted).toBeNull();
+  });
+
+  it('a tracked product with opening stock can be created from an invoice line and sold on it', async () => {
+    const user = userEvent.setup();
+    renderInvoice();
+    await screen.findByText('Select a customer…');
+    await waitFor(() => expect(screen.getByRole('option', { name: /GEN-00001/ })).toBeInTheDocument());
+
+    await user.selectOptions(screen.getByLabelText('Item for line 1'), '＋ New product or service…');
+    const dialog = await screen.findByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Name'), 'Desk lamp');
+    await user.click(within(dialog).getByRole('checkbox', { name: /Track inventory/ }));
+    await user.type(within(dialog).getByLabelText('Purchase price'), '60');
+    await user.type(within(dialog).getByLabelText('Sale price'), '100');
+    await user.type(within(dialog).getByLabelText('Quantity'), '10');
+    await user.click(within(dialog).getByRole('button', { name: 'Create and use' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(itemPosts).toHaveLength(0);
+    expect(stockPosts[0]).toMatchObject({
+      name: 'Desk lamp',
+      product: { purchasePriceCents: 6000, salePriceCents: 10000, revenueAccountId: null },
+      opening: { quantityMilli: 10000 },
+    });
+    expect(screen.getByLabelText('Item for line 1')).toHaveValue('lamp');
+    expect(screen.getByLabelText('Unit price for line 1')).toHaveValue('100.00');
+    expect(posted).toBeNull();
+  });
+
+  it('on a bill, an inventory product with no account of its own gets the default inventory account', async () => {
+    items.push(item({ id: 'plain-stock', code: 'GEN-00009', name: 'Plain stock', itemType: 'INVENTORY', stockManaged: true, assetAccountId: null, expenseAccountId: null }));
+    balances.push(balance('plain-stock', 'QUANTITY', 0));
+    try {
+      const user = userEvent.setup();
+      renderBill();
+      await screen.findByText('Select a vendor…');
+      await waitFor(() => expect(screen.getByRole('option', { name: /GEN-00009/ })).toBeInTheDocument());
+      await user.selectOptions(screen.getByLabelText('Item for line 1'), 'plain-stock');
+      expect(screen.getByLabelText('Account for line 1')).toHaveValue('acc-1140');
+    } finally {
+      items.pop();
+      balances.pop();
+    }
   });
 
   it('cancelling leaves the line exactly as it was', async () => {

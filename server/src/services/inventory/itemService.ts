@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -8,7 +9,9 @@ import { getActiveDefinitions } from './catalogueService.js';
 import { nextCodeOnClient } from './codeSchemeService.js';
 import * as ledgerItemService from '../accounting/itemService.js';
 import { postLinkOpeningOnClient } from './stockGlService.js';
-import { lockBalances, reclassOnClient } from './movementService.js';
+import { lockBalances, receiveManualOnClient, reclassOnClient } from './movementService.js';
+import { ensureInventoryReadyOnClient, suggestedProfileFor } from './setupService.js';
+import { ITEM_CODE_REGEX } from '../../utils/stockCodePattern.js';
 import { MODULE_TAGS } from '../../config/modules.js';
 import type {
   LinkAllResult,
@@ -187,7 +190,8 @@ export async function getItem(
 export interface CreateStockItemInput {
   name: string;
   description: string | null;
-  categoryId: string;
+  /** Omitted = the org's default category (setupService.ensureInventoryReadyOnClient). */
+  categoryId: string | null;
   uomId: string | null;
   tracking: StockTrackingMode | null;
   code: string | null;
@@ -197,6 +201,22 @@ export interface CreateStockItemInput {
   reorderPointMilli: number | null;
   /** Phase 32: the accounting side of the linked Accounting product. Omitted = no prices, default accounts. */
   product?: StockItemProductInput | undefined;
+  /** Opening stock posted with the item, in the same transaction. */
+  opening?: OpeningStockInput | undefined;
+}
+
+/**
+ * Opening stock entered on the product form (QuickBooks' "initial quantity on
+ * hand … as of"). Posts through the ordinary manual-receipt path — purpose
+ * OPENING, so Dr Inventory / Cr Opening-stock equity.
+ */
+export interface OpeningStockInput {
+  quantityMilli: number;
+  /** Omitted = the product's purchase price. */
+  unitCostCents: number | null;
+  occurredOn: string;
+  /** Omitted = the org's default location. */
+  locationId: string | null;
 }
 
 /** The accounting identity a stock item carries into Products & Services. */
@@ -220,103 +240,174 @@ const EMPTY_PRODUCT: StockItemProductInput = {
   purchaseTaxRateBp: 0,
 };
 
+function uniqueViolationToApiError(err: unknown): unknown {
+  if (pgErrorCode(err) !== PG_UNIQUE_VIOLATION) return err;
+  if (pgConstraint(err) === 'ux_stock_items_org_barcode') return new ApiError(409, 'Barcode already used by another item');
+  return new ApiError(409, 'Item code already exists');
+}
+
+interface StockItemFields {
+  name: string;
+  description: string | null;
+  categoryId: string;
+  uomId: string | null;
+  tracking: StockTrackingMode | null;
+  code: string | null;
+  codeSchemeId: string | null;
+  barcode: string | null;
+  attributes: Record<string, unknown>;
+  reorderPointMilli: number | null;
+}
+
+/**
+ * Validates and inserts one stock item on the caller's client — category,
+ * unit, tracking, attributes, barcode, and the code (explicit, else the given
+ * or default code scheme). Linking to a product is the caller's job.
+ */
+async function insertStockItemOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  input: StockItemFields,
+): Promise<{ id: string; code: string; tracking: StockTrackingMode }> {
+  const { rows: categoryRows } = await client.query<{
+    id: string;
+    code: string;
+    item_type: string;
+    default_tracking: string;
+    default_uom_id: string | null;
+    is_active: boolean;
+  }>(
+    'SELECT id, code, item_type, default_tracking, default_uom_id, is_active FROM stock_categories WHERE id = $1 AND org_id = $2',
+    [input.categoryId, orgId],
+  );
+  const category = categoryRows[0];
+  if (category === undefined) throw new ApiError(422, 'Category does not exist in this organization');
+  if (!category.is_active) throw new ApiError(422, 'Category is inactive');
+
+  const uomId = input.uomId ?? category.default_uom_id;
+  if (uomId === null) throw new ApiError(422, 'Choose a unit of measure');
+
+  const { rows: uomRows } = await client.query<{ decimal_places: number; is_active: boolean }>(
+    'SELECT decimal_places, is_active FROM stock_uoms WHERE id = $1 AND org_id = $2',
+    [uomId, orgId],
+  );
+  const uom = uomRows[0];
+  if (uom === undefined || !uom.is_active) {
+    throw new ApiError(422, 'Unit of measure does not exist in this organization');
+  }
+
+  const tracking = (input.tracking ?? category.default_tracking) as StockTrackingMode;
+  if (tracking === 'SERIAL' && uom.decimal_places !== 0) {
+    throw new ApiError(422, 'Serial-tracked items need a whole-number unit of measure');
+  }
+
+  const definitions = await getActiveDefinitions(client, orgId, input.categoryId, 'ITEM');
+  const validated = validateAttributes(definitions, input.attributes);
+  if (!validated.ok) throw new ApiError(422, `Invalid attributes: ${validated.errors.join('; ')}`);
+
+  if (input.barcode !== null && !isValidGtin(input.barcode)) {
+    throw new ApiError(422, 'Barcode check digit is invalid');
+  }
+
+  let code: string;
+  let codeSchemeId: string | null;
+  if (input.code !== null) {
+    code = input.code;
+    codeSchemeId = null;
+  } else {
+    let schemeId = input.codeSchemeId;
+    if (schemeId === null) {
+      const { rows: defaultRows } = await client.query<{ id: string }>(
+        'SELECT id FROM stock_code_schemes WHERE org_id = $1 AND is_default',
+        [orgId],
+      );
+      schemeId = defaultRows[0]?.id ?? null;
+      if (schemeId === null) throw new ApiError(422, 'Provide a code or configure a default code scheme');
+    }
+    code = await nextCodeOnClient(client, orgId, schemeId, {
+      categoryCode: category.code,
+      attributes: validated.value,
+      date: new Date(),
+    });
+    codeSchemeId = schemeId;
+  }
+
+  const inserted = await client.query<{ id: string }>(
+    `INSERT INTO stock_items
+       (org_id, code, name, description, category_id, item_type, tracking, uom_id, code_scheme_id,
+        barcode, attributes, reorder_point_milli, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
+     RETURNING id`,
+    [
+      orgId,
+      code,
+      input.name,
+      input.description,
+      input.categoryId,
+      category.item_type,
+      tracking,
+      uomId,
+      codeSchemeId,
+      input.barcode,
+      JSON.stringify(validated.value),
+      input.reorderPointMilli,
+      userId,
+    ],
+  );
+  const created = inserted.rows[0];
+  if (created === undefined) throw new Error('INSERT ... RETURNING produced no row');
+  return { id: created.id, code, tracking };
+}
+
+/** Posts opening stock for a just-created item on the caller's client, resolving cost and location defaults. */
+async function postOpeningOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  item: { id: string; tracking: StockTrackingMode },
+  opening: OpeningStockInput,
+  purchasePriceCents: number | null,
+  defaultLocationId: string | null,
+): Promise<void> {
+  if (item.tracking !== 'QUANTITY') {
+    throw new ApiError(422, 'Enter opening stock for lot- or serial-tracked items under Stock movements → Receive');
+  }
+  const unitCostCents = opening.unitCostCents ?? purchasePriceCents;
+  if (unitCostCents === null) throw new ApiError(422, 'Enter a unit cost for the opening stock, or a purchase price');
+  const locationId = opening.locationId ?? defaultLocationId;
+  if (locationId === null) throw new ApiError(422, 'Choose a stock location for the opening stock');
+  await receiveManualOnClient(client, orgId, userId, {
+    occurredOn: opening.occurredOn,
+    reference: null,
+    locationId,
+    purpose: 'OPENING',
+    lines: [{ itemId: item.id, quantityMilli: opening.quantityMilli, unitCostCents, lot: null, serials: null }],
+  });
+}
+
+/**
+ * Creates a stock item and its linked Products & Services entry — and, when
+ * asked, its opening stock — in ONE transaction. Inventory need not be set up
+ * first: `ensureInventoryReadyOnClient` applies the org's suggested industry
+ * profile the first time, so "tick Track inventory and save" is the whole flow.
+ */
 export async function createItem(orgId: string, userId: string, input: CreateStockItemInput): Promise<StockItem> {
+  const suggestedProfile = await suggestedProfileFor(orgId);
   try {
-    const { rows } = await withTransaction(async (client) => {
-      const { rows: categoryRows } = await client.query<{
-        id: string;
-        code: string;
-        item_type: string;
-        default_tracking: string;
-        default_uom_id: string | null;
-        is_active: boolean;
-      }>(
-        'SELECT id, code, item_type, default_tracking, default_uom_id, is_active FROM stock_categories WHERE id = $1 AND org_id = $2',
-        [input.categoryId, orgId],
-      );
-      const category = categoryRows[0];
-      if (category === undefined) throw new ApiError(422, 'Category does not exist in this organization');
-      if (!category.is_active) throw new ApiError(422, 'Category is inactive');
+    const id = await withTransaction(async (client) => {
+      const defaults = await ensureInventoryReadyOnClient(client, orgId, userId, suggestedProfile);
+      const categoryId = input.categoryId ?? defaults.defaultCategoryId;
+      if (categoryId === null) throw new ApiError(422, 'Choose a category');
 
-      const uomId = input.uomId ?? category.default_uom_id;
-      if (uomId === null) throw new ApiError(422, 'Choose a unit of measure');
-
-      const { rows: uomRows } = await client.query<{ decimal_places: number; is_active: boolean }>(
-        'SELECT decimal_places, is_active FROM stock_uoms WHERE id = $1 AND org_id = $2',
-        [uomId, orgId],
-      );
-      const uom = uomRows[0];
-      if (uom === undefined || !uom.is_active) {
-        throw new ApiError(422, 'Unit of measure does not exist in this organization');
-      }
-
-      const tracking = (input.tracking ?? category.default_tracking) as StockTrackingMode;
-      if (tracking === 'SERIAL' && uom.decimal_places !== 0) {
-        throw new ApiError(422, 'Serial-tracked items need a whole-number unit of measure');
-      }
-
-      const definitions = await getActiveDefinitions(client, orgId, input.categoryId, 'ITEM');
-      const validated = validateAttributes(definitions, input.attributes);
-      if (!validated.ok) throw new ApiError(422, `Invalid attributes: ${validated.errors.join('; ')}`);
-
-      if (input.barcode !== null && !isValidGtin(input.barcode)) {
-        throw new ApiError(422, 'Barcode check digit is invalid');
-      }
-
-      let code: string;
-      let codeSchemeId: string | null;
-      if (input.code !== null) {
-        code = input.code;
-        codeSchemeId = null;
-      } else {
-        let schemeId = input.codeSchemeId;
-        if (schemeId === null) {
-          const { rows: defaultRows } = await client.query<{ id: string }>(
-            'SELECT id FROM stock_code_schemes WHERE org_id = $1 AND is_default',
-            [orgId],
-          );
-          schemeId = defaultRows[0]?.id ?? null;
-          if (schemeId === null) throw new ApiError(422, 'Provide a code or configure a default code scheme');
-        }
-        code = await nextCodeOnClient(client, orgId, schemeId, {
-          categoryCode: category.code,
-          attributes: validated.value,
-          date: new Date(),
-        });
-        codeSchemeId = schemeId;
-      }
-
-      const inserted = await client.query<{ id: string }>(
-        `INSERT INTO stock_items
-           (org_id, code, name, description, category_id, item_type, tracking, uom_id, code_scheme_id,
-            barcode, attributes, reorder_point_milli, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12, $13)
-         RETURNING id`,
-        [
-          orgId,
-          code,
-          input.name,
-          input.description,
-          input.categoryId,
-          category.item_type,
-          tracking,
-          uomId,
-          codeSchemeId,
-          input.barcode,
-          JSON.stringify(validated.value),
-          input.reorderPointMilli,
-          userId,
-        ],
-      );
+      const created = await insertStockItemOnClient(client, orgId, userId, { ...input, categoryId });
 
       // Phase 32: every stock item is born linked to a Accounting product, in the
       // SAME transaction — a code collision in Products & Services rolls back this
       // insert and the code-counter bump above with it (rule 5).
       const product = input.product ?? EMPTY_PRODUCT;
-      const created = inserted.rows[0];
-      if (created === undefined) throw new Error('INSERT ... RETURNING produced no row');
       const ledgerItem = await ledgerItemService.createLinkedItemOnClient(client, orgId, userId, {
-        code,
+        code: created.code,
         name: input.name,
         itemType: 'INVENTORY',
         ...product,
@@ -326,19 +417,96 @@ export async function createItem(orgId: string, userId: string, input: CreateSto
         orgId,
         ledgerItem.id,
       ]);
-      return inserted;
+
+      if (input.opening !== undefined) {
+        await postOpeningOnClient(
+          client,
+          orgId,
+          userId,
+          created,
+          input.opening,
+          product.purchasePriceCents,
+          defaults.defaultLocationId,
+        );
+      }
+      return created.id;
     });
 
-    const row = rows[0];
-    if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
-    const { item } = await getItem(orgId, row.id);
+    const { item } = await getItem(orgId, id);
     return item;
   } catch (err) {
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
-      if (pgConstraint(err) === 'ux_stock_items_org_barcode') throw new ApiError(409, 'Barcode already used by another item');
-      throw new ApiError(409, 'Item code already exists');
-    }
-    throw err;
+    throw uniqueViolationToApiError(err);
+  }
+}
+
+export interface CreateFromProductInput {
+  categoryId: string | null;
+  assetAccountId: string | null;
+  cogsAccountId: string | null;
+  opening?: OpeningStockInput | undefined;
+}
+
+/**
+ * Turns "track inventory" on for an existing non-inventory product: flips the
+ * product to INVENTORY (accounting's `convertToInventoryOnClient` — the one
+ * sanctioned item-type transition) and creates the stock item linked to it,
+ * reusing the product's code when it fits the stock code grammar, else the
+ * default code scheme. Forward-only: documents already posted stay as posted.
+ */
+export async function createFromProduct(
+  orgId: string,
+  userId: string,
+  productId: string,
+  input: CreateFromProductInput,
+): Promise<StockItem> {
+  const suggestedProfile = await suggestedProfileFor(orgId);
+  try {
+    const id = await withTransaction(async (client) => {
+      const product = await ledgerItemService.convertToInventoryOnClient(client, orgId, productId, {
+        assetAccountId: input.assetAccountId,
+        cogsAccountId: input.cogsAccountId,
+      });
+      const defaults = await ensureInventoryReadyOnClient(client, orgId, userId, suggestedProfile);
+      const categoryId = input.categoryId ?? defaults.defaultCategoryId;
+      if (categoryId === null) throw new ApiError(422, 'Choose a category');
+
+      const productCode = product.code.trim().toUpperCase();
+      const created = await insertStockItemOnClient(client, orgId, userId, {
+        name: product.name,
+        description: product.description,
+        categoryId,
+        uomId: null,
+        tracking: null,
+        code: ITEM_CODE_REGEX.test(productCode) ? productCode : null,
+        codeSchemeId: null,
+        barcode: null,
+        attributes: {},
+        reorderPointMilli: null,
+      });
+      await client.query('UPDATE stock_items SET ledger_item_id = $3 WHERE id = $1 AND org_id = $2', [
+        created.id,
+        orgId,
+        product.id,
+      ]);
+
+      if (input.opening !== undefined) {
+        await postOpeningOnClient(
+          client,
+          orgId,
+          userId,
+          created,
+          input.opening,
+          product.purchasePriceCents,
+          defaults.defaultLocationId,
+        );
+      }
+      return created.id;
+    });
+
+    const { item } = await getItem(orgId, id);
+    return item;
+  } catch (err) {
+    throw uniqueViolationToApiError(err);
   }
 }
 

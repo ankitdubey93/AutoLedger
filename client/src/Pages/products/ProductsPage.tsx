@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
 import {
-  createItem,
   fetchStockProductBalances,
   listAccounts,
   listItems,
@@ -12,7 +11,8 @@ import {
   type ItemType,
   type StockProductBalance,
 } from '../../services/fetchServices';
-import { formatCents, parseCentsInput } from '../../utils/money';
+import { formatCents } from '../../utils/money';
+import ProductFormDialog from './ProductFormDialog';
 import TabBar from '../../components/ui/TabBar';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
 import { useTableSort } from '../../utils/useTableSort';
@@ -25,11 +25,11 @@ import LoadingState from '../../components/ui/LoadingState';
  * Products & Services — the one master an invoice or bill line is picked from
  * (Phase 24, extended in Phase 32).
  *
- * Four item types. SERVICE and NON_INVENTORY (office supplies, anything bought
- * or sold that is not quantity-tracked) are created here. INVENTORY and
- * FIXED_ASSET items are created in Inventory, which creates the linked
- * product automatically; here they show their on-hand quantity and an "Open in
- * Inventory" link, and their name/status are read-only.
+ * Every product is created and edited here through one form
+ * (ProductFormDialog): services, untracked goods, and — by ticking "Track
+ * inventory" — stocked goods with their opening quantity and cost, the way
+ * Xero and QuickBooks do it. A tracked product also has a stock item under
+ * Inventory (lots, serials, locations, custom fields), linked from its row.
  *
  * `?new=1` opens the create form on mount, the same idiom CreateMenu and
  * CustomersPage use to jump straight into "add one" from anywhere in the app.
@@ -58,188 +58,13 @@ function formatQuantity(milli: number, decimalPlaces: number): string {
   return (milli / 1000).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: decimalPlaces });
 }
 
-function ItemForm({
-  revenueAccounts,
-  expenseAccounts,
-  onCreated,
-  onCancel,
-}: {
-  revenueAccounts: Account[];
-  expenseAccounts: Account[];
-  onCreated: () => void;
-  onCancel: () => void;
-}) {
-  const [code, setCode] = useState('');
-  const [name, setName] = useState('');
-  const [itemType, setItemType] = useState<'SERVICE' | 'NON_INVENTORY'>('SERVICE');
-  const [description, setDescription] = useState('');
-  const [salePrice, setSalePrice] = useState('');
-  const [purchasePrice, setPurchasePrice] = useState('');
-  const [revenueAccountId, setRevenueAccountId] = useState('');
-  const [expenseAccountId, setExpenseAccountId] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function handleSubmit(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      await createItem({
-        code: code.trim(),
-        name: name.trim(),
-        description: description.trim() === '' ? null : description.trim(),
-        itemType,
-        salePriceCents: salePrice.trim() === '' ? null : (parseCentsInput(salePrice) ?? null),
-        purchasePriceCents: purchasePrice.trim() === '' ? null : (parseCentsInput(purchasePrice) ?? null),
-        revenueAccountId: revenueAccountId === '' ? null : revenueAccountId,
-        expenseAccountId: expenseAccountId === '' ? null : expenseAccountId,
-        saleTaxRateBp: 0,
-        purchaseTaxRateBp: 0,
-      });
-      onCreated();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Could not create the item');
-      setBusy(false);
-    }
-  }
-
-  return (
-    <form
-      onSubmit={(e) => void handleSubmit(e)}
-      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
-    >
-      <h3 className="text-sm font-semibold m-0">New product or service</h3>
-      <p className="text-xs text-[var(--muted)] m-0">
-        For anything you bill for or buy without tracking stock. To track quantity, use{' '}
-        <Link to="/inventory/items/new" className="underline">
-          New stock item
-        </Link>{' '}
-        — it appears here automatically.
-      </p>
-
-      <div className="flex flex-wrap gap-3">
-        <label className="flex flex-col gap-1 text-sm w-32">
-          <span className="text-[var(--muted)]">Code</span>
-          <input
-            type="text"
-            required
-            maxLength={40}
-            value={code}
-            onChange={(e) => setCode(e.target.value)}
-            className={inputClass}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm flex-1 min-w-48">
-          <span className="text-[var(--muted)]">Name</span>
-          <input
-            type="text"
-            required
-            maxLength={200}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            className={inputClass}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm w-48">
-          <span className="text-[var(--muted)]">Type</span>
-          <select
-            value={itemType}
-            onChange={(e) => setItemType(e.target.value as 'SERVICE' | 'NON_INVENTORY')}
-            className={inputClass}
-          >
-            <option value="SERVICE">Service</option>
-            <option value="NON_INVENTORY">Non-inventory (not stocked)</option>
-          </select>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <label className="flex flex-col gap-1 text-sm flex-1 min-w-40">
-          <span className="text-[var(--muted)]">Sale price</span>
-          <input
-            inputMode="decimal"
-            placeholder="0.00"
-            value={salePrice}
-            onChange={(e) => setSalePrice(e.target.value)}
-            className={`${inputClass} text-right tabular-nums`}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm flex-1 min-w-48">
-          <span className="text-[var(--muted)]">Revenue account</span>
-          <select
-            value={revenueAccountId}
-            onChange={(e) => setRevenueAccountId(e.target.value)}
-            className={inputClass}
-          >
-            <option value="">None</option>
-            {revenueAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.code} · {account.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <label className="flex flex-col gap-1 text-sm flex-1 min-w-40">
-          <span className="text-[var(--muted)]">Purchase price</span>
-          <input
-            inputMode="decimal"
-            placeholder="0.00"
-            value={purchasePrice}
-            onChange={(e) => setPurchasePrice(e.target.value)}
-            className={`${inputClass} text-right tabular-nums`}
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-sm flex-1 min-w-48">
-          <span className="text-[var(--muted)]">Expense account</span>
-          <select
-            value={expenseAccountId}
-            onChange={(e) => setExpenseAccountId(e.target.value)}
-            className={inputClass}
-          >
-            <option value="">None</option>
-            {expenseAccounts.map((account) => (
-              <option key={account.id} value={account.id}>
-                {account.code} · {account.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
-
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-[var(--muted)]">Description</span>
-        <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={2} className={inputClass} />
-      </label>
-
-      <div className="flex items-center gap-3">
-        <button
-          type="submit"
-          disabled={busy || code.trim() === '' || name.trim() === ''}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          {busy ? 'Creating…' : 'Create item'}
-        </button>
-        <button type="button" onClick={onCancel} disabled={busy} className="btn btn--ghost">
-          Cancel
-        </button>
-      </div>
-
-      {error !== null && <p className="status status--bad">{error}</p>}
-    </form>
-  );
-}
-
 export default function ProductsPage() {
   const [params, setParams] = useSearchParams();
   const [items, setItems] = useState<Item[] | null>(null);
-  const [revenueAccounts, setRevenueAccounts] = useState<Account[]>([]);
-  const [expenseAccounts, setExpenseAccounts] = useState<Account[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(params.get('new') === '1');
+  const [editing, setEditing] = useState<Item | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [balances, setBalances] = useState<Map<string, StockProductBalance>>(new Map());
   const [tab, setTab] = useState<TabId>('ALL');
@@ -256,8 +81,7 @@ export default function ProductsPage() {
       .then(([itemsRes, accountsRes]) => {
         if (ignore) return;
         setItems(itemsRes.items);
-        setRevenueAccounts(accountsRes.accounts.filter((a) => a.isPostable && a.type === 'Revenue'));
-        setExpenseAccounts(accountsRes.accounts.filter((a) => a.isPostable && a.type === 'Expense'));
+        setAccounts(accountsRes.accounts);
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load items');
@@ -284,6 +108,17 @@ export default function ProductsPage() {
       setError(err instanceof Error ? err.message : 'Could not update the item');
     }
   }
+
+  // `?edit=<productId>` — deep link from a stock item's "Edit prices, tax and accounts".
+  const editParam = params.get('edit');
+  useEffect(() => {
+    if (editParam === null || items === null) return;
+    const target = items.find((i) => i.id === editParam);
+    if (target !== undefined) setEditing(target);
+    const next = new URLSearchParams(params);
+    next.delete('edit');
+    setParams(next, { replace: true });
+  }, [editParam, items, params, setParams]);
 
   const visible = useMemo(() => (items === null ? null : items.filter((item) => tab === 'ALL' || item.itemType === tab)), [items, tab]);
   const { sorted: sortedItems, sort, toggle: toggleSort } = useTableSort(
@@ -316,12 +151,12 @@ export default function ProductsPage() {
         <div>
           <h2 className="text-lg font-semibold m-0">Products &amp; Services</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            Everything an invoice or bill line can be picked from — services, non-inventory items, stock and assets.
+            Everything you buy or sell. Tick “Track inventory” on a product to keep count of stock and its cost.
           </p>
         </div>
         <button
           type="button"
-          onClick={() => setShowForm((open) => !open)}
+          onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           <Plus size={15} aria-hidden="true" /> New product or service
@@ -337,21 +172,27 @@ export default function ProductsPage() {
 
       {error !== null && <p className="status status--bad">{error}</p>}
 
-      {showForm && (
-        <ItemForm
-          revenueAccounts={revenueAccounts}
-          expenseAccounts={expenseAccounts}
-          onCreated={() => {
+      {(showForm || editing !== null) && (
+        <ProductFormDialog
+          {...(editing === null
+            ? { initialTrack: params.get('track') === '1' }
+            : { item: editing, stockItemId: balances.get(editing.id)?.stockItemId ?? null })}
+          accounts={accounts}
+          onSaved={() => {
             setShowForm(false);
+            setEditing(null);
             setReloadToken((t) => t + 1);
           }}
-          onCancel={() => setShowForm(false)}
+          onCancel={() => {
+            setShowForm(false);
+            setEditing(null);
+          }}
         />
       )}
 
       {items === null && error === null && <LoadingState />}
 
-      {items !== null && items.length === 0 && !showForm && (
+      {items !== null && items.length === 0 && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-8 text-center flex flex-col items-center gap-3">
           <p className="text-sm text-[var(--muted)] m-0">No items yet.</p>
           <button
@@ -409,7 +250,10 @@ export default function ProductsPage() {
                       </span>
                     )}
                   </td>
-                  <td className="p-3 text-right">
+                  <td className="p-3 text-right whitespace-nowrap">
+                    <button type="button" onClick={() => setEditing(item)} className="btn btn--ghost">
+                      Edit
+                    </button>
                     {item.stockManaged ? (
                       <Link
                         to={`/inventory/items/${balances.get(item.id)?.stockItemId ?? ''}`}

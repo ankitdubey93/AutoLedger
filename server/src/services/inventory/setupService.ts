@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -146,100 +147,180 @@ export async function applyIndustryProfile(
   const profile = STOCK_INDUSTRY_PROFILES.find((p) => p.key === key);
   if (profile === undefined) throw new Error(`Unknown industry profile "${key}"`);
 
+  const created = await withTransaction((client) => applyIndustryProfileOnClient(client, orgId, userId, profile.key));
+  return { settings: await getStockSettings(orgId), created };
+}
+
+/**
+ * The body of `applyIndustryProfile`, on the CALLER's transaction client
+ * (rule 5) — so creating the first tracked product can provision inventory
+ * in the same transaction that creates it (`ensureInventoryReadyOnClient`).
+ */
+export async function applyIndustryProfileOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  key: StockIndustryKey,
+): Promise<ApplyProfileResult['created']> {
+  const profile = STOCK_INDUSTRY_PROFILES.find((p) => p.key === key);
+  if (profile === undefined) throw new Error(`Unknown industry profile "${key}"`);
+
   const created = { uoms: 0, categories: 0, attributes: 0, codeSchemes: 0, locations: 0 };
 
-  await withTransaction(async (client) => {
-    await client.query(
-      `INSERT INTO stock_settings (org_id, industry_profile, created_by)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (org_id) DO UPDATE SET industry_profile = EXCLUDED.industry_profile`,
-      [orgId, profile.key, userId],
-    );
+  await client.query(
+    `INSERT INTO stock_settings (org_id, industry_profile, created_by)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (org_id) DO UPDATE SET industry_profile = EXCLUDED.industry_profile`,
+    [orgId, profile.key, userId],
+  );
 
-    for (const uom of [...COMMON_UOMS, ...profile.uoms]) {
-      const result = await client.query(
-        `INSERT INTO stock_uoms (org_id, code, name, decimal_places, created_by)
-         VALUES ($1, $2, $3, $4, $5)
-         ON CONFLICT (org_id, code) DO NOTHING`,
-        [orgId, uom.code, uom.name, uom.decimalPlaces, userId],
-      );
-      created.uoms += result.rowCount ?? 0;
-    }
-
-    for (const category of profile.categories) {
-      const result = await client.query(
-        `INSERT INTO stock_categories (org_id, code, name, item_type, default_tracking, default_uom_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, (SELECT id FROM stock_uoms WHERE org_id = $1 AND code = $6), $7)
-         ON CONFLICT (org_id, code) DO NOTHING`,
-        [orgId, category.code, category.name, category.itemType, category.defaultTracking, category.defaultUomCode, userId],
-      );
-      created.categories += result.rowCount ?? 0;
-
-      for (const [index, attribute] of category.attributes.entries()) {
-        const optionsJson = attribute.options === null ? null : JSON.stringify(attribute.options);
-        const attrResult = await client.query(
-          `INSERT INTO stock_attribute_definitions
-             (org_id, category_id, applies_to, key, label, data_type, options, decimal_places, is_required, sort_order, created_by)
-           SELECT $1, c.id, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
-             FROM stock_categories c WHERE c.org_id = $1 AND c.code = $11
-           ON CONFLICT (org_id, category_id, applies_to, key) DO NOTHING`,
-          [
-            orgId,
-            attribute.appliesTo,
-            attribute.key,
-            attribute.label,
-            attribute.dataType,
-            optionsJson,
-            attribute.decimalPlaces,
-            attribute.isRequired,
-            index,
-            userId,
-            category.code,
-          ],
-        );
-        created.attributes += attrResult.rowCount ?? 0;
-      }
-    }
-
-    for (const s of profile.codeSchemes) {
-      const result = await client.query(
-        `INSERT INTO stock_code_schemes (org_id, name, pattern, is_default, created_by)
-         VALUES ($1, $2, $3, false, $4)
-         ON CONFLICT (org_id, name) DO NOTHING`,
-        [orgId, s.name, s.pattern, userId],
-      );
-      created.codeSchemes += result.rowCount ?? 0;
-
-      if (s.isDefault) {
-        await client.query(
-          `UPDATE stock_code_schemes SET is_default = true
-            WHERE org_id = $1 AND name = $2 AND is_active
-              AND NOT EXISTS (SELECT 1 FROM stock_code_schemes WHERE org_id = $1 AND is_default)`,
-          [orgId, s.name],
-        );
-      }
-    }
-
-    const locationResult = await client.query(
-      `INSERT INTO stock_locations (org_id, code, name, kind, created_by)
+  for (const uom of [...COMMON_UOMS, ...profile.uoms]) {
+    const result = await client.query(
+      `INSERT INTO stock_uoms (org_id, code, name, decimal_places, created_by)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (org_id, code) DO NOTHING`,
-      [orgId, profile.defaultLocation.code, profile.defaultLocation.name, profile.defaultLocation.kind, userId],
+      [orgId, uom.code, uom.name, uom.decimalPlaces, userId],
     );
-    created.locations += locationResult.rowCount ?? 0;
+    created.uoms += result.rowCount ?? 0;
+  }
 
-    // Phase 32: the profile's main location becomes the org's default document location
-    // (where a bill/invoice line lands when it names none) — only if none is chosen yet,
-    // so re-applying a profile never overrides an explicit choice.
-    await client.query(
-      `UPDATE stock_settings
-          SET default_location_id = (SELECT id FROM stock_locations WHERE org_id = $1 AND code = $2)
-        WHERE org_id = $1 AND default_location_id IS NULL`,
-      [orgId, profile.defaultLocation.code],
+  for (const category of profile.categories) {
+    const result = await client.query(
+      `INSERT INTO stock_categories (org_id, code, name, item_type, default_tracking, default_uom_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, (SELECT id FROM stock_uoms WHERE org_id = $1 AND code = $6), $7)
+       ON CONFLICT (org_id, code) DO NOTHING`,
+      [orgId, category.code, category.name, category.itemType, category.defaultTracking, category.defaultUomCode, userId],
     );
+    created.categories += result.rowCount ?? 0;
 
-    await markCompletedOnClient(client, orgId, MODULE_TAGS.inventory);
-  });
+    for (const [index, attribute] of category.attributes.entries()) {
+      const optionsJson = attribute.options === null ? null : JSON.stringify(attribute.options);
+      const attrResult = await client.query(
+        `INSERT INTO stock_attribute_definitions
+           (org_id, category_id, applies_to, key, label, data_type, options, decimal_places, is_required, sort_order, created_by)
+         SELECT $1, c.id, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
+           FROM stock_categories c WHERE c.org_id = $1 AND c.code = $11
+         ON CONFLICT (org_id, category_id, applies_to, key) DO NOTHING`,
+        [
+          orgId,
+          attribute.appliesTo,
+          attribute.key,
+          attribute.label,
+          attribute.dataType,
+          optionsJson,
+          attribute.decimalPlaces,
+          attribute.isRequired,
+          index,
+          userId,
+          category.code,
+        ],
+      );
+      created.attributes += attrResult.rowCount ?? 0;
+    }
+  }
 
-  return { settings: await getStockSettings(orgId), created };
+  for (const s of profile.codeSchemes) {
+    const result = await client.query(
+      `INSERT INTO stock_code_schemes (org_id, name, pattern, is_default, created_by)
+       VALUES ($1, $2, $3, false, $4)
+       ON CONFLICT (org_id, name) DO NOTHING`,
+      [orgId, s.name, s.pattern, userId],
+    );
+    created.codeSchemes += result.rowCount ?? 0;
+
+    if (s.isDefault) {
+      await client.query(
+        `UPDATE stock_code_schemes SET is_default = true
+          WHERE org_id = $1 AND name = $2 AND is_active
+            AND NOT EXISTS (SELECT 1 FROM stock_code_schemes WHERE org_id = $1 AND is_default)`,
+        [orgId, s.name],
+      );
+    }
+  }
+
+  const locationResult = await client.query(
+    `INSERT INTO stock_locations (org_id, code, name, kind, created_by)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (org_id, code) DO NOTHING`,
+    [orgId, profile.defaultLocation.code, profile.defaultLocation.name, profile.defaultLocation.kind, userId],
+  );
+  created.locations += locationResult.rowCount ?? 0;
+
+  // Phase 32: the profile's main location becomes the org's default document location
+  // (where a bill/invoice line lands when it names none) — only if none is chosen yet,
+  // so re-applying a profile never overrides an explicit choice.
+  await client.query(
+    `UPDATE stock_settings
+        SET default_location_id = (SELECT id FROM stock_locations WHERE org_id = $1 AND code = $2)
+      WHERE org_id = $1 AND default_location_id IS NULL`,
+    [orgId, profile.defaultLocation.code],
+  );
+
+  await markCompletedOnClient(client, orgId, MODULE_TAGS.inventory);
+
+  return created;
+}
+
+export interface InventoryDefaults {
+  defaultLocationId: string | null;
+  /**
+   * The category a product created without one lands in: one a plain form can
+   * satisfy (no required item fields, quantity-tracked), preferring trading goods.
+   */
+  defaultCategoryId: string | null;
+}
+
+/**
+ * Makes sure inventory is usable, on the caller's transaction: if the org has
+ * never set it up, applies the industry profile suggested by its onboarding
+ * industry — silently, like Xero, where ticking "track inventory" is all it
+ * takes. A transaction-scoped advisory lock keyed on the org serializes two
+ * concurrent first-creates; the loser then sees the row and applies nothing
+ * (and every profile insert is ON CONFLICT DO NOTHING regardless).
+ *
+ * `suggestedKey` is read by the caller BEFORE the transaction — it goes
+ * through accounting's settings service (the rule-16 read), which uses the pool.
+ */
+export async function ensureInventoryReadyOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  suggestedKey: StockIndustryKey,
+): Promise<InventoryDefaults> {
+  const configured = async (): Promise<boolean> =>
+    (await client.query('SELECT 1 FROM stock_settings WHERE org_id = $1', [orgId])).rowCount === 1;
+  // Check, lock, re-check: the lock is only taken on the (rare) first create,
+  // so ordinary item creation never serializes on it.
+  if (!(await configured())) {
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended('stock_setup:' || $1::text, 0))", [orgId]);
+    if (!(await configured())) await applyIndustryProfileOnClient(client, orgId, userId, suggestedKey);
+  }
+
+  const { rows: settingsRows } = await client.query<{ default_location_id: string | null }>(
+    'SELECT default_location_id FROM stock_settings WHERE org_id = $1',
+    [orgId],
+  );
+  const { rows: categoryRows } = await client.query<{ id: string }>(
+    `SELECT c.id FROM stock_categories c
+      WHERE c.org_id = $1 AND c.is_active
+      ORDER BY NOT EXISTS (
+                 SELECT 1 FROM stock_attribute_definitions d
+                  WHERE d.org_id = c.org_id AND d.category_id = c.id
+                    AND d.applies_to = 'ITEM' AND d.is_required AND d.is_active
+               ) DESC,
+               (c.default_tracking = 'QUANTITY') DESC,
+               (c.item_type = 'TRADING_GOOD') DESC,
+               c.created_at, c.code
+      LIMIT 1`,
+    [orgId],
+  );
+  return {
+    defaultLocationId: settingsRows[0]?.default_location_id ?? null,
+    defaultCategoryId: categoryRows[0]?.id ?? null,
+  };
+}
+
+/** The profile `ensureInventoryReadyOnClient` applies for this org — read before the transaction. */
+export async function suggestedProfileFor(orgId: string): Promise<StockIndustryKey> {
+  return suggestIndustryProfile((await ledgerSettingsService.getSettings(orgId)).industry);
 }

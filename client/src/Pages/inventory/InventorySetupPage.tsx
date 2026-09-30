@@ -29,6 +29,9 @@ export default function InventorySetupPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const welcome = searchParams.get('welcome') === '1';
+  // `?returnTo=/inventory/items/new` — where to go back to once set up. In-app paths only.
+  const rawReturnTo = searchParams.get('returnTo');
+  const returnTo = rawReturnTo !== null && rawReturnTo.startsWith('/') && !rawReturnTo.startsWith('//') ? rawReturnTo : null;
 
   const [settings, setSettings] = useState<StockSettings | null>(null);
   const [profiles, setProfiles] = useState<StockIndustryProfileSummary[]>([]);
@@ -97,13 +100,30 @@ export default function InventorySetupPage() {
           <li>{created.codeSchemes} item-code schemes</li>
           <li>{created.locations} locations</li>
         </ul>
-        <Link
-          to="/"
-          className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
-          onClick={() => navigate('/')}
-        >
-          Continue to dashboard
-        </Link>
+        <div className="flex flex-wrap items-center gap-2">
+          {returnTo !== null ? (
+            <Link
+              to={returnTo}
+              className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
+            >
+              Continue where you left off
+            </Link>
+          ) : (
+            <Link
+              to="/products?new=1"
+              className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
+            >
+              Add your first product
+            </Link>
+          )}
+          <Link
+            to="/"
+            className="inline-block rounded-md border border-[var(--border)] px-4 py-2 text-sm text-[var(--text)] no-underline hover:bg-[var(--panel-2)]"
+            onClick={() => navigate('/')}
+          >
+            Go to dashboard
+          </Link>
+        </div>
       </div>
     );
   }

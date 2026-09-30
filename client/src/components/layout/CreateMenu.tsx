@@ -19,7 +19,7 @@ export default function CreateMenu() {
     { label: 'Customer', to: '/customers?new=1' },
     { label: 'Vendor', to: '/vendors?new=1' },
     { label: 'Product or service', to: '/products?new=1' },
-    { label: 'Stock item', to: '/inventory/items/new' },
+    { label: 'Tracked product', to: '/products?new=1&track=1' },
     { label: 'Account', to: '/accounts?new=1' },
   ];
 

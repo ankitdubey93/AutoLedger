@@ -33,11 +33,30 @@ export const productSchema = z.object({
 
 export const linkProductSchema = productSchema;
 
+/** Opening stock posted with a new tracked product (QuickBooks' "initial quantity on hand as of"). */
+export const openingStockSchema = z.object({
+  quantityMilli: z.int().min(1).max(1_000_000_000),
+  /** Omitted = the product's purchase price. */
+  unitCostCents: z.int().min(0).max(1_000_000_000_000).nullable().default(null),
+  occurredOn: z.iso.date(),
+  /** Omitted = the org's default location. */
+  locationId: z.uuid().nullable().default(null),
+});
+
+/** POST /inventory/items/from-product/:productId — turn tracking on for a non-inventory product. */
+export const createFromProductSchema = z.object({
+  categoryId: z.uuid().nullable().default(null),
+  assetAccountId: z.uuid().nullable().default(null),
+  cogsAccountId: z.uuid().nullable().default(null),
+  opening: openingStockSchema.optional(),
+});
+
 export const createStockItemSchema = z
   .object({
     name: z.string().trim().min(1).max(200),
     description: z.string().trim().max(1000).nullable().default(null),
-    categoryId: z.uuid(),
+    /** Omitted = the org's default category — a plain product form never asks for one. */
+    categoryId: z.uuid().nullable().default(null),
     uomId: z.uuid().nullable().default(null),
     tracking: z.enum(STOCK_TRACKING_MODES).nullable().default(null),
     code: z
@@ -52,6 +71,7 @@ export const createStockItemSchema = z
     attributes: z.record(z.string(), z.unknown()).default({}),
     reorderPointMilli: quantityMilli.nullable().default(null),
     product: productSchema.optional(),
+    opening: openingStockSchema.optional(),
   })
   .refine((v) => !(v.code !== null && v.codeSchemeId !== null), {
     message: 'Provide either code or codeSchemeId, not both',

@@ -25,8 +25,11 @@ export interface StockLineData {
 
 const EMPTY: StockLineData = { balances: new Map(), locations: [], defaultLocationId: null };
 
-export function useStockLineData(): StockLineData {
+export function useStockLineData(): StockLineData & { reload: () => void } {
   const [data, setData] = useState<StockLineData>(EMPTY);
+  // Bumped after a tracked product is quick-added from the line — it may have
+  // set inventory up for the first time, so locations and balances are new.
+  const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
     let ignore = false;
@@ -43,7 +46,7 @@ export function useStockLineData(): StockLineData {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [reloadToken]);
 
-  return data;
+  return { ...data, reload: () => setReloadToken((t) => t + 1) };
 }
