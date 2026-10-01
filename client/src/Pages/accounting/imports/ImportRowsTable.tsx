@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type {
   AccountType,
   ImportEditFieldMeta,
@@ -43,6 +43,7 @@ export default function ImportRowsTable({
   savingRowId,
   onSave,
   onError,
+  onSetGroupStatus,
 }: {
   meta: ImportKindMeta;
   rows: MigrationImportRow[];
@@ -50,6 +51,7 @@ export default function ImportRowsTable({
   savingRowId: string | null;
   onSave: (row: MigrationImportRow, body: Record<string, string | number | null | Record<string, string | null>>) => void;
   onError: (message: string) => void;
+  onSetGroupStatus?: (rowIds: string[], status: 'VALID' | 'EXCLUDED') => void;
 }) {
   // Only rows the user has touched hold an edit; the rest read from the row.
   const isData = meta.storage === 'data';
@@ -107,6 +109,56 @@ export default function ImportRowsTable({
     });
   }
 
+  const grouped = meta.groupHeaderFields.length > 0;
+  // Runs of consecutive rows sharing a group key; a null key is its own run.
+  const runStartsAt = new Map<string, MigrationImportRow[]>();
+  if (grouped) {
+    let current: MigrationImportRow[] | null = null;
+    let currentKey: string | null = null;
+    for (const row of rows) {
+      if (current === null || row.groupKey === null || row.groupKey !== currentKey) {
+        current = [row];
+        currentKey = row.groupKey;
+        runStartsAt.set(row.id, current);
+      } else {
+        current.push(row);
+      }
+    }
+  }
+
+  function groupHeader(run: MigrationImportRow[]) {
+    const first = run[0];
+    if (first === undefined) return null;
+    const title = meta.groupHeaderFields
+      .map((field) => (first.raw[field] ?? '').trim())
+      .filter((text) => text !== '')
+      .join(' · ');
+    const allExcluded = run.every((r) => r.status === 'EXCLUDED');
+    const action = allExcluded ? 'Include' : 'Exclude';
+    return (
+      <tr key={`group-${first.id}`} className="border-t border-[var(--border)] bg-[var(--bg)]">
+        <td colSpan={meta.editFields.length + (readOnly ? 3 : 4)} className="p-2">
+          <span className="flex items-center justify-between gap-2">
+            <span>
+              <strong>{title}</strong>
+              {` — ${String(run.length)} line${run.length === 1 ? '' : 's'}`}
+            </span>
+            {!readOnly && onSetGroupStatus !== undefined && (
+              <button
+                type="button"
+                aria-label={`${action} group ${title}`}
+                className="btn btn--ghost"
+                onClick={() => onSetGroupStatus(run.map((r) => r.id), allExcluded ? 'VALID' : 'EXCLUDED')}
+              >
+                {action}
+              </button>
+            )}
+          </span>
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
       <table className="w-full border-collapse text-sm min-w-[50rem]">
@@ -125,7 +177,9 @@ export default function ImportRowsTable({
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.id} className="border-t border-[var(--border)] align-top">
+            <Fragment key={row.id}>
+            {runStartsAt.has(row.id) && groupHeader(runStartsAt.get(row.id) ?? [])}
+            <tr className="border-t border-[var(--border)] align-top">
               <td className="p-2">{row.rowNumber}</td>
               {meta.editFields.map((field) => (
                 <td key={field.key} className="p-2">
@@ -199,6 +253,7 @@ export default function ImportRowsTable({
                 </td>
               )}
             </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>

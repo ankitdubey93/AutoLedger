@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MAX_CSV_CHARS } from '../../config/constants.js';
+import { MAX_CSV_CHARS, MAX_IMPORT_ROWS } from '../../config/constants.js';
 import { DATE_FORMATS } from '../../utils/dateParse.js';
 import { ACCOUNT_TYPES, MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
 
@@ -64,3 +64,9 @@ export const patchMigrationRowSchema = z
       ),
     { message: 'A row has one side, not both' },
   );
+
+/** POST /migration-imports/:id/rows/status — bulk include/exclude (36c). */
+export const setRowsStatusSchema = z.object({
+  rowIds: z.array(z.uuid()).min(1).max(MAX_IMPORT_ROWS),
+  status: z.enum(['VALID', 'EXCLUDED']),
+});

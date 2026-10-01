@@ -23,6 +23,8 @@ import * as partyImportService from './partyImportService.js';
 import * as itemImportService from './itemImportService.js';
 import * as inventoryItemImportService from './inventoryItemImportService.js';
 import { IMPORT_ITEM_COLUMNS, IMPORT_ITEM_EDIT_FIELDS } from './importItemColumns.js';
+import * as journalImportService from './journalImportService.js';
+import { JOURNAL_COLUMNS, JOURNAL_EDIT_FIELDS, journalGroupKey } from './importJournalColumns.js';
 import { IMPORT_INVENTORY_ITEM_COLUMNS, IMPORT_INVENTORY_ITEM_EDIT_FIELDS } from './importInventoryItemColumns.js';
 
 /**
@@ -53,6 +55,13 @@ export interface ImportKindDef extends ImportKindMeta {
     createdBy: string,
     context: ImportCommitContext,
   ): Promise<MigrationCommitResult>;
+  /** Grouped kinds: the key that ties rows into one document; recomputed on every edit. */
+  groupKeyOf?: (
+    values: Readonly<Record<string, string | number | null>>,
+    raw: Readonly<Record<string, string>>,
+  ) => string | null;
+  /** Plural noun for the documents-per-import cap message. Default 'documents'. */
+  groupNoun?: string;
 }
 
 const AMOUNT_MISSING = 'Could not find an amount column, or a debit/credit pair, in the file';
@@ -86,6 +95,7 @@ export const IMPORT_KINDS = {
     label: 'Chart of accounts',
     noun: 'accounts',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'code',
@@ -187,6 +197,7 @@ export const IMPORT_KINDS = {
     label: 'Opening balances',
     noun: 'balances',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'code',
@@ -293,6 +304,7 @@ export const IMPORT_KINDS = {
     label: 'Customers',
     noun: 'customers',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'partyName',
@@ -403,6 +415,7 @@ export const IMPORT_KINDS = {
     label: 'Vendors',
     noun: 'vendors',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'partyName',
@@ -513,6 +526,7 @@ export const IMPORT_KINDS = {
     label: 'Products & services',
     noun: 'products',
     storage: 'data',
+    groupHeaderFields: [],
     columns: IMPORT_ITEM_COLUMNS,
     requiredOneOf: [],
     missingMessages: {
@@ -532,6 +546,7 @@ export const IMPORT_KINDS = {
     label: 'Inventory items',
     noun: 'items',
     storage: 'data',
+    groupHeaderFields: [],
     columns: IMPORT_INVENTORY_ITEM_COLUMNS,
     requiredOneOf: [],
     missingMessages: { itemName: 'Could not find an item name column in the file' },
@@ -544,6 +559,32 @@ export const IMPORT_KINDS = {
     commitOnClient: (client, orgId, importId, createdBy, context) =>
       inventoryItemImportService.commitOnClient(client, orgId, importId, createdBy, context),
   },
+  JOURNALS: {
+    kind: 'JOURNALS',
+    label: 'Journal entries',
+    noun: 'journal lines',
+    storage: 'data',
+    groupHeaderFields: ['journalNumber', 'date', 'narration'],
+    columns: JOURNAL_COLUMNS,
+    requiredOneOf: [['debit', 'credit'], ['amount']],
+    missingMessages: {
+      date: 'Could not find a date column in the file',
+      narration: 'Could not find a narration column in the file',
+      accountCode: 'Could not find an account code column in the file',
+      debit: AMOUNT_MISSING,
+      credit: AMOUNT_MISSING,
+      amount: AMOUNT_MISSING,
+    },
+    editFields: JOURNAL_EDIT_FIELDS,
+    groupKeyOf: journalGroupKey,
+    groupNoun: 'journals',
+    parseRow: (cells, columns, rowNumber, ctx) =>
+      parseDataRow(JOURNAL_COLUMNS, cells, columns, rowNumber, ctx.dateFormat),
+    validateRows: (client, orgId, rows) => journalImportService.validateRows(client, orgId, rows),
+    preview: (client, orgId, importId) => journalImportService.preview(client, orgId, importId),
+    commitOnClient: (client, orgId, importId, createdBy) =>
+      journalImportService.commitOnClient(client, orgId, importId, createdBy),
+  },
 } satisfies Record<MigrationImportKind, ImportKindDef>;
 
 export function getImportKind(kind: MigrationImportKind): ImportKindDef {
@@ -553,7 +594,8 @@ export function getImportKind(kind: MigrationImportKind): ImportKindDef {
 /** Metadata only — every function-valued property stripped. Order = MIGRATION_IMPORT_KINDS. */
 export function listImportKindMeta(): ImportKindMeta[] {
   return MIGRATION_IMPORT_KINDS.map((kind) => {
-    const { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields } = IMPORT_KINDS[kind];
-    return { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields };
+    const { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields, groupHeaderFields } =
+      IMPORT_KINDS[kind];
+    return { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields, groupHeaderFields };
   });
 }

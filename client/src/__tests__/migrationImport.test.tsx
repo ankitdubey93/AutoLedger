@@ -404,4 +404,66 @@ describe('MigrationImportDetailPage', () => {
 
     expect(await screen.findByText('Committed: 4 items created, opening stock posted for 2.')).toBeInTheDocument();
   });
+
+  function journalRows(): MigrationImportRow[] {
+    const mk = (id: string, n: number, key: string, number: string, acct: string) =>
+      baseRow({
+        id,
+        rowNumber: n,
+        accountCode: null,
+        groupKey: key,
+        raw: { journalNumber: number, date: '2026-06-30', narration: 'June accruals', accountCode: acct, debit: '10.00' },
+      });
+    return [
+      mk('jr-1', 2, 'J-001', 'J-001', '6100'),
+      mk('jr-2', 3, 'J-001', 'J-001', '2100'),
+      mk('jr-3', 4, 'J-002', 'J-002', '6100'),
+    ];
+  }
+
+  it('grouped rows render one header per journal with its line count', async () => {
+    const imp = baseImport({ kind: 'JOURNALS', status: 'VALIDATED', rowCount: 3, validCount: 3 });
+    mockRoutes(imp, journalRows(), { ...EMPTY_PREVIEW, kind: 'JOURNALS' });
+    renderPage(imp.id);
+
+    expect(await screen.findByRole('button', { name: /^Exclude group J-001/ })).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /^Exclude group / })).toHaveLength(2);
+    expect(screen.getByText(/— 2 lines/)).toBeInTheDocument();
+    expect(screen.getByText(/— 1 line$/)).toBeInTheDocument();
+  });
+
+  it('Exclude group sends every row id of that journal with status EXCLUDED', async () => {
+    const imp = baseImport({ kind: 'JOURNALS', status: 'VALIDATED', rowCount: 3, validCount: 3 });
+    mockRoutes(imp, journalRows(), { ...EMPTY_PREVIEW, kind: 'JOURNALS' });
+    const user = userEvent.setup();
+    renderPage(imp.id);
+
+    await user.click(await screen.findByRole('button', { name: /^Exclude group J-001/ }));
+
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find((c) => {
+        const [input, init] = c as [RequestInfo | URL, RequestInit?];
+        const url = typeof input === 'string' ? input : input.toString();
+        return init?.method === 'POST' && url.endsWith('/rows/status');
+      });
+      expect(call).toBeDefined();
+      expect(JSON.parse((call?.[1] as RequestInit).body as string)).toEqual({
+        rowIds: ['jr-1', 'jr-2'],
+        status: 'EXCLUDED',
+      });
+    });
+  });
+
+  it('a committed journal import shows entry and line counts', async () => {
+    const imp = baseImport({
+      kind: 'JOURNALS',
+      status: 'COMMITTED',
+      committedAt: new Date().toISOString(),
+      result: { kind: 'JOURNALS', entryCount: 2, lineCount: 5 },
+    });
+    mockRoutes(imp, journalRows(), { ...EMPTY_PREVIEW, kind: 'JOURNALS', canCommit: false });
+    renderPage(imp.id);
+
+    expect(await screen.findByText('Committed: 2 journal entries posted (5 lines).')).toBeInTheDocument();
+  });
 });

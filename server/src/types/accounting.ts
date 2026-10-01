@@ -1237,6 +1237,7 @@ export const MIGRATION_IMPORT_KINDS = [
   'VENDORS',
   'ITEMS',
   'INVENTORY_ITEMS',
+  'JOURNALS',
 ] as const;
 export type MigrationImportKind = (typeof MIGRATION_IMPORT_KINDS)[number];
 
@@ -1284,7 +1285,8 @@ export type MigrationCommitResult =
   | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
   | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
   | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
-  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number };
+  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number }
+  | { kind: 'JOURNALS'; entryCount: number; lineCount: number };
 
 /** One CSV column an import kind understands (Phase 36). */
 export interface ImportColumnDef {
@@ -1344,6 +1346,8 @@ export interface ImportKindMeta {
   missingMessages: Readonly<Record<string, string>>;
   editFields: readonly ImportEditFieldDef[];
   storage: ImportStorage;
+  /** Raw fields shown in a group's header row; [] = the kind is not grouped. */
+  groupHeaderFields: readonly string[];
 }
 
 export interface MigrationImportInspection {

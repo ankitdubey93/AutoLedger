@@ -2816,7 +2816,8 @@ export type MigrationImportKind =
   | 'CUSTOMERS'
   | 'VENDORS'
   | 'ITEMS'
-  | 'INVENTORY_ITEMS';
+  | 'INVENTORY_ITEMS'
+  | 'JOURNALS';
 export type ImportDateFormat = 'ISO' | 'DMY' | 'MDY';
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
@@ -2831,7 +2832,7 @@ export interface ImportColumnMeta {
   note: string;
   example: string;
   inTemplate: boolean;
-  type: 'text' | 'money' | 'percent' | 'quantity' | 'date' | 'enum';
+  type: 'text' | 'money' | 'signedMoney' | 'percent' | 'quantity' | 'date' | 'enum';
   maxLength: number | null;
   enumAliases: Record<string, string> | null;
   enumLabels: string[] | null;
@@ -2856,6 +2857,8 @@ export interface ImportKindMeta {
   missingMessages: Record<string, string>;
   editFields: ImportEditFieldMeta[];
   storage: 'typed' | 'data';
+  /** Columns shown in a group's header row; empty = not a grouped kind. */
+  groupHeaderFields: string[];
 }
 
 export interface MigrationImportInspection {
@@ -2949,7 +2952,8 @@ export type MigrationCommitResult =
   | { kind: 'OPENING_BALANCES'; journalEntryId: string; plugCents: number }
   | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
   | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
-  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number };
+  | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number }
+  | { kind: 'JOURNALS'; entryCount: number; lineCount: number };
 
 /** POST /migration-imports — OWNER, ADMIN or ACCOUNTANT. */
 export function createMigrationImport(body: {
@@ -3023,6 +3027,14 @@ export function patchMigrationImportRow(
     method: 'PATCH',
     body: JSON.stringify(body),
   });
+}
+
+/** POST /migration-imports/:id/rows/status — OWNER, ADMIN or ACCOUNTANT. */
+export function setMigrationImportRowsStatus(
+  id: string,
+  body: { rowIds: string[]; status: 'VALID' | 'EXCLUDED' },
+): Promise<{ success: boolean; import: MigrationImport }> {
+  return apiFetch(`/migration-imports/${id}/rows/status`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 /** POST /migration-imports/:id/validate — OWNER, ADMIN or ACCOUNTANT. */

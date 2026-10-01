@@ -1,7 +1,7 @@
 import { parseMoneyText } from './money.js';
 import { parseFlexibleDate, type DateFormat } from './dateParse.js';
 
-export type ImportCellType = 'text' | 'money' | 'percent' | 'quantity' | 'date' | 'enum';
+export type ImportCellType = 'text' | 'money' | 'percent' | 'quantity' | 'date' | 'enum' | 'signedMoney';
 export type ParsedCell = { ok: true; value: string | number | null } | { ok: false; error: string };
 
 /** Structural subset of ImportColumnDef this module needs (keeps utils free of types/accounting). */
@@ -110,6 +110,7 @@ export function parseImportCell(spec: CellSpec, text: string, dateFormat: DateFo
       return { ok: true, value: trimmed };
     }
 
+    case 'signedMoney':
     case 'money': {
       // parseMoneyText strips a trailing 3-letter currency code, so a digit-free
       // word like "abc" would otherwise parse as 0. Only "-", an em dash and
@@ -119,7 +120,7 @@ export function parseImportCell(spec: CellSpec, text: string, dateFormat: DateFo
       }
       try {
         const cents = parseMoneyText(text);
-        if (cents < 0) {
+        if (cents < 0 && spec.type === 'money') {
           return {
             ok: false,
             error: `${spec.label} cannot be negative`,

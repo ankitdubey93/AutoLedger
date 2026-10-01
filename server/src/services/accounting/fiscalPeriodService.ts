@@ -279,16 +279,28 @@ export async function assertPeriodOpenOnClient(
   orgId: string,
   entryDate: string,
 ): Promise<void> {
-  const { rows } = await client.query<{ status: FiscalPeriodStatus }>(
-    `SELECT status FROM fiscal_periods
-      WHERE org_id = $1 AND $2::date BETWEEN starts_on AND ends_on`,
-    [orgId, entryDate],
-  );
-  const row = rows[0];
-  if (row === undefined || row.status === 'OPEN') return;
+  const status = await periodStatusOnClient(client, orgId, entryDate);
+  if (status === null || status === 'OPEN') return;
 
   throw new ApiError(
     422,
-    `The fiscal period covering ${entryDate} is ${row.status.toLowerCase()}; reopen it or post to an open period`,
+    `The fiscal period covering ${entryDate} is ${status.toLowerCase()}; reopen it or post to an open period`,
   );
+}
+
+/**
+ * The status of the fiscal period covering `date`, or null when no period
+ * covers it (posting allowed). Never throws. On the caller's client (rule 5).
+ */
+export async function periodStatusOnClient(
+  client: PoolClient,
+  orgId: string,
+  date: string,
+): Promise<FiscalPeriodStatus | null> {
+  const { rows } = await client.query<{ status: FiscalPeriodStatus }>(
+    `SELECT status FROM fiscal_periods
+      WHERE org_id = $1 AND $2::date BETWEEN starts_on AND ends_on`,
+    [orgId, date],
+  );
+  return rows[0]?.status ?? null;
 }

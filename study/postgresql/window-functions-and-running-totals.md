@@ -125,6 +125,40 @@ A: Building LedgerCore's account ledger, which shows a running balance per line.
 
 ---
 
+---
+
+## Phase 36c additions — `MIN(…) OVER (PARTITION BY …)` as a sort key that keeps groups together
+
+**Verified against:** PostgreSQL 16 (the planner shape below is reasoned from how window functions execute, not from an `EXPLAIN` captured for this query — I did not run one).
+
+The staged-import review screen shows a journal's lines together, in file order, even after an edit has moved a row from one journal to another. The rows are flat with a nullable `group_key`; `listRows` (`migrationImportService.ts`) picks this `ORDER BY` for grouped kinds:
+
+```sql
+ORDER BY MIN(row_number) OVER (PARTITION BY COALESCE(group_key, id::text)), row_number
+```
+
+**Mechanism.** The window has a `PARTITION BY` and **no window `ORDER BY`**, so the frame is the whole partition and `MIN(row_number)` is the partition's first file position, attached to every row of it (contrast the running total in this note, where an `ORDER BY` inside `OVER` creates a moving frame). Sorting by that value puts each group at the place where its earliest row sits, and the second key, `row_number`, restores file order inside it. Result: groups appear in order of first appearance, contiguous, with no `GROUP BY` collapsing the rows — a plain `GROUP BY group_key` would return one row per group and lose the lines, and a self-join or subquery for the minimum would say the same thing more expensively. Window functions are allowed in `ORDER BY` because it is evaluated after window computation in the logical order this note describes (`FROM → WHERE → GROUP BY → HAVING → window → SELECT list → ORDER BY → LIMIT`).
+
+**`COALESCE(group_key, id::text)`** matters: `PARTITION BY group_key` puts every `NULL` in one partition, so all ungrouped rows would be dragged together under the smallest row number. Substituting the row's own uuid text makes each null-key row its own partition. Collision between a key and a uuid string is impossible here because keys start with `N:` or `D:`.
+
+**It is applied after `WHERE`, before `LIMIT`.** The status filter (`WHERE status = 'INVALID'`) shrinks the set the window sees, so a group filtered down to two rows is ordered by the earliest *surviving* row; order stays deterministic because `row_number` is unique per import, which is the tiebreaker the running-balance section insists on. Pagination works because the whole ordering is computed before `LIMIT/OFFSET`; a group can straddle a page boundary, and the client groups runs of consecutive rows, so a split group gets a header on each page.
+
+**Cost.** The window needs the rows sorted by partition key, then a second sort for the output order: O(n log n) per page request over the whole import (cap 5000 rows). Acceptable at that cap; at larger scale you would store a `group_order` column maintained on write instead — rejected now because every edit that regroups would have to renumber.
+
+**The `ORDER BY` string is a constant chosen by a boolean** (`grouped ? … : 'row_number ASC'`) — never built from input (rule 4).
+
+### Interview Q&A (36c)
+
+**Q: How do you keep the rows of each group adjacent without collapsing them?**
+A: Sort by a per-group value that is the same on every row of the group, computed with a window function: `MIN(row_number) OVER (PARTITION BY group_key)`, then `row_number` as the tiebreaker. A window function keeps every input row, unlike `GROUP BY`. Omitting the window's own `ORDER BY` makes the frame the entire partition, so the minimum is the same for all rows in it. The groups then come out in order of first appearance.
+
+**Q: What goes wrong with `PARTITION BY group_key` when some keys are NULL?**
+A: `NULL`s are treated as equal for partitioning, so all ungrouped rows become one partition and are sorted together as if they were one group. `COALESCE(group_key, id::text)` gives each a private partition. I would flag that I rely on the prefixes making a real key unable to equal a uuid.
+
+### Follow-ups (36c)
+
+- "Would an index help?" Not for this ordering: the sort key is a computed window value, so the planner must sort. An index on `(org_id, import_id, row_number)` helps the `WHERE` and the plain-order path only.
+
 ## See also
 
 - [aggregating-a-ledger.md](aggregating-a-ledger.md) — the sibling technique for a snapshot total (`FILTER`), versus this note's per-row running total; also the shared "why does this project have no summary tables" reasoning

@@ -7,6 +7,7 @@ import {
   getMigrationImportRows,
   patchMigrationImportRow,
   previewMigrationImport,
+  setMigrationImportRowsStatus,
   type MigrationCommitPreview,
   type MigrationImport,
   type MigrationImportRow,
@@ -114,6 +115,16 @@ export default function MigrationImportDetailPage() {
     }
   }
 
+  async function setGroupStatus(rowIds: string[], status: 'VALID' | 'EXCLUDED') {
+    setError(null);
+    try {
+      await setMigrationImportRowsStatus(id, { rowIds, status });
+      refresh();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not update the rows');
+    }
+  }
+
   async function handleCommit() {
     setBusy(true);
     setError(null);
@@ -175,7 +186,9 @@ export default function MigrationImportDetailPage() {
       {readOnly && imp.result !== null && imp.result.kind !== 'OPENING_BALANCES' && (
         <div className="card">
           <p className="text-sm m-0">
-            {imp.result.kind === 'ITEMS'
+            {imp.result.kind === 'JOURNALS'
+              ? `Committed: ${String(imp.result.entryCount)} journal entries posted (${String(imp.result.lineCount)} lines).`
+              : imp.result.kind === 'ITEMS'
               ? `Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} filled in.`
               : imp.result.kind === 'INVENTORY_ITEMS'
                 ? `Committed: ${String(imp.result.createdCount)} items created, opening stock posted for ${String(imp.result.openingStockCount)}.`
@@ -264,6 +277,7 @@ export default function MigrationImportDetailPage() {
         savingRowId={savingRowId}
         onSave={(row, body) => void saveRow(row, body)}
         onError={setError}
+        onSetGroupStatus={(rowIds, status) => void setGroupStatus(rowIds, status)}
       />
 
       <Pagination

@@ -27,6 +27,12 @@ router.patch(
   migrationImportController.patchRow,
 );
 router.post(
+  '/:id/rows/status',
+  authenticate,
+  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  migrationImportController.setRowsStatus,
+);
+router.post(
   '/:id/validate',
   authenticate,
   requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),

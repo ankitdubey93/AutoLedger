@@ -13,12 +13,13 @@ const PARTY_EDIT_FIELDS: ImportEditFieldMeta[] = [
       { key: 'partyTaxNumber', label: 'Tax number', input: 'text', maxLength: 64, nullable: true, options: null },
 ];
 
-const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS' | 'ITEMS' | 'INVENTORY_ITEMS', ImportKindMeta> = {
+const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS' | 'ITEMS' | 'INVENTORY_ITEMS' | 'JOURNALS', ImportKindMeta> = {
   CHART_OF_ACCOUNTS: {
     kind: 'CHART_OF_ACCOUNTS',
     label: 'Chart of accounts',
     noun: 'accounts',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'code',
@@ -109,6 +110,7 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     label: 'Opening balances',
     noun: 'balances',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'code',
@@ -199,6 +201,7 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     label: 'Customers',
     noun: 'customers',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'partyName',
@@ -308,6 +311,7 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     label: 'Vendors',
     noun: 'vendors',
     storage: 'typed',
+    groupHeaderFields: [],
     columns: [
       {
         key: 'partyName',
@@ -418,6 +422,7 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     label: 'Products & services',
     noun: 'products',
     storage: 'data',
+    groupHeaderFields: [],
     columns: [
       { key: 'itemCode', header: '*ItemCode', label: 'Item code', required: true, synonyms: ['code', 'item code', 'sku', 'product code', 'item'], note: 'Up to 40 characters. A code that already exists only has its blank fields filled — nothing is overwritten.', example: 'CONSULT-HR', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
       { key: 'itemName', header: '*ItemName', label: 'Name', required: true, synonyms: ['name', 'item name', 'product name', 'product', 'service'], note: 'Up to 200 characters.', example: 'Consulting (hourly)', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
@@ -450,6 +455,7 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     label: 'Inventory items',
     noun: 'items',
     storage: 'data',
+    groupHeaderFields: [],
     columns: [
       { key: 'itemCode', header: 'ItemCode', label: 'Item code', required: false, synonyms: ['code', 'item code', 'sku', 'product code', 'item'], note: 'A–Z, 0–9 and - _ / . (converted to upper case). Blank: generated from your item-code scheme. Must not already exist.', example: 'WIDGET-01', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
       { key: 'itemName', header: '*ItemName', label: 'Name', required: true, synonyms: ['name', 'item name', 'product name', 'product'], note: 'Up to 200 characters.', example: 'Blue widget', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
@@ -492,7 +498,42 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
       { key: 'openingLocation', label: 'Opening location', input: 'text', maxLength: 100, nullable: true, options: null },
       { key: 'openingDate', label: 'Opening date', input: 'text', maxLength: null, nullable: true, options: null },
     ],
-  }};
+  },
+  JOURNALS: {
+    kind: 'JOURNALS',
+    label: 'Journal entries',
+    noun: 'journal lines',
+    storage: 'data',
+    groupHeaderFields: ['journalNumber', 'date', 'narration'],
+    columns: [
+      { key: 'journalNumber', header: 'JournalNumber', label: 'Journal number', required: false, synonyms: ['journal number', 'journal no', 'journal', 'entry number', 'entry no', 'journal id', 'reference', 'ref'], note: 'Rows with the same number form one entry. Blank: rows with the same Date and Narration are grouped, as in Xero. The number only groups rows — the entry gets its own reference.', example: 'J-001', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
+      { key: 'date', header: '*Date', label: 'Date', required: true, synonyms: ['date', 'journal date', 'entry date', 'transaction date'], note: 'Every line of an entry must have the same date, in an open period.', example: '2026-06-30', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'narration', header: '*Narration', label: 'Narration', required: true, synonyms: ['narration', 'journal narration', 'memo', 'journal description'], note: "Every line of an entry must have the same narration. It becomes the entry's description.", example: 'June accruals', inTemplate: true, type: 'text', maxLength: 500, enumAliases: null, enumLabels: null },
+      { key: 'accountCode', header: '*AccountCode', label: 'Account code', required: true, synonyms: ['account code', 'account', 'code', 'gl code', 'account number'], note: 'Any postable account except receivable, payable and inventory control accounts.', example: '6100', inTemplate: true, type: 'text', maxLength: 20, enumAliases: null, enumLabels: null },
+      { key: 'debit', header: 'Debit', label: 'Debit', required: false, synonyms: ['debit', 'dr', 'debit amount'], note: 'Use Debit and Credit, or one signed Amount column.', example: '1200.00', inTemplate: true, type: 'money', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'credit', header: 'Credit', label: 'Credit', required: false, synonyms: ['credit', 'cr', 'credit amount'], note: 'Leave blank on a debit line.', example: '', inTemplate: true, type: 'money', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'amount', header: 'Amount', label: 'Signed amount', required: false, synonyms: ['amount', 'line amount', 'net amount'], note: 'Instead of Debit and Credit: positive is a debit, negative a credit.', example: '1200.00', inTemplate: false, type: 'signedMoney', maxLength: null, enumAliases: null, enumLabels: null },
+    ],
+    requiredOneOf: [['debit', 'credit'], ['amount']],
+    missingMessages: {
+      date: 'Could not find a date column in the file',
+      narration: 'Could not find a narration column in the file',
+      accountCode: 'Could not find an account code column in the file',
+      debit: AMOUNT_MISSING,
+      credit: AMOUNT_MISSING,
+      amount: AMOUNT_MISSING,
+    },
+    editFields: [
+      { key: 'journalNumber', label: 'Journal number', input: 'text', maxLength: 40, nullable: true, options: null },
+      { key: 'date', label: 'Date', input: 'text', maxLength: null, nullable: false, options: null },
+      { key: 'narration', label: 'Narration', input: 'text', maxLength: 500, nullable: false, options: null },
+      { key: 'accountCode', label: 'Account code', input: 'text', maxLength: 20, nullable: false, options: null },
+      { key: 'debit', label: 'Debit', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'credit', label: 'Credit', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'amount', label: 'Signed amount', input: 'text', maxLength: null, nullable: true, options: null },
+    ],
+  },
+};
 
 
 export const IMPORT_KINDS_FIXTURE: ImportKindMeta[] = [
@@ -502,4 +543,5 @@ export const IMPORT_KINDS_FIXTURE: ImportKindMeta[] = [
   BY_KIND.VENDORS,
   BY_KIND.ITEMS,
   BY_KIND.INVENTORY_ITEMS,
+  BY_KIND.JOURNALS,
 ];

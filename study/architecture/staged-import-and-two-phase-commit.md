@@ -261,6 +261,71 @@ A: Because commit here writes real products, stock and journal entries, and a ha
 - "What happens to a 5000-row inventory import?" It is one transaction and each opening receipt is its own journal entry, so the cost is linear and held under one connection; the row cap (5000) is the bound. Measured only for two rows so far.
 - "Why not commit in batches and resume?" Because that reintroduces partial state for exactly the data (GL entries) where partial state is hardest to reason about; you would need per-row idempotency keys and a resumable cursor, a different design.
 
+---
+
+## Phase 36c additions — grouped documents from flat rows (`JOURNALS`)
+
+**Verified against:** this codebase at Phase 36c, PostgreSQL 16, Node 22. Code: `journalImportService.ts`, `importJournalColumns.ts`, `migrationImportService.ts` (`createImport`, `listRows`, `patchRow`, `setRowsStatus`), tests in `server/src/__tests__/accounting/journalImport.test.ts`.
+
+### Mechanism: a CSV is flat, a journal is not
+
+A journal entry is a header (date, narration) plus N lines; a CSV journal export has one row per line with the header repeated. The import has to rebuild the document from the rows. The design decision is that **the staging table stays flat** (one `migration_import_rows` row per CSV line, unchanged from 36a/36b) and the document is only a *derived grouping*, carried as one nullable column, `group_key` (migration 078, `<= 220` chars, partial index `idx_migration_rows_group`). No "documents" table was added, because a second table would need its own edit, exclude and revalidate paths and a way to keep the two in sync; a key column is a view of the rows that cannot disagree with them.
+
+**How the key is derived.** `journalGroupKey(values, raw)` returns `'N:' + upper(journalNumber)` when a number is present, else `'D:' + date + '|' + lower(narration).slice(0, 200)`, else `null` (all three blank). The two prefixes keep the namespaces apart: a number `2026-06-30|rent` cannot collide with a Date+Narration key. It prefers the parsed `values` but falls back to the `raw` text (date truncated to 15 chars), so a row whose date *failed* to parse still lands in a sensible group and its error message names the right entry instead of vanishing into a singleton.
+
+**Where it is computed.** The registry entry declares an optional `groupKeyOf` hook (and a `groupNoun`). `createImport` calls it for every parsed row before the `unnest` insert, counts distinct non-null keys and refuses above `MAX_IMPORT_DOCUMENTS` (1000) with a 422. `patchRow` **re-derives the key on every edit that sends `values`**: after the `data || patch` UPDATE it re-reads the row's `data`/`raw` *on the same client* and writes `group_key` back with `WHERE id AND org_id AND import_id`, before `revalidateOnClient`. The order matters — revalidation groups rows by the stored `group_key`, so a stale key would validate the wrong documents. It skips the recompute when only `status` is patched, since status cannot change a key (an accepted plan defect: the contract said "always", the code does "when values is sent").
+
+**Validation has two levels, and both report on rows.** The staging table has no document rows, so an entry-level problem must be attached to the rows the user can see. `validateRows` runs per-row checks first (parse errors, required cells, one side per line, account exists/postable, control-account refusal), then per-group checks whose message is pushed onto **every** row of the group: fewer than two lines, debits ≠ credits (integer sums of cents), closed or locked period. One group check is deliberately per-row instead: in a *numbered* journal, a row whose date or narration differs from the first row's gets the error itself (`Date differs from row 4 (…)`), because blaming all five lines for one typo'd date would hide which line to fix. In a Date+Narration group the check is skipped — equal date and narration are the key, so they cannot differ. The balance check is only run when *every* row in the group has a resolved side; otherwise one unparseable amount would produce a bogus "does not balance" on top of the real error.
+
+**Commit re-groups from storage, not from memory.** `commitOnClient` reloads the rows with `loadDataRowsOnClient`, recomputes keys with the same function and groups in first-row order, then posts one `createEntryOnClient` call per group on the locked transaction client with `sourceType 'migration_import'` and `sourceId` = the import id. A thrown `ApiError` is re-wrapped as `The <label> (rows a–b): <message>` with its status preserved. Everything — all entries and the `COMMITTED` mark — commits or rolls back together; the period-closed-after-validation case is covered by the revalidate-at-commit guard from 36b (test: `revalidate at commit: a period closed after validation blocks commit`).
+
+**Bulk status.** Exclude/include a whole journal is `POST /:id/rows/status` with `rowIds`. It takes the import row lock (`SELECT … FOR UPDATE`, same guard as commit, so a bulk edit cannot interleave with a commit), runs one `UPDATE … WHERE id = ANY($4::uuid[])` with `org_id` and `import_id` in the predicate, and compares `rowCount` against `new Set(rowIds).size`. That comparison *is* the tenancy and membership check: an id from another import or org simply does not match the predicate, the count falls short, and the request is a 404 — no per-id existence queries. Then it calls `revalidateOnClient`, because excluding an unbalanced journal should flip the import to `VALIDATED` and because setting `VALID` only puts the row back in the queue; the validator assigns its real status.
+
+### Xero's Date+Narration grouping: an implicit key and its collision risk
+
+Xero's manual-journal CSV has no journal number; rows belong together because they share Date and Narration. That is a **natural key with no uniqueness guarantee**: two genuinely different entries on 30 June both narrated "Accrual" are indistinguishable from one entry, and the importer merges them. Worse, the merged group often still *balances* (two balanced entries sum to a balanced one), so nothing flags it — the user just gets one entry with four-plus lines instead of two. Mitigations chosen: the guide recommends `JournalNumber` and says why; the number, when present, always wins; and the preview shows "Journal entries to post: N", so a wrong count is visible before commit. Not chosen: adding a positional rule ("a new group starts when a balanced run closes"), which would be smarter but makes the grouping depend on row order and on arithmetic — an edit to one amount would silently re-split groups. The narration is lowercased and cut at 200 characters in the key (two narrations identical for 200 chars on the same date merge; accepted).
+
+### Why a document cap exists (`MAX_IMPORT_DOCUMENTS = 1000`)
+
+Commit is one transaction: for each entry it checks the control accounts, the period, inserts the header and lines, and the deferred balance trigger fires at `COMMIT` for every entry at once. Row count (`MAX_IMPORT_ROWS = 5000`) does not bound that work, because one row can be one document (single-line "journals" are all invalid, but invoices in 36d are many lines per document with heavier side effects). The cap is on *documents* so the transaction's size, lock hold time and the pooled connection it pins are bounded by the thing that costs. It is enforced at staging, before any row is written, with the user's own noun ("1001 journals"). Measured: 200 two-line journals committed inside a 60 s test limit; 1000 has **not** been timed — the number is a bound chosen conservatively, not a measured limit.
+
+### Rejected alternatives (36c)
+
+| Option | Why not |
+|---|---|
+| A `migration_import_documents` table | A second source of truth to keep in sync with rows on every edit and exclude |
+| Group in the client | Validation, preview counts and commit all need the grouping server-side |
+| Recompute the key at read time only (no column) | `listRows` orders and pages by it in SQL; it would need the derivation in SQL too |
+| Post journals as they validate (per-document commit) | Reintroduces partial state for GL entries (see 36b follow-ups) |
+| Reject a file whose groups collide | Cannot be detected — the collision is the ambiguity |
+
+### Gotchas (36c)
+
+- A stale `group_key` after an edit is a silent wrong-document bug, not an error. The regrouping test (`editing a JournalNumber regroups the row`) checks the key *and* the listing order.
+- The key must be computed by exactly one function shared by staging, patching, validation and commit; `journalImportService` calls `journalGroupKey` again from `values`/`raw` on commit rather than trusting the stored column, which keeps commit correct even for a row staged before a future key change.
+- `setRowsStatus` with `VALID` does **not** make a row valid; a row with errors comes straight back as `INVALID` after the revalidate. "Include" means "stop excluding".
+- Error text interpolates user cell values (journal number, narration). The UI renders it as React text, so it is escaped; do not ever render it as HTML.
+
+### Interview Q&A (36c)
+
+**Q: A CSV has one row per journal line, but you post one entry per journal. Where does the document come from, and why is it not a table?**
+A: It is derived. Each staged row carries a nullable `group_key` computed by a per-kind hook: the journal number if present, otherwise date plus lowercased narration. Validation, listing, preview counts and commit all group by that one column. I kept staging flat because a documents table would need its own edit, exclude and revalidate paths and could drift from the rows; a key column can only ever be a function of the rows. The cost is that the key must be recomputed whenever a row's inputs change, which is why `patchRow` rewrites it on every edit that sends values and does so before revalidating.
+
+**Q: Where should an error about a whole entry, such as "does not balance", be shown when the UI shows rows?**
+A: On every row in the group, so whichever line the user looks at shows it and the import's error count is nonzero until the group is fixed. The exception is an error that identifies a specific offending row, like a date that differs from the entry's first line: that goes only on the differing row, otherwise the user has to diff five lines to find the typo. I also skip the balance check when any row's amount failed to parse, because the real error is already shown and a computed "does not balance" would be noise.
+
+**Q: Xero exports journals with no ID, grouped by date and narration. What is the failure mode of importing that?**
+A: It is an implicit natural key with no uniqueness guarantee. Two distinct entries with the same date and narration merge into one, and since each balanced entry balances, the merged one balances too, so no validation fails. The defences are to prefer an explicit journal number when one exists, to recommend it in the guide, and to show the entry count in the preview so a count of 1 when the user expects 2 is visible before posting. I rejected a "new group when the running total returns to zero" heuristic because it makes grouping depend on row order and arithmetic, so editing one amount could silently change the grouping.
+
+**Q: Why cap documents instead of rows?**
+A: Commit is a single transaction whose cost scales with documents: per-document period and account checks, inserts, and a deferred balance trigger firing at commit. A row cap does not bound that, because rows per document vary. The cap is checked at staging so nothing is written, and the error names the noun the user sees. I have not measured the 1000-document commit (200 was fine); I would say so rather than call the number tuned.
+
+### Follow-ups they'll dig into (36c)
+
+- "What if the entry count makes the transaction too long?" Split into smaller imports (the error message says so) or, as a redesign, per-document idempotency keys plus a resumable cursor; that trades the atomicity you want for GL data.
+- "Why does bulk exclude lock the import row?" So it serialises with commit, which takes the same `FOR UPDATE`; otherwise a status flip could land between commit's revalidate and its post.
+- "Can the group key contain user input safely in SQL?" It is only ever a bound parameter or an array element in `unnest`; it is never interpolated (rule 4).
+
 ## See also
 
 - [partial-unique-indexes.md](../postgresql/partial-unique-indexes.md) — the constraint that makes a second commit of an opening-balance import physically impossible.
@@ -269,3 +334,5 @@ A: Because commit here writes real products, stock and journal entries, and a ha
 - [../postgresql/transactions-isolation-pooling.md](../postgresql/transactions-isolation-pooling.md) — `READ COMMITTED`, row locks and the pooled-client rule the `commit` function depends on
 - [../typescript/const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md#phase-36a-additions--satisfies-recordkind-def-as-an-exhaustive-registry) — how the registry's exhaustiveness is enforced
 - [../react/schema-driven-forms-and-print-layouts.md](../react/schema-driven-forms-and-print-layouts.md#phase-36a-additions--a-server-metadata-driven-mapper-and-row-editor) — the client that renders from this registry's metadata
+- [double-entry-as-an-invariant.md](double-entry-as-an-invariant.md) — validating balance before the deferred trigger, and the shared control-account refusal map the journal import reuses.
+- [../postgresql/window-functions-and-running-totals.md](../postgresql/window-functions-and-running-totals.md) — the `MIN(row_number) OVER (PARTITION BY …)` ordering that keeps a group's rows together.

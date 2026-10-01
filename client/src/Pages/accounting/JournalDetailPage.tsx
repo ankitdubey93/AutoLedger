@@ -152,8 +152,22 @@ export default function JournalDetailPage() {
         </DetailRow>
         <DetailRow label="Description">{entry.description ?? '—'}</DetailRow>
         <DetailRow label="Source">
-          {entry.sourceType}
-          {entry.sourceId !== null && <span className="text-[var(--muted)]"> · {entry.sourceId}</span>}
+          {entry.sourceType === 'migration_import' ? (
+            <>
+              Imported (CSV)
+              {entry.sourceId !== null && (
+                <span className="text-[var(--muted)]">
+                  {' · '}
+                  <Link to={`/migration-imports/${entry.sourceId}`}>view import</Link>
+                </span>
+              )}
+            </>
+          ) : (
+            <>
+              {entry.sourceType}
+              {entry.sourceId !== null && <span className="text-[var(--muted)]"> · {entry.sourceId}</span>}
+            </>
+          )}
         </DetailRow>
         <DetailRow label="Posted by">
           {entry.createdByName ?? entry.createdByEmail ?? '—'}

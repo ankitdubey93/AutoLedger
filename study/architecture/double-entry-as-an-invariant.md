@@ -146,6 +146,54 @@ A: Enforcing the balance invariant in the database as well as the service. The s
 
 ---
 
+---
+
+## Phase 36c additions — balance checked before posting, and one refusal map for two paths
+
+**Verified against:** PostgreSQL 16; `journalService.ts` (`createEntryOnClient`, `assertNotControlAccountsOnClient`, `listControlAccountsOnClient`), `journalImportService.ts`, `fiscalPeriodService.periodStatusOnClient`.
+
+### Validating balance before posting vs relying on the deferred trigger
+
+The deferred constraint trigger is the **backstop**: it fires at `COMMIT`, sees the final set of lines and aborts the whole transaction on imbalance. As a *user-facing* error it is poor — it fires late, names no row, and rolls back everything. A staged import of 300 journal lines needs the opposite: find every unbalanced entry up front and say which one. So the importer checks balance itself, in integer cents (`d !== c`, never an epsilon), at three layers that do different jobs:
+
+| Layer | Job | What the user sees |
+|---|---|---|
+| `journalImportService.validateRows` | Find problems before commit, per group | `The journal J-2 does not balance: debits 1.00, credits 0.99` on every row of J-2 |
+| `createEntryOnClient` | Assert the same invariant at the service boundary for every caller | A 422 with the entry's label (wrapped as `The journal J-2 (rows 4–5): …`) |
+| Deferred trigger | Make it impossible for any code path, incl. a bug in the two above, to persist an imbalance | A raw DB exception; in normal operation it never fires |
+
+Redundant on purpose: the first is UX, the second is the contract, the third is the guarantee. A bug in layer 1 (say, it mis-signs an `Amount`) produces a row that validated but fails at commit as a clean 422 from layer 2 — not a corrupt ledger.
+
+**One side per line.** The signed `Amount` column is translated into the same `{debitCents, creditCents}` pair the database requires (rule 7): positive → debit, negative → credit of `-amount`; zero is rejected (`A line needs a non-zero amount`), as are a row with both Debit and Credit set or neither. The import never invents a shape the table's CHECK does not allow.
+
+**Only the validator reports "does not balance" when every line resolved.** If one amount failed to parse, the sum is meaningless, so the check is withheld rather than reporting a misleading total.
+
+### One refusal map shared by the manual path and the import path
+
+Manual journals may not post to the receivable, payable or inventory control accounts (Phases 25, 35a): those balances must equal their subledgers. Two callers now need that rule — the manual journal route (throw on the first hit) and the importer's validator (flag every row, all at once). Copying the rule would let the two drift, which is exactly the class of bug the rule exists to prevent. So `loadControlAccountsOnClient` builds a `Map<accountId, message>` once, `listControlAccountsOnClient` exposes it, and `assertNotControlAccountsOnClient` is rewritten on top of the same map. The message text is byte-identical to the pre-refactor text; the import test `control accounts are refused at validation with the manual-journal message` asserts the row error equals what the manual path throws.
+
+**Precedence gotcha.** The map's insertion order is receivable, payable, inventory. The plan said to throw the first map entry present in the journal's lines; that would change which inventory account is named when a journal has several (map order instead of line order). The implementation keeps the old behaviour exactly — receivable, then payable, then remaining ids in **line order** — by checking those two ids explicitly and then iterating `accountIds`. Refactors that "share a map" quietly change tie-breaking unless a test pins it; the existing manual-journal tests were the gate and ran unedited.
+
+**Enforced twice.** The import rejects control accounts at validation, and commit revalidates (36b's revalidate-at-commit), because `createEntryOnClient` does *not* call the assertion (the manual `createEntry` path and the recurring/bank-rule callers do, explicitly): without the commit-time recheck, an org changing its receivable setting between validate and commit could let an import post to a control account.
+
+**Period status, same idea.** `assertPeriodOpenOnClient` *throws*; a validator needs a value. `periodStatusOnClient` returns the status or `null` (no period covers the date, posting allowed) and never throws; the assertion is rebuilt on it with its message unchanged. The importer caches it per date and appends `…is closed; reopen it or change the date` to the group's rows. `null` means "no period row", not "open" — a date outside generated periods posts.
+
+### Interview Q&A (36c)
+
+**Q: You have a deferred balance trigger. Why also check balance in application code before posting?**
+A: The trigger guarantees no code path can persist an unbalanced entry, but it reports too late and too coarsely: at commit, for the whole transaction, without saying which entry. For a bulk import I want every bad entry named before anything is written, so the validator computes integer debit and credit sums per group and reports them on the rows. The service-level check gives every caller a readable 422, and the trigger remains the guarantee if either check has a bug. They are different layers with different audiences, not duplicates.
+
+**Q: Two code paths need the same business rule, one throwing on the first violation and one collecting all of them. How do you avoid duplicating it?**
+A: Extract the rule as data rather than as a throwing function: here, a map from account id to refusal message. The throwing path looks ids up and throws on the first; the collecting path looks up every row. The hazard is that extracting changes tie-breaking — the old code had a fixed precedence among the three control-account kinds — so I preserved that explicitly and relied on the unedited existing tests to prove the messages and precedence did not move.
+
+**Q: A row's validation passed yesterday. What can make the commit fail today even though you did not touch the file?**
+A: Anything the validation read: a fiscal period closed, an account deactivated, or the control-account setting changed. Commit revalidates under the import row lock, so the user gets a 409 `became invalid since validation` with nothing posted, rather than a half-written batch. The test closes the period after validation and asserts the 409 and zero entries.
+
+### Follow-ups (36c)
+
+- "Why not let the trigger be the only check?" It cannot produce a per-row message and it aborts the whole batch at the very end; it is a guarantee, not a UX.
+- "Why is `null` period status allowed?" Periods are generated ranges; a date with no period row has nothing to be closed, and the existing `assertPeriodOpenOnClient` already allowed it.
+
 ## See also
 
 - [deferred-constraint-triggers.md](../postgresql/deferred-constraint-triggers.md) — how the invariant is enforced by the database

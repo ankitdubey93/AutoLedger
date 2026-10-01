@@ -66,6 +66,13 @@ export const MIGRATION_STEPS: MigrationStep[] = [
     to: '/migration-imports/new?kind=INVENTORY_ITEMS',
     kind: 'INVENTORY_ITEMS',
   },
+  {
+    key: 'journals',
+    label: 'Other journals (optional)',
+    hint: 'Adjustments not covered by the steps above, such as accruals or year-to-date summaries.',
+    to: '/migration-imports/new?kind=JOURNALS',
+    kind: 'JOURNALS',
+  },
 ];
 
 export const IMPORT_GUIDES: Record<MigrationImportKind, ImportGuide> = {
@@ -164,6 +171,22 @@ export const IMPORT_GUIDES: Record<MigrationImportKind, ImportGuide> = {
       "Don't also include inventory in opening balances; the opening-balance import refuses inventory accounts for this reason.",
       "Category, Unit and OpeningLocation accept a code or a name; leave them blank to use your defaults. Inventory is set up automatically if it isn't yet.",
       'Lot- and serial-tracked stock is received under Stock movements → Receive, not here.',
+    ],
+  },  JOURNALS: {
+    intro: 'Post several journal entries at once — accruals, adjustments or year-to-date summaries.',
+    steps: [
+      'Download the template — keep the column headings exactly as they are. Headings starting with * are required.',
+      'Fill it in with Excel, Google Sheets or Numbers, one row per record, then save or download it as CSV.',
+      'Upload the file. If your headings differ (for example an export from another system), match each of our fields to one of your columns.',
+      'Review the rows. Fix or exclude anything flagged in red — nothing is saved to your books yet.',
+      'Commit. An owner or admin commits; the import is then final.',
+    ],
+    rules: [
+      'Rows with the same JournalNumber form one entry. Without a JournalNumber, rows with the same Date and Narration are grouped — the same way Xero does it.',
+      'Each entry needs at least two lines and must balance: total debits equal total credits.',
+      'Use Debit and Credit columns, or one signed Amount column (positive is a debit, negative a credit).',
+      'Receivable, payable and inventory control accounts are refused — use invoices, bills and Inventory for those so every balance stays traceable.',
+      'Every date must fall in an open period. Imported entries are marked "Imported" and are corrected by reversing them, like any posted entry.',
     ],
   },
 };

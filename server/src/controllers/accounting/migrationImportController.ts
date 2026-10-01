@@ -3,6 +3,7 @@ import * as migrationImportService from '../../services/accounting/migrationImpo
 import {
   createMigrationImportSchema,
   patchMigrationRowSchema,
+  setRowsStatusSchema,
   inspectMigrationImportSchema,
 } from '../../schemas/accounting/migrationImportSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
@@ -117,6 +118,14 @@ export const patchRow: RequestHandler = async (req, res) => {
     input,
   );
   res.json({ success: true, import: result.import, row: result.row });
+};
+
+/** POST /migration-imports/:id/rows/status */
+export const setRowsStatus: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(setRowsStatusSchema, req.body);
+  const imp = await migrationImportService.setRowsStatus(user.orgId, requireParam(req, 'id'), input.rowIds, input.status);
+  res.json({ success: true, import: imp });
 };
 
 /** POST /migration-imports/:id/validate */

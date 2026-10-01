@@ -15,6 +15,7 @@ import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
+import ImportButton from '../../components/imports/ImportButton';
 
 /**
  * The journal register — every posted entry, filterable and paginated.
@@ -159,12 +160,15 @@ export default function JournalsPage() {
             edit.
           </p>
         </div>
-        <Link
-          to="/journals/new"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
-        >
-          <Plus size={15} /> New entry
-        </Link>
+        <div className="flex items-center gap-2">
+          <ImportButton kind="JOURNALS" returnTo="/journals" />
+          <Link
+            to="/journals/new"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          >
+            <Plus size={15} /> New entry
+          </Link>
+        </div>
       </header>
 
       <div className="flex flex-wrap items-end gap-3">

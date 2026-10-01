@@ -6,7 +6,7 @@ import { parseCsv } from '../../utils/csv.js';
 import { isDateFormat, type DateFormat } from '../../utils/dateParse.js';
 import { parseImportCell, suggestDateFormat } from '../../utils/importValues.js';
 import { compactHeader, findMissingRequired, resolveColumnIndexes } from '../../utils/importColumns.js';
-import { MAX_IMPORT_ROWS } from '../../config/constants.js';
+import { MAX_IMPORT_DOCUMENTS, MAX_IMPORT_ROWS } from '../../config/constants.js';
 import { getImportKind } from './importKinds.js';
 import { importDateFormatOnClient } from './importRowStore.js';
 import {
@@ -269,7 +269,12 @@ export async function listRows(
   importId: string,
   options: ListRowsOptions,
 ): Promise<{ rows: MigrationImportRow[]; totalCount: number }> {
-  await assertImportExists(orgId, importId);
+  const imp = await assertImportExists(orgId, importId);
+  // Constants chosen by a boolean — never interpolated from input (rule 4).
+  const grouped = getImportKind(imp.kind).groupKeyOf !== undefined;
+  const orderBy = grouped
+    ? 'MIN(row_number) OVER (PARTITION BY COALESCE(group_key, id::text)), row_number'
+    : 'row_number ASC';
 
   const offset = (options.page - 1) * options.limit;
   const clauses = ['org_id = $1', 'import_id = $2'];
@@ -289,7 +294,7 @@ export async function listRows(
   const { rows } = await pool.query<RowRow>(
     `SELECT ${ROW_COLUMNS} FROM migration_import_rows
       WHERE ${where}
-      ORDER BY row_number ASC
+      ORDER BY ${orderBy}
       LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}`,
     [...values, options.limit, offset],
   );
@@ -466,6 +471,20 @@ export async function createImport(
 
     if (parsed.length === 0) {
       throw new ApiError(422, 'The file contains no data rows');
+    }
+
+    if (def.groupKeyOf !== undefined) {
+      const keys = new Set<string>();
+      for (const row of parsed) {
+        row.groupKey = def.groupKeyOf(row.data ?? {}, row.raw);
+        if (row.groupKey !== null) keys.add(row.groupKey);
+      }
+      if (keys.size > MAX_IMPORT_DOCUMENTS) {
+        throw new ApiError(
+          422,
+          `This file has ${String(keys.size)} ${def.groupNoun ?? 'documents'}; one import takes at most ${String(MAX_IMPORT_DOCUMENTS)} — split it into smaller files`,
+        );
+      }
     }
 
     const { rows: importRows } = await client.query<{ id: string }>(
@@ -659,6 +678,23 @@ export async function patchRow(
     );
     if (rows[0] === undefined) throw new ApiError(404, 'Migration import row not found');
 
+    if (def.groupKeyOf !== undefined && input.values !== undefined) {
+      const { rows: current } = await client.query<{
+        data: Record<string, string | number | null> | null;
+        raw: Record<string, string>;
+      }>('SELECT data, raw FROM migration_import_rows WHERE id = $1 AND org_id = $2 AND import_id = $3', [
+        rowId,
+        orgId,
+        importId,
+      ]);
+      const cur = current[0];
+      if (cur === undefined) throw new ApiError(404, 'Migration import row not found');
+      await client.query(
+        'UPDATE migration_import_rows SET group_key = $1 WHERE id = $2 AND org_id = $3 AND import_id = $4',
+        [def.groupKeyOf(cur.data ?? {}, cur.raw), rowId, orgId, importId],
+      );
+    }
+
     const updatedImport = await revalidateOnClient(client, orgId, importId);
 
     const { rows: rowRows } = await client.query<RowRow>(
@@ -669,6 +705,39 @@ export async function patchRow(
     if (rowRow === undefined) throw new ApiError(404, 'Migration import row not found');
 
     return { import: updatedImport, row: toRow(rowRow) };
+  });
+}
+
+/**
+ * Bulk include/exclude (36c): one statement over a set of rows, then a full
+ * revalidate. Setting VALID puts a row back into validation; the revalidate
+ * assigns its real status.
+ */
+export async function setRowsStatus(
+  orgId: string,
+  importId: string,
+  rowIds: string[],
+  status: 'VALID' | 'EXCLUDED',
+): Promise<MigrationImport> {
+  return withTransaction(async (client) => {
+    const { rows: statusRows } = await client.query<{ status: string }>(
+      'SELECT status FROM migration_imports WHERE id = $1 AND org_id = $2 FOR UPDATE',
+      [importId, orgId],
+    );
+    const importStatus = statusRows[0]?.status;
+    if (importStatus === undefined) throw new ApiError(404, 'Migration import not found');
+    if (importStatus === 'COMMITTED') throw new ApiError(409, 'This import has already been committed');
+
+    const result = await client.query(
+      `UPDATE migration_import_rows
+          SET status = $1, errors = CASE WHEN $1 = 'EXCLUDED' THEN '{}'::text[] ELSE errors END
+        WHERE org_id = $2 AND import_id = $3 AND id = ANY($4::uuid[])`,
+      [status, orgId, importId, rowIds],
+    );
+    if (result.rowCount !== new Set(rowIds).size) {
+      throw new ApiError(404, 'Some rows were not found in this import');
+    }
+    return revalidateOnClient(client, orgId, importId);
   });
 }
 

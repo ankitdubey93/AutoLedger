@@ -127,6 +127,9 @@ export const MAX_CSV_CHARS = 900_000;
 // Phase 36 — one staged import's data-row cap; bounds revalidation and commit time.
 export const MAX_IMPORT_ROWS = 5000;
 
+/** Grouped import kinds (36c): most documents (e.g. journals) one import may stage. */
+export const MAX_IMPORT_DOCUMENTS = 1000;
+
 // ------------------------------------------------ background jobs (7)
 
 /**

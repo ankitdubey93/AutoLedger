@@ -431,4 +431,24 @@ describe('JournalDetailPage', () => {
     expect(screen.queryByRole('button', { name: /edit/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /delete/i })).toBeNull();
   });
+
+  it('an imported journal shows "Imported (CSV)" with a link to its import', async () => {
+    const entry = baseEntry({ sourceType: 'migration_import', sourceId: 'imp-77' });
+    mockDetailRoute(entry);
+    renderJournalDetailPage(entry.id);
+
+    expect(await screen.findByText(/Imported \(CSV\)/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'view import' })).toHaveAttribute('href', '/migration-imports/imp-77');
+  });
+});
+
+describe('JournalsPage import', () => {
+  it('the Journals page has an Import button linking to the JOURNALS wizard', async () => {
+    mockRegisterRoutes([baseEntry()]);
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    const link = screen.getByRole('link', { name: 'Import' });
+    expect(link).toHaveAttribute('href', '/migration-imports/new?kind=JOURNALS&returnTo=%2Fjournals');
+  });
 });

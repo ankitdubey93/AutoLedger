@@ -149,6 +149,31 @@ describe('parseImportCell', () => {
       value: '2026-01-31',
     });
   });
+
+  it('signedMoney keeps the sign', () => {
+    const spec: CellSpec = {
+      label: 'Amount',
+      type: 'signedMoney',
+      maxLength: null,
+      enumAliases: null,
+      enumLabels: null,
+    };
+    expect(parseImportCell(spec, '-12.50', 'ISO')).toEqual({ ok: true, value: -1250 });
+    expect(parseImportCell(spec, '12.50', 'ISO')).toEqual({ ok: true, value: 1250 });
+  });
+
+  it('signedMoney rejects words', () => {
+    const spec: CellSpec = {
+      label: 'Amount',
+      type: 'signedMoney',
+      maxLength: null,
+      enumAliases: null,
+      enumLabels: null,
+    };
+    const result = parseImportCell(spec, 'abc', 'ISO');
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toContain('is not an amount');
+  });
 });
 
 describe('suggestDateFormat', () => {

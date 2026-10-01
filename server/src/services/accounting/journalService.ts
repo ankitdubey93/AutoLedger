@@ -361,6 +361,35 @@ export async function assertNotControlAccountsOnClient(
   orgId: string,
   accountIds: string[],
 ): Promise<void> {
+  const { map, receivableId, payableId } = await loadControlAccountsOnClient(client, orgId);
+
+  // Precedence (unchanged): receivable, then payable, then inventory in the
+  // caller's line order — whatever order the lines came in.
+  for (const id of [receivableId, payableId]) {
+    if (id !== null && accountIds.includes(id)) {
+      const message = map.get(id);
+      if (message !== undefined) throw new ApiError(422, message);
+    }
+  }
+  for (const accountId of accountIds) {
+    const message = map.get(accountId);
+    if (message !== undefined) throw new ApiError(422, message);
+  }
+}
+
+/**
+ * Every control account this org has (receivable, payable, inventory control),
+ * mapped to the exact message assertNotControlAccountsOnClient throws for it.
+ * Insertion order is receivable, payable, inventory; the first writer of an id wins.
+ */
+export async function listControlAccountsOnClient(client: Queryable, orgId: string): Promise<Map<string, string>> {
+  return (await loadControlAccountsOnClient(client, orgId)).map;
+}
+
+async function loadControlAccountsOnClient(
+  client: Queryable,
+  orgId: string,
+): Promise<{ map: Map<string, string>; receivableId: string | null; payableId: string | null }> {
   const receivableId = await resolveControlAccountIdOnClient(
     client,
     orgId,
@@ -373,41 +402,43 @@ export async function assertNotControlAccountsOnClient(
     'SELECT payable_account_id AS account_id FROM ledger_settings WHERE org_id = $1',
     '2100',
   );
-
-  async function codeOf(accountId: string): Promise<string> {
-    const { rows } = await client.query<{ code: string }>(
-      'SELECT code FROM accounts WHERE org_id = $1 AND id = $2',
-      [orgId, accountId],
-    );
-    return rows[0]?.code ?? accountId;
-  }
-
-  if (receivableId !== null && accountIds.includes(receivableId)) {
-    const code = await codeOf(receivableId);
-    throw new ApiError(
-      422,
-      `Account ${code} is the receivable control account — post to it through an invoice or a payment, not a journal entry`,
-    );
-  }
-  if (payableId !== null && accountIds.includes(payableId)) {
-    const code = await codeOf(payableId);
-    throw new ApiError(
-      422,
-      `Account ${code} is the payable control account — post to it through a bill or a payment, not a journal entry`,
-    );
-  }
-
   // Phase 35a — inventory control accounts (Core model §2).
   const inventoryIds = await resolveInventoryControlAccountIdsOnClient(client, orgId);
-  for (const accountId of accountIds) {
-    if (inventoryIds.has(accountId)) {
-      const code = await codeOf(accountId);
-      throw new ApiError(
-        422,
-        `Account ${code} is an inventory control account — its balance comes from stock movements. Record stock through bills, invoices or Inventory, or reconcile it under Inventory → Valuation`,
-      );
-    }
+
+  const ids = [
+    ...new Set([...(receivableId === null ? [] : [receivableId]), ...(payableId === null ? [] : [payableId]), ...inventoryIds]),
+  ];
+  const codes = new Map<string, string>();
+  if (ids.length > 0) {
+    const { rows } = await client.query<{ id: string; code: string }>(
+      'SELECT id, code FROM accounts WHERE org_id = $1 AND id = ANY($2::uuid[])',
+      [orgId, ids],
+    );
+    for (const row of rows) codes.set(row.id, row.code);
   }
+  const codeOf = (id: string): string => codes.get(id) ?? id;
+
+  const map = new Map<string, string>();
+  if (receivableId !== null) {
+    map.set(
+      receivableId,
+      `Account ${codeOf(receivableId)} is the receivable control account — post to it through an invoice or a payment, not a journal entry`,
+    );
+  }
+  if (payableId !== null && !map.has(payableId)) {
+    map.set(
+      payableId,
+      `Account ${codeOf(payableId)} is the payable control account — post to it through a bill or a payment, not a journal entry`,
+    );
+  }
+  for (const id of inventoryIds) {
+    if (map.has(id)) continue;
+    map.set(
+      id,
+      `Account ${codeOf(id)} is an inventory control account — its balance comes from stock movements. Record stock through bills, invoices or Inventory, or reconcile it under Inventory → Valuation`,
+    );
+  }
+  return { map, receivableId, payableId };
 }
 
 /**
