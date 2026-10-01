@@ -6,6 +6,7 @@ import AccountTabs, { ACCOUNT_TABS, type AccountTab } from './AccountTabs';
 import ProfilePanel from './account/ProfilePanel';
 import ChangePasswordPanel from './account/ChangePasswordPanel';
 import SessionsPanel from './account/SessionsPanel';
+import NotificationsPanel from './account/NotificationsPanel';
 import OrganizationsPage from './organizations/OrganizationsPage';
 import { initials } from '../utils/initials';
 
@@ -117,6 +118,7 @@ export default function AccountPage() {
         {tab === 'profile' && <ProfilePanel />}
         {tab === 'password' && <ChangePasswordPanel />}
         {tab === 'sessions' && <SessionsPanel />}
+        {tab === 'notifications' && <NotificationsPanel />}
         {tab === 'system' && <HealthPanel />}
       </div>
       {tab === 'organizations' && <OrganizationsPage />}

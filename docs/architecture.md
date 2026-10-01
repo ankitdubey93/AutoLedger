@@ -67,6 +67,22 @@ The alternative — checking membership on every request — puts a query in fro
 **Signing out other browsers (Phase 38a).** User settings → Sessions revokes one browser or all others, and changing your password revokes all others. Each marks the refresh row `revoked_at`, a tombstone, rather than deleting it. Deleting would be indistinguishable from a rotated-away token, and the next refresh from that browser would trip reuse detection and sign out every session, the revoker's included. The revoked browser keeps its access token for up to 15 minutes, the same window as logout.
 
 **Two settings areas (Phase 38a).** `/account` is user-level only: profile, password, sessions, your organizations, service status. Organization-level settings live under `/settings` (the hub). Profile and members moved there (`/settings/profile`, `/settings/members`), and the old `/account?tab=` URLs redirect.
+
+### Email — Phase 38b
+
+Every email is a row in `email_outbox`, written by `enqueueEmailOnClient` **on the transaction of the change it is about**: the reset token, the invitation, the submitted bill, the accepted invitation. A rollback therefore takes the email with it, and a commit guarantees an attempt (rule 5: no post-COMMIT work). The worker's `email-drain` job runs every 5 seconds:
+1. It reclaims `SENDING` rows a crashed worker left behind (older than 5 minutes).
+2. It claims due `PENDING` rows with `FOR UPDATE SKIP LOCKED` in a short statement of its own.
+3. It sends each row **outside any transaction** through `MAIL_TRANSPORT`.
+4. It records `SENT`, `PENDING` with exponential backoff, or `FAILED`. A 4xx from the provider is permanent; 408, 429, 5xx and network errors are retried, up to 5 attempts.
+
+Delivery is **at-least-once**: a crash after the provider accepts but before `SENT` is recorded sends twice. That is acceptable for these messages, and it is what makes the outbox safe.
+
+Token-bearing links (reset, invitation, verification, change of email) are the only secrets in the outbox. They are AES-256-GCM encrypted with `INTEGRATION_ENCRYPTION_KEY` (required in production for a real transport) and set to NULL when the row finishes, which a CHECK enforces.
+
+Transports are plain `fetch`: Brevo (`POST /v3/smtp/email`), Mailpit (local inbox, `POST /api/v1/send`), or `log`. An organization sets its sender **display name** and **reply-to**. The From address is always the platform's verified sender, because a free Brevo account only sends from verified senders.
+
+Notification preferences are per user, stored as opt-outs. "Bill awaiting approval" goes to every member who can approve, except the submitter; "invitation accepted" goes to the inviter.
 ### Roles
 
 Start with a small fixed set and expand only when a module needs it: `OWNER`, `ADMIN`, `ACCOUNTANT`, `VIEWER`. Stored as a TEXT column with a CHECK constraint (Phase 1).

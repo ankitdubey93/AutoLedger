@@ -15,13 +15,15 @@ import {
 } from '../utils/jwt.js';
 import {
   BCRYPT_COST,
+  EMAIL_TOKEN_TTL_MS,
   MAX_OWNED_ORGANIZATIONS,
+  VERIFY_RESEND_COOLDOWN_MS,
   PASSWORD_RESET_TOKEN_TTL_MS,
   REFRESH_TOKEN_TTL_MS,
 } from '../config/constants.js';
 import { env } from '../config/env.js';
-import { logger } from '../utils/logger.js';
 import { getRequestContext } from '../utils/requestContext.js';
+import { enqueueEmailOnClient } from './mail/emailOutboxService.js';
 import {
   isRole,
   type ActiveSession,
@@ -355,6 +357,9 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
       // `client`, never `pool` (rule 5) — see createOrganizationOnClient.
       await createOrganizationOnClient(client, userId, input.organizationName);
     }
+
+    // Phase 38b — a verification email, on the same transaction.
+    await issueEmailTokenOnClient(client, userId, 'VERIFY', input.email, input.name);
 
     const user = await loadUser(client, userId);
     await client.query('COMMIT');
@@ -802,6 +807,219 @@ export async function revokeOtherSessions(
   return { signedOutSessions: rowCount ?? 0 };
 }
 
+/* ------------------------------------------- Phase 38b — email address */
+
+function frontendUrl(path: string): string {
+  return `${new URL(env.FRONTEND_URL).origin}${path}`;
+}
+
+/**
+ * Mints a verification or change-of-email token for `email` and enqueues
+ * the email carrying it, on the caller's transaction. Earlier tokens of the
+ * same purpose are deleted, so only the newest link works. Only the token's
+ * SHA-256 is stored, as for reset and refresh tokens.
+ */
+async function issueEmailTokenOnClient(
+  client: Queryable,
+  userId: string,
+  purpose: 'VERIFY' | 'CHANGE',
+  email: string,
+  name: string | null,
+): Promise<void> {
+  const token = randomBytes(32).toString('base64url');
+  await client.query('DELETE FROM user_email_tokens WHERE user_id = $1 AND purpose = $2', [userId, purpose]);
+  await client.query(
+    'INSERT INTO user_email_tokens (user_id, purpose, email, token_hash, expires_at) VALUES ($1, $2, $3, $4, $5)',
+    [userId, purpose, email.toLowerCase(), hashRefreshToken(token), new Date(Date.now() + EMAIL_TOKEN_TTL_MS)],
+  );
+  await enqueueEmailOnClient(client, {
+    orgId: null,
+    to: email,
+    toName: name,
+    template: purpose === 'VERIFY' ? 'verify_email' : 'confirm_email_change',
+    link: frontendUrl(purpose === 'VERIFY' ? `/verify-email?token=${token}` : `/confirm-email-change?token=${token}`),
+  });
+}
+
+/**
+ * Claims an email token atomically (`DELETE ... RETURNING`, so a link works
+ * once). Expired → 400 after the delete commits, as reset does.
+ */
+async function claimEmailTokenOnClient(
+  client: Queryable,
+  token: string,
+  purpose: 'VERIFY' | 'CHANGE',
+): Promise<{ userId: string; email: string; expired: boolean } | null> {
+  const { rows } = await client.query<{ user_id: string; email: string; expires_at: Date }>(
+    'DELETE FROM user_email_tokens WHERE token_hash = $1 AND purpose = $2 RETURNING user_id, email, expires_at',
+    [hashRefreshToken(token), purpose],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  return { userId: row.user_id, email: row.email, expired: row.expires_at.getTime() <= Date.now() };
+}
+
+/**
+ * POST /auth/verify-email — public: the token is the proof. Marks the
+ * address verified only if it is still the account's address: a link sent
+ * before an email change must not verify the new address.
+ */
+export async function verifyEmail(token: string): Promise<void> {
+  const client = await pool.connect();
+  let outcome: 'ok' | 'expired' | 'stale';
+  try {
+    await beginTransaction(client);
+    const claimed = await claimEmailTokenOnClient(client, token, 'VERIFY');
+    if (claimed === null) throw new ApiError(400, 'This verification link is invalid or has already been used');
+    if (claimed.expired) {
+      outcome = 'expired';
+    } else {
+      const { rowCount } = await client.query(
+        'UPDATE users SET email_verified = true WHERE id = $1 AND LOWER(email) = $2',
+        [claimed.userId, claimed.email],
+      );
+      outcome = rowCount === 0 ? 'stale' : 'ok';
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (outcome === 'expired') throw new ApiError(400, 'This verification link has expired — send a new one from Account settings');
+  if (outcome === 'stale') throw new ApiError(400, 'This link was for an email address your account no longer uses');
+}
+
+/**
+ * POST /auth/verify-email/resend — signed in, unverified. A one-minute
+ * cooldown stops the button being used to flood an inbox (or the free
+ * daily sending quota).
+ */
+export async function resendVerification(userId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+    const { rows } = await client.query<{ email: string; name: string | null; email_verified: boolean }>(
+      'SELECT email, name, email_verified FROM users WHERE id = $1 FOR UPDATE',
+      [userId],
+    );
+    const user = rows[0];
+    if (user === undefined) throw new ApiError(401, 'User no longer exists');
+    if (user.email_verified) throw new ApiError(409, 'Your email is already verified');
+
+    const { rows: recent } = await client.query(
+      `SELECT 1 FROM user_email_tokens
+        WHERE user_id = $1 AND purpose = 'VERIFY' AND created_at > now() - ($2::int * interval '1 millisecond')`,
+      [userId, VERIFY_RESEND_COOLDOWN_MS],
+    );
+    if (recent.length > 0) throw new ApiError(429, 'A verification email was sent less than a minute ago');
+
+    await issueEmailTokenOnClient(client, userId, 'VERIFY', user.email, user.name);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * POST /auth/me/email — start changing the sign-in email. Needs the current
+ * password (as change-password does: a borrowed session must not be enough
+ * to take the account). Nothing changes until the link sent to the NEW
+ * address is opened, which proves the user controls it.
+ *
+ * 409 when the address already has an account. That does tell a signed-in
+ * user that an address is registered — an accepted, stated trade-off: the
+ * caller is authenticated and rate limited, and the alternative (accept now,
+ * fail at confirmation) is a worse experience for the common case.
+ */
+export async function requestEmailChange(userId: string, newEmail: string, currentPassword: string): Promise<void> {
+  const email = newEmail.toLowerCase();
+  const { rows } = await pool.query<{ password: string; email: string; name: string | null }>(
+    'SELECT password, email, name FROM users WHERE id = $1',
+    [userId],
+  );
+  const user = rows[0];
+  if (user === undefined) throw new ApiError(401, 'User no longer exists');
+  if (!(await bcrypt.compare(currentPassword, user.password))) {
+    throw new ApiError(400, 'Your current password is incorrect');
+  }
+  if (user.email.toLowerCase() === email) throw new ApiError(400, 'That is already your sign-in email');
+
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+    const { rows: taken } = await client.query('SELECT 1 FROM users WHERE LOWER(email) = $1', [email]);
+    if (taken.length > 0) throw new ApiError(409, 'An account with that email already exists');
+    await issueEmailTokenOnClient(client, userId, 'CHANGE', email, user.name);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * POST /auth/confirm-email-change — public: the token sent to the new
+ * address is the proof. Swaps the sign-in email, marks it verified (opening
+ * the link proved it), and emails a notice to the OLD address so a hijack
+ * is visible to the person who loses the account.
+ *
+ * The UNIQUE (LOWER(email)) index is the real guard against the address
+ * being taken in between: a 23505 here becomes 409.
+ */
+export async function confirmEmailChange(token: string): Promise<void> {
+  const client = await pool.connect();
+  let expired = false;
+  try {
+    await beginTransaction(client);
+    const claimed = await claimEmailTokenOnClient(client, token, 'CHANGE');
+    if (claimed === null) throw new ApiError(400, 'This link is invalid or has already been used');
+    if (claimed.expired) {
+      expired = true;
+    } else {
+      const { rows } = await client.query<{ email: string; name: string | null }>(
+        'SELECT email, name FROM users WHERE id = $1 FOR UPDATE',
+        [claimed.userId],
+      );
+      const old = rows[0];
+      if (old === undefined) throw new ApiError(400, 'This link is invalid or has already been used');
+      try {
+        await client.query('UPDATE users SET email = $2, email_verified = true WHERE id = $1', [
+          claimed.userId,
+          claimed.email,
+        ]);
+      } catch (err) {
+        // The whole transaction rolls back, token claim included, so the
+        // link still reports this same 409 if opened again.
+        if (isUniqueViolation(err)) throw new ApiError(409, 'That email address now belongs to another account');
+        throw err;
+      }
+      // Pending verification links were for the old address.
+      await client.query("DELETE FROM user_email_tokens WHERE user_id = $1 AND purpose = 'VERIFY'", [claimed.userId]);
+      await enqueueEmailOnClient(client, {
+        orgId: null,
+        to: old.email,
+        toName: old.name,
+        template: 'email_changed_notice',
+        data: { newEmail: claimed.email },
+      });
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+  if (expired) throw new ApiError(400, 'This link has expired — start the change again from Account settings');
+}
+
 /* ----------------------------------------------------------- password reset */
 
 /**
@@ -818,28 +1036,36 @@ export async function revokeOtherSessions(
  * works. The token itself is 256 random bits; only its SHA-256 is stored,
  * exactly as refresh tokens are (utils/jwt.ts's hashRefreshToken).
  *
- * **Delivery is a log line, not an email** — there is no mail transport in
- * this codebase. Outside production the link is logged at `info` so a
- * developer can use it; in production only the fact of the request is logged.
- * A real mailer would be a queued job written in this same transaction
- * (rule 5: no follow-up work after COMMIT), not a call made here.
+ * **Delivery (Phase 38b)** is an email-outbox row written in this same
+ * transaction (rule 5: no follow-up work after COMMIT); the worker's
+ * `email-drain` sends it through MAIL_TRANSPORT.
  */
 export async function requestPasswordReset(email: string): Promise<void> {
   const token = randomBytes(32).toString('base64url');
   const client = await pool.connect();
-  let userId: string | null = null;
 
   try {
     await beginTransaction(client);
-    const { rows } = await client.query<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [email]);
-    userId = rows[0]?.id ?? null;
-    if (userId !== null) {
-      await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+    const { rows } = await client.query<{ id: string; email: string; name: string | null }>(
+      'SELECT id, email, name FROM users WHERE LOWER(email) = LOWER($1)',
+      [email],
+    );
+    const user = rows[0];
+    if (user !== undefined) {
+      await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [user.id]);
       await client.query('INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)', [
-        userId,
+        user.id,
         hashRefreshToken(token),
         new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS),
       ]);
+      // Phase 38b — delivered through the email outbox, on this transaction.
+      await enqueueEmailOnClient(client, {
+        orgId: null,
+        to: user.email,
+        toName: user.name,
+        template: 'password_reset',
+        link: frontendUrl(`/reset-password?token=${token}`),
+      });
     }
     await client.query('COMMIT');
   } catch (err) {
@@ -847,14 +1073,6 @@ export async function requestPasswordReset(email: string): Promise<void> {
     throw err;
   } finally {
     client.release();
-  }
-
-  if (userId === null) return;
-  if (env.isProduction) {
-    logger.warn({ userId }, 'password reset requested, but no mail transport is configured to deliver it');
-  } else {
-    const resetUrl = `${new URL(env.FRONTEND_URL).origin}/reset-password?token=${token}`;
-    logger.info({ userId, resetUrl }, 'password reset link (development only — no mail transport)');
   }
 }
 

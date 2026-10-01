@@ -4,8 +4,9 @@ import { pool } from '../db/connect.js';
 import { withTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { hashRefreshToken } from '../utils/jwt.js';
-import { logger } from '../utils/logger.js';
 import { env } from '../config/env.js';
+import { enqueueEmailOnClient } from './mail/emailOutboxService.js';
+import { notifyInvitationAcceptedOnClient } from './mail/notificationService.js';
 import { INVITATION_TTL_MS } from '../config/constants.js';
 import { isRole, type Role } from '../types/auth.js';
 import {
@@ -20,7 +21,8 @@ import {
  * § Invitations.
  *
  * An invitation names an email and a role. Its token is a bearer credential
- * delivered as a link the inviter copies (there is no mail transport), so
+ * delivered by email (Phase 38b, through the outbox) and also shown once to
+ * the inviter as a fallback link, so
  * only its SHA-256 is stored — the same treatment refresh and password-reset
  * tokens get. Accepting requires **both** the token and a signed-in account
  * whose email matches: emails are not verified in this codebase, so matching
@@ -137,6 +139,26 @@ export async function createInvitation(
       );
       const id = rows[0]?.id;
       if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
+
+      // Phase 38b — the invitation email, on this same transaction: if the
+      // insert rolls back, no email about it can exist (rule 5).
+      const { rows: ctxRows } = await client.query<{ org_name: string; inviter_name: string }>(
+        `SELECT o.name AS org_name, COALESCE(u.name, u.email) AS inviter_name
+           FROM organizations o, users u
+          WHERE o.id = $1 AND u.id = $2`,
+        [orgId, inviter.id],
+      );
+      await enqueueEmailOnClient(client, {
+        orgId,
+        to: email,
+        template: 'invitation',
+        data: {
+          organizationName: ctxRows[0]?.org_name ?? '',
+          inviterName: ctxRows[0]?.inviter_name ?? 'Someone',
+          roleLabel: input.role,
+        },
+        link: acceptUrlFor(token),
+      });
       return loadInvitation(client, orgId, id);
     } catch (err) {
       if (typeof err === 'object' && err !== null && 'code' in err && err.code === PG_UNIQUE_VIOLATION) {
@@ -146,13 +168,10 @@ export async function createInvitation(
     }
   });
 
-  const acceptUrl = acceptUrlFor(token);
-  // No mail transport (the same position as password reset): the inviter is
-  // shown the link once. Outside production it is also logged for developers.
-  if (!env.isProduction) {
-    logger.info({ orgId, invitationId: invitation.id, acceptUrl }, 'organization invitation link (development only)');
-  }
-  return { invitation, acceptUrl };
+  // Phase 38b — the invitation is emailed (above); the link is still
+  // returned this once, as a fallback the inviter can copy if the email
+  // does not arrive.
+  return { invitation, acceptUrl: acceptUrlFor(token) };
 }
 
 async function loadInvitation(q: Queryable, orgId: string, id: string): Promise<Invitation> {
@@ -262,8 +281,8 @@ export async function acceptInvitationOnClient(
   token: string,
   user: { id: string; email: string },
 ): Promise<{ orgId: string; role: Role }> {
-  const { rows } = await client.query<InvitationRow>(
-    `SELECT id, org_id, email, role, expires_at, accepted_at, revoked_at, created_at
+  const { rows } = await client.query<InvitationRow & { invited_by: string | null }>(
+    `SELECT id, org_id, email, role, expires_at, accepted_at, revoked_at, created_at, invited_by
        FROM organization_invitations
       WHERE token_hash = $1
       FOR UPDATE`,
@@ -296,5 +315,12 @@ export async function acceptInvitationOnClient(
     'UPDATE organization_invitations SET accepted_at = now(), accepted_by = $3 WHERE org_id = $1 AND id = $2',
     [row.org_id, row.id, user.id],
   );
+
+  // Phase 38b — tell the inviter, on this transaction.
+  const { rows: memberRows } = await client.query<{ name: string | null }>('SELECT name FROM users WHERE id = $1', [user.id]);
+  await notifyInvitationAcceptedOnClient(client, row.org_id, row.invited_by, {
+    name: memberRows[0]?.name ?? null,
+    email: user.email,
+  });
   return { orgId: row.org_id, role };
 }

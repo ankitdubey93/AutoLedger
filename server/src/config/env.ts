@@ -193,6 +193,19 @@ const parsed = {
   // (utils/secretBox.ts) — NOT a JWT secret (rule 11), a separate concern.
   INTEGRATION_ENCRYPTION_KEY: optional('INTEGRATION_ENCRYPTION_KEY', ''),
 
+  // Phase 38b — outbound email. `log` writes each email to the log (no link
+  // in production); `mailpit` posts to a local Mailpit container's HTTP send
+  // API (docker compose's `mailpit` service, inbox at :8025); `brevo` sends
+  // for real through Brevo's transactional API (free: 300 emails/day). No
+  // SDK in either case — plain fetch, as Gemini and Drive are called.
+  MAIL_TRANSPORT: oneOf('MAIL_TRANSPORT', ['log', 'mailpit', 'brevo'] as const, 'log'),
+  BREVO_API_KEY: optional('BREVO_API_KEY', ''),
+  // The From address. With Brevo it must be a sender verified in your Brevo
+  // account (Senders, Domains & Dedicated IPs → Senders).
+  MAIL_FROM_EMAIL: optional('MAIL_FROM_EMAIL', 'no-reply@autoledger.local').toLowerCase(),
+  MAIL_FROM_NAME: optional('MAIL_FROM_NAME', 'AutoLedger'),
+  MAILPIT_URL: optional('MAILPIT_URL', 'http://localhost:8025'),
+
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),
@@ -209,6 +222,22 @@ if (
   problems.push(
     'INTEGRATION_ENCRYPTION_KEY must be 64 hex characters (32 bytes). ' +
       'Generate one with: openssl rand -hex 32',
+  );
+}
+
+// Phase 38b — a real transport needs its credentials at boot, not at the
+// first send hours later. Production also needs the encryption key: the
+// outbox holds token-bearing links (reset, invitation) until they are sent,
+// and they must not sit there in plaintext.
+if (parsed.MAIL_TRANSPORT === 'brevo') {
+  if (parsed.BREVO_API_KEY === '') problems.push('MAIL_TRANSPORT=brevo requires BREVO_API_KEY.');
+  if (parsed.MAIL_FROM_EMAIL === 'no-reply@autoledger.local') {
+    problems.push('MAIL_TRANSPORT=brevo requires MAIL_FROM_EMAIL — a sender verified in your Brevo account.');
+  }
+}
+if (parsed.NODE_ENV === 'production' && parsed.MAIL_TRANSPORT !== 'log' && parsed.INTEGRATION_ENCRYPTION_KEY === '') {
+  problems.push(
+    'A real MAIL_TRANSPORT in production requires INTEGRATION_ENCRYPTION_KEY, which encrypts emailed links at rest.',
   );
 }
 

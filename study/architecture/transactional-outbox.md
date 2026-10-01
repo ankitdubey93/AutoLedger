@@ -3,8 +3,8 @@
 > You cannot atomically commit a Postgres transaction and send an HTTP request — so instead you atomically commit the *fact that a request needs sending*, and let a separate process do the sending, as many times as it takes.
 
 **Category:** Architecture
-**Introduced by:** Phase 7 — `outbox_events`, `outboxService.emitEvent`, the outbox drain handler
-**Verified against:** PostgreSQL 16, BullMQ ^6.3.4
+**Introduced by:** Phase 7 — `outbox_events`, `outboxService.emitEvent`, the outbox drain handler; extended Phase 38b — the email outbox (`email_outbox`, `services/mail/`)
+**Verified against:** PostgreSQL 16, BullMQ ^6.3.4; Mailpit v1.29 (send API, live); Brevo transactional API docs as of 2026-10-01 (not exercised live)
 
 ---
 
@@ -83,6 +83,24 @@ Any `PENDING` row untouched for longer than `DELIVERY_REENQUEUE_AFTER_MS` (60s) 
 
 This is the honest shape of **at-least-once** delivery: the durable record (the `PENDING` row) is the source of truth, and everything downstream — the Redis job, the actual HTTP send — is disposable and can be regenerated from it. Exactly-once delivery across a network boundary is not achievable without a distributed transaction the receiver also participates in, which is why the receiver is expected to dedupe on `deliveryId` rather than the sender promising something it structurally cannot guarantee.
 
+### A second outbox: email (Phase 38b), and what changes when the side effect is a person's inbox
+
+The same dual-write problem returned with email. "Insert the invitation, then call Brevo" has the same two failure orders as "commit the journal entry, then enqueue the webhook". The send succeeds and the insert rolls back, so someone is invited to nothing. Or the insert commits and the process dies before the send, so the invitation exists and nobody hears about it. The fix has the same shape: `enqueueEmailOnClient` writes an `email_outbox` row **on the producer's transaction client**, alongside the reset token, the invitation, the submitted bill or the accepted invitation. A test makes an invitation fail (the address is already a member, so 409) and asserts there is no outbox row: the rollback took the email with it.
+
+Three things are deliberately different from the webhook outbox:
+
+- **One table, no fan-out, no Redis hop per message.** Webhooks fan out (one event, N endpoints) and then enqueue a BullMQ job per delivery. Email has exactly one recipient per row, so the row itself is the unit of work. The repeating `email-drain` job (every 5 seconds, `attempts: 1`) claims rows directly with `UPDATE … WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING …`. That single statement is its own transaction, so the claim commits **before** any network call. **Retries live on the row** (`attempts`, `next_attempt_at` with exponential backoff), not in BullMQ, so a retry survives a Redis flush and is visible in SQL.
+- **Sending happens outside any transaction.** Holding a transaction (and a pooled connection) open across an HTTPS call to an email provider is the classic way to exhaust a pool when the provider is slow. The claim moves the row to `SENDING` and stamps `claimed_at`. The worker sends, then writes the outcome in a second statement guarded by `AND status = 'SENDING'`. If the worker dies between the provider accepting the message and that outcome write, the row stays `SENDING`. The next pass **reclaims** any `SENDING` row older than five minutes back to `PENDING`, and it is sent again. That is the at-least-once cost, stated plainly: a crash in that window means a duplicate email, never a lost one.
+- **Not every failure deserves a retry.** The transport throws `MailSendError` with a `permanent` flag. A 4xx from the provider (other than 408 and 429) means the request itself is wrong: an unverified sender, a bad API key, a rejected address. Retrying cannot fix that, and on a free plan capped at 300 emails a day it only burns quota. Those go straight to `FAILED`. 408, 429, 5xx and network errors back off and retry, up to five attempts.
+
+**The payload problem webhooks didn't have.** A webhook payload is non-secret business data. An invitation or password-reset email carries a **bearer token**, and the token tables store only its SHA-256, so the outbox is the one place the raw link exists. Two mitigations apply:
+- The link is AES-256-GCM encrypted (`utils/secretBox.ts`) whenever `INTEGRATION_ENCRYPTION_KEY` is set, and the server refuses to boot in production with a real transport and no key.
+- It is **nulled when the row finishes**, enforced by a CHECK (`status NOT IN ('SENT','FAILED') OR secret_link IS NULL`), so the guarantee doesn't depend on every code path remembering.
+
+The row is also kept out of the audit trail for the same reason `outbox_events` is: the trail is append-only and would copy the link forever.
+
+**Why no SDK and no SMTP.** Brevo's transactional API is one `POST /v3/smtp/email` with an `api-key` header and a `201 { messageId }` response, so it is a `fetch` call. That matches how the Gemini and Drive clients are written, and adds nothing to `package.json` (rule 14). The local-development transport posts to a Mailpit container's HTTP send API, so there is no SMTP client anywhere in the codebase. That transport was verified against a live `axllent/mailpit:v1.29` container. The Brevo transport was verified only against its documentation and a stubbed `fetch`, because no API key was available here.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -127,6 +145,15 @@ A: The row is safely committed — Postgres already has it, durable. The enqueue
 
 **Q: Why is `outbox_events` excluded from the audit trail, when webhook_endpoints is included?**
 A: The audit trail's value is recording who changed a piece of configuration or a financial fact and when — `webhook_endpoints` is exactly that: a human decided to route financial data to a new URL, which is a compliance-relevant action. `outbox_events` and `webhook_deliveries` are high-volume derived machinery, not facts anyone configured — one row is created and updated automatically per event per subscriber, with no meaningful "who did this." Auditing them would multiply the audit table's size for rows that add no investigative value beyond what the *audited* source event (the invoice, the bill) already carries.
+
+**Q: You send emails from an outbox. Why not just call the email provider right after the transaction commits?**
+A: Because the process can die between the commit and the call. The invitation would exist with no email, and nothing would ever notice. Calling it before the commit is worse: the email goes out and the transaction can still roll back. Writing an outbox row on the same transaction makes the email exactly as durable as the change it describes. A worker drains the table, so a commit guarantees an attempt and a rollback guarantees nothing was sent. The cost is a few seconds of latency and at-least-once delivery.
+
+**Q: How do you stop the drain from holding database connections while it waits on the provider?**
+A: The claim is a single statement: `UPDATE … SET status = 'SENDING', claimed_at = now() WHERE id IN (SELECT … FOR UPDATE SKIP LOCKED) RETURNING …`. It commits on its own, before any network call. Then each row is sent with no transaction open, and the outcome is written in a separate guarded update. A crash mid-send leaves a `SENDING` row with an old `claimed_at`, which the next pass puts back to `PENDING`. So the price of never holding a connection across HTTP is the occasional duplicate email after a crash.
+
+**Q: A password-reset link is a credential. How do you keep it safe while it sits in a queue table?**
+A: The token tables store only a hash, so the outbox row is the one place the raw link exists. I encrypt it with AES-256-GCM when a key is configured (and production refuses to boot without one if it is really sending mail), keep the table out of the append-only audit trail, and null the link the moment the row is SENT or FAILED. A CHECK constraint enforces that last part, so a finished row physically cannot carry a link. The window during which the link exists at rest is seconds.
 
 ## Follow-ups they'll dig into
 

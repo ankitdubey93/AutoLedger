@@ -46,6 +46,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **36 ✅ done** | Accounting — CSV import throughout: one importer registry with column mapping, templates and a step wizard (36a), products and tracked items with opening stock (36b), manual journals (36c), invoices and bills with draft/post and conversion mode (36d); migration `078` — see [Phase 36a, as delivered](#phase-36a-as-delivered) and the steps after it | Needs 9b, 24, 32 |
 | **37 ✅ done** | Platform — several organizations per user: add an organization (its own setup wizard), switch from a top-bar menu, login opens the last-used one, leave; invitations by email + role through a copyable link (accepting needs the link and the matching signed-in email), registering from an invite, member role changes and removal with an "at least one OWNER" invariant; migration `079` — see [Phase 37, as delivered](#phase-37-as-delivered) below | Needs 1, 3.5, 33 |
 | **38a ✅ done** | Platform — user settings vs organization settings: `/account` becomes user-only (profile, change password, sessions with sign-out-others, your organizations), organization profile and members move under `/settings`; session id across rotation and revocation tombstones; migrations `080`, `081` — see [Phase 38a, as delivered](#phase-38a-as-delivered) below. 38b (email via Brevo) and 38c (custom roles and permissions) follow | Needs 37 |
+| **38b ✅ done** | Platform — real email through Brevo (free, `fetch`, no SDK) via a transactional outbox drained by the worker: invitations, password reset, email verification, change of sign-in email, organization sender name and reply-to, and per-user notification preferences (bill awaiting approval, invitation accepted); Mailpit for local inboxes; migration `082` — see [Phase 38b, as delivered](#phase-38b-as-delivered) below | Needs 7, 37, 38a |
 
 **Phase 18 is numbered after 17 but applied before it** — 17 stays deferred; migration numbers and phase numbers both simply follow build order from here, not a fixed sequence decided in advance. This is the first phase of the suite's second stage — showcase, integrate, guide, automate — laid out in full in the strategic plan that opened it. Phase 19 delivered the AP-Flow slice of that plan's "multi-provider AI layer" theme; Phase 19.1 (AI usage metering), 19.2 (Google Drive intake), 19.3 (that intake promoted to the platform) and 19.4 (duplicate-content capture, a bug found through 19.3's own real-world use) delivered the rest of the "automations" theme's AP-Flow slice, as half-steps rather than a renumbering. Phases 20–23 (a verification sweep, app enablement and cross-app connections, an in-app help center, and the remainder of the automations theme beyond AP-Flow) **keep their reserved names and stay unstarted** — Phase 24 is a direct feature request (payment terms, an item catalogue, a party importer, UI corrections), outside that strategic sequence, and takes the next free number rather than colliding with 20–23, the same reasoning that let Phase 18 jump ahead of 17.
 
@@ -1300,6 +1301,64 @@ A direct feature request (2026-10-01): "two settings — one user-level, one org
 **Deliberately not built:** a device name the user can edit, geolocation from IP, and a sweep of expired tombstones (they expire with the row and are never read once past `expires_at`).
 
 **Study notes:** extended [jwt-and-refresh-rotation.md](../study/security-auth/jwt-and-refresh-rotation.md): a session id across rotation, revocation tombstones vs reuse detection, and why the change-password wrong-password answer is 400.
+
+## Phase 38b, as delivered
+
+Step two of Phase 38 (2026-10-01). The user chose **Brevo** (free, 300 emails/day) and all four email features: verification, change of login email, organization sender settings, and notification preferences.
+
+**Server.**
+- Migration `082` (`email_outbox`, `user_email_tokens`, `organization_email_settings`, `user_notification_preferences`); see [schema.md](schema.md#phase-38b--email-platform--applied).
+- `services/mail/`:
+  - `transports.ts`: `log`, `mailpit` and `brevo`, all `fetch`, with a `MailSendError.permanent` flag that decides retries.
+  - `templates.ts`: seven pure functions, all data HTML-escaped.
+  - `emailOutboxService.ts`: `enqueueEmailOnClient` and `drainEmailOutbox`.
+  - `notificationService.ts`: preferences, plus the two notification producers.
+  - `organizationEmailSettingsService.ts`.
+- A new `email-drain` repeating job runs every 5s with `attempts: 1`; retries live on the rows.
+- Producers, each on its own transaction:
+  - `requestPasswordReset`: the logged link is gone.
+  - `createInvitation`: emailed, with `acceptUrl` still returned once as a fallback.
+  - `register`: a verification email.
+  - `acceptInvitationOnClient`: notifies the inviter.
+  - `submitBill`: notifies approvers; it gained a `submittedBy` argument.
+- New routes:
+  - `POST /auth/verify-email`, `/verify-email/resend` (one-minute cooldown), `/me/email` (needs the current password; the link goes to the new address) and `/confirm-email-change` (notice to the old address).
+  - `GET`/`PUT /auth/me/notifications`.
+  - `GET`/`PATCH /organizations/email-settings`.
+- Env: `MAIL_TRANSPORT`, `BREVO_API_KEY`, `MAIL_FROM_EMAIL`, `MAIL_FROM_NAME`, `MAILPIT_URL`. Brevo without a key or a verified sender fails at boot. Production with a real transport needs `INTEGRATION_ENCRYPTION_KEY`. Pinned to `log` under test.
+- `docker-compose.yml` gains an opt-in `mailpit` service (`--profile mail`).
+
+**Verified for real.** The Mailpit transport was run against a live `axllent/mailpit:v1.29` container: sender name, recipient and reply-to arrived as sent. The Brevo request shape matches the documentation as of 2026-10-01 and is covered by a stubbed-`fetch` test. **It was not exercised against Brevo itself** (no API key on this machine).
+
+**Client.**
+- `/verify-email` and `/confirm-email-change` link pages (`EmailLinkPage`). The token is spent by a button, never on page load: StrictMode runs effects twice, and mail scanners pre-open links.
+- Account → Profile shows verification status with Resend, and a Change email form.
+- Account → Notifications toggles.
+- Organization settings → Email (`/settings/email`) shows which transport is live.
+- A dismissible "verify your email" banner.
+- The invite form says the invitation was emailed, with the link as a fallback.
+
+**Tests.**
+- Server: 22 new (`platform/email.test.ts`):
+  - The drain: sent and link cleared, retry and backoff, permanent failure, the last attempt, reclaiming a stale claim, two concurrent drains never double-sending, and the CHECK refusing a finished row with a link.
+  - The Brevo and Mailpit request shapes and retry classes, and HTML escaping.
+  - Rollback writes no email.
+  - Verification, the resend cooldown, the email-change round trip, and a stale verification link.
+  - Email settings with cross-tenant isolation and the role gate.
+  - Notifications with an opt-out.
+- `passwordReset.test.ts` now reads the token from the outbox (new helper `__tests__/helpers/email.ts`).
+- Client: 8 new.
+- **1932 server tests passing (2 skipped) + 547 client tests passing**; typecheck and lint clean.
+
+**Deliberately not built:**
+- Bounce/complaint webhooks from Brevo.
+- An outbox retention sweep.
+- Per-organization notification preferences.
+- Requiring a verified email to accept invitations.
+- Emailing invoices to customers (a separate feature).
+- Encrypting links when no key is configured outside production (development keeps them in plaintext until sent).
+
+**Study notes:** extended [transactional-outbox.md](../study/architecture/transactional-outbox.md) (an existing note on the same pattern, so not a new one): claim-then-send outside a transaction, retries on the row, permanent vs retryable errors, and a bearer link encrypted at rest and cleared by a CHECK.
 
 ## Cross-cutting infrastructure
 

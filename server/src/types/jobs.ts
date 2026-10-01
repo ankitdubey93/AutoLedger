@@ -12,6 +12,7 @@ export const QUEUE_NAMES = [
   'integration-drive-sync',
   'recurring-sweep',
   'recurring-generate',
+  'email-drain',
   'dead-letter',
 ] as const;
 
@@ -37,6 +38,7 @@ export interface JobPayloads {
   'integration-drive-sync': { orgId: string; folderId: string };
   'recurring-sweep': Record<string, never>;
   'recurring-generate': { orgId: string; scheduleId: string };
+  'email-drain': Record<string, never>;
   'dead-letter': {
     queue: QueueName;
     jobId: string;

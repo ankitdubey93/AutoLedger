@@ -55,6 +55,11 @@ export default defineConfig({
       CAPTURE_AI_PROVIDER: 'anthropic',
       ANTHROPIC_API_KEY: '',
       GEMINI_API_KEY: '',
+      // Phase 38b — the same pin for email: a developer's .env may say
+      // MAIL_TRANSPORT=brevo with a live key. The suite must never send real
+      // mail; drain tests inject their own transport.
+      MAIL_TRANSPORT: 'log',
+      BREVO_API_KEY: '',
       // Phase 19.2 — the identical pin, same reason: a developer's local
       // .env may carry real Google OAuth credentials and encryption key
       // (needed to run Drive intake locally). Every Drive test that wants a

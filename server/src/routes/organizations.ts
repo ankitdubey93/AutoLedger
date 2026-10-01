@@ -66,4 +66,9 @@ router.delete(
   organizationController.revokeInvitation,
 );
 
+// Phase 38b — how email sent on this organization's behalf presents itself.
+// Reading is administrative like the rest of organization configuration.
+router.get('/email-settings', authenticate, requireRole('OWNER', 'ADMIN'), organizationController.getEmailSettings);
+router.patch('/email-settings', authenticate, requireRole('OWNER', 'ADMIN'), organizationController.updateEmailSettings);
+
 export default router;

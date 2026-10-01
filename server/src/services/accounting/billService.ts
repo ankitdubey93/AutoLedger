@@ -23,6 +23,7 @@ import {
   type BillStatus,
 } from '../../types/accounting.js';
 import { MODULE_TAGS } from '../../config/modules.js';
+import { notifyBillAwaitingApprovalOnClient } from '../mail/notificationService.js';
 
 /**
  * Accounting bills — Phase 3.9's AP source document.
@@ -973,7 +974,11 @@ export async function deleteBill(orgId: string, id: string): Promise<void> {
   throw new ApiError(409, 'Only a draft or in-review bill can be deleted');
 }
 
-export async function submitBill(orgId: string, id: string): Promise<Bill> {
+/**
+ * `submittedBy` (Phase 38b) is the caller, so the approval-request email
+ * goes to every other approver and not back to them.
+ */
+export async function submitBill(orgId: string, id: string, submittedBy: string | null = null): Promise<Bill> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
@@ -995,6 +1000,10 @@ export async function submitBill(orgId: string, id: string): Promise<Bill> {
       `UPDATE bills SET status = 'AWAITING_APPROVAL', submitted_at = now() WHERE id = $1 AND org_id = $2`,
       [id, orgId],
     );
+
+    // Phase 38b — ask the approvers, on this transaction (platform email
+    // outbox; rule 5).
+    await notifyBillAwaitingApprovalOnClient(client, orgId, id, submittedBy);
 
     await client.query('COMMIT');
     return await getBillById(orgId, id);

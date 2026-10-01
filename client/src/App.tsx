@@ -11,6 +11,7 @@ import RegisterPage from './Pages/auth/RegisterPage';
 import ForgotPasswordPage from './Pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './Pages/auth/ResetPasswordPage';
 import InvitePage from './Pages/auth/InvitePage';
+import EmailLinkPage from './Pages/auth/EmailLinkPage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
@@ -45,6 +46,9 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             {/* Phase 37 — public: the invitee may not have an account yet. */}
             <Route path="/invite/:token" element={<InvitePage />} />
+            {/* Phase 38b — emailed links; public, the token is the proof. */}
+            <Route path="/verify-email" element={<EmailLinkPage kind="verify" />} />
+            <Route path="/confirm-email-change" element={<EmailLinkPage kind="change" />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>

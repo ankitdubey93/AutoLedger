@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { SUPPORTED_CURRENCIES } from '../config/currencies.js';
 import { ROLES } from '../types/auth.js';
+import { NOTIFICATION_EVENTS } from '../types/email.js';
 
 /**
  * Request schema for editing the active organization. Platform layer,
@@ -32,4 +33,20 @@ export const createInvitationSchema = z.object({
 /** Phase 37 — PATCH /organizations/members/:userId. */
 export const updateMemberRoleSchema = z.object({
   role: z.enum(ROLES),
+});
+
+/** Phase 38b — PATCH /organizations/email-settings. `null` resets to the default. */
+export const updateEmailSettingsSchema = z
+  .object({
+    senderName: z.string().trim().min(1).max(100).nullable().optional(),
+    replyTo: z.string().trim().toLowerCase().email().max(254).nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });
+
+/** Phase 38b — PUT /auth/me/notifications. */
+export const notificationPreferencesSchema = z.object({
+  preferences: z
+    .array(z.object({ event: z.enum(NOTIFICATION_EVENTS), enabled: z.boolean() }))
+    .min(1)
+    .max(NOTIFICATION_EVENTS.length),
 });

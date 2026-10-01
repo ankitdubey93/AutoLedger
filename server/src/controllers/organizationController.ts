@@ -1,8 +1,10 @@
 import type { RequestHandler } from 'express';
 import * as invitationService from '../services/invitationService.js';
+import * as emailSettingsService from '../services/mail/organizationEmailSettingsService.js';
 import * as organizationService from '../services/organizationService.js';
 import {
   createInvitationSchema,
+  updateEmailSettingsSchema,
   updateMemberRoleSchema,
   updateOrganizationSchema,
 } from '../schemas/organizationSchema.js';
@@ -85,4 +87,19 @@ export const revokeInvitation: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   await invitationService.revokeInvitation(user.orgId, uuidParam(req, 'id'));
   res.json({ success: true });
+};
+
+/** GET /organizations/email-settings — Phase 38b. */
+export const getEmailSettings: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const settings = await emailSettingsService.getEmailSettings(user.orgId);
+  res.json({ success: true, settings });
+};
+
+/** PATCH /organizations/email-settings — Phase 38b. */
+export const updateEmailSettings: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(updateEmailSettingsSchema, req.body);
+  const settings = await emailSettingsService.updateEmailSettings(user.orgId, input);
+  res.json({ success: true, settings });
 };

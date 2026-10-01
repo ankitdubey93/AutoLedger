@@ -2,14 +2,14 @@ import request from 'supertest';
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../app.js';
 import { closePool, pool } from '../db/connect.js';
-import { logger } from '../utils/logger.js';
 import { createUserWithOrg, loginAgent, resetTables } from './helpers/factories.js';
+import { latestEmailToken } from './helpers/email.js';
 
 /**
  * Forgot / reset password (2026-09-29), end to end through HTTP and a real
- * database. There is no mail transport: outside production the link is
- * logged, so these tests read the raw token from a spy on the logger — the
- * only place it ever exists, since the table stores a hash.
+ * database. Since Phase 38b the link is emailed through the outbox, so these
+ * tests read the raw token from the outbox row — the only place it exists,
+ * since the token table stores a hash.
  */
 
 const app = createApp();
@@ -20,16 +20,11 @@ beforeEach(resetTables);
 afterEach(() => vi.restoreAllMocks());
 afterAll(closePool);
 
-/** Requests a reset for `email` and returns the token from the logged link. */
+/** Requests a reset for `email` and returns the token from the emailed link (Phase 38b: the outbox). */
 async function requestToken(email: string): Promise<string> {
-  const info = vi.spyOn(logger, 'info');
   const res = await request(app).post(FORGOT).send({ email });
   expect(res.status).toBe(202);
-  const call = info.mock.calls.find(([obj]) => typeof obj === 'object' && obj !== null && 'resetUrl' in obj);
-  if (call === undefined) throw new Error('no reset link was logged');
-  const url = new URL((call[0] as { resetUrl: string }).resetUrl);
-  info.mockRestore();
-  return url.searchParams.get('token') ?? '';
+  return latestEmailToken(email, 'password_reset');
 }
 
 describe('POST /auth/forgot-password', () => {

@@ -273,6 +273,67 @@ export function revokeOtherSessions(): Promise<{ success: boolean; signedOutSess
   return apiFetch('/auth/sessions/revoke-others', { method: 'POST' });
 }
 
+/* ------------------------------------------------ Phase 38b — email */
+
+/** POST /auth/verify-email — public; the token is the proof. */
+export function verifyEmail(token: string): Promise<{ success: boolean }> {
+  return apiFetch('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) }, NO_AUTO_REFRESH);
+}
+
+/** POST /auth/verify-email/resend — 429 within a minute of the last one. */
+export function resendVerification(): Promise<{ success: boolean }> {
+  return apiFetch('/auth/verify-email/resend', { method: 'POST' });
+}
+
+/** POST /auth/me/email — sends a confirmation link to the new address; nothing changes until it is opened. */
+export function requestEmailChange(input: { newEmail: string; currentPassword: string }): Promise<{ success: boolean }> {
+  return apiFetch('/auth/me/email', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** POST /auth/confirm-email-change — public; the token is the proof. */
+export function confirmEmailChange(token: string): Promise<{ success: boolean }> {
+  return apiFetch('/auth/confirm-email-change', { method: 'POST', body: JSON.stringify({ token }) }, NO_AUTO_REFRESH);
+}
+
+export type NotificationEvent = 'bill_awaiting_approval' | 'invitation_accepted';
+
+export interface NotificationPreference {
+  event: NotificationEvent;
+  enabled: boolean;
+}
+
+/** GET /auth/me/notifications */
+export function getNotificationPreferences(): Promise<{ success: boolean; preferences: NotificationPreference[] }> {
+  return apiFetch('/auth/me/notifications');
+}
+
+/** PUT /auth/me/notifications */
+export function setNotificationPreferences(
+  preferences: NotificationPreference[],
+): Promise<{ success: boolean; preferences: NotificationPreference[] }> {
+  return apiFetch('/auth/me/notifications', { method: 'PUT', body: JSON.stringify({ preferences }) });
+}
+
+export interface OrganizationEmailSettings {
+  senderName: string | null;
+  replyTo: string | null;
+  fromEmail: string;
+  transport: 'log' | 'mailpit' | 'brevo';
+}
+
+/** GET /organizations/email-settings — OWNER and ADMIN. */
+export function getEmailSettings(): Promise<{ success: boolean; settings: OrganizationEmailSettings }> {
+  return apiFetch('/organizations/email-settings');
+}
+
+/** PATCH /organizations/email-settings — `null` resets a field to the default. */
+export function updateEmailSettings(input: {
+  senderName?: string | null;
+  replyTo?: string | null;
+}): Promise<{ success: boolean; settings: OrganizationEmailSettings }> {
+  return apiFetch('/organizations/email-settings', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
 /* ---------------------------------------------- Phase 37 — organizations */
 
 /**

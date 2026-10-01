@@ -107,7 +107,7 @@ export const submit: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const id = requireParam(req, 'id');
   parseBody(submitBillSchema, req.body ?? {});
-  const bill = await billService.submitBill(user.orgId, id);
+  const bill = await billService.submitBill(user.orgId, id, user.id);
   res.json({ success: true, bill });
 };
 

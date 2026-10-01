@@ -55,6 +55,24 @@ export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
  */
 export const MAX_OWNED_ORGANIZATIONS = 25;
 
+/** Phase 38b — how often the worker drains `email_outbox`. */
+export const EMAIL_DRAIN_INTERVAL_MS = 5_000;
+/** Phase 38b — rows claimed per drain pass. Small: a free Brevo plan allows 300/day. */
+export const EMAIL_DRAIN_BATCH = 20;
+/** Phase 38b — sends attempted before a row is marked FAILED. */
+export const EMAIL_MAX_ATTEMPTS = 5;
+/** Phase 38b — first retry delay; doubles per attempt, capped at 30 minutes. */
+export const EMAIL_RETRY_BASE_MS = 30_000;
+/**
+ * Phase 38b — a SENDING row older than this was claimed by a worker that
+ * died mid-send; it goes back to PENDING (so delivery is at-least-once).
+ */
+export const EMAIL_STALE_CLAIM_MS = 5 * 60 * 1000;
+/** Phase 38b — verification and change-of-email links. */
+export const EMAIL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+/** Phase 38b — minimum gap between two verification emails for one user. */
+export const VERIFY_RESEND_COOLDOWN_MS = 60 * 1000;
+
 /**
  * Cookies are keyed by name + domain + path and **ignore the port**, so every
  * app on localhost shares one jar. A generic `access_token` would be clobbered

@@ -97,6 +97,12 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 | GET | `/sessions` | access cookie | Phase 38a. `{ sessions: [{ id, startedAt, lastActiveAt, userAgent, ip, organizationName, current }] }` — your live, unrevoked sessions, newest activity first. `id` is the session id carried across token rotation |
 | DELETE | `/sessions/:id` | access cookie | Phase 38a. Sign one other browser out. Another user's or an unknown id is `404`; the current session is `422` (use `/logout`) |
 | POST | `/sessions/revoke-others` | access cookie | Phase 38a. Sign out everywhere except here → `{ signedOutSessions }` |
+| POST | `/verify-email` | none | Phase 38b. `{ token }` → `200`. Marks the address verified if it is still the account's address (a link minted before an email change cannot verify the new one). `400` invalid, used, expired or stale. Rate limited |
+| POST | `/verify-email/resend` | access cookie | Phase 38b. → `202`; a fresh link, the old one stops working. `409` already verified, `429` within a minute of the last one. Rate limited |
+| POST | `/me/email` | access cookie | Phase 38b. `{ newEmail, currentPassword }` → `202`. Emails a confirmation link to the **new** address; nothing changes until it is opened. `400` wrong password or same address; `409` the address has an account (a stated trade-off: a signed-in, rate-limited caller learns that an address is registered). Rate limited |
+| POST | `/confirm-email-change` | none | Phase 38b. `{ token }` → `200`. Swaps the sign-in email, marks it verified, and emails a notice to the **old** address. `409` if the address was taken in between. Rate limited |
+| GET | `/me/notifications` | access cookie | Phase 38b. `{ preferences: [{ event, enabled }] }` for `bill_awaiting_approval` and `invitation_accepted`. Per user, across every organization; no row = enabled |
+| PUT | `/me/notifications` | access cookie | Phase 38b. `{ preferences: [{ event, enabled }] }` — upserts each given event |
 
 **`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
 
@@ -105,6 +111,8 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 **`/register` and `/login` are rate limited** — 10 failed attempts per 15 minutes per IP, returning `429` in the standard error envelope. Successful logins are not counted, so a shared office NAT cannot lock colleagues out. `/refresh` and `/logout` are deliberately **not** limited: a legitimate client refreshes on a schedule, and the one moment you most want to clear cookies is the moment you must be able to.
 
 `/logout` is public on purpose: clearing cookies must work even when the access token has already expired.
+
+**Email (Phase 38b).** Invitations, password reset, verification, change-of-email and notifications are emailed. Every message is an `email_outbox` row written on the transaction of the change it describes, and the worker's `email-drain` sends it (see [architecture.md](architecture.md#email--phase-38b)). `POST /organizations/invitations` still returns `acceptUrl` once, as a fallback if the email does not arrive. Register now also sends a verification email.
 
 **Sessions and revocation (Phase 38a).** A browser's session id is minted at login and carried through every rotation, switch-org, create, accept and leave, so it stays one entry in `GET /sessions`. Revoking a session (one, all others, or by changing your password) marks its refresh row `revoked_at` instead of deleting it. A deleted row would make that browser's next refresh look like a replayed token, and reuse detection would sign out **every** session, the revoker's included. A revoked row is refused quietly on refresh (`401`, cookies cleared, other sessions untouched), and the session-moving routes refuse it too, so a revoked browser cannot use its still-valid access token to mint a new session. Its access token itself lasts up to 15 minutes, the same trade-off as logout.
 
@@ -167,6 +175,8 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | GET | `/invitations` | `OWNER`, `ADMIN` | Phase 37. Open invitations (pending, or expired and not yet closed out), newest first |
 | POST | `/invitations` | `OWNER`, `ADMIN` | Phase 37. `{ email, role }` → `201 { invitation, acceptUrl }`. **The link is returned this once** — only the token's SHA-256 is stored, and there is no mail transport (outside production it is also logged). `409` if the address is already a member or has a pending invitation; `403` for an `ADMIN` inviting an `OWNER`. Expires after 7 days |
 | DELETE | `/invitations/:id` | `OWNER`, `ADMIN` | Phase 37. Revoke. Another organization's invitation is `404`; an accepted one is `409` |
+| GET | `/email-settings` | `OWNER`, `ADMIN` | Phase 38b. `{ settings: { senderName, replyTo, fromEmail, transport } }` — how email sent for this organization presents itself. `fromEmail` is the platform's verified sender and is read-only |
+| PATCH | `/email-settings` | `OWNER`, `ADMIN` | Phase 38b. `{ senderName?, replyTo? }`; `null` resets a field to the default |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 

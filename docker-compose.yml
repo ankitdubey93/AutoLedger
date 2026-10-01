@@ -82,6 +82,19 @@ services:
       timeout: 3s
       retries: 10
 
+  # Phase 38b — a local inbox for development email. Opt-in: start it with
+  # `docker compose up -d mailpit` and set MAIL_TRANSPORT=mailpit in
+  # server/.env; every email the app sends then appears at
+  # http://localhost:8025 instead of reaching anyone. The server posts to its
+  # HTTP send API (POST /api/v1/send) — no SMTP library involved.
+  mailpit:
+    image: axllent/mailpit:v1.29
+    container_name: autodb_mailpit
+    restart: unless-stopped
+    profiles: ["mail"]
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
   # ---------------------------------------------------------------------------
   # The application itself, containerized — opt-in via the `app` profile, so
   # `docker compose up` (and ./dev.sh, which names its services) still starts

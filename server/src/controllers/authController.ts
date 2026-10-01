@@ -4,7 +4,8 @@ import { clearAuthCookies, readRefreshCookie, setAuthCookies } from '../utils/co
 import { requireUser } from '../utils/requireUser.js';
 import { requireParam } from '../utils/routeParam.js';
 import { parseBody } from '../utils/parseBody.js';
-import { createOrganizationSchema } from '../schemas/organizationSchema.js';
+import { createOrganizationSchema, notificationPreferencesSchema } from '../schemas/organizationSchema.js';
+import * as notificationService from '../services/mail/notificationService.js';
 import * as invitationService from '../services/invitationService.js';
 import { ApiError } from '../utils/apiError.js';
 import {
@@ -229,6 +230,57 @@ export const revokeOtherSessions: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const result = await authService.revokeOtherSessions(user.id, readRefreshCookie(req.cookies));
   res.json({ success: true, ...result });
+};
+
+/* ------------------------------------------------------------- Phase 38b
+ * Email address: verification, change of sign-in email, notification
+ * preferences.
+ */
+
+/** POST /auth/verify-email — `{ token }`; public, the token is the proof. */
+export const verifyEmail: RequestHandler = async (req, res) => {
+  const body = requireBodyObject(req.body);
+  await authService.verifyEmail(requireString(body, 'token', { max: 128 }));
+  res.json({ success: true });
+};
+
+/** POST /auth/verify-email/resend */
+export const resendVerification: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  await authService.resendVerification(user.id);
+  res.status(202).json({ success: true });
+};
+
+/** POST /auth/me/email — `{ newEmail, currentPassword }`; a link goes to the new address. */
+export const requestEmailChange: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const body = requireBodyObject(req.body);
+  const newEmail = requireEmail(body, 'newEmail');
+  const currentPassword = requireString(body, 'currentPassword', { max: 512 });
+  await authService.requestEmailChange(user.id, newEmail, currentPassword);
+  res.status(202).json({ success: true });
+};
+
+/** POST /auth/confirm-email-change — `{ token }`; public, the token is the proof. */
+export const confirmEmailChange: RequestHandler = async (req, res) => {
+  const body = requireBodyObject(req.body);
+  await authService.confirmEmailChange(requireString(body, 'token', { max: 128 }));
+  res.json({ success: true });
+};
+
+/** GET /auth/me/notifications */
+export const getNotificationPreferences: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const preferences = await notificationService.getPreferences(user.id);
+  res.json({ success: true, preferences });
+};
+
+/** PUT /auth/me/notifications — `{ preferences: [{ event, enabled }] }`. */
+export const setNotificationPreferences: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const { preferences } = parseBody(notificationPreferencesSchema, req.body);
+  const updated = await notificationService.setPreferences(user.id, preferences);
+  res.json({ success: true, preferences: updated });
 };
 
 /** POST /auth/logout — always succeeds, so the client can always reach a clean state. */

@@ -9,8 +9,10 @@ import { handleIntegrationDriveSweep } from './handlers/integrationDriveSweepHan
 import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandler.js';
 import { handleRecurringSweep } from './handlers/recurringSweepHandler.js';
 import { handleRecurringGenerate } from './handlers/recurringGenerateHandler.js';
+import { handleEmailDrain } from './handlers/emailDrainHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
+  EMAIL_DRAIN_INTERVAL_MS,
   INTEGRATION_DRIVE_POLL_INTERVAL_MS,
   INTEGRITY_CHECK_CRON,
   JOB_ATTEMPTS,
@@ -36,6 +38,7 @@ const HANDLERS: {
   'integration-drive-sync': handleIntegrationDriveSync,
   'recurring-sweep': handleRecurringSweep,
   'recurring-generate': handleRecurringGenerate,
+  'email-drain': handleEmailDrain,
 };
 
 let workers: Worker[] = [];
@@ -126,6 +129,15 @@ export async function startWorkers(): Promise<void> {
   // tick will re-check anyway. The generate job keeps the default retries,
   // because runDueOccurrences rethrows only unexpected errors, after a full
   // rollback.
+  // Phase 38b — the email outbox drain. attempts: 1: retries are tracked on
+  // each outbox row (attempts / next_attempt_at), so a BullMQ retry would
+  // only stack overlapping passes.
+  await queues['email-drain'].upsertJobScheduler(
+    'email-drain-tick',
+    { every: EMAIL_DRAIN_INTERVAL_MS },
+    { name: 'email-drain', data: {}, opts: { attempts: 1 } },
+  );
+
   await queues['recurring-sweep'].upsertJobScheduler(
     'recurring-sweep-tick',
     { every: RECURRING_SWEEP_INTERVAL_MS },

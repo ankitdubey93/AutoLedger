@@ -762,6 +762,22 @@ No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.m
 
 `080_platform_session_metadata.sql` and `081_platform_session_revocation.sql`, both additive and idempotent, extend `refresh_tokens` (see its entry above): a session id carried across rotation, when the session started, the browser's user agent and IP (display only), and a `revoked_at` tombstone. Two files rather than one because `080` was already applied when the revocation bug surfaced, and an applied migration is never edited (rule 13; the runner checksums every file).
 
+## Phase 38b — email (platform) — applied
+
+`082_platform_email.sql`, additive and idempotent. Four tables:
+
+- **`email_outbox`** — one row per email.
+  - Columns: `id` UUID PK · `org_id` NULL FK → `organizations` CASCADE (null for identity emails: reset, verification) · `to_email` (lowercased CHECK) · `to_name` · `template` (CHECK: the seven templates) · `template_data` JSONB object (non-secret) · `secret_link` TEXT NULL (the token-bearing link) · `secret_encrypted` BOOLEAN · `sender_name` (≤ 100) · `reply_to` (lowercased) · `status` (`PENDING`/`SENDING`/`SENT`/`FAILED`) · `attempts` · `next_attempt_at` · `claimed_at` · `last_error` (≤ 500) · `provider_message_id` · `sent_at` · `created_at`.
+  - Constraints: `ck_email_outbox_sent_at` (SENT ⇔ `sent_at`), and **`ck_email_outbox_link_cleared`**: a SENT or FAILED row cannot carry a link.
+  - Indexes: `idx_email_outbox_org_id`; partial `idx_email_outbox_due (next_attempt_at) WHERE status = 'PENDING'` and `idx_email_outbox_sending (claimed_at) WHERE status = 'SENDING'`, for the drain's two scans.
+  - Not audited (the trail would copy the link). Status transitions: `EMAIL_STATUS_TRANSITIONS` in `types/email.ts`.
+- **`user_email_tokens`** — verification and change-of-email links.
+  - Columns: `user_id` FK CASCADE · `purpose` (`VERIFY`/`CHANGE`) · `email` (the address being verified or changed to, lowercased) · `token_hash` (unique, SHA-256) · `expires_at` (after `created_at`).
+  - Single use via `DELETE … RETURNING`. Index `idx_user_email_tokens_user_id`.
+  - The plaintext `users.email_verification_*` columns from `001` stay unused (rule 13).
+- **`organization_email_settings`** — `org_id` PK FK CASCADE · `sender_name` (1–100) · `reply_to` (lowercased) · timestamps, with an `updated_at` trigger. **Audited.**
+- **`user_notification_preferences`** — `(user_id, event)` PK · `user_id` FK CASCADE · `event` (CHECK `bill_awaiting_approval`/`invitation_accepted`) · `enabled`. Opt-outs only; no row means enabled.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

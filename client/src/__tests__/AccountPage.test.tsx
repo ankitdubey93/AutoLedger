@@ -91,12 +91,12 @@ function renderAccount(initialEntries: string[] = ['/account']) {
 }
 
 describe('AccountPage', () => {
-  it('opens on Profile, with the five user-level tabs', async () => {
+  it('opens on Profile, with the six user-level tabs', async () => {
     mockRoutes('OWNER');
     renderAccount();
 
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Profile', 'Password', 'Sessions', 'Organizations', 'Status']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['Profile', 'Password', 'Sessions', 'Notifications', 'Organizations', 'Status']);
     expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByText('Account created')).toBeInTheDocument();
     expect(screen.getByText(day(USER_CREATED))).toBeInTheDocument();
@@ -197,5 +197,57 @@ describe('AccountPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(bodiesFor('/auth/sessions/s2', 'DELETE')).toHaveLength(1);
+  });
+
+  it('Profile: an unverified email offers to resend the verification email', async () => {
+    mockRoutes('OWNER', (url, method) =>
+      url.includes('/auth/verify-email/resend') && method === 'POST' ? jsonResponse(202, { success: true }) : undefined,
+    );
+    const user = userEvent.setup();
+    renderAccount();
+
+    await user.click(await screen.findByRole('button', { name: 'Send verification email' }));
+    expect(await screen.findByText(/Verification email sent/)).toBeInTheDocument();
+  });
+
+  it('Profile: changing the email sends a link and says the address has not changed yet', async () => {
+    mockRoutes('OWNER', (url, method) =>
+      url.includes('/auth/me/email') && method === 'POST' ? jsonResponse(202, { success: true }) : undefined,
+    );
+    const user = userEvent.setup();
+    renderAccount();
+
+    await user.click(await screen.findByRole('button', { name: 'Change email' }));
+    await user.type(screen.getByLabelText('New email'), 'ada@new.example');
+    await user.type(screen.getByLabelText('Current password'), 'my-password');
+    await user.click(screen.getByRole('button', { name: 'Send confirmation link' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('We sent a confirmation link to ada@new.example');
+    expect(bodiesFor('/auth/me/email', 'POST')).toEqual([{ newEmail: 'ada@new.example', currentPassword: 'my-password' }]);
+  });
+
+  it('Notifications: toggling a switch saves just that event', async () => {
+    let prefs = [
+      { event: 'bill_awaiting_approval', enabled: true },
+      { event: 'invitation_accepted', enabled: true },
+    ];
+    mockRoutes('OWNER', (url, method, body) => {
+      if (!url.includes('/auth/me/notifications')) return undefined;
+      if (method === 'PUT') {
+        const [change] = (body as { preferences: Array<{ event: string; enabled: boolean }> }).preferences;
+        prefs = prefs.map((p) => (p.event === change?.event ? { ...p, enabled: change.enabled } : p));
+      }
+      return jsonResponse(200, { success: true, preferences: prefs });
+    });
+    const user = userEvent.setup();
+    renderAccount(['/account?tab=notifications']);
+
+    const box = await screen.findByRole('checkbox', { name: /Bills awaiting approval/ });
+    expect(box).toBeChecked();
+    await user.click(box);
+    expect(await screen.findByRole('checkbox', { name: /Bills awaiting approval/ })).not.toBeChecked();
+    expect(bodiesFor('/auth/me/notifications', 'PUT')).toEqual([
+      { preferences: [{ event: 'bill_awaiting_approval', enabled: false }] },
+    ]);
   });
 });

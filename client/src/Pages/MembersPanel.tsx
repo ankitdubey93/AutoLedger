@@ -29,8 +29,8 @@ const ROLES: Role[] = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER'];
  * demoted or removed; the selects below offer only what the server allows,
  * and the server enforces it regardless.
  *
- * There is no mail transport, so an invitation's link is shown once, here,
- * for the inviter to copy and send themselves.
+ * An invitation is emailed (Phase 38b). Its link is also shown once, here,
+ * as a fallback the inviter can copy if the email does not arrive.
  */
 export default function MembersPanel() {
   const auth = useAuth();
@@ -253,8 +253,7 @@ function InvitationsCard({
     <section className="card">
       <h2>Invite someone</h2>
       <p className="muted">
-        They join this organization with the role you choose. Invitations last 7 days; the link is shown once — copy
-        it and send it to them.
+        We email them an invitation to join with the role you choose. Invitations last 7 days.
       </p>
 
       <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => void onSubmit(e)}>
@@ -292,7 +291,8 @@ function InvitationsCard({
       {link !== null && (
         <div className="mt-3 flex flex-col gap-2" role="status">
           <p className="m-0 text-sm">
-            Invitation link for <strong>{link.email}</strong> — this is the only time it is shown:
+            Invitation emailed to <strong>{link.email}</strong>. If it does not arrive, send them this link yourself — it is
+            shown only once:
           </p>
           <div className="flex gap-2">
             <input readOnly aria-label="Invitation link" className={inputClass} value={link.url} onFocus={(e) => e.target.select()} />

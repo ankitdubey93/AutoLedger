@@ -51,4 +51,13 @@ router.get('/sessions', authenticate, authController.listSessions);
 router.post('/sessions/revoke-others', authenticate, authController.revokeOtherSessions);
 router.delete('/sessions/:id', authenticate, authController.revokeSession);
 
+// Phase 38b — the email address. The two public token routes are throttled
+// like reset-password; the two that send an email are throttled like login.
+router.post('/verify-email', authLimiter, authController.verifyEmail);
+router.post('/verify-email/resend', authLimiter, authenticate, authController.resendVerification);
+router.post('/me/email', authLimiter, authenticate, authController.requestEmailChange);
+router.post('/confirm-email-change', authLimiter, authController.confirmEmailChange);
+router.get('/me/notifications', authenticate, authController.getNotificationPreferences);
+router.put('/me/notifications', authenticate, authController.setNotificationPreferences);
+
 export default router;
