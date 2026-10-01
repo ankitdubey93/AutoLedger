@@ -428,6 +428,7 @@ export async function assertExpenseAccounts(
   client: PoolClient,
   orgId: string,
   accountIds: string[],
+  allowAccountId: string | null = null,
 ): Promise<void> {
   const unique = [...new Set(accountIds)];
 
@@ -443,7 +444,7 @@ export async function assertExpenseAccounts(
   if (header !== undefined) {
     throw new ApiError(422, `Account ${header.code} is a header account and cannot be posted to`);
   }
-  const wrongType = rows.find((row) => row.type !== 'Expense' && row.type !== 'Asset');
+  const wrongType = rows.find((row) => row.type !== 'Expense' && row.type !== 'Asset' && row.id !== allowAccountId);
   if (wrongType !== undefined) {
     throw new ApiError(422, `Account ${wrongType.code} must be an Expense or Asset account`);
   }
@@ -594,6 +595,7 @@ async function insertBillOnClient(
   createdBy: string,
   header: InsertBillHeader,
   totals: LineTotal[],
+  allowAccountId: string | null = null,
 ): Promise<string> {
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
@@ -622,6 +624,7 @@ async function insertBillOnClient(
     client,
     orgId,
     totals.map((t) => t.input.expenseAccountId),
+    allowAccountId,
   );
 
   // Resolved on every draft save so the draft always displays an honest
@@ -670,6 +673,11 @@ async function insertBillOnClient(
   return billId;
 }
 
+export interface CreateBillOptions {
+  /** Import conversion mode only: this one account id (3400) is accepted by assertExpenseAccounts. */
+  equityAccountId?: string;
+}
+
 /**
  * Phase 34b — the core of `createBill`, runnable on a caller's own
  * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
@@ -682,6 +690,7 @@ export async function createBillOnClient(
   orgId: string,
   createdBy: string,
   input: CreateBillInput,
+  options: CreateBillOptions = {},
 ): Promise<string> {
   validateBillInput(input);
   const totals = computeLineTotals(input.lines);
@@ -702,9 +711,28 @@ export async function createBillOnClient(
       paymentTermsCode: resolvedDue.paymentTermsCode,
     },
     totals,
+    options.equityAccountId ?? null,
   );
 
   return billId;
+}
+
+/** Import only: which (vendor, reference) pairs already exist in this org (rule 1). Key: `${vendorId}|${reference}`. */
+export async function findExistingBillReferencesOnClient(
+  client: PoolClient,
+  orgId: string,
+  pairs: readonly { vendorId: string; reference: string }[],
+): Promise<Set<string>> {
+  if (pairs.length === 0) return new Set();
+  const { rows } = await client.query<{ vendor_id: string; vendor_reference: string }>(
+    `SELECT vendor_id, vendor_reference FROM bills
+      WHERE org_id = $1 AND vendor_id = ANY($2::uuid[]) AND vendor_reference = ANY($3::text[])`,
+    [orgId, [...new Set(pairs.map((p) => p.vendorId))], [...new Set(pairs.map((p) => p.reference))]],
+  );
+  const existing = new Set(rows.map((r) => `${r.vendor_id}|${r.vendor_reference}`));
+  // The two ANY filters over-select (a cross product); keep only the requested pairs.
+  const wanted = new Set(pairs.map((p) => `${p.vendorId}|${p.reference}`));
+  return new Set([...existing].filter((k) => wanted.has(k)));
 }
 
 export async function createBill(

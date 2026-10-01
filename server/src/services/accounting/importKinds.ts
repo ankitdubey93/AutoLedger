@@ -3,6 +3,8 @@ import type { DateFormat } from '../../utils/dateParse.js';
 import {
   MIGRATION_IMPORT_KINDS,
   type ImportCommitContext,
+  type ImportCommitMode,
+  type ImportPreviewOptions,
   type ImportKindMeta,
   type MigrationCommitPreview,
   type MigrationCommitResult,
@@ -24,6 +26,16 @@ import * as itemImportService from './itemImportService.js';
 import * as inventoryItemImportService from './inventoryItemImportService.js';
 import { IMPORT_ITEM_COLUMNS, IMPORT_ITEM_EDIT_FIELDS } from './importItemColumns.js';
 import * as journalImportService from './journalImportService.js';
+import * as invoiceImportService from './invoiceImportService.js';
+import * as billImportService from './billImportService.js';
+import {
+  BILL_COLUMNS,
+  BILL_EDIT_FIELDS,
+  INVOICE_COLUMNS,
+  INVOICE_EDIT_FIELDS,
+  billGroupKey,
+  invoiceGroupKey,
+} from './importDocumentColumns.js';
 import { JOURNAL_COLUMNS, JOURNAL_EDIT_FIELDS, journalGroupKey } from './importJournalColumns.js';
 import { IMPORT_INVENTORY_ITEM_COLUMNS, IMPORT_INVENTORY_ITEM_EDIT_FIELDS } from './importInventoryItemColumns.js';
 
@@ -33,7 +45,7 @@ import { IMPORT_INVENTORY_ITEM_COLUMNS, IMPORT_INVENTORY_ITEM_EDIT_FIELDS } from
  * strategy functions the generic importer dispatches to. Adding a kind means
  * adding an entry here; `satisfies` makes a missing one a compile error.
  */
-export interface ImportKindDef extends ImportKindMeta {
+export interface ImportKindDef extends Omit<ImportKindMeta, 'commitModes' | 'supportsConversionMode'> {
   parseRow(
     cells: readonly string[],
     columns: ResolvedImportColumns,
@@ -45,8 +57,8 @@ export interface ImportKindDef extends ImportKindMeta {
     orgId: string,
     rows: readonly MigrationImportRow[],
   ): Promise<{ rowId: string; errors: string[] }[]>;
-  preview(client: PoolClient, orgId: string, importId: string): Promise<MigrationCommitPreview>;
-  /** Optional; runs BEFORE BEGIN. Default: { inventoryProfile: null }. */
+  preview(client: PoolClient, orgId: string, importId: string, opts: ImportPreviewOptions): Promise<MigrationCommitPreview>;
+  /** Optional; runs BEFORE BEGIN. Default: { inventoryProfile: null, mode: null, postingDate: null }. */
   prepareCommit?: (orgId: string) => Promise<ImportCommitContext>;
   commitOnClient(
     client: PoolClient,
@@ -62,6 +74,10 @@ export interface ImportKindDef extends ImportKindMeta {
   ) => string | null;
   /** Plural noun for the documents-per-import cap message. Default 'documents'. */
   groupNoun?: string;
+  /** Commit modes offered (document kinds). Default: none. */
+  commitModes?: readonly ImportCommitMode[];
+  /** Conversion mode allowed at staging. Default false. */
+  supportsConversionMode?: boolean;
 }
 
 const AMOUNT_MISSING = 'Could not find an amount column, or a debit/credit pair, in the file';
@@ -585,6 +601,57 @@ export const IMPORT_KINDS = {
     commitOnClient: (client, orgId, importId, createdBy) =>
       journalImportService.commitOnClient(client, orgId, importId, createdBy),
   },
+  INVOICES: {
+    kind: 'INVOICES',
+    label: 'Invoices',
+    noun: 'invoice lines',
+    storage: 'data',
+    groupHeaderFields: ['invoiceNumber', 'contactName', 'invoiceDate'],
+    columns: INVOICE_COLUMNS,
+    requiredOneOf: [],
+    missingMessages: {
+      contactName: 'Could not find a customer or vendor name column in the file',
+      invoiceDate: 'Could not find an invoice date column in the file',
+      description: 'Could not find a description column in the file',
+    },
+    editFields: INVOICE_EDIT_FIELDS,
+    groupKeyOf: invoiceGroupKey,
+    groupNoun: 'invoices',
+    commitModes: ['DRAFT', 'POST'],
+    supportsConversionMode: true,
+    parseRow: (cells, columns, rowNumber, ctx) =>
+      parseDataRow(INVOICE_COLUMNS, cells, columns, rowNumber, ctx.dateFormat),
+    validateRows: (client, orgId, rows) => invoiceImportService.validateRows(client, orgId, rows),
+    preview: (client, orgId, importId, opts) => invoiceImportService.preview(client, orgId, importId, opts),
+    commitOnClient: (client, orgId, importId, createdBy, context) =>
+      invoiceImportService.commitOnClient(client, orgId, importId, createdBy, context),
+  },
+  BILLS: {
+    kind: 'BILLS',
+    label: 'Expenses (bills)',
+    noun: 'expense lines',
+    storage: 'data',
+    groupHeaderFields: ['contactName', 'invoiceNumber', 'invoiceDate'],
+    columns: BILL_COLUMNS,
+    requiredOneOf: [],
+    missingMessages: {
+      contactName: 'Could not find a customer or vendor name column in the file',
+      invoiceNumber: 'Could not find an invoice number column in the file',
+      invoiceDate: 'Could not find an invoice date column in the file',
+      description: 'Could not find a description column in the file',
+    },
+    editFields: BILL_EDIT_FIELDS,
+    groupKeyOf: billGroupKey,
+    groupNoun: 'expenses',
+    commitModes: ['DRAFT', 'POST'],
+    supportsConversionMode: true,
+    parseRow: (cells, columns, rowNumber, ctx) =>
+      parseDataRow(BILL_COLUMNS, cells, columns, rowNumber, ctx.dateFormat),
+    validateRows: (client, orgId, rows) => billImportService.validateRows(client, orgId, rows),
+    preview: (client, orgId, importId, opts) => billImportService.preview(client, orgId, importId, opts),
+    commitOnClient: (client, orgId, importId, createdBy, context) =>
+      billImportService.commitOnClient(client, orgId, importId, createdBy, context),
+  },
 } satisfies Record<MigrationImportKind, ImportKindDef>;
 
 export function getImportKind(kind: MigrationImportKind): ImportKindDef {
@@ -594,8 +661,20 @@ export function getImportKind(kind: MigrationImportKind): ImportKindDef {
 /** Metadata only — every function-valued property stripped. Order = MIGRATION_IMPORT_KINDS. */
 export function listImportKindMeta(): ImportKindMeta[] {
   return MIGRATION_IMPORT_KINDS.map((kind) => {
-    const { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields, groupHeaderFields } =
-      IMPORT_KINDS[kind];
-    return { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields, groupHeaderFields };
+    const def: ImportKindDef = IMPORT_KINDS[kind];
+    const { kind: k, label, noun, storage, columns, requiredOneOf, missingMessages, editFields, groupHeaderFields } = def;
+    return {
+      kind: k,
+      label,
+      noun,
+      storage,
+      columns,
+      requiredOneOf,
+      missingMessages,
+      editFields,
+      groupHeaderFields,
+      commitModes: def.commitModes ?? [],
+      supportsConversionMode: def.supportsConversionMode ?? false,
+    };
   });
 }

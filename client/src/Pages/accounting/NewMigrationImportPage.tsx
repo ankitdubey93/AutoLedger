@@ -47,6 +47,7 @@ export default function NewMigrationImportPage() {
   const [mapping, setMapping] = useState<Record<string, string | null>>({});
   const [showMapper, setShowMapper] = useState(false);
   const [dateFormat, setDateFormat] = useState<ImportDateFormat | ''>('');
+  const [conversionMode, setConversionMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -124,6 +125,7 @@ export default function NewMigrationImportPage() {
         content,
         columnMap: showMapper ? mapping : null,
         ...(hasDates && dateFormat !== '' ? { dateFormat } : {}),
+        ...(meta?.supportsConversionMode === true ? { conversionMode } : {}),
       });
       const suffix = returnTo !== null ? `?returnTo=${encodeURIComponent(returnTo)}` : '';
       navigate(`/migration-imports/${res.import.id}${suffix}`, { replace: true });
@@ -242,6 +244,20 @@ export default function NewMigrationImportPage() {
                     <option value="MDY">MM/DD/YYYY</option>
                   </select>
                 </label>
+              )}
+
+              {meta.supportsConversionMode && (
+                <div className="flex flex-col gap-1">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={conversionMode}
+                      onChange={(e) => setConversionMode(e.target.checked)}
+                    />
+                    These are open items from before my conversion date (conversion mode)
+                  </label>
+                  <p className="text-xs text-[var(--muted)]">Use this for unpaid invoices or bills you are bringing over at your conversion date. They post to 3400 Opening Balance Equity on that date instead of revenue or expense, so your opening balances aren't counted twice. Tax must be 0 and products can't be used.</p>
+                </div>
               )}
 
               {!showMapper ? (

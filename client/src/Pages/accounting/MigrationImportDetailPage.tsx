@@ -9,6 +9,7 @@ import {
   previewMigrationImport,
   setMigrationImportRowsStatus,
   type MigrationCommitPreview,
+  type MigrationCommitResult,
   type MigrationImport,
   type MigrationImportRow,
   type MigrationRowStatus,
@@ -40,6 +41,22 @@ const STATUS_LABEL: Record<MigrationRowStatus, string> = { VALID: 'Valid', INVAL
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-sm text-[var(--text)] w-full';
 
+function committedMessage(result: Exclude<MigrationCommitResult, { kind: 'OPENING_BALANCES' }>): string {
+  switch (result.kind) {
+    case 'INVOICES':
+    case 'BILLS':
+      return `Committed: ${String(result.documentCount)} ${result.kind === 'INVOICES' ? 'invoices' : 'expenses'} ${result.mode === 'DRAFT' ? 'created as drafts' : 'posted'} (${String(result.lineCount)} lines).`;
+    case 'JOURNALS':
+      return `Committed: ${String(result.entryCount)} journal entries posted (${String(result.lineCount)} lines).`;
+    case 'ITEMS':
+      return `Committed: ${String(result.createdCount)} created, ${String(result.mergedCount)} filled in.`;
+    case 'INVENTORY_ITEMS':
+      return `Committed: ${String(result.createdCount)} items created, opening stock posted for ${String(result.openingStockCount)}.`;
+    default:
+      return `Committed: ${String(result.createdCount)} created, ${String(result.mergedCount)} merged.`;
+  }
+}
+
 export default function MigrationImportDetailPage() {
   const { importId } = useParams<{ importId: string }>();
   const navigate = useNavigate();
@@ -57,6 +74,16 @@ export default function MigrationImportDetailPage() {
   const [showCommitConfirm, setShowCommitConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [commitMode, setCommitMode] = useState<'DRAFT' | 'POST'>('DRAFT');
+  const [dateChoice, setDateChoice] = useState<'OWN' | 'ON'>('OWN');
+  const [postingDate, setPostingDate] = useState('');
+
+  // Document imports (invoices, expenses) offer a commit mode; the options only apply once the
+  // import's own kind says so and it was not staged in conversion mode.
+  const optionsActive =
+    imp !== null &&
+    !imp.conversionMode &&
+    (kinds?.find((k) => k.kind === imp.kind)?.commitModes.length ?? 0) > 0;
 
   const refresh = useCallback(() => {
     if (importId === undefined) return;
@@ -74,13 +101,20 @@ export default function MigrationImportDetailPage() {
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Could not load rows'));
 
-    previewMigrationImport(importId)
+    const previewParams: NonNullable<Parameters<typeof previewMigrationImport>[2]> = {};
+    if (commitMode === 'POST') {
+      previewParams.mode = 'POST';
+      if (dateChoice === 'ON' && postingDate !== '') previewParams.postingDate = postingDate;
+    } else if (optionsActive) {
+      previewParams.mode = 'DRAFT';
+    }
+    previewMigrationImport(importId, undefined, previewParams)
       .then((res) => setPreview(res.preview))
       .catch(() => {
         // Preview is a convenience panel — its own failure should not block
         // the rest of the page from rendering.
       });
-  }, [importId, statusFilter, page]);
+  }, [importId, statusFilter, page, commitMode, dateChoice, postingDate, optionsActive]);
 
   useEffect(() => {
     refresh();
@@ -98,6 +132,9 @@ export default function MigrationImportDetailPage() {
   const isParty = imp.kind === 'CUSTOMERS' || imp.kind === 'VENDORS';
   const readOnly = imp.status === 'COMMITTED';
   const returnTo = safeReturnTo(searchParams.get('returnTo'));
+  const hasCommitModes = meta.commitModes.length > 0;
+  const isInvoices = imp.kind === 'INVOICES';
+  const documentsPosting = hasCommitModes && (imp.conversionMode || commitMode === 'POST');
 
   async function saveRow(
     row: MigrationImportRow,
@@ -129,7 +166,14 @@ export default function MigrationImportDetailPage() {
     setBusy(true);
     setError(null);
     try {
-      await commitMigrationImport(id);
+      if (hasCommitModes && !imp?.conversionMode) {
+        await commitMigrationImport(id, {
+          mode: commitMode,
+          ...(commitMode === 'POST' && dateChoice === 'ON' && postingDate !== '' ? { postingDate } : {}),
+        });
+      } else {
+        await commitMigrationImport(id);
+      }
       setShowCommitConfirm(false);
       refresh();
     } catch (err: unknown) {
@@ -186,13 +230,7 @@ export default function MigrationImportDetailPage() {
       {readOnly && imp.result !== null && imp.result.kind !== 'OPENING_BALANCES' && (
         <div className="card">
           <p className="text-sm m-0">
-            {imp.result.kind === 'JOURNALS'
-              ? `Committed: ${String(imp.result.entryCount)} journal entries posted (${String(imp.result.lineCount)} lines).`
-              : imp.result.kind === 'ITEMS'
-              ? `Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} filled in.`
-              : imp.result.kind === 'INVENTORY_ITEMS'
-                ? `Committed: ${String(imp.result.createdCount)} items created, opening stock posted for ${String(imp.result.openingStockCount)}.`
-                : `Committed: ${String(imp.result.createdCount)} created, ${String(imp.result.mergedCount)} merged.`}
+            {committedMessage(imp.result)}
           </p>
         </div>
       )}
@@ -236,6 +274,74 @@ export default function MigrationImportDetailPage() {
             <p className="text-sm text-[var(--muted)] m-0">
               Fix {preview.blockingErrorCount} invalid row{preview.blockingErrorCount === 1 ? '' : 's'} first.
             </p>
+          )}
+          {hasCommitModes && imp.conversionMode && (
+            <p className="text-sm m-0">
+              Conversion mode — documents post on your conversion date to 3400 Opening Balance Equity.
+            </p>
+          )}
+          {hasCommitModes && !imp.conversionMode && (
+            <div className="flex flex-col gap-2">
+              <div role="radiogroup" aria-label="How to import" className="flex flex-col gap-1 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="commit-mode"
+                    value="DRAFT"
+                    checked={commitMode === 'DRAFT'}
+                    onChange={() => setCommitMode('DRAFT')}
+                  />
+                  Import as drafts
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="radio"
+                    name="commit-mode"
+                    value="POST"
+                    checked={commitMode === 'POST'}
+                    onChange={() => setCommitMode('POST')}
+                  />
+                  Import and post
+                </label>
+                <span className="text-xs text-[var(--muted)]">
+                  {isInvoices ? 'Issues the invoices' : 'Approves the expenses'}
+                </span>
+              </div>
+              {commitMode === 'POST' && (
+                <div role="radiogroup" aria-label="Posting date" className="flex flex-col gap-1 text-sm">
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="posting-date-choice"
+                      value="OWN"
+                      checked={dateChoice === 'OWN'}
+                      onChange={() => setDateChoice('OWN')}
+                    />
+                    Each document's own date
+                  </label>
+                  <label className="flex items-center gap-2">
+                    <input
+                      type="radio"
+                      name="posting-date-choice"
+                      value="ON"
+                      checked={dateChoice === 'ON'}
+                      onChange={() => setDateChoice('ON')}
+                    />
+                    On this date
+                    <input
+                      type="date"
+                      aria-label="Posting date"
+                      value={postingDate}
+                      onChange={(e) => {
+                        setPostingDate(e.target.value);
+                        setDateChoice('ON');
+                      }}
+                      className={inputClass + ' !w-auto'}
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
           )}
           <div>
             <button
@@ -296,7 +402,11 @@ export default function MigrationImportDetailPage() {
       {showCommitConfirm && (
         <ConfirmDialog
           title="Commit this import?"
-          body="This creates accounts and posts to the ledger. It cannot be undone by editing — only by a reversing entry."
+          body={
+            hasCommitModes
+              ? `This creates ${String(preview?.summary[0]?.value ?? imp.validCount)} ${documentsPosting ? 'posted' : 'draft'} document(s).${documentsPosting ? ' It cannot be undone by editing — only by a reversing entry.' : ''}`
+              : 'This creates accounts and posts to the ledger. It cannot be undone by editing — only by a reversing entry.'
+          }
           confirmLabel="Commit"
           busy={busy}
           onConfirm={() => void handleCommit()}

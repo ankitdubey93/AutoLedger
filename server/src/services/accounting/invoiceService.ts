@@ -415,6 +415,7 @@ export async function assertRevenueAccounts(
   client: PoolClient,
   orgId: string,
   accountIds: string[],
+  allowAccountId: string | null = null,
 ): Promise<void> {
   const unique = [...new Set(accountIds)];
 
@@ -430,7 +431,7 @@ export async function assertRevenueAccounts(
   if (header !== undefined) {
     throw new ApiError(422, `Account ${header.code} is a header account and cannot be posted to`);
   }
-  const wrongType = rows.find((row) => row.type !== 'Revenue');
+  const wrongType = rows.find((row) => row.type !== 'Revenue' && row.id !== allowAccountId);
   if (wrongType !== undefined) {
     throw new ApiError(422, `Account ${wrongType.code} is not a Revenue account`);
   }
@@ -552,6 +553,13 @@ async function insertInvoiceLines(
   );
 }
 
+export interface CreateInvoiceOptions {
+  /** Import only: stored on the draft; issue uses it instead of allocating. Never exposed in invoiceSchema. */
+  invoiceNumber?: string;
+  /** Import conversion mode only: this one account id (3400) is accepted by assertRevenueAccounts as if it were Revenue. */
+  equityAccountId?: string;
+}
+
 /**
  * Phase 34b — the core of `createInvoice`, runnable on a caller's own
  * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
@@ -564,6 +572,7 @@ export async function createInvoiceOnClient(
   orgId: string,
   createdBy: string,
   input: CreateInvoiceInput,
+  options: CreateInvoiceOptions = {},
 ): Promise<string> {
   validateInvoiceInput(input);
   const totals = computeLineTotals(input.lines);
@@ -596,6 +605,7 @@ export async function createInvoiceOnClient(
     client,
     orgId,
     totals.map((t) => t.input.revenueAccountId),
+    options.equityAccountId ?? null,
   );
 
   // Resolved on every draft save so the draft always displays an honest
@@ -610,8 +620,8 @@ export async function createInvoiceOnClient(
        (org_id, customer_id, issue_date, due_date, currency_code,
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
-        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
      RETURNING id`,
     [
       orgId,
@@ -633,6 +643,7 @@ export async function createInvoiceOnClient(
       baseTaxCents,
       baseTotalCents,
       createdBy,
+      options.invoiceNumber ?? null,
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
@@ -641,6 +652,20 @@ export async function createInvoiceOnClient(
   await insertInvoiceLines(client, orgId, invoiceId, totals);
 
   return invoiceId;
+}
+
+/** Import only: which of an import's invoice numbers already exist in this org (rule 1). */
+export async function findExistingInvoiceNumbersOnClient(
+  client: PoolClient,
+  orgId: string,
+  numbers: readonly string[],
+): Promise<Set<string>> {
+  if (numbers.length === 0) return new Set();
+  const { rows } = await client.query<{ invoice_number: string }>(
+    'SELECT invoice_number FROM invoices WHERE org_id = $1 AND invoice_number = ANY($2::text[])',
+    [orgId, [...numbers]],
+  );
+  return new Set(rows.map((r) => r.invoice_number));
 }
 
 export async function createInvoice(
@@ -870,9 +895,10 @@ export async function issueInvoiceOnClient(
       subtotal_cents: string;
       total_cents: string;
       tax_cents: string;
+      invoice_number: string | null;
     }>(
       `SELECT id, status, issue_date, due_date, customer_id, customer_name_snapshot,
-              currency_code, subtotal_cents, total_cents, tax_cents
+              currency_code, subtotal_cents, total_cents, tax_cents, invoice_number
          FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -1017,7 +1043,7 @@ export async function issueInvoiceOnClient(
       for (const [accountId, value] of inventoryByAccount) glLines.push({ accountId, debitCents: 0, creditCents: value });
     }
 
-    const invoiceNumber = await invoiceSettingsService.allocateInvoiceNumber(client, orgId);
+    const invoiceNumber = invoiceRow.invoice_number ?? await invoiceSettingsService.allocateInvoiceNumber(client, orgId);
 
     const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
       entryDate: postingDate,

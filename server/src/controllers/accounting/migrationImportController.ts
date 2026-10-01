@@ -5,11 +5,12 @@ import {
   patchMigrationRowSchema,
   setRowsStatusSchema,
   inspectMigrationImportSchema,
+  commitMigrationImportSchema,
 } from '../../schemas/accounting/migrationImportSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
-import { readPagination } from '../../utils/queryParam.js';
+import { readPagination, optionalIsoDate } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
 import { isMigrationImportKind, isMigrationRowStatus, isMigrationImportStatus, MIGRATION_IMPORT_KINDS } from '../../types/accounting.js';
 import { listImportKindMeta } from '../../services/accounting/importKinds.js';
@@ -138,7 +139,14 @@ export const validate: RequestHandler = async (req, res) => {
 /** GET /migration-imports/:id/preview */
 export const preview: RequestHandler = async (req, res) => {
   const user = requireUser(req);
-  const result = await migrationImportService.preview(user.orgId, requireParam(req, 'id'));
+  const modeParam = req.query.mode;
+  let mode: 'DRAFT' | 'POST' | null = null;
+  if (modeParam !== undefined) {
+    if (modeParam !== 'DRAFT' && modeParam !== 'POST') throw new ApiError(400, 'mode must be DRAFT or POST');
+    mode = modeParam;
+  }
+  const postingDate = optionalIsoDate(req, 'postingDate');
+  const result = await migrationImportService.preview(user.orgId, requireParam(req, 'id'), { mode, postingDate });
   res.json({ success: true, preview: result });
 };
 
@@ -146,7 +154,8 @@ export const preview: RequestHandler = async (req, res) => {
 export const commit: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const id = requireParam(req, 'id');
-  const { import: imp, result } = await migrationImportService.commit(user.orgId, user.id, id);
+  const body = parseBody(commitMigrationImportSchema, req.body ?? {});
+  const { import: imp, result } = await migrationImportService.commit(user.orgId, user.id, id, body);
   res.json({ success: true, import: imp, result });
 };
 

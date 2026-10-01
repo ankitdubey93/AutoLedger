@@ -263,4 +263,33 @@ describe('NewMigrationImportPage wizard', () => {
     expect(await screen.findByText('Choose the date format your file uses')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Stage import' })).toBeDisabled();
   });
+
+  it('the wizard shows the conversion-mode checkbox for invoices and sends it', async () => {
+    mockApi(
+      inspection({
+        kind: 'INVOICES',
+        headers: ['*ContactName', '*InvoiceDate', '*Description'],
+        sampleRows: [['Northwind', '2026-01-05', 'Consulting']],
+        suggestedMap: { contactName: '*ContactName', invoiceDate: '*InvoiceDate', description: '*Description' },
+        exactMatch: true,
+        suggestedDateFormat: 'ISO',
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage('/migration-imports/new?kind=INVOICES&returnTo=%2Finvoices');
+
+    await uploadCsv(user, '*ContactName,*InvoiceDate,*Description\nNorthwind,2026-01-05,Consulting');
+
+    const checkbox = await screen.findByRole('checkbox', {
+      name: 'These are open items from before my conversion date (conversion mode)',
+    });
+    expect(checkbox).not.toBeChecked();
+    expect(screen.getByText(/They post to 3400 Opening Balance Equity on that date/)).toBeInTheDocument();
+
+    await user.click(checkbox);
+    await user.click(screen.getByRole('button', { name: 'Stage import' }));
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/migration-imports/imp-new'));
+    expect(postBody('/migration-imports')).toMatchObject({ kind: 'INVOICES', conversionMode: true });
+  });
 });

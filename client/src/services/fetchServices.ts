@@ -2817,7 +2817,9 @@ export type MigrationImportKind =
   | 'VENDORS'
   | 'ITEMS'
   | 'INVENTORY_ITEMS'
-  | 'JOURNALS';
+  | 'JOURNALS'
+  | 'INVOICES'
+  | 'BILLS';
 export type ImportDateFormat = 'ISO' | 'DMY' | 'MDY';
 export type MigrationImportStatus = 'DRAFT' | 'VALIDATED' | 'COMMITTED';
 export type MigrationRowStatus = 'VALID' | 'INVALID' | 'EXCLUDED';
@@ -2859,6 +2861,10 @@ export interface ImportKindMeta {
   storage: 'typed' | 'data';
   /** Columns shown in a group's header row; empty = not a grouped kind. */
   groupHeaderFields: string[];
+  /** Commit modes the kind offers; empty = none. */
+  commitModes: ('DRAFT' | 'POST')[];
+  /** True when the import may be staged in conversion mode. */
+  supportsConversionMode: boolean;
 }
 
 export interface MigrationImportInspection {
@@ -2892,6 +2898,8 @@ export interface MigrationImport {
   columnMap: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
   dateFormat: ImportDateFormat;
+  conversionMode: boolean;
+  commitOptions: { mode: 'DRAFT' | 'POST'; postingDate: string | null } | null;
 }
 
 /** Mirrors server/src/types/accounting.ts's MigrationImportRow. */
@@ -2953,7 +2961,8 @@ export type MigrationCommitResult =
   | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
   | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
   | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number }
-  | { kind: 'JOURNALS'; entryCount: number; lineCount: number };
+  | { kind: 'JOURNALS'; entryCount: number; lineCount: number }
+  | { kind: 'INVOICES' | 'BILLS'; documentCount: number; lineCount: number; mode: 'DRAFT' | 'POST' };
 
 /** POST /migration-imports — OWNER, ADMIN or ACCOUNTANT. */
 export function createMigrationImport(body: {
@@ -2962,6 +2971,7 @@ export function createMigrationImport(body: {
   content: string;
   columnMap?: Record<string, string | null> | null;
   dateFormat?: ImportDateFormat;
+  conversionMode?: boolean;
 }): Promise<{ success: boolean; import: MigrationImport; rows: MigrationImportRow[] }> {
   return apiFetch('/migration-imports', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -3046,15 +3056,21 @@ export function validateMigrationImport(id: string): Promise<{ success: boolean;
 export function previewMigrationImport(
   id: string,
   signal?: AbortSignal,
+  params: { mode?: 'DRAFT' | 'POST'; postingDate?: string } = {},
 ): Promise<{ success: boolean; preview: MigrationCommitPreview }> {
-  return apiFetch(`/migration-imports/${id}/preview`, { signal: signal ?? null });
+  const query = new URLSearchParams();
+  if (params.mode !== undefined) query.set('mode', params.mode);
+  if (params.postingDate !== undefined && params.postingDate !== '') query.set('postingDate', params.postingDate);
+  const qs = query.toString();
+  return apiFetch(`/migration-imports/${id}/preview${qs === '' ? '' : `?${qs}`}`, { signal: signal ?? null });
 }
 
 /** POST /migration-imports/:id/commit — OWNER/ADMIN only; irreversible. */
 export function commitMigrationImport(
   id: string,
+  body: { mode?: 'DRAFT' | 'POST'; postingDate?: string | null } = {},
 ): Promise<{ success: boolean; import: MigrationImport; result: MigrationCommitResult }> {
-  return apiFetch(`/migration-imports/${id}/commit`, { method: 'POST', body: JSON.stringify({}) });
+  return apiFetch(`/migration-imports/${id}/commit`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 /** DELETE /migration-imports/:id — refused once COMMITTED. */

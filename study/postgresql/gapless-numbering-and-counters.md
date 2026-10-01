@@ -4,6 +4,7 @@
 
 **Category:** PostgreSQL
 **Introduced by:** Phase 3.8 — `ledger_invoice_settings.next_number`, allocating `INV-000001`, `INV-000002`, … as invoices are issued. Extended Phase 28 — StockLedger's item-code counters, one counter per *rendered scope key*, not one counter per organization.
+**Extended Phase 36d** — importing an invoice's own number from a file: reserving it on the draft, ratcheting the counter past it with `GREATEST`.
 **Verified against:** PostgreSQL 16
 
 ---
@@ -63,6 +64,27 @@ A second difference from the invoice case: an item's code isn't always auto-gene
 
 Despite the name of this pattern, it is not perfectly gapless — a transaction that allocates a number and then the *client* disconnects before ever calling `/issue` again would still burn nothing, because the allocation is inside the transaction; but an organization that issues, then immediately voids, an invoice keeps that invoice's number permanently (voiding does not return the number to the pool — the invoice still exists, just marked `VOID`). What this pattern actually guarantees is stronger than "gapless" and more useful: every number that is ever handed out corresponds to a row that really was created inside a transaction that committed. Auditors call this **sequential and accounted for**, not strictly gapless, and it is what real accounting systems (including QuickBooks, Xero) actually provide — a true gapless guarantee across arbitrary failures needs a separate reservation/confirmation protocol that is not worth the complexity here.
 
+### Reserving numbers someone else already chose, and advancing the counter past them (Phase 36d)
+
+Everything above assumes the system is the only author of numbers. The invoice importer breaks that: a file from the old system carries `INV-0042`, and the user wants it kept. **Verified against:** PostgreSQL 16 (`READ COMMITTED`); code read in `invoiceService.ts`, `invoiceSettingsService.ts`, `invoiceImportService.ts`; behaviour pinned by `invoiceImport.test.ts`. The deadlock paragraph at the end is reasoning from the documented lock order, **not** something a test exercises.
+
+**Two halves: reserve, then advance.**
+
+1. *Reserve.* The imported number is written onto the **draft** at creation: `createInvoiceOnClient(…, input, { invoiceNumber })` adds `invoice_number` to the INSERT. A normal draft has `invoice_number NULL`; `ux_invoices_org_number (org_id, invoice_number)` is an ordinary unique index, and since NULLs are distinct in a Postgres unique index, any number of un-numbered drafts coexist while a non-null imported number is already protected from duplicates. `issueInvoiceOnClient` selects `invoice_number` in its `FOR UPDATE` read and then does exactly one thing differently: `invoiceRow.invoice_number ?? await allocateInvoiceNumber(client, orgId)`. A NULL (every ordinary draft) falls through to the counter, so the normal path is byte-identical; a reserved number is used as-is and **the counter is not touched**. That is why the test `a reserved number survives a later manual issue of that draft` can issue the imported draft through the public `POST /invoices/:id/issue` later and still get `INV-9001`. The number is never exposed on the create API (`invoiceSchema` has no such field); only the importer's `options` argument can set it.
+2. *Advance.* Reserving only protects against a **duplicate of that exact string**. It does nothing about the counter later *generating* `INV-000005` for an unrelated invoice, which would then collide on the unique index at issue time — a 23505 at the worst moment, for a user who did nothing wrong. So `advancePastImportedNumbersOnClient(client, orgId, numbers)` raises `next_number` past every imported number the counter could ever produce. Mechanism, in order: `INSERT … ON CONFLICT DO NOTHING` (the same lazy seed as above), `SELECT number_prefix … FOR UPDATE` (takes the settings row lock and reads the prefix under it), then — in JS — for each number that `startsWith(prefix)` and whose remainder matches `^[0-9]+$` and is at most 2,000,000,000, keep the maximum; and finally
+
+```sql
+UPDATE ledger_invoice_settings SET next_number = GREATEST(next_number, $2::int + 1) WHERE org_id = $1
+```
+
+`GREATEST` is what makes this a *monotone ratchet*: it can only raise the counter. Importing `INV-000005` into an org already at `next_number = 800` leaves it at 800; importing `INV-000900` moves it to 901. A plain `SET next_number = $max + 1` would move the counter **backwards** for an old-numbered file and hand out numbers already used. The 2,000,000,000 cap exists because `next_number` is a Postgres `INTEGER` (max 2,147,483,647): a file number like `INV-99999999999` would overflow the column on `+ 1`, so a number that large is simply not advanced past (it still stays reserved on its own draft). A number with a different prefix (`OLD-1`) or non-digits (`INV-0042A`) is ignored for advancement: the counter can only generate `${prefix}${digits}`, and a different string cannot collide with that — which also means `INV-5` and generated `INV-000005` are *different strings* and both can exist (padding is part of the string, not the value). When nothing parses, the function returns without writing.
+
+**Why the advance runs before any document is created.** `commitOnClient` calls it once, up front, with every numbered document's number, *then* loops creating (and, in POST mode, issuing). Consider the order the other way round with a file of `[blank-number invoice, INV-000005]` against a counter at 5. The first document is issued first and allocates `INV-000005` from the counter; when the second document (whose draft already holds that string) is created or issued, it collides — a 23505 mid-import. Advancing first means the counter is already at 6 before any blank-number document asks for one. The same call also covers `DRAFT` mode: nothing is allocated now, but the drafts are reserved, and a user who later issues an *un-numbered* draft would otherwise be handed a number a reserved draft holds. If any later step fails, everything rolls back **including the advance** — the counter row is part of the same transaction, so a failed import leaves no skipped numbers behind; this is the "rollback un-burns the number" property from above applied to a ratchet.
+
+**What the skip costs.** After importing `INV-000005`, a normal invoice gets `INV-000006` — numbers 1–4 are never issued (test `the sequence skips imported numbers`). That is a hole in the sequence, but an accounted-for one: the file's numbers belong to the previous system's series. We promise *no reuse*, not *no holes*.
+
+**Concurrency and a lock-order caveat (reasoned, not tested).** The advance takes the settings-row lock at the start and holds it until `COMMIT`, so one large POST import blocks every other user's invoice issuing for its duration (the plan's open risk; capped at 1000 documents, not timed). Separately, the repository's documented order for issuing is *document row → stock balances → invoice number → journal*. The importer acquires the invoice-number lock **first**, then (for an inventory line in POST mode) the stock-balance locks inside `issueInvoiceOnClient`. A concurrent ordinary issue of an inventory invoice takes them in the opposite order. Two transactions each holding what the other wants is a deadlock; PostgreSQL detects it (after `deadlock_timeout`, default 1 s) and aborts one with `40P01`. If the importer were the victim its whole transaction would roll back and surface as a 500. I read this from the code and the lock-order rule and did not reproduce it; treat it as a hypothesis to verify, not a measured defect.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -70,6 +92,9 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 | PostgreSQL `SEQUENCE` | Never blocks, cheapest under concurrency | Rejected — burns a number on every rolled-back transaction, by design; unacceptable for an audited document number |
 | `SELECT MAX(n) + 1` | No dedicated counter state to maintain | Rejected — read-then-write race under concurrency; either a unique-constraint failure or, without one, a silent duplicate |
 | A counter row + `UPDATE ... RETURNING` inside the document's own transaction | One extra row, one extra statement per issue | **Chosen** — serializes only same-org concurrent issuers, and a rollback of the whole operation naturally reverts the allocation |
+| Imported number: `SET next_number = $max + 1` | One simple statement | Rejected (36d) — moves the counter backwards for an old-numbered file and re-issues numbers already used; `GREATEST` is the ratchet |
+| Imported number: let the user fix the collision when issue fails | No new code | Rejected (36d) — a 23505 at issue time, days later, from a user who did nothing wrong |
+| Imported number: renumber everything from the sequence | Zero collision risk | Rejected (36d) — the user asked to keep their numbers; printed invoices and customer records already carry them |
 | A separate reservation table (allocate now, confirm later) | True gaplessness across any failure, including a crash between allocate and use | Rejected as overkill — the counter-in-transaction approach already ties allocation to a real committed row; the extra protocol buys a guarantee this system doesn't need |
 
 ## Where it lives in this codebase
@@ -81,6 +106,10 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 - `server/src/db/migrations/065_stock_setup.sql` — `stock_code_counters (org_id, scheme_id, scope_key, next_seq)`, composite-keyed instead of one row per org
 - `server/src/utils/stockCodePattern.ts` — `renderScopeKey`, the pure function that derives a counter's scope key from a pattern and its non-sequence token values
 - `server/src/services/inventory/itemService.ts` — `createItem`'s 20-attempt bounded retry around the counter allocation + insert, catching `23505` on the item-code unique constraint specifically
+- `server/src/services/accounting/invoiceSettingsService.ts` (36d) — `advancePastImportedNumbersOnClient`, `MAX_ADVANCE_NUMBER` (2,000,000,000)
+- `server/src/services/accounting/invoiceService.ts` (36d) — `createInvoiceOnClient`'s `options.invoiceNumber`; the one changed line in `issueInvoiceOnClient`, `invoiceRow.invoice_number ?? await allocateInvoiceNumber(…)`; `findExistingInvoiceNumbersOnClient`
+- `server/src/services/accounting/invoiceImportService.ts` (36d) — `commitOnClient` calls the advance once, before the create/issue loop
+- `server/src/__tests__/accounting/invoiceImport.test.ts` (36d) — `'a reserved number survives a later manual issue of that draft'`, `'the sequence skips imported numbers'`, `"import as drafts keeps the file's number on the draft"`
 - `server/src/__tests__/inventory/items.test.ts` — asserts two items in different categories (different scope keys) both start at `...00001`, and that a manual code collision is skipped past rather than surfaced as a 500
 
 ## Gotchas
@@ -90,6 +119,12 @@ Despite the name of this pattern, it is not perfectly gapless — a transaction 
 - Voiding an invoice does not reclaim its number. If the business ever wants number reuse after a void, that's a deliberate, separate decision — not a bug in this mechanism.
 - The `UPDATE` locks the *counter row*, not the invoices table — a long-running unrelated transaction holding a lock on the same organization's `ledger_invoice_settings` row (say, someone mid-edit on invoice defaults, in a transaction that hasn't committed) would block an issue attempt until it releases. In practice, `updateInvoiceSettings` runs and commits in a single statement, so this window is negligible.
 - A retry loop around a counter allocation genuinely burns a sequence value per attempt — retrying 3 times because of manual-code collisions means the counter has advanced by 3, not by 1, even though only the last attempt's value survives. This is the correct trade (the alternative is a value that was already taken by a different row), but it means the counter's current value is "how many allocation *attempts* have happened," not "how many items exist" — the two only coincide when nobody ever types a colliding manual code.
+- **A reserved number only protects its own string.** Without the advance, a counter that later reaches the same value collides at issue time. The two halves (reserve on the draft, ratchet the counter) are both required.
+- **Never write the counter with a plain `SET … = $n`** when absorbing outside numbers: `GREATEST` keeps it monotone. A lower file number must be a no-op.
+- **`next_number` is a 32-bit `INTEGER`.** A parsed number is ignored above 2,000,000,000 so `+ 1` cannot overflow; such a number stays reserved on its draft but the counter is not advanced for it.
+- **Only `prefix + digits` strings are comparable to the counter.** `OLD-1`, or the same value with different padding, cannot collide and is ignored by the advance. If the user later changes the prefix, previously-imported numbers under the old prefix are not re-examined.
+- **The advance must precede the loop and must be on the transaction client.** After a failed import it rolls back with everything else, so no numbers are skipped for nothing.
+- **The unique index backstops; it does not validate.** `findExistingInvoiceNumbersOnClient` refuses a duplicate at staging; at commit a race still surfaces as `23505 ux_invoices_org_number`, which the importer rewraps as a 409 naming the rows.
 - Per-scope-key counters multiply the number of counter rows by however many distinct scopes a pattern can render — a pattern keyed by category *and* year creates a new row every January for every category still in use. That's intended (it's what makes the sequence restart per year), but it means the counter table's row count is not bounded by organization count the way the invoice counter's is.
 
 ## Interview Q&A
@@ -117,6 +152,18 @@ A: A single counter row per org would force every category and every year onto o
 
 **Q: What happens if a user manually types an item code that collides with one the counter would generate later?**
 A: The insert fails with a `23505` unique-violation on the item-code constraint, and the service catches specifically that constraint (by name, not by parsing the error message) and retries — allocating the next sequence value again and attempting the insert again, up to a bounded number of attempts, rather than surfacing a raw 500 to the user. Each retry does burn a sequence value permanently even though only the successful attempt's number is used, which is an accepted cost: the alternative is colliding with a code a human already chose, which is worse than a small, explainable gap in the sequence.
+
+**Q: A user imports invoices that already have numbers like `INV-0042`. How do you stop your own counter from later generating a duplicate?**
+A: Two mechanisms, both needed. The imported number is stored on the draft itself, and issuing uses it instead of allocating, so the counter is never consulted for that document. Then, before creating anything, the importer calls a function that locks the settings row, finds the largest imported number that looks like `prefix + digits`, and runs `SET next_number = GREATEST(next_number, max + 1)`. The first protects the document's own number via the unique index; the second protects the counter from reaching it later. `GREATEST` makes the update a ratchet — it can only raise the counter, so importing an old low number is a no-op rather than a reset.
+
+**Q: Why does the counter advance happen before the invoices are created and not after?**
+A: Because blank-number rows in the same file allocate from the counter when they are issued. If the counter has not been moved yet, one of them can be handed `INV-000005` just before a numbered row that already holds that string is created or issued, and you get a unique-index violation halfway through the import. Advancing first guarantees the counter is past every reserved number before the first allocation. It also rolls back with the rest of the transaction, so a failed import does not leave skipped numbers.
+
+**Q: Doesn't skipping numbers break the "sequential and accounted for" promise?**
+A: It leaves a hole in this system's series, but the skipped values (say 1–4 when `INV-000005` was imported) were never allocated by this system, and the imported number belongs to the previous system's series. What the mechanism still guarantees is that every number it hands out corresponds to a committed invoice and that none is ever reused. I would say that out loud rather than call the series gapless; the alternatives were renumbering the customer's documents or letting issue fail later on a collision, both worse.
+
+**Q: What can go wrong with writing user-derived values into an `INTEGER` counter, and how did you guard it?**
+A: Two things. A plain assignment can move the counter backwards, which re-issues used numbers — fixed with `GREATEST`. And a number parsed from user-controlled text can exceed the column's 32-bit range, so `+ 1` would raise a numeric-overflow error and abort the import; numbers above 2,000,000,000 are skipped for advancement (they stay reserved on their draft). I would also mention the unmeasured risk: the settings row is locked until commit, so a large posting import blocks other users' issuing for its duration, and I have not timed a 1000-document run.
 
 ## Follow-ups they'll dig into
 

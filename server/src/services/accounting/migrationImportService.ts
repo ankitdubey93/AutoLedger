@@ -14,6 +14,9 @@ import {
   isAccountType,
   isMigrationImportKind,
   type AccountType,
+  type ImportCommitContext,
+  type ImportCommitMode,
+  type ImportPreviewOptions,
   type MigrationCommitResult,
   type MigrationImport,
   type MigrationImportInspection,
@@ -44,6 +47,8 @@ import {
 
 const PG_UNIQUE_VIOLATION = '23505';
 const PG_FOREIGN_KEY_VIOLATION = '23503';
+const PG_DEADLOCK_DETECTED = '40P01';
+const PG_SERIALIZATION_FAILURE = '40001';
 
 function pgErrorCode(err: unknown): string | undefined {
   if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
@@ -75,6 +80,8 @@ interface ImportRow {
   column_map: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
   date_format: string;
+  conversion_mode: boolean;
+  commit_options: { mode: ImportCommitMode; postingDate: string | null } | null;
 }
 
 const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, i.row_count, i.error_count,
@@ -85,7 +92,9 @@ const IMPORT_SELECT = `SELECT i.id, i.kind, i.status, i.file_name, i.delimiter, 
                                i.journal_entry_id, i.committed_at,
                                i.created_by, u.name AS created_by_name, i.created_at,
                                i.column_map, i.result,
-                               COALESCE(i.options->>'dateFormat', 'ISO') AS date_format
+                               COALESCE(i.options->>'dateFormat', 'ISO') AS date_format,
+                               COALESCE((i.options->>'conversionMode')::boolean, false) AS conversion_mode,
+                               i.commit_options
                           FROM migration_imports i
                           LEFT JOIN users u ON u.id = i.created_by`;
 
@@ -114,6 +123,8 @@ function toImport(row: ImportRow): MigrationImport {
     columnMap: row.column_map,
     result: row.result,
     dateFormat: isDateFormat(row.date_format) ? row.date_format : 'ISO',
+    conversionMode: row.conversion_mode,
+    commitOptions: row.commit_options,
   };
 }
 
@@ -393,6 +404,7 @@ export interface CreateImportInput {
   content: string;
   columnMap: Record<string, string | null> | null;
   dateFormat: DateFormat;
+  conversionMode: boolean;
 }
 
 /** Shared by `createImport` and `inspectImport`: parse, cap rows, resolve columns. */
@@ -461,6 +473,9 @@ export async function createImport(
     await beginTransaction(client);
 
     const { def, table, columns } = parseAndResolve(input);
+    if (input.conversionMode && def.supportsConversionMode !== true) {
+      throw new ApiError(400, 'conversionMode applies only to invoice and bill imports');
+    }
     const missing = findMissingRequired(def.columns, def.requiredOneOf, columns);
     const firstMissing = missing[0];
     if (firstMissing !== undefined) {
@@ -489,7 +504,7 @@ export async function createImport(
 
     const { rows: importRows } = await client.query<{ id: string }>(
       `INSERT INTO migration_imports (org_id, kind, file_name, delimiter, row_count, created_by, column_map, options)
-       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, jsonb_build_object('dateFormat', $8::text))
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, jsonb_build_object('dateFormat', $8::text, 'conversionMode', $9::boolean))
        RETURNING id`,
       [
         orgId,
@@ -500,6 +515,7 @@ export async function createImport(
         createdBy,
         input.columnMap === null ? null : JSON.stringify(input.columnMap),
         input.dateFormat,
+        input.conversionMode,
       ],
     );
     const importId = importRows[0]?.id;
@@ -757,24 +773,52 @@ export async function deleteImport(orgId: string, importId: string): Promise<voi
 }
 
 /** Read-only preview of what commit will do, delegated by kind. */
-export async function preview(orgId: string, importId: string) {
+export async function preview(orgId: string, importId: string, opts: ImportPreviewOptions) {
   const imp = await getImportById(orgId, importId);
-  return withTransaction((client) => getImportKind(imp.kind).preview(client, orgId, importId));
+  return withTransaction((client) => getImportKind(imp.kind).preview(client, orgId, importId, opts));
 }
 
 export type CommitResult = MigrationCommitResult;
+
+export interface CommitBody {
+  mode?: ImportCommitMode | undefined;
+  postingDate?: string | null | undefined;
+}
 
 /** Commits a VALIDATED import, delegated by kind. All-or-nothing. */
 export async function commit(
   orgId: string,
   createdBy: string,
   importId: string,
+  body: CommitBody = {},
 ): Promise<{ import: MigrationImport; result: CommitResult }> {
   // Pre-transaction reads (rule 5): the kind, and whatever its prepareCommit
   // needs from the pool. Nothing below BEGIN may touch `pool`.
   const kindRow = await getImportById(orgId, importId);
   const def = getImportKind(kindRow.kind);
-  const context = (await def.prepareCommit?.(orgId)) ?? { inventoryProfile: null };
+  const prepared = (await def.prepareCommit?.(orgId)) ?? { inventoryProfile: null, mode: null, postingDate: null };
+
+  // Commit options: pure checks, no reads.
+  let mode: ImportCommitMode | null = null;
+  let postingDate: string | null = null;
+  if (def.commitModes === undefined) {
+    if (body.mode !== undefined || (body.postingDate !== undefined && body.postingDate !== null)) {
+      throw new ApiError(400, 'This import kind has no commit options');
+    }
+  } else if (kindRow.conversionMode) {
+    if (body.mode === 'DRAFT') throw new ApiError(400, 'Conversion-mode imports are always posted');
+    if (body.postingDate !== undefined && body.postingDate !== null) {
+      throw new ApiError(400, 'Conversion-mode imports post on your conversion date');
+    }
+    mode = 'POST';
+  } else {
+    mode = body.mode ?? 'DRAFT';
+    if (mode === 'DRAFT' && body.postingDate !== undefined && body.postingDate !== null) {
+      throw new ApiError(400, 'A posting date applies only when posting');
+    }
+    postingDate = mode === 'POST' ? (body.postingDate ?? null) : null;
+  }
+  const context: ImportCommitContext = { ...prepared, mode, postingDate };
 
   const client = await pool.connect();
   try {
@@ -818,25 +862,37 @@ export async function commit(
 
     const result = await def.commitOnClient(client, orgId, importId, createdBy, context);
 
-    await client.query('UPDATE migration_imports SET result = $1::jsonb WHERE id = $2 AND org_id = $3', [
-      JSON.stringify(result),
-      importId,
-      orgId,
-    ]);
+    await client.query(
+      'UPDATE migration_imports SET result = $1::jsonb, commit_options = $2::jsonb WHERE id = $3 AND org_id = $4',
+      [
+        JSON.stringify(result),
+        mode === null ? null : JSON.stringify({ mode, postingDate }),
+        importId,
+        orgId,
+      ],
+    );
 
     await client.query('COMMIT');
     return { import: await getImportById(orgId, importId), result };
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_migration_imports_one_committed_opening') {
-      throw new ApiError(409, 'This organization already has a committed opening-balance import');
-    }
-    if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
-      throw new ApiError(422, 'A referenced account does not exist');
-    }
-    throw err;
+    throw commitErrorToApiError(err) ?? err;
   } finally {
     client.release();
   }
+}
+
+/** Maps the Postgres errors `commit` can hit after ROLLBACK to a user-facing ApiError; null = rethrow as-is. */
+export function commitErrorToApiError(err: unknown): ApiError | null {
+  if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_migration_imports_one_committed_opening') {
+    return new ApiError(409, 'This organization already has a committed opening-balance import');
+  }
+  if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION) {
+    return new ApiError(422, 'A referenced account does not exist');
+  }
+  if (pgErrorCode(err) === PG_DEADLOCK_DETECTED || pgErrorCode(err) === PG_SERIALIZATION_FAILURE) {
+    return new ApiError(409, 'Another user was posting at the same time — nothing was imported. Commit again.');
+  }
+  return null;
 }

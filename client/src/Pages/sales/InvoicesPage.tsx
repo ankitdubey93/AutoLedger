@@ -16,6 +16,7 @@ import type { SortState } from '../../utils/useTableSort';
 import SortableHeader from '../../components/ui/SortableHeader';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
+import ImportButton from '../../components/imports/ImportButton';
 
 /**
  * The invoice register — every sales invoice, filterable and paginated.
@@ -184,12 +185,15 @@ export default function InvoicesPage() {
             voiding it.
           </p>
         </div>
-        <Link
-          to="/invoices/new"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
-        >
-          <Plus size={15} /> New invoice
-        </Link>
+        <div className="flex items-center gap-2">
+          <ImportButton kind="INVOICES" returnTo="/invoices" />
+          <Link
+            to="/invoices/new"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          >
+            <Plus size={15} /> New invoice
+          </Link>
+        </div>
       </header>
 
       <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Invoice status">

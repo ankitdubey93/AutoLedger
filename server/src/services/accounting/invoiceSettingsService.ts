@@ -286,6 +286,49 @@ export async function allocateInvoiceNumber(client: Queryable, orgId: string): P
   return `${row.number_prefix}${String(row.allocated).padStart(row.number_padding, '0')}`;
 }
 
+/** Largest numeric part an imported number may advance the counter to (next_number is an INTEGER). */
+const MAX_ADVANCE_NUMBER = 2_000_000_000;
+
+/**
+ * Phase 36d — after an import reserves externally-supplied invoice numbers,
+ * moves the sequence past any that look like `${number_prefix}<digits>` so a
+ * later allocation can never collide. Locks the settings row first (the same
+ * lock allocateInvoiceNumber's UPDATE takes) and only ever raises next_number.
+ * Runs on the caller's transaction client (rule 5).
+ */
+export async function advancePastImportedNumbersOnClient(
+  client: Queryable,
+  orgId: string,
+  numbers: readonly string[],
+): Promise<void> {
+  await client.query(
+    'INSERT INTO ledger_invoice_settings (org_id) VALUES ($1) ON CONFLICT (org_id) DO NOTHING',
+    [orgId],
+  );
+  const { rows } = await client.query<{ number_prefix: string }>(
+    'SELECT number_prefix FROM ledger_invoice_settings WHERE org_id = $1 FOR UPDATE',
+    [orgId],
+  );
+  const prefix = rows[0]?.number_prefix;
+  if (prefix === undefined) throw new Error('invoice settings row missing after upsert');
+
+  let max = 0;
+  for (const number of numbers) {
+    if (!number.startsWith(prefix)) continue;
+    const rest = number.slice(prefix.length);
+    if (!/^[0-9]+$/.test(rest)) continue;
+    const n = Number(rest);
+    if (n > MAX_ADVANCE_NUMBER) continue;
+    if (n > max) max = n;
+  }
+  if (max === 0) return;
+
+  await client.query(
+    'UPDATE ledger_invoice_settings SET next_number = GREATEST(next_number, $2::int + 1) WHERE org_id = $1',
+    [orgId, max],
+  );
+}
+
 /**
  * Phase 26 — credit and debit notes each keep their own gapless series
  * (`CN-000001`, `DN-000001`) on the same settings row, allocated exactly like

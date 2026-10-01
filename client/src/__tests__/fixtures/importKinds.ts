@@ -13,13 +13,15 @@ const PARTY_EDIT_FIELDS: ImportEditFieldMeta[] = [
       { key: 'partyTaxNumber', label: 'Tax number', input: 'text', maxLength: 64, nullable: true, options: null },
 ];
 
-const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS' | 'ITEMS' | 'INVENTORY_ITEMS' | 'JOURNALS', ImportKindMeta> = {
+const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | 'VENDORS' | 'ITEMS' | 'INVENTORY_ITEMS' | 'JOURNALS' | 'INVOICES' | 'BILLS', ImportKindMeta> = {
   CHART_OF_ACCOUNTS: {
     kind: 'CHART_OF_ACCOUNTS',
     label: 'Chart of accounts',
     noun: 'accounts',
     storage: 'typed',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       {
         key: 'code',
@@ -111,6 +113,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'balances',
     storage: 'typed',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       {
         key: 'code',
@@ -202,6 +206,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'customers',
     storage: 'typed',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       {
         key: 'partyName',
@@ -312,6 +318,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'vendors',
     storage: 'typed',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       {
         key: 'partyName',
@@ -423,6 +431,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'products',
     storage: 'data',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       { key: 'itemCode', header: '*ItemCode', label: 'Item code', required: true, synonyms: ['code', 'item code', 'sku', 'product code', 'item'], note: 'Up to 40 characters. A code that already exists only has its blank fields filled — nothing is overwritten.', example: 'CONSULT-HR', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
       { key: 'itemName', header: '*ItemName', label: 'Name', required: true, synonyms: ['name', 'item name', 'product name', 'product', 'service'], note: 'Up to 200 characters.', example: 'Consulting (hourly)', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
@@ -456,6 +466,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'items',
     storage: 'data',
     groupHeaderFields: [],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       { key: 'itemCode', header: 'ItemCode', label: 'Item code', required: false, synonyms: ['code', 'item code', 'sku', 'product code', 'item'], note: 'A–Z, 0–9 and - _ / . (converted to upper case). Blank: generated from your item-code scheme. Must not already exist.', example: 'WIDGET-01', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
       { key: 'itemName', header: '*ItemName', label: 'Name', required: true, synonyms: ['name', 'item name', 'product name', 'product'], note: 'Up to 200 characters.', example: 'Blue widget', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
@@ -505,6 +517,8 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
     noun: 'journal lines',
     storage: 'data',
     groupHeaderFields: ['journalNumber', 'date', 'narration'],
+    commitModes: [],
+    supportsConversionMode: false,
     columns: [
       { key: 'journalNumber', header: 'JournalNumber', label: 'Journal number', required: false, synonyms: ['journal number', 'journal no', 'journal', 'entry number', 'entry no', 'journal id', 'reference', 'ref'], note: 'Rows with the same number form one entry. Blank: rows with the same Date and Narration are grouped, as in Xero. The number only groups rows — the entry gets its own reference.', example: 'J-001', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
       { key: 'date', header: '*Date', label: 'Date', required: true, synonyms: ['date', 'journal date', 'entry date', 'transaction date'], note: 'Every line of an entry must have the same date, in an open period.', example: '2026-06-30', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
@@ -533,6 +547,105 @@ const BY_KIND: Record<'CHART_OF_ACCOUNTS' | 'OPENING_BALANCES' | 'CUSTOMERS' | '
       { key: 'amount', label: 'Signed amount', input: 'text', maxLength: null, nullable: true, options: null },
     ],
   },
+  INVOICES: {
+    kind: 'INVOICES',
+    label: 'Invoices',
+    noun: 'invoice lines',
+    storage: 'data',
+    groupHeaderFields: ['invoiceNumber', 'contactName', 'invoiceDate'],
+    commitModes: ['DRAFT', 'POST'],
+    supportsConversionMode: true,
+    columns: [
+      { key: 'contactName', header: '*ContactName', label: 'Customer', required: true, synonyms: ['contact name', 'contact', 'customer', 'customer name', 'client', 'vendor', 'vendor name', 'supplier', 'name'], note: 'An existing customer, matched by name. Import customers first.', example: 'Northwind Traders', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
+      { key: 'emailAddress', header: 'EmailAddress', label: 'Email', required: false, synonyms: ['email address', 'email'], note: 'Only needed when two customers share a name.', example: '', inTemplate: true, type: 'text', maxLength: 254, enumAliases: null, enumLabels: null },
+      { key: 'invoiceNumber', header: 'InvoiceNumber', label: 'Invoice number', required: false, synonyms: ['invoice number', 'invoice no', 'invoice #', 'number', 'invoice'], note: 'Rows with the same number form one invoice, and the invoice keeps this number. Blank: each row is its own invoice, numbered from your sequence when posted.', example: 'INV-0042', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
+      { key: 'invoiceDate', header: '*InvoiceDate', label: 'Date', required: true, synonyms: ['invoice date', 'date', 'issue date'], note: '', example: '2026-06-15', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'dueDate', header: 'DueDate', label: 'Due date', required: false, synonyms: ['due date', 'due'], note: 'Blank: worked out from PaymentTerms.', example: '2026-07-15', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'paymentTerms', header: 'PaymentTerms', label: 'Payment terms', required: false, synonyms: ['payment terms', 'terms'], note: 'A payment term\'s code or name, such as NET30 or "Net 30". Needed when DueDate is blank.', example: '', inTemplate: true, type: 'text', maxLength: 60, enumAliases: null, enumLabels: null },
+      { key: 'currency', header: 'Currency', label: 'Currency', required: false, synonyms: ['currency', 'currency code'], note: 'Blank: your base currency.', example: '', inTemplate: true, type: 'text', maxLength: 3, enumAliases: null, enumLabels: null },
+      { key: 'notes', header: 'Reference', label: 'Reference', required: false, synonyms: ['reference', 'notes', 'memo'], note: "Stored as the invoice's notes.", example: 'PO 7781', inTemplate: true, type: 'text', maxLength: 1000, enumAliases: null, enumLabels: null },
+      { key: 'itemCode', header: 'ItemCode', label: 'Item code', required: false, synonyms: ['item code', 'inventory item code', 'product code', 'sku', 'item'], note: 'Optional. Fills a blank description, price, account and tax rate from the product.', example: '', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
+      { key: 'description', header: '*Description', label: 'Description', required: true, synonyms: ['description', 'line description', 'details'], note: 'Blank allowed when ItemCode is set.', example: 'Consulting, June', inTemplate: true, type: 'text', maxLength: 500, enumAliases: null, enumLabels: null },
+      { key: 'quantity', header: 'Quantity', label: 'Quantity', required: false, synonyms: ['quantity', 'qty'], note: 'Blank: 1.', example: '10', inTemplate: true, type: 'quantity', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'unitAmount', header: 'UnitAmount', label: 'Unit price', required: false, synonyms: ['unit amount', 'unit price', 'price', 'rate'], note: "Excluding tax. Blank: the product's sale price.", example: '150.00', inTemplate: true, type: 'money', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'accountCode', header: 'AccountCode', label: 'Account', required: false, synonyms: ['account code', 'account', 'revenue account', 'sales account'], note: "A Revenue account. Blank: the product's account. Not needed in conversion mode.", example: '4100', inTemplate: true, type: 'text', maxLength: 20, enumAliases: null, enumLabels: null },
+      { key: 'taxRate', header: 'TaxRate', label: 'Tax %', required: false, synonyms: ['tax rate', 'tax', 'tax type', 'gst', 'vat'], note: "A percentage. Blank: the product's rate, else 0. Must be 0 or blank in conversion mode.", example: '10', inTemplate: true, type: 'percent', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'location', header: 'Location', label: 'Stock location', required: false, synonyms: ['location', 'warehouse', 'stock location'], note: 'For inventory products only. Blank: your default location.', example: '', inTemplate: true, type: 'text', maxLength: 100, enumAliases: null, enumLabels: null },
+    ],
+    requiredOneOf: [],
+    missingMessages: {
+      contactName: 'Could not find a customer or vendor name column in the file',
+      invoiceDate: 'Could not find an invoice date column in the file',
+      description: 'Could not find a description column in the file',
+    },
+    editFields: [
+      { key: 'contactName', label: 'Customer', input: 'text', maxLength: 200, nullable: false, options: null },
+      { key: 'emailAddress', label: 'Email', input: 'text', maxLength: 254, nullable: true, options: null },
+      { key: 'invoiceNumber', label: 'Invoice number', input: 'text', maxLength: 40, nullable: true, options: null },
+      { key: 'invoiceDate', label: 'Date', input: 'text', maxLength: null, nullable: false, options: null },
+      { key: 'dueDate', label: 'Due date', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'paymentTerms', label: 'Payment terms', input: 'text', maxLength: 60, nullable: true, options: null },
+      { key: 'currency', label: 'Currency', input: 'text', maxLength: 3, nullable: true, options: null },
+      { key: 'notes', label: 'Reference', input: 'text', maxLength: 1000, nullable: true, options: null },
+      { key: 'itemCode', label: 'Item code', input: 'text', maxLength: 40, nullable: true, options: null },
+      { key: 'description', label: 'Description', input: 'text', maxLength: 500, nullable: false, options: null },
+      { key: 'quantity', label: 'Quantity', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'unitAmount', label: 'Unit price', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'accountCode', label: 'Account', input: 'text', maxLength: 20, nullable: true, options: null },
+      { key: 'taxRate', label: 'Tax %', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'location', label: 'Stock location', input: 'text', maxLength: 100, nullable: true, options: null },
+    ],
+  },
+  BILLS: {
+    kind: 'BILLS',
+    label: 'Expenses (bills)',
+    noun: 'expense lines',
+    storage: 'data',
+    groupHeaderFields: ['contactName', 'invoiceNumber', 'invoiceDate'],
+    commitModes: ['DRAFT', 'POST'],
+    supportsConversionMode: true,
+    columns: [
+      { key: 'contactName', header: '*ContactName', label: 'Vendor', required: true, synonyms: ['contact name', 'contact', 'customer', 'customer name', 'client', 'vendor', 'vendor name', 'supplier', 'name'], note: 'An existing vendor, matched by name. Import vendors first.', example: 'Acme Supplies', inTemplate: true, type: 'text', maxLength: 200, enumAliases: null, enumLabels: null },
+      { key: 'emailAddress', header: 'EmailAddress', label: 'Email', required: false, synonyms: ['email address', 'email'], note: 'Only needed when two vendors share a name.', example: '', inTemplate: true, type: 'text', maxLength: 254, enumAliases: null, enumLabels: null },
+      { key: 'invoiceNumber', header: '*InvoiceNumber', label: "Vendor's invoice number", required: true, synonyms: ['invoice number', 'invoice no', 'invoice #', 'number', 'invoice', 'reference', 'bill number', 'vendor reference', 'supplier invoice number'], note: "The vendor's own invoice number. Rows with the same vendor and number form one expense.", example: 'SUP-881', inTemplate: true, type: 'text', maxLength: 100, enumAliases: null, enumLabels: null },
+      { key: 'invoiceDate', header: '*InvoiceDate', label: 'Date', required: true, synonyms: ['invoice date', 'date', 'issue date', 'bill date'], note: '', example: '2026-06-15', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'dueDate', header: 'DueDate', label: 'Due date', required: false, synonyms: ['due date', 'due'], note: 'Blank: worked out from PaymentTerms.', example: '2026-07-15', inTemplate: true, type: 'date', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'paymentTerms', header: 'PaymentTerms', label: 'Payment terms', required: false, synonyms: ['payment terms', 'terms'], note: 'A payment term\'s code or name, such as NET30 or "Net 30". Needed when DueDate is blank.', example: '', inTemplate: true, type: 'text', maxLength: 60, enumAliases: null, enumLabels: null },
+      { key: 'currency', header: 'Currency', label: 'Currency', required: false, synonyms: ['currency', 'currency code'], note: 'Blank: your base currency.', example: '', inTemplate: true, type: 'text', maxLength: 3, enumAliases: null, enumLabels: null },
+      { key: 'notes', header: 'Reference', label: 'Reference', required: false, synonyms: ['reference', 'notes', 'memo'], note: "Stored as the expense's notes.", example: 'PO 7781', inTemplate: true, type: 'text', maxLength: 1000, enumAliases: null, enumLabels: null },
+      { key: 'itemCode', header: 'ItemCode', label: 'Item code', required: false, synonyms: ['item code', 'inventory item code', 'product code', 'sku', 'item'], note: 'Optional. Fills a blank description, price, account and tax rate from the product.', example: '', inTemplate: true, type: 'text', maxLength: 40, enumAliases: null, enumLabels: null },
+      { key: 'description', header: '*Description', label: 'Description', required: true, synonyms: ['description', 'line description', 'details'], note: 'Blank allowed when ItemCode is set.', example: 'Consulting, June', inTemplate: true, type: 'text', maxLength: 500, enumAliases: null, enumLabels: null },
+      { key: 'quantity', header: 'Quantity', label: 'Quantity', required: false, synonyms: ['quantity', 'qty'], note: 'Blank: 1.', example: '10', inTemplate: true, type: 'quantity', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'unitAmount', header: 'UnitAmount', label: 'Unit price', required: false, synonyms: ['unit amount', 'unit price', 'price', 'rate'], note: "Excluding tax. Blank: the product's purchase price.", example: '150.00', inTemplate: true, type: 'money', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'accountCode', header: 'AccountCode', label: 'Account', required: false, synonyms: ['account code', 'account', 'expense account', 'purchases account'], note: "An Expense or Asset account. Blank: the product's account. Not needed in conversion mode.", example: '6100', inTemplate: true, type: 'text', maxLength: 20, enumAliases: null, enumLabels: null },
+      { key: 'taxRate', header: 'TaxRate', label: 'Tax %', required: false, synonyms: ['tax rate', 'tax', 'tax type', 'gst', 'vat'], note: "A percentage. Blank: the product's rate, else 0. Must be 0 or blank in conversion mode.", example: '10', inTemplate: true, type: 'percent', maxLength: null, enumAliases: null, enumLabels: null },
+      { key: 'location', header: 'Location', label: 'Stock location', required: false, synonyms: ['location', 'warehouse', 'stock location'], note: 'For inventory products only. Blank: your default location.', example: '', inTemplate: true, type: 'text', maxLength: 100, enumAliases: null, enumLabels: null },
+    ],
+    requiredOneOf: [],
+    missingMessages: {
+      contactName: 'Could not find a customer or vendor name column in the file',
+      invoiceNumber: 'Could not find an invoice number column in the file',
+      invoiceDate: 'Could not find an invoice date column in the file',
+      description: 'Could not find a description column in the file',
+    },
+    editFields: [
+      { key: 'contactName', label: 'Vendor', input: 'text', maxLength: 200, nullable: false, options: null },
+      { key: 'emailAddress', label: 'Email', input: 'text', maxLength: 254, nullable: true, options: null },
+      { key: 'invoiceNumber', label: "Vendor's invoice number", input: 'text', maxLength: 100, nullable: false, options: null },
+      { key: 'invoiceDate', label: 'Date', input: 'text', maxLength: null, nullable: false, options: null },
+      { key: 'dueDate', label: 'Due date', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'paymentTerms', label: 'Payment terms', input: 'text', maxLength: 60, nullable: true, options: null },
+      { key: 'currency', label: 'Currency', input: 'text', maxLength: 3, nullable: true, options: null },
+      { key: 'notes', label: 'Reference', input: 'text', maxLength: 1000, nullable: true, options: null },
+      { key: 'itemCode', label: 'Item code', input: 'text', maxLength: 40, nullable: true, options: null },
+      { key: 'description', label: 'Description', input: 'text', maxLength: 500, nullable: false, options: null },
+      { key: 'quantity', label: 'Quantity', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'unitAmount', label: 'Unit price', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'accountCode', label: 'Account', input: 'text', maxLength: 20, nullable: true, options: null },
+      { key: 'taxRate', label: 'Tax %', input: 'text', maxLength: null, nullable: true, options: null },
+      { key: 'location', label: 'Stock location', input: 'text', maxLength: 100, nullable: true, options: null },
+    ],
+  },
 };
 
 
@@ -544,4 +657,6 @@ export const IMPORT_KINDS_FIXTURE: ImportKindMeta[] = [
   BY_KIND.ITEMS,
   BY_KIND.INVENTORY_ITEMS,
   BY_KIND.JOURNALS,
+  BY_KIND.INVOICES,
+  BY_KIND.BILLS,
 ];

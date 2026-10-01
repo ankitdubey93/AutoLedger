@@ -80,7 +80,7 @@ function lookupByText<T>(map: ReadonlyMap<string, T>, raw: string): T | undefine
 }
 
 export async function prepareCommit(orgId: string): Promise<ImportCommitContext> {
-  return { inventoryProfile: await documentStockService.suggestedProfileForImport(orgId) };
+  return { inventoryProfile: await documentStockService.suggestedProfileForImport(orgId), mode: null, postingDate: null };
 }
 
 export async function validateRows(

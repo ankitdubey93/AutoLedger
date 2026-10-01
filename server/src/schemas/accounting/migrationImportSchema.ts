@@ -17,6 +17,13 @@ export const createMigrationImportSchema = z.object({
   content: z.string().min(1).max(MAX_CSV_CHARS),
   columnMap: z.record(z.string().min(1).max(64), z.string().trim().min(1).max(200).nullable()).nullable().default(null),
   dateFormat: z.enum(DATE_FORMATS).default('ISO'),
+  conversionMode: z.boolean().default(false),
+});
+
+/** POST /migration-imports/:id/commit — options for kinds with commit modes (36d). */
+export const commitMigrationImportSchema = z.object({
+  mode: z.enum(['DRAFT', 'POST']).optional(),
+  postingDate: z.iso.date().nullable().optional(),
 });
 
 export const inspectMigrationImportSchema = z.object({

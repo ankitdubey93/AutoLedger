@@ -4,6 +4,7 @@
 
 **Category:** PostgreSQL
 **Introduced by:** Phase 3.9 — `agingService.ts`, the AR/AP aging reports. Phase 19 supplies the concrete bug this reconciliation exists to catch — see below. Phase 25 adds per-party accounts (a customer's/vendor's own ledger) and the rule that journals may not post to a control account. Phase 35a adds a **third** control account, inventory — with a different subledger shape (a computed set of accounts, not one fixed pair; a movement ledger, not documents) and a different corrective action (a journal true-up, not a document)
+**Extended Phase 36d** — imported conversion-mode documents: the document's own dates for ageing, the conversion date for the GL entry
 **Verified against:** PostgreSQL 16
 
 ---
@@ -167,6 +168,23 @@ This is a useful interview story about generalizing an existing pattern to a cas
 
 ---
 
+### A document keeps its own dates while the GL posts on the conversion date (Phase 36d)
+
+**Verified against:** PostgreSQL 16; code read in `agingService.ts` (`buildOpenDocsCte`, `loadControlAccountBalance`) and the conversion-mode path of the invoice/bill importer; behaviour pinned by `invoiceImport.test.ts` (`conversion mode posts to 3400 on the conversion date and nets the opening plug`) and `billImport.test.ts` (`conversion mode posts bills to 3400 and AP ageing shows them`). The `asOf`-before-conversion-date paragraph is my reading of the code, **not** a test.
+
+A conversion-mode import brings an invoice issued 2025-12-22 and due 2026-01-21 into a ledger whose conversion date is 2026-01-01. The document row keeps `issue_date = 2025-12-22` and `due_date = 2026-01-21`. Its **journal entry** is dated 2026-01-01 (DR AR 500.00 / CR 3400). Two clocks, deliberately different:
+
+- **Ageing reads the document.** `buildOpenDocsCte` selects `d.due_date` and buckets it against `asOf` with the `CASE` ladder, over every document in the open status. As of 2026-02-10 this invoice is 20 days past its original due date and lands in `1–30` (the test asserts `d1to30Cents = 50000`). If conversion mode had reset the document dates to the conversion date, an invoice already overdue at the switch would look freshly issued and collections would lose the signal ageing exists to give.
+- **The control account reads the journal.** `loadControlAccountBalance` sums `ledger_lines` joined to `journal_entries` with `e.entry_date <= asOf`. The 500.00 enters the GL on 2026-01-01, because the books before the conversion date are the opening balances' territory and posting earlier would land in a closed period or restate history.
+
+These are the same two independently-derived numbers as before; they agree because both include the invoice, one by due date and one by posting date, and `reconciles` is `true` for any `asOf` on or after the conversion date. The ageing and reconciliation code needed **no change** — the invariant "a document and its journal entry are created in the same transaction" holds because posting goes through `issueInvoiceOnClient`/`approveBillOnClient` on a single client; only the *dates* were chosen differently (journal = conversion date, document = the file's).
+
+**An `asOf` earlier than the conversion date.** Reading the query: the document side filters on status, not on the document's issue date, so it counts the imported invoice for any `asOf`; the GL side filters `entry_date <= asOf`, so it does not include the 2026-01-01 entry for an `asOf` of 2025-12-31. I therefore expect `reconciles` to be `false` for an `asOf` before the conversion date once conversion-mode documents exist. This is an inference from the SQL, not something I ran; it is also arguably honest, since the ledger has no receivable before its conversion date.
+
+**The other leg.** The document's other line posts to 3400 Opening Balance Equity rather than revenue, so the P&L is unaffected, and the AR leg is what both the control-account sum and the document-side outstanding see. For bills the AP leg is credit-normal and 3400 takes the debit (the test asserts 3400's net is a 300.00 debit). Payments applied later settle the imported document through the normal allocation rows, so its derived outstanding falls exactly as for any other invoice.
+
+---
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -177,6 +195,8 @@ This is a useful interview story about generalizing an existing pattern to a cas
 | Trust the GL control-account balance as "the" AR number, skip the subledger detail | Simpler, one source | Rejected — loses the age breakdown per document, which is the entire deliverable of an aging report |
 | Trust the subledger sum as "the" AR number, skip control-account reconciliation | Simpler, one query | Rejected — removes the one check that catches documents and postings drifting apart, which is the report's actual value to an accountant |
 | **Compute both, assert equality** | Two queries instead of one | **Chosen** — the assertion is the report's job |
+| Conversion-mode imports: date the document at the conversion date too | One date, simpler | Rejected (36d) — a pre-switch overdue invoice would look newly issued; ageing would lose exactly the signal it exists to give |
+| Conversion-mode imports: date the journal at the document's own (pre-conversion) date | Dates agree | Rejected (36d) — lands in a period the new books do not cover and restates opening history |
 | One GL account per customer/vendor (sub-accounts of AR/AP) | Balance per party "for free" from the trial balance | Rejected (Phase 25) — thousands of chart rows, every new customer is a chart change, statements unreadable; not how any mainstream package models it |
 | `customer_id`/`vendor_id` column on `ledger_lines` (the QuickBooks model) | Journals could carry a party; the party ledger becomes a plain `WHERE` | Rejected for now — needs a migration, a backfill, per-party FX revaluation lines, and aging (which sums *documents*) still wouldn't see a party-tagged journal line, so `reconciles` would still break |
 | **Attribute control-account lines via the owning document's `journal_entry_id`; refuse journals to the control account (the SAP model)** | Adjustments (e.g. bad-debt write-offs) now need a document — credit notes are unbuilt | **Chosen** (Phase 25) — no migration, every existing FK already carries the link, and the subledger stays provably equal to the GL |
@@ -193,6 +213,8 @@ This is a useful interview story about generalizing an existing pattern to a cas
 - `server/src/services/accounting/journalService.ts` — `assertNotControlAccountsOnClient`, called from `createEntry` and `bankMatchService.postJournalForTransaction`, never from `createEntryOnClient`
 - `server/src/__tests__/accounting/partyLedger.test.ts` — `'per customer, ledger closing === open-items outstanding; their sum === ar-aging total === control balance'`; `controlAccountGuard.test.ts` — the 422s, the rollback, and that documents still post
 - `server/src/__tests__/accounting/bankReconciliation.test.ts` — `'does not reconcile when a cash movement was never imported'`, the direct proof that a `false` here means an incomplete import, not a books error
+- `server/src/services/accounting/documentImportCore.ts`, `invoiceImportService.ts`, `billImportService.ts` (Phase 36d) — conversion mode: journal dated `booksStartDate` via `issueInvoiceOnClient(…, postingDate)` / `approveBillOnClient(…, postingDate)`, document dates untouched
+- `server/src/__tests__/accounting/invoiceImport.test.ts`, `billImport.test.ts` (36d) — the two conversion-mode tests asserting a `1–30` bucket as of 2026-02-10, `reconciles: true` and unchanged P&L
 - `server/src/services/accounting/itemService.ts` (Phase 35a) — `resolveInventoryControlAccountIdsOnClient` (the computed account set)
 - `server/src/services/inventory/valuationService.ts` (Phase 35a) — `getValuation` (the reconciliation report), `trueUp` (the sanctioned corrective journal)
 - `server/src/db/integrity.ts` (Phase 35a) — `inventory_accounts_reconcile_with_gl`, the 7th check, the movement-ledger-vs-GL version of this same "two independently derived sums" pattern
@@ -210,6 +232,8 @@ This is a useful interview story about generalizing an existing pattern to a cas
 - **Some control-account lines belong to no party — by design.** FX revaluation posts one aggregate AR line (reversed the next day), and legacy manual journals from before the guard exist. Neither appears in any customer's ledger; `reconciles` is what surfaces them.
 - **Guard the manual path, not the shared posting primitive.** Putting the control-account check inside `createEntryOnClient` would have broken invoice issue, payments and FX revaluation, which are *supposed* to post there. The rule is about *who* posts, so it lives at the entry points humans use.
 - **The sign convention has to match the account type, not be hardcoded.** AR sums `debit - credit` (Asset, debit-normal); AP sums `credit - debit` (Liability, credit-normal). Getting this backwards makes `reconciles` false for entirely correct data — a wrong-sign bug looks identical to a real reconciliation break until you check the account type.
+- **Two dates, two readers.** For an imported conversion-mode document, ageing reads `due_date`, the control account reads `entry_date`. Resetting either to "make them match" breaks the thing it serves.
+- **An `asOf` before the conversion date likely reconciles false** once such documents exist (document side has no issue-date filter; GL side has `entry_date <= asOf`). Read from the SQL, not run.
 - **A newly-introduced control-account check can fail instantly on old data, and that's correct, not a bug in the check.** The moment `inventory_accounts_reconcile_with_gl` shipped, any organization with a pre-existing manual journal to what is now a computed control account (or a product remapped before the guard existed) started failing it — there was no way to introduce a *whole-account* check without surfacing whatever drift already existed. The fix is a true-up per account, not loosening the check.
 - **The computed account set means "is this a control account" can change answer between two calls in the same request if you're not careful about where you snapshot it.** Every guard call and the valuation report both recompute the set fresh rather than caching it, which is correct but means a test asserting "org B's manual journal to its own inventory account is unaffected by org A's products" is worth having explicitly — the set really is per-organization, not global, but it's *earned* by being recomputed from `org_id`-scoped data every time, not assumed.
 
@@ -261,6 +285,18 @@ A: Two structural things. First, AR/AP each have one configured account (or one 
 
 **Q: For AR you fix drift with a credit note (a document); for inventory you fix it with a bare journal, no movement. Why the opposite?**
 A: Because the two subledgers trust different sides. AR/AP's subledger-of-record is the *documents* — an invoice is the fact, the GL posting is derived from it — so correcting AR drift means posting the right kind of document (a credit note), never inventing a bare journal that no document explains. Inventory's subledger-of-record is the *movement ledger* — it's append-only, and an integrity check independently proves the cached balance equals its sum, so it's the one side of this system that's provably reconstructible from source rows. When inventory's GL disagrees with its movements, the movements are essentially always right and the GL is the side that picked up an out-of-band posting, so the fix moves the GL to match the movements — a journal, never a manufactured movement. Same underlying rule (fix drift by restoring the side that's derivable to source, never by faking the source) applied to opposite sides depending on which one is actually the source in each case.
+
+**Q: You import an invoice from before your system's start date. Why does ageing show it as 20 days overdue when the GL entry is dated later than that?**
+A: They answer different questions from different columns. Ageing buckets the document's own `due_date` against `asOf`, so an invoice due 21 January is 20 days late on 10 February whatever date its journal carries. The control account sums journal lines by `entry_date`, and that entry is deliberately dated on the conversion date because the books before it are the opening balances' territory. The two totals still agree for any date on or after the conversion date because both include the same invoice — it was created and posted in one transaction through the normal issue path — so `reconciles` stays true without any change to the report.
+
+**Q: Why not simply date the imported document at the conversion date so everything lines up?**
+A: That would throw away the due date, so an invoice already overdue at the switch would look freshly issued and the collections signal would be lost. The report's purpose is to age *documents*; the GL date only has to fall inside the period the new books cover. Keeping the file's dates on the document and the conversion date on the journal satisfies both.
+
+**Q: What would you check to be sure a new import path did not break AR/AP reconciliation?**
+A: Three assertions after a commit, all integer equality: the ageing total equals the expected outstanding, `reconciles` is true, and the P&L is unchanged for a conversion-mode import — which is what the invoice and bill import tests do. I'd add an explicit case for an `asOf` before the conversion date; from the SQL I expect `reconciles` to be false there because the document side is not date-limited, and I'd say that is a prediction I haven't run.
+
+**Q: Where does the other side of a conversion-mode invoice go, and why does that keep revenue correct?**
+A: To 3400 Opening Balance Equity instead of a revenue account, so no P&L account moves. The opening trial balance already contains the revenue those unpaid invoices represent; posting it again as revenue would double-count it. The AR leg is what the subledger and control account both need, and later payments settle it through the usual allocations.
 
 ---
 

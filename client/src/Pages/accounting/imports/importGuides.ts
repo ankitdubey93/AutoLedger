@@ -14,8 +14,6 @@ export interface MigrationStep {
   kind: MigrationImportKind | null;
 }
 
-// Step D (open invoices and bills) is inserted before `stock`: opening stock posts inventory
-// directly, so it comes last, after every document that might name a product.
 export const MIGRATION_STEPS: MigrationStep[] = [
   {
     key: 'conversion-date',
@@ -58,6 +56,20 @@ export const MIGRATION_STEPS: MigrationStep[] = [
     hint: 'Your trial balance on the conversion date, without receivables, payables or inventory.',
     to: '/migration-imports/new?kind=OPENING_BALANCES',
     kind: 'OPENING_BALANCES',
+  },
+  {
+    key: 'invoices',
+    label: 'Open invoices',
+    hint: 'Unpaid customer invoices at your conversion date — use conversion mode.',
+    to: '/migration-imports/new?kind=INVOICES',
+    kind: 'INVOICES',
+  },
+  {
+    key: 'bills',
+    label: 'Open expenses (bills)',
+    hint: 'Unpaid vendor bills at your conversion date — use conversion mode.',
+    to: '/migration-imports/new?kind=BILLS',
+    kind: 'BILLS',
   },
   {
     key: 'stock',
@@ -187,6 +199,40 @@ export const IMPORT_GUIDES: Record<MigrationImportKind, ImportGuide> = {
       'Use Debit and Credit columns, or one signed Amount column (positive is a debit, negative a credit).',
       'Receivable, payable and inventory control accounts are refused — use invoices, bills and Inventory for those so every balance stays traceable.',
       'Every date must fall in an open period. Imported entries are marked "Imported" and are corrected by reversing them, like any posted entry.',
+    ],
+  },
+  INVOICES: {
+    intro: "Bring in invoices — open ones you're still owed when you switch, or history you want to see here.",
+    steps: [
+      'Download the template — keep the column headings exactly as they are. Headings starting with * are required.',
+      'Fill it in with Excel, Google Sheets or Numbers, one row per record, then save or download it as CSV.',
+      'Upload the file. If your headings differ (for example an export from another system), match each of our fields to one of your columns.',
+      'Review the rows. Fix or exclude anything flagged in red — nothing is saved to your books yet.',
+      'Commit. An owner or admin commits; the import is then final.',
+    ],
+    rules: [
+      'Rows with the same InvoiceNumber form one invoice and it keeps that number. Leave the number blank and each row becomes its own invoice, numbered from your sequence.',
+      'Customers must exist first (Customers → Import). If two customers share a name, add EmailAddress.',
+      'ItemCode is optional — it fills a blank description, price, account and tax rate from the product.',
+      'Choose at commit: import as drafts to review them, or import and post to issue them straight away.',
+      "Switching mid-year? Turn on conversion mode for invoices still unpaid at your conversion date and import only the amount outstanding — they post to Opening Balance Equity so your opening balances aren't counted twice.",
+    ],
+  },
+  BILLS: {
+    intro: 'Bring in expenses (bills) — ones you still owe when you switch, or history you want to see here.',
+    steps: [
+      'Download the template — keep the column headings exactly as they are. Headings starting with * are required.',
+      'Fill it in with Excel, Google Sheets or Numbers, one row per record, then save or download it as CSV.',
+      'Upload the file. If your headings differ (for example an export from another system), match each of our fields to one of your columns.',
+      'Review the rows. Fix or exclude anything flagged in red — nothing is saved to your books yet.',
+      'Commit. An owner or admin commits; the import is then final.',
+    ],
+    rules: [
+      "Rows with the same vendor and InvoiceNumber (the vendor's own invoice number) form one expense.",
+      'Vendors must exist first (Vendors → Import). If two vendors share a name, add EmailAddress.',
+      'Lines can use Expense or Asset accounts. An inventory product line receives stock when posted.',
+      'Choose at commit: import as drafts to review them, or import and post to approve them straight away.',
+      'Switching mid-year? Turn on conversion mode for bills still unpaid at your conversion date and import only the amount outstanding.',
     ],
   },
 };

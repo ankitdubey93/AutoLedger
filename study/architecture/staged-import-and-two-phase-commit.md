@@ -326,6 +326,81 @@ A: Commit is a single transaction whose cost scales with documents: per-document
 - "Why does bulk exclude lock the import row?" So it serialises with commit, which takes the same `FOR UPDATE`; otherwise a status flip could land between commit's revalidate and its post.
 - "Can the group key contain user input safely in SQL?" It is only ever a bound parameter or an array element in `unnest`; it is never interpolated (rule 4).
 
+## Phase 36d additions — one transaction for draft-or-post, and conversion mode
+
+**Verified against:** this codebase at Phase 36d, PostgreSQL 16 (`READ COMMITTED`), Node 22. Code read: `migrationImportService.ts` (`commit`, `createImport`), `documentImportCore.ts`, `invoiceImportService.ts`, `billImportService.ts`, `invoiceService.ts`; behaviour pinned by `invoiceImport.test.ts` and `billImport.test.ts`. Not verified: a 1000-document posting import has not been timed, and a stock-short or lot/serial failure is caught only at commit (one wrapped error, full rollback).
+
+### Which choices belong at staging and which at commit
+
+The user makes two separate decisions, and they live in different places for a reason.
+
+- **Conversion mode is a staging option** (`options.conversionMode` in `migration_imports.options`, set by `createImport`, read back by `importOptionsOnClient`). It changes **what is valid**: line accounts resolve to 3400 instead of a revenue/expense account, tax must be 0, `ItemCode` is refused, and every document must be dated on or before the conversion date. Anything that changes validation has to be known when rows are validated, so it cannot wait for commit. It is refused with a 400 for a kind with `supportsConversionMode: false`.
+- **Draft vs post is a commit option** (`POST /:id/commit` body `{ mode, postingDate }`, recorded in `migration_imports.commit_options`). It does **not** change which rows are valid; it changes what the commit does with valid ones, so the same staged file can be committed either way. The one validation-like consequence — "the period covering the posting date is closed" — is computed by the **preview**, which accepts `?mode=POST&postingDate=…`, so the UI can show it and set `canCommit = false` before the user presses the button.
+
+`commit` validates the options **before `BEGIN`**, with pure checks on values it already has (no reads, so rule 5 holds): a kind with no `commitModes` and any option → 400 `This import kind has no commit options`; conversion mode with `DRAFT` → 400 `Conversion-mode imports are always posted`; conversion mode with a `postingDate` → 400 (it posts on the conversion date); `DRAFT` with a `postingDate` → 400 `A posting date applies only when posting`. Otherwise `mode = body.mode ?? 'DRAFT'` — **drafts are the default**, so an omitted body (every pre-existing caller sent `{}`) cannot post anything by accident. The effective `{mode, postingDate}` is written to `commit_options` in the **same `UPDATE`** that stores `result`, inside the transaction, so the record of "how was this committed" can never disagree with what was committed.
+
+### Draft vs post is one transaction either way
+
+`commitOnClient` resolves every document with `resolveDocumentsOnClient` (the same function validation and preview use, so a document that previews clean is the one that commits; a mismatch between group count and resolved-document count throws as a backstop), then for each document in first-row order calls the **existing document services on the transaction client**: `createInvoiceOnClient`, and in POST mode `issueInvoiceOnClient` (bills: `createBillOnClient`, `approveBillOnClient`). Both modes run the same function; POST is just one more call per document. That reuse is the point: issue and approve already own the FX rate, the stock receipt/issue and COGS, the number, the period check, the journal entry and the webhook event, and already pass through their lifecycle transition tables (rules 6 and 10). The importer never writes a status or a journal line itself, so there is no second implementation of "what posting an invoice means" to drift.
+
+The consequence is all-or-nothing across the whole file: if document 37 of 40 fails — a closed period, a missing FX rate for its date, a short stock issue — the transaction rolls back the 36 invoices already issued, their journals, their stock movements, the advanced invoice counter and the import's own `COMMITTED` mark. The test `post with a posting date in a closed period: preview blocks, commit rolls back everything` asserts exactly that: preview says `canCommit: false` with the period warning, a forced commit is refused, **no invoice exists** and the import is still `VALIDATED`. An `ApiError` thrown from inside is re-wrapped with the document and the file rows (`Invoice INV-9001 (rows 4–6): …`), preserving its status; a `23505` on `ux_invoices_org_number` / `ux_bills_vendor_reference` becomes a 409 naming the same rows.
+
+Order inside a posted invoice import: the **counter advance first** (see [the numbering note](../postgresql/gapless-numbering-and-counters.md#reserving-numbers-someone-else-already-chose-and-advancing-the-counter-past-them-phase-36d)), then the create/issue loop.
+
+### Conversion mode: historical open items vs the opening trial balance
+
+**The accounting problem.** A business switching systems mid-year has two kinds of history. The *opening trial balance* at the conversion date already contains the cumulative effect of everything before it — including the revenue earned on invoices the customer has not yet paid. But the new system also needs the **individual open invoices** (who owes what, due when) so it can chase them, apply payments to them and age them. If those invoices are imported as ordinary posted invoices they post **DR Accounts Receivable / CR Revenue**, and the revenue is counted twice: once inside the opening balances, once as new year-to-date revenue.
+
+**The design.** A conversion-mode document posts **DR Accounts Receivable / CR 3400 Opening Balance Equity** (bills: **DR 3400 / CR Accounts Payable**), dated on the conversion date (`books_start_date`), tax 0, no products. That creates the receivable the payment-application machinery needs without touching any P&L account, so year-to-date revenue stays whole (test: P&L revenue 0 after the import). 3400 is the account the opening-balance importer already uses for its balancing line: it posts `plug = Σdebits − Σcredits` of the uploaded trial balance to 3400. If the user's trial balance **omits** the AR/AP lines (because the documents will carry them), the file is short by exactly that amount, the plug debits 3400 for it, the document import credits 3400 by the same amount, and **the two net to zero**. That is the property to be able to explain: 3400 is a holding account whose balance after both imports should be nil.
+
+What the test actually pins, honestly: `conversion mode posts to 3400 on the conversion date and nets the opening plug` commits a balanced trial balance (cash 1000 / equity 1000, so the plug is 0), imports a 500.00 invoice dated 2025-12-22 and asserts the invoice is `ISSUED`, its journal `entryDate` is 2026-01-01, revenue is 0 and 3400's net is a credit of 500.00 — the invoice's half of the netting. It does not run an opening import that omits AR and then assert 3400 = 0; that composition follows from the arithmetic above and the plug code but is **my reading, not a test**.
+
+**Why the document keeps its own dates.** The invoice's issue and due dates are the file's (2025-12-22, 2026-01-21); only the *journal* is dated on the conversion date, because the books before the conversion date are not this system's and a journal there would either hit a closed period or restate history. See [the ageing note](../postgresql/subledger-reconciliation-and-aging.md#a-document-keeps-its-own-dates-while-the-gl-posts-on-the-conversion-date-phase-36d) for why this does not break reconciliation.
+
+**Guards that make the mode safe.** Tax must be 0 (`import the amount outstanding including tax`) because splitting tax would post a liability that is also inside the opening balances; `ItemCode` is refused because a product line would receive or issue stock, double-counting what the stock import already brought in; documents dated *after* the conversion date are refused because they are not opening items. The reverse mistake — a user importing carried-over balances in *normal* mode — cannot be detected from the data, so the preview warns when any document is dated before the conversion date and tells the user to restage with conversion mode on. The FX rate for a foreign-currency document is taken at the posting date (the conversion date), as `issueInvoiceOnClient` always does; documented, not changed.
+
+### Rejected alternatives (36d)
+
+| Option | Why not |
+|---|---|
+| Separate "create drafts" and "post them" endpoints | Two transactions: a failure on the second leaves a half-posted set and the user has to work out which. One transaction makes failure atomic |
+| Write the journal lines directly in the importer | A second implementation of posting (FX, stock, COGS, numbering, periods, events) that must be kept in step with the real one; reusing issue/approve costs a call |
+| Make mode a staging option like conversion mode | Mode does not affect validity; it would force a re-stage to change one's mind |
+| Default mode `POST` | A forgotten option would post to the ledger irreversibly (rule 6: posted documents can only be reversed) |
+| Post conversion documents to revenue and add a correcting entry | Revenue is wrong in every interim report, and the correction has to be reconstructed |
+| Auto-detect "this is an opening item" from the date | A pre-conversion date can also be legitimate history the user wants counted; guessing silently alters the P&L, so the user chooses and the preview warns |
+
+### Gotchas (36d)
+
+- **Option checks before `BEGIN`, rollback after.** The 400s for bad option combinations never open a transaction; everything else shares one.
+- **An omitted body must mean DRAFT.** Existing callers send `{}`; the default is the safe one.
+- **The preview's period check and the commit's are two looks at the same fact.** A period closed between them is caught at commit (the issue fails, everything rolls back); the preview only helps the user avoid it.
+- **The conversion-mode 3400 line is accepted by an allowance, not by weakening the check.** `assertRevenueAccounts`/`assertExpenseAccounts` take an optional `allowAccountId`; only the importer passes it, and only the id of 3400. Every other caller keeps the two-argument form.
+- **Stock problems surface at commit, not at validate** (lot/serial items, a short issue): one wrapped error, full rollback — the same trade 36b accepted for barcodes.
+
+### Interview Q&A (36d)
+
+**Q: The same staged file can be committed as drafts or posted. Where do you put that choice, and why not at staging?**
+A: At commit, because it does not change which rows are valid — only what happens to them — and putting it at staging would force a re-stage to change one's mind. Conversion mode is the opposite: it changes validation (accounts, tax, items, dates), so it has to be a staging option. The commit options are validated before `BEGIN` with pure checks, the default is drafts so an empty body cannot post, and the chosen options are stored with the result in the same UPDATE.
+
+**Q: How do you make "post forty invoices" atomic without reimplementing posting?**
+A: One transaction on one checked-out client, calling the existing `createInvoiceOnClient` and `issueInvoiceOnClient` per document. They already own FX, stock, numbering, the period check and the journal, and they enforce the lifecycle, so the importer has no posting logic of its own. A failure anywhere rolls back every earlier invoice, journal, stock movement and the counter advance together; I test that with a closed period and assert no invoice exists and the import is still validated.
+
+**Q: A user is moving to your system mid-year with unpaid invoices. Why would importing them normally be wrong, and what does conversion mode do?**
+A: Their opening trial balance already includes the revenue those invoices represent, so a normal import posts it again as year-to-date revenue. In conversion mode each invoice posts DR AR / CR 3400 Opening Balance Equity on the conversion date instead of CR Revenue, with its own issue and due dates, tax 0 and no product lines. That gives the receivable for payment application and ageing without touching the P&L. 3400 is the account the opening-balance import plugs into, so when the trial balance omits AR the plug and the invoice entries offset. My tests pin the invoice half of that offset; the omitted-AR composition is arithmetic, not a test.
+
+**Q: Why can't the importer detect that an invoice is an opening item because it predates the conversion date?**
+A: Because a pre-conversion date is equally what legitimate history looks like, and guessing wrong silently changes the P&L or double-counts it. So the user chooses, and the preview warns — "N documents are dated before your conversion date; if they are balances carried over, restage with conversion mode on" — which makes the mistake visible without guessing.
+
+**Q: Tell me about a design where you reused existing services instead of writing new SQL, and what it cost you.**
+A: The invoice and bill importer. Posting goes through `issueInvoiceOnClient` and `approveBillOnClient`, so FX, stock, numbering and period rules came for free and cannot drift. The costs were a small number of hooks into those live paths — an optional reserved invoice number, and an allow-one-account parameter so 3400 passes the revenue/expense type check — each written so the default is byte-identical for every other caller, with the existing tests running unedited as the proof. The other cost is that some failures (stock short, a lot-tracked product) only show at commit.
+
+### Follow-ups they'll dig into (36d)
+
+- "What if a 1000-document posting import is too slow?" It holds a connection and the invoice-number row lock for the whole transaction; the 1000-document cap bounds it, and I have not timed it. The redesign would be per-document idempotency and a resumable cursor, which gives up atomicity for GL data.
+- "Why not validate the closed period at staging?" The posting date is chosen at commit, so there is nothing to check yet; the preview takes it as a parameter.
+- "What stops a user from committing a conversion import twice?" The same `FOR UPDATE` on the import row as every kind; the second request sees `COMMITTED` and gets a 409.
+
 ## See also
 
 - [partial-unique-indexes.md](../postgresql/partial-unique-indexes.md) — the constraint that makes a second commit of an opening-balance import physically impossible.
@@ -334,5 +409,7 @@ A: Commit is a single transaction whose cost scales with documents: per-document
 - [../postgresql/transactions-isolation-pooling.md](../postgresql/transactions-isolation-pooling.md) — `READ COMMITTED`, row locks and the pooled-client rule the `commit` function depends on
 - [../typescript/const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md#phase-36a-additions--satisfies-recordkind-def-as-an-exhaustive-registry) — how the registry's exhaustiveness is enforced
 - [../react/schema-driven-forms-and-print-layouts.md](../react/schema-driven-forms-and-print-layouts.md#phase-36a-additions--a-server-metadata-driven-mapper-and-row-editor) — the client that renders from this registry's metadata
+- [../postgresql/gapless-numbering-and-counters.md](../postgresql/gapless-numbering-and-counters.md#reserving-numbers-someone-else-already-chose-and-advancing-the-counter-past-them-phase-36d) — reserving an imported invoice number and advancing the counter with `GREATEST` before the create/issue loop.
+- [../postgresql/subledger-reconciliation-and-aging.md](../postgresql/subledger-reconciliation-and-aging.md#a-document-keeps-its-own-dates-while-the-gl-posts-on-the-conversion-date-phase-36d) — why conversion-mode documents still age and reconcile.
 - [double-entry-as-an-invariant.md](double-entry-as-an-invariant.md) — validating balance before the deferred trigger, and the shared control-account refusal map the journal import reuses.
 - [../postgresql/window-functions-and-running-totals.md](../postgresql/window-functions-and-running-totals.md) — the `MIN(row_number) OVER (PARTITION BY …)` ordering that keeps a group's rows together.

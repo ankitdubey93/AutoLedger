@@ -3,6 +3,8 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MigrationImportDetailPage from '../Pages/accounting/MigrationImportDetailPage';
+import InvoicesPage from '../Pages/sales/InvoicesPage';
+import BillsPage from '../Pages/purchases/BillsPage';
 import type { MigrationImport, MigrationImportRow } from '../services/fetchServices';
 import { IMPORT_KINDS_FIXTURE } from './fixtures/importKinds';
 
@@ -34,6 +36,8 @@ function baseImport(overrides: Partial<MigrationImport> = {}): MigrationImport {
     columnMap: null,
     result: null,
     dateFormat: 'ISO',
+    conversionMode: false,
+    commitOptions: null,
     ...overrides,
   };
 }
@@ -465,5 +469,158 @@ describe('MigrationImportDetailPage', () => {
     renderPage(imp.id);
 
     expect(await screen.findByText('Committed: 2 journal entries posted (5 lines).')).toBeInTheDocument();
+  });
+
+  const DOC_PREVIEW = {
+    ...EMPTY_PREVIEW,
+    kind: 'INVOICES',
+    canCommit: true,
+    summary: [{ label: 'Invoices', value: 3, format: 'count' }],
+  };
+
+  function commitCalls() {
+    return fetchMock.mock.calls.filter((c) => {
+      const [input, init] = c as [RequestInfo | URL, RequestInit?];
+      const url = typeof input === 'string' ? input : input.toString();
+      return init?.method === 'POST' && url.includes('/commit');
+    });
+  }
+
+  function previewUrls(): string[] {
+    return fetchMock.mock.calls
+      .map((c) => {
+        const input = (c as [RequestInfo | URL])[0];
+        return typeof input === 'string' ? input : input.toString();
+      })
+      .filter((u) => u.includes('/preview'));
+  }
+
+  it('document imports offer draft or post, and posting sends mode and date', async () => {
+    const imp = baseImport({ kind: 'INVOICES', status: 'VALIDATED' });
+    mockRoutes(imp, [baseRow()], DOC_PREVIEW);
+    const user = userEvent.setup();
+    renderPage(imp.id);
+
+    const how = await screen.findByRole('radiogroup', { name: 'How to import' });
+    expect(screen.getByRole('radio', { name: 'Import as drafts' })).toBeChecked();
+    expect(screen.getByRole('radio', { name: 'Import and post' })).not.toBeChecked();
+    expect(how).toHaveTextContent('Issues the invoices');
+    expect(screen.queryByRole('radiogroup', { name: 'Posting date' })).toBeNull();
+
+    await user.click(screen.getByRole('radio', { name: 'Import and post' }));
+    expect(await screen.findByRole('radiogroup', { name: 'Posting date' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: "Each document's own date" })).toBeChecked();
+    await user.click(screen.getByRole('radio', { name: /On this date/ }));
+    const dateInput = screen.getByLabelText('Posting date', { selector: 'input[type="date"]' });
+    await user.type(dateInput, '2026-03-31');
+
+    await user.click(screen.getByRole('button', { name: 'Commit' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('This creates 3 posted document(s).');
+    await user.click(screen.getByRole('dialog').querySelector('button:last-of-type') as HTMLElement);
+
+    await waitFor(() => expect(commitCalls()).toHaveLength(1));
+    const body = JSON.parse((commitCalls()[0]?.[1] as RequestInit).body as string) as Record<string, unknown>;
+    expect(body).toEqual({ mode: 'POST', postingDate: '2026-03-31' });
+  });
+
+  it('changing the commit options re-fetches the preview with them', async () => {
+    const imp = baseImport({ kind: 'BILLS', status: 'VALIDATED' });
+    mockRoutes(imp, [baseRow()], { ...DOC_PREVIEW, kind: 'BILLS' });
+    const user = userEvent.setup();
+    renderPage(imp.id);
+
+    await screen.findByRole('radiogroup', { name: 'How to import' });
+    expect(screen.getByRole('radiogroup', { name: 'How to import' })).toHaveTextContent('Approves the expenses');
+    await user.click(screen.getByRole('radio', { name: 'Import and post' }));
+
+    await waitFor(() => expect(previewUrls().some((u) => u.includes('mode=POST'))).toBe(true));
+
+    await user.click(screen.getByRole('radio', { name: /On this date/ }));
+    await user.type(screen.getByLabelText('Posting date', { selector: 'input[type="date"]' }), '2026-04-30');
+
+    await waitFor(() =>
+      expect(previewUrls().some((u) => u.includes('mode=POST') && u.includes('postingDate=2026-04-30'))).toBe(true),
+    );
+  });
+
+  it('a conversion-mode import shows the fixed posting note and commits with an empty body', async () => {
+    const imp = baseImport({ kind: 'INVOICES', status: 'VALIDATED', conversionMode: true });
+    mockRoutes(imp, [baseRow()], DOC_PREVIEW);
+    const user = userEvent.setup();
+    renderPage(imp.id);
+
+    expect(
+      await screen.findByText('Conversion mode — documents post on your conversion date to 3400 Opening Balance Equity.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('radiogroup', { name: 'How to import' })).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: 'Commit' }));
+    expect(screen.getByRole('dialog')).toHaveTextContent('This creates 3 posted document(s).');
+    await user.click(screen.getByRole('dialog').querySelector('button:last-of-type') as HTMLElement);
+
+    await waitFor(() => expect(commitCalls()).toHaveLength(1));
+    expect(JSON.parse((commitCalls()[0]?.[1] as RequestInit).body as string)).toEqual({});
+  });
+
+  it('a committed invoice import reports drafts or posted with counts', async () => {
+    const drafts = baseImport({
+      kind: 'INVOICES',
+      status: 'COMMITTED',
+      committedAt: new Date().toISOString(),
+      result: { kind: 'INVOICES', documentCount: 3, lineCount: 7, mode: 'DRAFT' },
+    });
+    mockRoutes(drafts, [baseRow()], DOC_PREVIEW);
+    const first = renderPage(drafts.id);
+    expect(await screen.findByText('Committed: 3 invoices created as drafts (7 lines).')).toBeInTheDocument();
+    first.unmount();
+
+    const posted = baseImport({
+      id: 'imp-2',
+      kind: 'BILLS',
+      status: 'COMMITTED',
+      committedAt: new Date().toISOString(),
+      result: { kind: 'BILLS', documentCount: 2, lineCount: 4, mode: 'POST' },
+    });
+    mockRoutes(posted, [baseRow()], { ...DOC_PREVIEW, kind: 'BILLS' });
+    renderPage(posted.id);
+    expect(await screen.findByText('Committed: 2 expenses posted (4 lines).')).toBeInTheDocument();
+  });
+});
+
+describe('Import buttons on the document registers', () => {
+  it('Invoices and Expenses pages link to their import wizards', async () => {
+    const stub = vi.fn((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/api/v1/invoices')) {
+        return Promise.resolve(
+          jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, invoices: [] }),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse(200, { success: true, count: 0, totalCount: 0, currentPage: 1, totalPages: 1, bills: [] }),
+      );
+    });
+    vi.stubGlobal('fetch', stub);
+
+    const inv = render(
+      <MemoryRouter initialEntries={['/invoices']}>
+        <Routes>
+          <Route path="/invoices" element={<InvoicesPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const invLink = await screen.findByRole('link', { name: 'Import' });
+    expect(invLink).toHaveAttribute('href', '/migration-imports/new?kind=INVOICES&returnTo=%2Finvoices');
+    inv.unmount();
+
+    render(
+      <MemoryRouter initialEntries={['/expenses']}>
+        <Routes>
+          <Route path="/expenses" element={<BillsPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    const billLink = await screen.findByRole('link', { name: 'Import' });
+    expect(billLink).toHaveAttribute('href', '/migration-imports/new?kind=BILLS&returnTo=%2Fexpenses');
   });
 });

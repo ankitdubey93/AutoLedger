@@ -308,6 +308,22 @@ export async function findItemsByCodesOnClient(
   return out;
 }
 
+/** Full defaults for document lines (import): code -> Item, org-scoped. */
+export async function findItemDefaultsByCodesOnClient(
+  client: PoolClient,
+  orgId: string,
+  codes: readonly string[],
+): Promise<Map<string, Item>> {
+  const out = new Map<string, Item>();
+  if (codes.length === 0) return out;
+  const { rows } = await client.query<ItemRow>(
+    `SELECT ${ITEM_COLUMNS} FROM items WHERE org_id = $1 AND code = ANY($2::text[])`,
+    [orgId, [...codes]],
+  );
+  for (const row of rows) out.set(row.code, toItem(row));
+  return out;
+}
+
 export async function createItem(orgId: string, createdBy: string, input: CreateItemInput): Promise<Item> {
   // Stock-managed types are created in Inventory, which creates the linked
   // product here in the same transaction (createLinkedItemOnClient).

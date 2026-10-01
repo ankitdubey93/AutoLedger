@@ -44,7 +44,11 @@ export function accountCodeError(
   wantTypes: readonly AccountType[],
 ): string | null {
   if (account === undefined) return `${label} "${code}" was not found`;
-  if (!wantTypes.includes(account.type)) return `${label} "${code}" must be a ${wantTypes.join(' or ')} account`;
+  if (!wantTypes.includes(account.type)) {
+    const typeText = wantTypes.join(' or ');
+    const article = /^[AEIOU]/i.test(typeText) ? 'an' : 'a';
+    return `${label} "${code}" must be ${article} ${typeText} account`;
+  }
   if (!account.isPostable) return `${label} "${code}" is a header account and cannot be posted to`;
   if (!account.isActive) return `${label} "${code}" is inactive`;
   return null;

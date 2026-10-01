@@ -1238,6 +1238,8 @@ export const MIGRATION_IMPORT_KINDS = [
   'ITEMS',
   'INVENTORY_ITEMS',
   'JOURNALS',
+  'INVOICES',
+  'BILLS',
 ] as const;
 export type MigrationImportKind = (typeof MIGRATION_IMPORT_KINDS)[number];
 
@@ -1286,7 +1288,8 @@ export type MigrationCommitResult =
   | { kind: 'CUSTOMERS' | 'VENDORS'; createdCount: number; mergedCount: number }
   | { kind: 'ITEMS'; createdCount: number; mergedCount: number }
   | { kind: 'INVENTORY_ITEMS'; createdCount: number; openingStockCount: number }
-  | { kind: 'JOURNALS'; entryCount: number; lineCount: number };
+  | { kind: 'JOURNALS'; entryCount: number; lineCount: number }
+  | { kind: 'INVOICES' | 'BILLS'; documentCount: number; lineCount: number; mode: 'DRAFT' | 'POST' };
 
 /** One CSV column an import kind understands (Phase 36). */
 export interface ImportColumnDef {
@@ -1321,6 +1324,17 @@ export interface PreviewSummaryItem {
 /** Built before BEGIN by the kind's prepareCommit (pool reads allowed there), passed into commitOnClient. */
 export interface ImportCommitContext {
   inventoryProfile: string | null;
+  /** Set by the generic commit after prepareCommit; null for kinds with no commit modes. */
+  mode: ImportCommitMode | null;
+  postingDate: string | null;
+}
+
+/** Document imports (Phase 36d): create drafts, or create and post. */
+export type ImportCommitMode = 'DRAFT' | 'POST';
+
+export interface ImportPreviewOptions {
+  mode: ImportCommitMode | null;
+  postingDate: string | null;
 }
 
 /** One field the review page lets a user fix on a staged row (a PATCH body key). */
@@ -1348,6 +1362,10 @@ export interface ImportKindMeta {
   storage: ImportStorage;
   /** Raw fields shown in a group's header row; [] = the kind is not grouped. */
   groupHeaderFields: readonly string[];
+  /** Commit modes the kind offers; [] = none. */
+  commitModes: readonly ImportCommitMode[];
+  /** True when the import may be staged in conversion mode (open items posted to 3400). */
+  supportsConversionMode: boolean;
 }
 
 export interface MigrationImportInspection {
@@ -1385,6 +1403,8 @@ export interface MigrationImport {
   columnMap: Record<string, string | null> | null;
   result: MigrationCommitResult | null;
   dateFormat: DateFormat;
+  conversionMode: boolean;
+  commitOptions: { mode: ImportCommitMode; postingDate: string | null } | null;
 }
 
 export interface MigrationImportRow {
