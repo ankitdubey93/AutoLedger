@@ -229,6 +229,50 @@ export function listMembers(signal?: AbortSignal): Promise<{
   return apiFetch('/organizations/members', { signal: signal ?? null });
 }
 
+/* ------------------------------------------- Phase 38a — user settings */
+
+/** One signed-in browser. `id` survives token rotation; `current` is this one. */
+export interface ActiveSession {
+  id: string;
+  startedAt: string;
+  lastActiveAt: string;
+  userAgent: string | null;
+  ip: string | null;
+  organizationName: string | null;
+  current: boolean;
+}
+
+/** PATCH /auth/me — your own display name. */
+export function updateProfile(input: { name: string }): Promise<{ success: boolean; user: PublicUser }> {
+  return apiFetch('/auth/me', { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/**
+ * POST /auth/change-password — signs every other session out. A wrong
+ * current password is a 400 (not 401, which would trigger a token refresh).
+ */
+export function changePassword(input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<{ success: boolean; signedOutSessions: number }> {
+  return apiFetch('/auth/change-password', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** GET /auth/sessions */
+export function listSessions(): Promise<{ success: boolean; count: number; sessions: ActiveSession[] }> {
+  return apiFetch('/auth/sessions');
+}
+
+/** DELETE /auth/sessions/:id — sign one other browser out. */
+export function revokeSession(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/auth/sessions/${id}`, { method: 'DELETE' });
+}
+
+/** POST /auth/sessions/revoke-others — sign out everywhere except here. */
+export function revokeOtherSessions(): Promise<{ success: boolean; signedOutSessions: number }> {
+  return apiFetch('/auth/sessions/revoke-others', { method: 'POST' });
+}
+
 /* ---------------------------------------------- Phase 37 — organizations */
 
 /**

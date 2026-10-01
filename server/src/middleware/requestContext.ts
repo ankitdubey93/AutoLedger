@@ -34,6 +34,7 @@ export const attachRequestContext: RequestHandler = (req, res, next) => {
   const context: RequestContext = {
     requestId: incoming !== undefined && INCOMING_REQUEST_ID.test(incoming) ? incoming : randomUUID(),
     ip: typeof req.ip === 'string' && req.ip !== '' ? req.ip.slice(0, 45) : null,
+    userAgent: req.get('user-agent')?.slice(0, 300) ?? null,
     userId: null,
     orgId: null,
   };

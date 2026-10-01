@@ -21,8 +21,10 @@ import {
 } from '../config/constants.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
+import { getRequestContext } from '../utils/requestContext.js';
 import {
   isRole,
+  type ActiveSession,
   type IssuedSession,
   type Membership,
   type OrganizationSummary,
@@ -189,23 +191,73 @@ export async function buildSession(
 /* ----------------------------------------------------------------- sessions */
 
 /**
+ * Phase 38a — the browser session a refresh row belongs to. Minted at login
+ * and carried forward through every rotation and org move, so one browser is
+ * one row in the sessions list however often its tokens rotate.
+ */
+interface SessionCarry {
+  sessionId: string;
+  startedAt: Date;
+}
+
+/**
+ * Deletes the presented refresh row and returns the session it belonged to,
+ * so the replacement row can carry it forward. Scoped by `user_id` too: a
+ * cookie that somehow belongs to another identity retires nothing.
+ */
+async function retireRefreshRow(
+  client: Queryable,
+  userId: string,
+  refreshToken: string | null,
+): Promise<SessionCarry | null> {
+  if (refreshToken === null) return null;
+  const { rows } = await client.query<{ session_id: string; session_started_at: Date; revoked_at: Date | null }>(
+    'DELETE FROM refresh_tokens WHERE token_hash = $1 AND user_id = $2 RETURNING session_id, session_started_at, revoked_at',
+    [hashRefreshToken(refreshToken), userId],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  // A browser signed out from another device still holds a valid access
+  // token for up to 15 minutes; it must not use it to mint a fresh session.
+  if (row.revoked_at !== null) throw new ApiError(401, 'This session was signed out');
+  return { sessionId: row.session_id, startedAt: row.session_started_at };
+}
+
+/**
  * Signs both tokens and persists the refresh row. Always called with the
  * transaction's own client so the row and whatever else the caller is doing
  * commit or roll back together (rule 5).
+ *
+ * `carry` continues an existing session (rotation, switch, create, accept,
+ * leave); null starts a new one (login). The device description comes from
+ * the request context, refreshed on every issue.
  */
 async function issueSession(
   client: Queryable,
   userId: string,
   orgId: string,
   role: Role,
+  carry: SessionCarry | null = null,
 ): Promise<IssuedSession> {
   const accessToken = signAccessToken({ id: userId, orgId, role });
   const refreshToken = signRefreshToken(userId, orgId);
   const expiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+  const ctx = getRequestContext();
 
   await client.query(
-    'INSERT INTO refresh_tokens (user_id, token_hash, org_id, expires_at) VALUES ($1, $2, $3, $4)',
-    [userId, hashRefreshToken(refreshToken), orgId, expiresAt],
+    `INSERT INTO refresh_tokens
+       (user_id, token_hash, org_id, expires_at, session_id, session_started_at, user_agent, ip)
+     VALUES ($1, $2, $3, $4, COALESCE($5::uuid, gen_random_uuid()), COALESCE($6::timestamptz, now()), $7, $8)`,
+    [
+      userId,
+      hashRefreshToken(refreshToken),
+      orgId,
+      expiresAt,
+      carry?.sessionId ?? null,
+      carry?.startedAt ?? null,
+      ctx?.userAgent ?? null,
+      ctx?.ip ?? null,
+    ],
   );
 
   // Phase 37 — every session issue (login, refresh, switch, create, accept,
@@ -386,8 +438,15 @@ export async function rotateRefreshToken(token: string): Promise<IssuedSession> 
   try {
     await beginTransaction(client);
 
-    const { rows } = await client.query<{ user_id: string; org_id: string | null; expires_at: Date }>(
-      'DELETE FROM refresh_tokens WHERE token_hash = $1 RETURNING user_id, org_id, expires_at',
+    const { rows } = await client.query<{
+      user_id: string;
+      org_id: string | null;
+      expires_at: Date;
+      session_id: string;
+      session_started_at: Date;
+      revoked_at: Date | null;
+    }>(
+      'DELETE FROM refresh_tokens WHERE token_hash = $1 RETURNING user_id, org_id, expires_at, session_id, session_started_at, revoked_at',
       [hashRefreshToken(token)],
     );
     const row = rows[0];
@@ -396,6 +455,15 @@ export async function rotateRefreshToken(token: string): Promise<IssuedSession> 
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [claims.userId]);
       await client.query('COMMIT');
       throw new ApiError(401, 'Refresh token has already been used — please sign in again');
+    }
+
+    // Phase 38a — signed out from another device (sessions list, password
+    // change). Refused quietly: unlike a replay, this is not evidence of
+    // theft, so the user's other sessions are left alone. The tombstone is
+    // consumed by the DELETE above; the controller clears the cookies.
+    if (row.revoked_at !== null) {
+      await client.query('COMMIT');
+      throw new ApiError(401, 'This session was signed out');
     }
 
     // Belt and braces with the JWT's own exp: a clock change or a token issued
@@ -410,7 +478,10 @@ export async function rotateRefreshToken(token: string): Promise<IssuedSession> 
     const memberships = await listMemberships(client, row.user_id);
     const { orgId, role } = resolveActiveOrg(memberships, row.org_id);
 
-    const issued = await issueSession(client, row.user_id, orgId, role);
+    const issued = await issueSession(client, row.user_id, orgId, role, {
+      sessionId: row.session_id,
+      startedAt: row.session_started_at,
+    });
     await client.query('COMMIT');
     return issued;
   } catch (err) {
@@ -452,13 +523,8 @@ export async function switchOrg(
       throw new ApiError(403, 'You are not a member of that organization');
     }
 
-    if (currentRefreshToken !== null) {
-      await client.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [
-        hashRefreshToken(currentRefreshToken),
-      ]);
-    }
-
-    const issued = await issueSession(client, userId, targetOrgId, role);
+    const carry = await retireRefreshRow(client, userId, currentRefreshToken);
+    const issued = await issueSession(client, userId, targetOrgId, role, carry);
     await client.query('COMMIT');
     return issued;
   } catch (err) {
@@ -486,10 +552,8 @@ async function inTransactionThenSwitch(
   try {
     await beginTransaction(client);
     const target = await fn(client);
-    if (currentRefreshToken !== null) {
-      await client.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hashRefreshToken(currentRefreshToken)]);
-    }
-    const issued = await issueSession(client, userId, target.orgId, target.role);
+    const carry = await retireRefreshRow(client, userId, currentRefreshToken);
+    const issued = await issueSession(client, userId, target.orgId, target.role, carry);
     await client.query('COMMIT');
     return issued;
   } catch (err) {
@@ -593,6 +657,149 @@ export async function logout(refreshToken: string | null): Promise<void> {
 /** GET /auth/check — the session as the client sees it. */
 export async function getSession(userId: string, orgId: string): Promise<SessionPayload> {
   return buildSession(pool, userId, orgId);
+}
+
+/* ------------------------------------------- Phase 38a — self-service */
+
+/*
+ * Everything below is scoped by `user_id`, not `org_id`, and that is not a
+ * rule-1 violation: a password, a name and a set of signed-in browsers belong
+ * to the identity, which precedes every organization (the same reasoning as
+ * `listMemberships`). The caller's id always comes from the verified token.
+ */
+
+/** PATCH /auth/me — the caller's own display name. */
+export async function updateProfile(userId: string, input: { name: string | null }): Promise<PublicUser> {
+  const { rowCount } = await pool.query('UPDATE users SET name = $2 WHERE id = $1', [userId, input.name]);
+  if (rowCount === 0) throw new ApiError(401, 'User no longer exists');
+  return loadUser(pool, userId);
+}
+
+/**
+ * POST /auth/change-password — while signed in. Requires the current
+ * password (a borrowed, unlocked laptop must not be enough to take the
+ * account over), then signs the user out of **every other** session and any
+ * outstanding reset link, keeping this one. Other sessions are revoked as
+ * tombstones (migration 081), not deleted, so their next refresh is refused
+ * quietly instead of tripping reuse detection.
+ *
+ * A wrong current password is 400, not 401: this route is authenticated, and
+ * the client treats a 401 as "access token expired" — it would refresh,
+ * replay, and eventually sign the user out for a typo.
+ *
+ * bcrypt runs before BEGIN (both the compare and the new hash), so the
+ * transaction never holds a connection for ~200ms of hashing.
+ */
+export async function changePassword(
+  userId: string,
+  currentRefreshToken: string | null,
+  currentPassword: string,
+  newPassword: string,
+): Promise<{ signedOutSessions: number }> {
+  const { rows } = await pool.query<{ password: string }>('SELECT password FROM users WHERE id = $1', [userId]);
+  const row = rows[0];
+  if (row === undefined) throw new ApiError(401, 'User no longer exists');
+  if (!(await bcrypt.compare(currentPassword, row.password))) {
+    throw new ApiError(400, 'Your current password is incorrect');
+  }
+  if (currentPassword === newPassword) {
+    throw new ApiError(400, 'Choose a password different from your current one');
+  }
+  const passwordHash = await bcrypt.hash(newPassword, BCRYPT_COST);
+
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+    await client.query('UPDATE users SET password = $2 WHERE id = $1', [userId, passwordHash]);
+    await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [userId]);
+    const { rowCount } = await client.query(
+      `UPDATE refresh_tokens SET revoked_at = now()
+        WHERE user_id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR token_hash <> $2)`,
+      [userId, currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken)],
+    );
+    await client.query('COMMIT');
+    return { signedOutSessions: rowCount ?? 0 };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** GET /auth/sessions — the caller's live sessions, newest activity first. */
+export async function listSessions(userId: string, currentRefreshToken: string | null): Promise<ActiveSession[]> {
+  const currentHash = currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken);
+  const { rows } = await pool.query<{
+    session_id: string;
+    session_started_at: Date;
+    created_at: Date;
+    user_agent: string | null;
+    ip: string | null;
+    org_name: string | null;
+    is_current: boolean;
+  }>(
+    `SELECT r.session_id, r.session_started_at, r.created_at, r.user_agent, r.ip,
+            o.name AS org_name, (r.token_hash = $2) AS is_current
+       FROM refresh_tokens r
+       LEFT JOIN organizations o ON o.id = r.org_id
+      WHERE r.user_id = $1 AND r.expires_at > now() AND r.revoked_at IS NULL
+      ORDER BY r.created_at DESC`,
+    [userId, currentHash],
+  );
+  return rows.map((r) => ({
+    id: r.session_id,
+    startedAt: r.session_started_at.toISOString(),
+    lastActiveAt: r.created_at.toISOString(),
+    userAgent: r.user_agent,
+    ip: r.ip,
+    organizationName: r.org_name,
+    current: r.is_current === true,
+  }));
+}
+
+/**
+ * DELETE /auth/sessions/:id — sign one other browser out. Another user's
+ * session id is a 404 (the `user_id` predicate), and so is an unknown one.
+ * The current session is refused: signing yourself out is /auth/logout,
+ * which also clears the cookies.
+ *
+ * The revoked browser's access token stays valid until it expires (up to 15
+ * minutes) — the same stated trade-off as logout (docs/architecture.md).
+ */
+export async function revokeSession(
+  userId: string,
+  sessionId: string,
+  currentRefreshToken: string | null,
+): Promise<void> {
+  const currentHash = currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken);
+  const { rows } = await pool.query<{ is_current: boolean }>(
+    'SELECT (token_hash = $3) AS is_current FROM refresh_tokens WHERE user_id = $1 AND session_id = $2 AND revoked_at IS NULL',
+    [userId, sessionId, currentHash],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new ApiError(404, 'Session not found');
+  if (row.is_current) throw new ApiError(422, 'This is your current session — sign out instead');
+  // A tombstone, not a delete — see migration 081: deleting would make the
+  // revoked browser's next refresh look like token theft and sign out every
+  // session, this one included.
+  await pool.query('UPDATE refresh_tokens SET revoked_at = now() WHERE user_id = $1 AND session_id = $2', [
+    userId,
+    sessionId,
+  ]);
+}
+
+/** POST /auth/sessions/revoke-others — sign out everywhere except here. */
+export async function revokeOtherSessions(
+  userId: string,
+  currentRefreshToken: string | null,
+): Promise<{ signedOutSessions: number }> {
+  const { rowCount } = await pool.query(
+    `UPDATE refresh_tokens SET revoked_at = now()
+      WHERE user_id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR token_hash <> $2)`,
+    [userId, currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken)],
+  );
+  return { signedOutSessions: rowCount ?? 0 };
 }
 
 /* ----------------------------------------------------------- password reset */

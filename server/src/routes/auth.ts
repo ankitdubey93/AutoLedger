@@ -43,4 +43,12 @@ router.post('/leave-org', authenticate, authController.leaveOrganization);
 router.get('/invitations/:token', authLimiter, authController.previewInvitation);
 router.post('/invitations/:token/accept', authLimiter, authenticate, authController.acceptInvitation);
 
+// Phase 38a — self-service on the caller's own identity (user settings).
+router.patch('/me', authenticate, authController.updateProfile);
+// Throttled like login: a wrong current password is a guess.
+router.post('/change-password', authLimiter, authenticate, authController.changePassword);
+router.get('/sessions', authenticate, authController.listSessions);
+router.post('/sessions/revoke-others', authenticate, authController.revokeOtherSessions);
+router.delete('/sessions/:id', authenticate, authController.revokeSession);
+
 export default router;

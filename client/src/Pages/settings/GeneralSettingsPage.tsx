@@ -195,7 +195,7 @@ export default function GeneralSettingsPage() {
       </label>
 
       <p className="text-sm text-[var(--muted)] m-0">
-        <Link to="/account">Address, contact details and logo are on your account's Organisation page.</Link>
+        <Link to="/settings/profile">Address, contact details and logo are on the organization profile page.</Link>
       </p>
 
       {error !== null && <p className="status status--bad">{error}</p>}

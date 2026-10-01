@@ -54,6 +54,7 @@ Constraint: `UNIQUE (org_id, user_id)`. Index `idx_org_members_user_id` on `user
 **`refresh_tokens`**
 `id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token_hash` TEXT UNIQUE NOT NULL · `org_id` UUID FK → `organizations` ON DELETE CASCADE (nullable) · `expires_at` TIMESTAMPTZ NOT NULL · `created_at`
 Indexes: `idx_refresh_tokens_user_id`, `idx_refresh_tokens_expires_at`.
+Phase 38a: migration `080` adds `session_id` UUID NOT NULL DEFAULT `gen_random_uuid()` (unique, `ux_refresh_tokens_session_id` — the browser session, carried across rotation), `session_started_at` TIMESTAMPTZ NOT NULL DEFAULT now(), `user_agent` TEXT NULL (≤ 300), `ip` TEXT NULL (≤ 45); migration `081` adds `revoked_at` TIMESTAMPTZ NULL — a revocation tombstone, so a revoked browser's refresh is refused quietly instead of tripping reuse detection. Tombstones expire with the row.
 
 **`password_reset_tokens`** — migration `077_platform_password_reset_tokens.sql`, 2026-09-29 (pre-showcase polish) — applied
 `id` UUID PK · `user_id` UUID NOT NULL FK → `users` ON DELETE CASCADE · `token_hash` TEXT NOT NULL (SHA-256 hex of the emailed token) · `expires_at` TIMESTAMPTZ NOT NULL · `created_at` TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -756,6 +757,10 @@ No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.m
   Constraints: `ux_organization_invitations_token_hash UNIQUE (token_hash)`; `ck_organization_invitations_expires_after_created`; `ck_organization_invitations_single_outcome` (not both accepted and revoked); `ck_organization_invitations_accepted_by` (`accepted_at` and `accepted_by` set together).
   Indexes: `idx_organization_invitations_org_id`, `_invited_by`, `_accepted_by`; partial unique `ux_organization_invitations_open_email (org_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL` — one open invitation per address per organization (an expired one is closed out by the service before a re-invite).
   Status (`PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`) is derived from the timestamps, never stored; the transition table is `INVITATION_TRANSITIONS` in `types/organization.ts` (rule 10). **Not audited**, like `refresh_tokens` and `password_reset_tokens`: the trail would copy `token_hash`. The membership an acceptance creates is audited through `organization_members`' trigger.
+
+## Phase 38a — session metadata and revocation (platform) — applied
+
+`080_platform_session_metadata.sql` and `081_platform_session_revocation.sql`, both additive and idempotent, extend `refresh_tokens` (see its entry above): a session id carried across rotation, when the session started, the browser's user agent and IP (display only), and a `revoked_at` tombstone. Two files rather than one because `080` was already applied when the revocation bug surfaced, and an applied migration is never edited (rule 13; the runner checksums every file).
 
 ## Phase 17 — target tables
 

@@ -28,7 +28,7 @@ export default function OrgSwitcher() {
     }),
     { type: 'separator' as const },
     { label: 'Add organization', icon: Plus, to: '/organizations/new' },
-    { label: 'Manage organizations', icon: Settings2, to: '/organizations' },
+    { label: 'Manage organizations', icon: Settings2, to: '/account?tab=organizations' },
   ];
 
   return (

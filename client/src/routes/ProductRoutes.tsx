@@ -64,6 +64,8 @@ import ProfitAndLossPage from '../Pages/reports/ProfitAndLossPage';
 import BalanceSheetPage from '../Pages/reports/BalanceSheetPage';
 import TrialBalancePage from '../Pages/reports/TrialBalancePage';
 // Settings
+import OrganizationProfileSettingsPage from '../Pages/settings/OrganizationProfileSettingsPage';
+import MembersSettingsPage from '../Pages/settings/MembersSettingsPage';
 import SettingsHubPage from '../Pages/settings/SettingsHubPage';
 import GeneralSettingsPage from '../Pages/settings/GeneralSettingsPage';
 import FinancialSettingsPage from '../Pages/settings/FinancialSettingsPage';
@@ -184,6 +186,9 @@ export default function ProductRoutes() {
           {/* Settings */}
           <Route path="/settings" element={<SettingsHubPage />} />
           <Route path="/settings/general" element={<GeneralSettingsPage />} />
+          {/* Phase 38a — moved here from the Account page. */}
+          <Route path="/settings/profile" element={<OrganizationProfileSettingsPage />} />
+          <Route path="/settings/members" element={<MembersSettingsPage />} />
           <Route path="/settings/financial" element={<FinancialSettingsPage />} />
           <Route path="/settings/chart" element={<ChartSettingsPage />} />
           <Route path="/settings/conversion-balances" element={<ConversionBalancesPage />} />

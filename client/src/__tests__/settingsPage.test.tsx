@@ -205,13 +205,13 @@ describe('GeneralSettingsPage (Organization tab)', () => {
     }
   });
 
-  it('links to the account page for address, contact details and logo', async () => {
+  it('links to the organization profile page for address, contact details and logo', async () => {
     renderSettingsPage();
 
     const link = await screen.findByRole('link', {
-      name: "Address, contact details and logo are on your account's Organisation page.",
+      name: 'Address, contact details and logo are on the organization profile page.',
     });
-    expect(link).toHaveAttribute('href', '/account');
+    expect(link).toHaveAttribute('href', '/settings/profile');
   });
 });
 

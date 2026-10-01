@@ -1,4 +1,4 @@
-import { LogOut, Menu as MenuIcon, Monitor, Moon, Search, Sun, UserCog } from 'lucide-react';
+import { LogOut, Menu as MenuIcon, Monitor, Moon, Search, Settings, Sun, UserCog } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
 import { useOrg } from '../../context/OrgContext';
@@ -97,7 +97,8 @@ export default function AppTopBar() {
           panelLabel="Account"
           align="right"
           items={[
-            { label: 'Account', icon: UserCog, to: '/account' },
+            { label: 'Account settings', icon: UserCog, to: '/account' },
+            { label: 'Organization settings', icon: Settings, to: '/settings' },
             { type: 'separator' as const },
             { label: 'Sign out', icon: LogOut, onSelect: () => void logout(), danger: true },
           ]}

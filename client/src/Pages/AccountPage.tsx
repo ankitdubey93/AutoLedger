@@ -1,169 +1,33 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  getHealth,
-  updateOrganization,
-  type HealthResponse,
-} from '../services/fetchServices';
-import { useAuth, useAuthActions } from '../context/AuthContext';
-import { useOrg } from '../context/OrgContext';
-import AccountTabs, { type AccountTab } from './AccountTabs';
-import OrganizationProfilePanel from './OrganizationProfilePanel';
-import MembersPanel from './MembersPanel';
+import { Navigate, useSearchParams } from 'react-router-dom';
+import { getHealth, type HealthResponse } from '../services/fetchServices';
+import { useAuth } from '../context/AuthContext';
+import AccountTabs, { ACCOUNT_TABS, type AccountTab } from './AccountTabs';
+import ProfilePanel from './account/ProfilePanel';
+import ChangePasswordPanel from './account/ChangePasswordPanel';
+import SessionsPanel from './account/SessionsPanel';
+import OrganizationsPage from './organizations/OrganizationsPage';
 import { initials } from '../utils/initials';
 
 /**
- * The account page: identity, organization, membership, and session details.
- * Reached from the user menu in the top bar.
+ * Account settings — everything that belongs to **you**, whichever
+ * organization is active: your profile, password, signed-in sessions and
+ * the organizations you belong to (Phase 38a).
  *
- * Every value below comes from a real Phase 1 endpoint. There is no
- * placeholder data and no link to a screen that does not exist — the modules
- * that are not built yet are shown as visibly disabled rather than as
- * something that looks clickable and leads to an empty table.
+ * Organization-level settings (the company's profile, members, accounting
+ * configuration) live under /settings. Before Phase 38a this page mixed the
+ * two; its old Organisation and Members tabs redirect there.
+ *
+ * The tab lives in `?tab=` so a link (the org menu's "Manage organizations",
+ * a redirect) can open the right one.
  */
 
-/** A calendar date, spelled out — "22 September 2026" in en-GB. */
-function formatDay(iso: string): string {
-  return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-}
+/** Pre-38a tabs that moved to Organization settings. */
+const MOVED_TABS: Record<string, string> = {
+  organization: '/settings/profile',
+  members: '/settings/members',
+};
 
-/** Formats the remaining access-token lifetime as m:ss, or "expired". */
-function useCountdown(isoTarget: string): string {
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    // One second is the coarsest tick that still looks live.
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  const remaining = Date.parse(isoTarget) - now;
-  if (Number.isNaN(remaining)) return 'unknown';
-  if (remaining <= 0) return 'expired — will refresh on next request';
-
-  const totalSeconds = Math.floor(remaining / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${String(minutes)}:${String(seconds).padStart(2, '0')}`;
-}
-
-function BusinessIdentificationPanel() {
-  const { organization } = useOrg();
-  const { refreshNow } = useAuthActions();
-
-  const [taxNumber, setTaxNumber] = useState('');
-  const [businessNumber, setBusinessNumber] = useState('');
-  const [seeded, setSeeded] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Seeded once the organization is available, rather than at useState
-  // initialization time — `organization` is null on the render before
-  // OrgContext finishes loading.
-  useEffect(() => {
-    if (organization !== null && !seeded) {
-      setTaxNumber(organization.taxNumber ?? '');
-      setBusinessNumber(organization.businessNumber ?? '');
-      setSeeded(true);
-    }
-  }, [organization, seeded]);
-
-  async function handleSave() {
-    setSaving(true);
-    setError(null);
-    setSaved(false);
-    try {
-      await updateOrganization({
-        taxNumber: taxNumber.trim() === '' ? null : taxNumber.trim(),
-        businessNumber: businessNumber.trim() === '' ? null : businessNumber.trim(),
-      });
-      await refreshNow();
-      setSaved(true);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save business identification');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section className="card">
-      <h2>Business identification</h2>
-
-      <div className="form">
-        <label htmlFor="tax-number">Tax registration number</label>
-        <input
-          id="tax-number"
-          type="text"
-          maxLength={64}
-          value={taxNumber}
-          onChange={(e) => setTaxNumber(e.target.value)}
-        />
-
-        <label htmlFor="business-number">Business registration number</label>
-        <input
-          id="business-number"
-          type="text"
-          maxLength={64}
-          value={businessNumber}
-          onChange={(e) => setBusinessNumber(e.target.value)}
-        />
-      </div>
-
-      <p className="muted">Shown on invoices when enabled in the invoice settings.</p>
-
-      {error !== null && <p className="status status--bad">{error}</p>}
-      {saved && error === null && <p className="status status--good">Saved.</p>}
-
-      <button type="button" className="btn" disabled={saving} onClick={() => void handleSave()}>
-        {saving ? 'Saving…' : 'Save'}
-      </button>
-    </section>
-  );
-}
-
-function SessionPanel({ expiresAt }: { expiresAt: string }) {
-  const { refreshNow } = useAuthActions();
-  const countdown = useCountdown(expiresAt);
-  const [lastRefresh, setLastRefresh] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function onRefresh() {
-    setBusy(true);
-    try {
-      await refreshNow();
-      setLastRefresh(new Date().toLocaleTimeString());
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <section className="card">
-      <h2>Session</h2>
-      <dl>
-        <dt>Access token expires in</dt>
-        <dd>{countdown}</dd>
-        <dt>Last manual refresh</dt>
-        <dd>{lastRefresh ?? 'none this visit'}</dd>
-      </dl>
-      {/*
-        Normally invisible — the fetch wrapper refreshes on a 401 without
-        anyone asking. Exposing it makes the rotation observable.
-      */}
-      <button type="button" className="btn btn--ghost" onClick={() => void onRefresh()} disabled={busy}>
-        {busy ? 'Refreshing…' : 'Refresh now'}
-      </button>
-      <p className="muted">
-        Tokens live in httpOnly cookies, so this page cannot read them — the server reports the
-        expiry.
-      </p>
-    </section>
-  );
-}
-
-/** 93784 → "1d 2h 3m"; under a minute reads "just started". */
 function formatUptime(totalSeconds: number): string {
   const days = Math.floor(totalSeconds / 86_400);
   const hours = Math.floor((totalSeconds % 86_400) / 3_600);
@@ -221,14 +85,16 @@ function HealthPanel() {
 
 export default function AccountPage() {
   const auth = useAuth();
-  const { organization, role } = useOrg();
-  const [tab, setTab] = useState<AccountTab>('organization');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requested = searchParams.get('tab') ?? 'profile';
+
+  const moved = MOVED_TABS[requested];
+  if (moved !== undefined) return <Navigate to={moved} replace />;
 
   // AppShell renders behind ProtectedRoute, so this is defensive only.
   if (auth.status !== 'authenticated') return null;
 
-  // When the caller joined the active organization — their membership row.
-  const joinedAt = auth.memberships.find((m) => m.orgId === organization?.id)?.joinedAt;
+  const tab: AccountTab = (ACCOUNT_TABS as readonly string[]).includes(requested) ? (requested as AccountTab) : 'profile';
 
   return (
     <div className="dashboard">
@@ -237,86 +103,23 @@ export default function AccountPage() {
           {initials(auth.user.name, auth.user.email)}
         </span>
         <div>
-          <h1>Account</h1>
+          <h1>Account settings</h1>
           <p className="subtitle m-0 mt-0.5">
+            {auth.user.name !== null && `${auth.user.name} · `}
             {auth.user.email}
-            {organization !== null && (
-              <>
-                {' · '}
-                {organization.name}
-                {role !== null && <span className="chip ml-2">{role}</span>}
-              </>
-            )}
           </p>
         </div>
       </header>
 
-      <div className="grid">
-        <section className="card">
-          <h2>You</h2>
-          <dl>
-            <dt>Name</dt>
-            <dd>{auth.user.name ?? '—'}</dd>
-            <dt>Email</dt>
-            <dd>{auth.user.email}</dd>
-            <dt>Email verified</dt>
-            <dd>
-              {auth.user.emailVerified ? (
-                'yes'
-              ) : (
-                // No verify button: email verification is not built, and a button that does nothing is worse.
-                <span className="muted">Not verified</span>
-              )}
-            </dd>
-            <dt>Account created</dt>
-            <dd>{formatDay(auth.user.createdAt)}</dd>
-          </dl>
-        </section>
-
-        <section className="card">
-          <h2>Organization</h2>
-          {organization === null ? (
-            <p className="muted">No active organization.</p>
-          ) : (
-            <dl>
-              <dt>Name</dt>
-              <dd>{organization.name}</dd>
-              <dt>Slug</dt>
-              <dd>
-                <code>{organization.slug}</code>
-              </dd>
-              <dt>Base currency</dt>
-              <dd>{organization.baseCurrency}</dd>
-              <dt>Your role</dt>
-              <dd>
-                <span className="chip">{role ?? '—'}</span>
-              </dd>
-              <dt>Organization created</dt>
-              <dd>{formatDay(organization.createdAt)}</dd>
-              <dt>You joined</dt>
-              <dd>{joinedAt === undefined ? '—' : formatDay(joinedAt)}</dd>
-              <dt>Organizations</dt>
-              <dd>
-                {auth.memberships.length} · <Link to="/organizations">Manage</Link>
-              </dd>
-            </dl>
-          )}
-        </section>
-      </div>
-
-      <AccountTabs active={tab} onChange={setTab} />
+      <AccountTabs active={tab} onChange={(next) => setSearchParams({ tab: next }, { replace: true })} />
 
       <div className="grid">
-        {tab === 'organization' && (
-          <>
-            <OrganizationProfilePanel />
-            <BusinessIdentificationPanel />
-          </>
-        )}
-        {tab === 'members' && <MembersPanel />}
-        {tab === 'session' && <SessionPanel expiresAt={auth.accessTokenExpiresAt} />}
+        {tab === 'profile' && <ProfilePanel />}
+        {tab === 'password' && <ChangePasswordPanel />}
+        {tab === 'sessions' && <SessionsPanel />}
         {tab === 'system' && <HealthPanel />}
       </div>
+      {tab === 'organizations' && <OrganizationsPage />}
     </div>
   );
 }

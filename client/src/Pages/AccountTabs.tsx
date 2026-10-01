@@ -1,26 +1,29 @@
-import { Building2, KeyRound, Server, Users } from 'lucide-react';
+import { Building2, KeyRound, MonitorSmartphone, Server, UserRound } from 'lucide-react';
 import TabBar from '../components/ui/TabBar';
 
-export type AccountTab = 'organization' | 'members' | 'session' | 'system';
+/** Phase 38a — user-level tabs only; organization settings live under /settings. */
+export const ACCOUNT_TABS = ['profile', 'password', 'sessions', 'organizations', 'system'] as const;
+export type AccountTab = (typeof ACCOUNT_TABS)[number];
 
 export interface AccountTabsProps {
   active: AccountTab;
   onChange: (tab: AccountTab) => void;
 }
 
-/** The tab strip for the Account page — a thin wrapper over the shared TabBar (Phase 31). */
+/** The tab strip for Account settings — a thin wrapper over the shared TabBar (Phase 31). */
 export default function AccountTabs({ active, onChange }: AccountTabsProps) {
   return (
     <TabBar
-      ariaLabel="Account"
+      ariaLabel="Account settings"
       variant="buttons"
       fullWidth
       active={active}
       onChange={(id) => onChange(id as AccountTab)}
       items={[
-        { id: 'organization', label: 'Organisation', icon: Building2 },
-        { id: 'members', label: 'Members', icon: Users },
-        { id: 'session', label: 'Session', icon: KeyRound },
+        { id: 'profile', label: 'Profile', icon: UserRound },
+        { id: 'password', label: 'Password', icon: KeyRound },
+        { id: 'sessions', label: 'Sessions', icon: MonitorSmartphone },
+        { id: 'organizations', label: 'Organizations', icon: Building2 },
         { id: 'system', label: 'Status', icon: Server },
       ]}
     />

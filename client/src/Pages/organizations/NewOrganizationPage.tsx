@@ -67,7 +67,7 @@ export default function NewOrganizationPage() {
           <button type="submit" className={primaryButtonClass} disabled={submitting || name.trim().length < 2}>
             {submitting ? 'Creating…' : 'Create and set up'}
           </button>
-          <Link to="/organizations" className={`${secondaryButtonClass} no-underline`}>
+          <Link to="/account?tab=organizations" className={`${secondaryButtonClass} no-underline`}>
             Cancel
           </Link>
         </div>

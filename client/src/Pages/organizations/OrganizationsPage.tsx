@@ -8,7 +8,8 @@ import ConfirmDialog from '../../components/ConfirmDialog';
 import { primaryButtonClass, secondaryButtonClass } from '../../components/ui/formClasses';
 
 /**
- * Phase 37 — "Your organizations": every organization the user belongs to,
+ * Phase 37 — "Your organizations": every organization the user belongs to.
+ * Rendered inside Account settings → Organizations since Phase 38a,
  * with Switch for the others and Leave for the active one.
  *
  * Leave applies to the active organization only, because the server takes
@@ -37,6 +38,7 @@ export default function OrganizationsPage() {
   return (
     <div className="flex flex-col gap-5">
       <PageHeader
+        as="h2"
         icon={Building2}
         title="Your organizations"
         subtitle="Each organization keeps its own books. Switch between them at any time from the top bar."

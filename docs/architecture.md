@@ -63,6 +63,10 @@ The consequence, stated plainly: **removing someone from an organization does no
 
 The alternative — checking membership on every request — puts a query in front of every route and gives up the reason for using stateless tokens at all. If a module ever needs immediate revocation (a compliance requirement, say), the answer is a short-lived denylist in Redis from Phase 5, not a per-request join.
 
+
+**Signing out other browsers (Phase 38a).** User settings → Sessions revokes one browser or all others, and changing your password revokes all others. Each marks the refresh row `revoked_at`, a tombstone, rather than deleting it. Deleting would be indistinguishable from a rotated-away token, and the next refresh from that browser would trip reuse detection and sign out every session, the revoker's included. The revoked browser keeps its access token for up to 15 minutes, the same window as logout.
+
+**Two settings areas (Phase 38a).** `/account` is user-level only: profile, password, sessions, your organizations, service status. Organization-level settings live under `/settings` (the hub). Profile and members moved there (`/settings/profile`, `/settings/members`), and the old `/account?tab=` URLs redirect.
 ### Roles
 
 Start with a small fixed set and expand only when a module needs it: `OWNER`, `ADMIN`, `ACCOUNTANT`, `VIEWER`. Stored as a TEXT column with a CHECK constraint (Phase 1).

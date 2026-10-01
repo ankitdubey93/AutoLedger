@@ -3,7 +3,7 @@
 > A signed token proves who issued it, not whether it should still be honoured. Everything else follows from that.
 
 **Category:** Security
-**Introduced by:** Phase 1 — login, session persistence, and `POST /auth/refresh`; extended Phase 37 — invitation tokens
+**Introduced by:** Phase 1 — login, session persistence, and `POST /auth/refresh`; extended Phase 37 — invitation tokens; Phase 38a — session ids and revocation tombstones
 **Verified against:** Node 24.4.1, `jsonwebtoken` 9.0.3, PostgreSQL 16
 
 ---
@@ -89,6 +89,18 @@ it('gives two tokens issued in the same second different values', () => {
 
 ---
 
+### Session ids, and why revocation needs a tombstone (Phase 38a)
+
+**A refresh row is not a session.** Rotation deletes the presented row and inserts a new one every time the access token is refreshed (about every 15 minutes), so a row's own `id` changes constantly. To show "where you're signed in" as one entry per browser, migration `080` adds a `session_id` that is minted at login and **copied forward** by every operation that replaces the row: refresh, switch-org, and Phase 37's create, accept and leave. In code there is one carry type (`SessionCarry`), one place that retires a row and returns it (`retireRefreshRow`, a `DELETE … RETURNING session_id, session_started_at`), and one place that inserts (`issueSession`, which `COALESCE`s a carried id or mints a new one). A unique index on `session_id` holds because rotation deletes before it inserts, inside one transaction.
+
+**The bug the tests found.** The first version revoked a session by deleting its rows. The test then refreshed the revoked browser, and *every* session died, including the one that had done the revoking. Rotation's reuse detection reads "valid signature, no row" as **a stolen token being replayed**, and its response is to delete the whole token family. A deleted row and a rotated-away row are indistinguishable, so "sign out that laptop" was treated as theft.
+
+**The fix is a tombstone.** Migration `081` adds `revoked_at`. Revocation (one session, all others, or as part of a password change) is now `UPDATE … SET revoked_at = now()`. On refresh, the `DELETE … RETURNING` claim still consumes the row atomically and reads `revoked_at`. If it is set, the server commits the delete and answers 401 "This session was signed out" **without** touching the user's other sessions. The controller already clears cookies on any refresh failure, so the browser doesn't retry with the dead cookie. Tombstones need no sweep for correctness: they fail the same way once past `expires_at`.
+
+**A second hole, closed the same way.** The session-moving routes (switch-org, create-org, accept, leave) authenticate with the **access** token and then replace the refresh row. A revoked browser holds a valid access token for up to 15 minutes, so before the fix it could call `POST /auth/organizations` and be issued a brand-new session, undoing the revocation. `retireRefreshRow` now throws 401 when the row it retires is a tombstone. The transaction rolls back, and a test asserts that no organization was created and the session count is unchanged.
+
+**Why "change password" keeps this session.** Revoking every session including the current one would sign the user out mid-action, for no security gain: the current browser just proved it knows the current password. All *other* sessions are revoked, since a password change is usually prompted by a suspected compromise elsewhere, along with any outstanding reset link. A wrong current password returns **400, not 401**. The route is authenticated, and the client's fetch wrapper treats a 401 as "access token expired": it would refresh, replay, get 401 again, and could end by signing the user out over a typo.
+
 ### Invitation links: a second bearer token, bound to an email (Phase 37)
 
 An organization invitation is delivered as a link the inviter copies (`/invite/<token>`; there is no mail transport). It reuses the refresh token's storage rules:
@@ -167,6 +179,12 @@ A: I'd store only a SHA-256 of a 256-bit random token and show the link once. Ac
 
 **Q: Your refresh cookie is path-scoped. What did that change about your API design?**
 A: Any endpoint that moves the session to another organization has to rotate the refresh token, or the next silent refresh reads the stale org off the old row and drags the user back. The browser only sends the refresh cookie to `/api/v1/auth`, so a "create organization" endpoint under `/organizations` would never see the old token and would leave its row alive. I moved create, leave and accept-invitation under `/auth` next to `switch-org`, and a test asserts exactly one refresh row remains after creating an organization.
+
+**Q: How do you show a user "where you're signed in" when refresh tokens rotate every 15 minutes?**
+A: The refresh row can't be the session, because rotation replaces it each time. I mint a session id at login and copy it forward every time the row is replaced: on refresh, and on any route that moves the session to another organization. One function retires a row and returns its session id, one function inserts with either the carried id or a new one, and a unique index on the session id holds because rotation deletes before inserting in the same transaction. The list is then one row per session, with when it started, when its tokens were last issued, and the user agent and IP for display.
+
+**Q: You implemented "sign out other devices" by deleting their refresh tokens. What broke?**
+A: Reuse detection. A valid refresh token with no row means the token was already rotated, i.e. replayed, and the response is to delete the user's whole token family. A deleted-because-revoked row looks exactly the same, so when the signed-out laptop next refreshed, every session including mine was killed. A test caught it. The fix is a tombstone: revocation sets `revoked_at` instead of deleting, refresh reads it and refuses quietly without the family wipe, and the routes that re-issue sessions refuse a tombstoned row. Otherwise a revoked browser could use its remaining 15 minutes of access token to mint a fresh session.
 
 ## Follow-ups they'll dig into
 

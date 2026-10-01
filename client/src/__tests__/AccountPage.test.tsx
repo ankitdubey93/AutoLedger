@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountPage from '../Pages/AccountPage';
 import { AuthProvider } from '../context/AuthContext';
@@ -8,9 +8,9 @@ import { OrgProvider } from '../context/OrgContext';
 import type { Role } from '../services/fetchServices';
 
 /**
- * Account settings: the three dates (account created, organization created,
- * when you joined it) and the tab strip. Phase 33 removed the Apps tab along
- * with per-organization app selection.
+ * Account settings (Phase 38a): user-level tabs only — Profile, Password,
+ * Sessions, Organizations, Status. The old Organisation and Members tabs
+ * moved to Organization settings and their URLs redirect there.
  */
 
 const USER_CREATED = '2026-03-04T10:00:00.000Z';
@@ -50,17 +50,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mockRoutes(role: Role) {
+type Handler = (url: string, method: string, body: unknown) => Response | undefined;
+
+function mockRoutes(role: Role, extra: Handler = () => undefined) {
   fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input.toString();
     const method = init?.method ?? 'GET';
+    const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
 
+    const handled = extra(url, method, body);
+    if (handled !== undefined) return Promise.resolve(handled);
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session(role)));
-    if (url.includes('/organizations/members')) {
-      return Promise.resolve(jsonResponse(403, { success: false, error: 'Forbidden' }));
-    }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unmocked ${method} ${url}` }));
   });
+}
+
+function bodiesFor(fragment: string, method: string): unknown[] {
+  return fetchMock.mock.calls
+    .filter(([input, init]) => String(input).includes(fragment) && ((init as RequestInit | undefined)?.method ?? 'GET') === method)
+    .map(([, init]) => {
+      const b = (init as RequestInit | undefined)?.body;
+      return typeof b === 'string' ? JSON.parse(b) : null;
+    });
 }
 
 function renderAccount(initialEntries: string[] = ['/account']) {
@@ -68,7 +79,11 @@ function renderAccount(initialEntries: string[] = ['/account']) {
     <MemoryRouter initialEntries={initialEntries}>
       <AuthProvider>
         <OrgProvider>
-          <AccountPage />
+          <Routes>
+            <Route path="/account" element={<AccountPage />} />
+            <Route path="/settings/members" element={<p>Members settings page</p>} />
+            <Route path="/settings/profile" element={<p>Organization profile page</p>} />
+          </Routes>
         </OrgProvider>
       </AuthProvider>
     </MemoryRouter>,
@@ -76,57 +91,111 @@ function renderAccount(initialEntries: string[] = ['/account']) {
 }
 
 describe('AccountPage', () => {
-  it('shows account-created, organization-created and joined dates', async () => {
+  it('opens on Profile, with the five user-level tabs', async () => {
     mockRoutes('OWNER');
-    renderAccount();
-
-    expect(await screen.findByText(day(USER_CREATED))).toBeInTheDocument();
-    expect(screen.getByText('Account created')).toBeInTheDocument();
-    expect(screen.getByText('Organization created')).toBeInTheDocument();
-    expect(screen.getByText(day(ORG_CREATED))).toBeInTheDocument();
-    expect(screen.getByText('You joined')).toBeInTheDocument();
-    expect(screen.getByText(day(JOINED))).toBeInTheDocument();
-  });
-
-  it('renders four tabs with Organisation selected by default; Members shows its own panel', async () => {
-    mockRoutes('OWNER');
-    // Layer a members route and an empty profile over the harness: the Members
-    // tab lists real rows, and the Organisation tab's profile panel loads.
-    const base = fetchMock.getMockImplementation() as (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-    fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-      const url = typeof input === 'string' ? input : input.toString();
-      if (url.includes('/organizations/members')) {
-        return Promise.resolve(
-          jsonResponse(200, {
-            success: true,
-            count: 1,
-            members: [{ userId: 'u1', name: 'Ada', email: 'ada@example.com', role: 'OWNER', joinedAt: JOINED }],
-          }),
-        );
-      }
-      if (url.includes('/organizations/profile')) {
-        return Promise.resolve(jsonResponse(404, { success: false, error: 'not needed here' }));
-      }
-      return base(input, init);
-    });
-    const user = userEvent.setup();
     renderAccount();
 
     const tabs = await screen.findAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['Organisation', 'Members', 'Session', 'Status']);
-    expect(screen.getByRole('tab', { name: 'Organisation' })).toHaveAttribute('aria-selected', 'true');
-    for (const name of ['Members', 'Session', 'Status']) {
-      expect(screen.getByRole('tab', { name })).toHaveAttribute('aria-selected', 'false');
-    }
-    // Default tab: the Organisation panels, not the others.
-    expect(await screen.findByRole('heading', { name: 'Organization profile' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Members' })).not.toBeInTheDocument();
+    expect(tabs.map((t) => t.textContent)).toEqual(['Profile', 'Password', 'Sessions', 'Organizations', 'Status']);
+    expect(screen.getByRole('tab', { name: 'Profile' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('Account created')).toBeInTheDocument();
+    expect(screen.getByText(day(USER_CREATED))).toBeInTheDocument();
+    // Nothing organization-level lives here any more.
+    expect(screen.queryByRole('tab', { name: 'Members' })).not.toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole('tab', { name: 'Members' }));
-    expect(screen.getByRole('tab', { name: 'Members' })).toHaveAttribute('aria-selected', 'true');
-    expect(await screen.findByRole('heading', { name: 'Members' })).toBeInTheDocument();
-    expect(await screen.findByRole('columnheader', { name: 'Email' })).toBeInTheDocument();
-    expect(screen.getByRole('cell', { name: 'ada@example.com' })).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: 'Organization profile' })).not.toBeInTheDocument();
+  it('lists your organizations with the date you joined each', async () => {
+    mockRoutes('OWNER');
+    renderAccount(['/account?tab=organizations']);
+
+    expect(await screen.findByRole('heading', { name: 'Your organizations' })).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: /Acme/ })).toBeInTheDocument();
+    expect(screen.getByText(new Date(JOINED).toLocaleDateString())).toBeInTheDocument();
+  });
+
+  it('redirects the old Members and Organisation tabs to Organization settings', async () => {
+    mockRoutes('OWNER');
+    renderAccount(['/account?tab=members']);
+    expect(await screen.findByText('Members settings page')).toBeInTheDocument();
+  });
+
+  it('saves your name', async () => {
+    mockRoutes('OWNER', (url, method) =>
+      url.includes('/auth/me') && method === 'PATCH'
+        ? jsonResponse(200, { success: true, user: session('OWNER').user })
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderAccount();
+
+    const name = await screen.findByLabelText('Name');
+    await user.clear(name);
+    await user.type(name, 'Ada Lovelace');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(await screen.findByText('Saved.')).toBeInTheDocument();
+    expect(bodiesFor('/auth/me', 'PATCH')).toEqual([{ name: 'Ada Lovelace' }]);
+  });
+
+  it('changes the password and reports how many other sessions were signed out', async () => {
+    mockRoutes('OWNER', (url, method) =>
+      url.includes('/auth/change-password') && method === 'POST'
+        ? jsonResponse(200, { success: true, signedOutSessions: 2 })
+        : undefined,
+    );
+    const user = userEvent.setup();
+    renderAccount(['/account?tab=password']);
+
+    await user.type(await screen.findByLabelText('Current password'), 'old-password-1');
+    await user.type(screen.getByLabelText('New password'), 'new-password-1');
+    await user.type(screen.getByLabelText('Confirm new password'), 'new-password-2');
+    expect(screen.getByText('The two new passwords do not match.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Change password' })).toBeDisabled();
+
+    await user.clear(screen.getByLabelText('Confirm new password'));
+    await user.type(screen.getByLabelText('Confirm new password'), 'new-password-1');
+    await user.click(screen.getByRole('button', { name: 'Change password' }));
+
+    expect(await screen.findByRole('status')).toHaveTextContent('Signed out of 2 other sessions.');
+    expect(bodiesFor('/auth/change-password', 'POST')).toEqual([
+      { currentPassword: 'old-password-1', newPassword: 'new-password-1' },
+    ]);
+  });
+
+  it('lists sessions and signs one other browser out', async () => {
+    const sessions = [
+      {
+        id: 's1',
+        startedAt: USER_CREATED,
+        lastActiveAt: USER_CREATED,
+        userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36',
+        ip: '127.0.0.1',
+        organizationName: 'Acme',
+        current: true,
+      },
+      {
+        id: 's2',
+        startedAt: USER_CREATED,
+        lastActiveAt: USER_CREATED,
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit/605.1.15 Version/17.0 Safari/604.1',
+        ip: '10.0.0.2',
+        organizationName: 'Acme',
+        current: false,
+      },
+    ];
+    mockRoutes('OWNER', (url, method) => {
+      if (url.includes('/auth/sessions/s2') && method === 'DELETE') return jsonResponse(200, { success: true });
+      if (url.includes('/auth/sessions')) return jsonResponse(200, { success: true, count: 2, sessions });
+      return undefined;
+    });
+    const user = userEvent.setup();
+    renderAccount(['/account?tab=sessions']);
+
+    expect(await screen.findByText('Chrome on Linux')).toBeInTheDocument();
+    expect(screen.getByText('This device')).toBeInTheDocument();
+    expect(screen.getByText('Safari on iOS')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(bodiesFor('/auth/sessions/s2', 'DELETE')).toHaveLength(1);
   });
 });

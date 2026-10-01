@@ -186,6 +186,51 @@ export const acceptInvitation: RequestHandler = async (req, res) => {
   res.json({ success: true, ...session });
 };
 
+/* ------------------------------------------------------------- Phase 38a
+ * Self-service on the caller's own identity. Under /auth because the
+ * refresh cookie (path=/api/v1/auth) is how "this session" is recognised.
+ */
+
+/** PATCH /auth/me — `{ name }`; an empty name clears it. */
+export const updateProfile: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const body = requireBodyObject(req.body);
+  const updated = await authService.updateProfile(user.id, { name: optionalString(body, 'name', { max: 120 }) });
+  res.json({ success: true, user: updated });
+};
+
+/** POST /auth/change-password — `{ currentPassword, newPassword }`. */
+export const changePassword: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const body = requireBodyObject(req.body);
+  const currentPassword = requireString(body, 'currentPassword', { max: 512 });
+  const newPassword = requirePassword(body, 'newPassword');
+  const result = await authService.changePassword(user.id, readRefreshCookie(req.cookies), currentPassword, newPassword);
+  res.json({ success: true, ...result });
+};
+
+/** GET /auth/sessions */
+export const listSessions: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const sessions = await authService.listSessions(user.id, readRefreshCookie(req.cookies));
+  res.json({ success: true, count: sessions.length, sessions });
+};
+
+/** DELETE /auth/sessions/:id */
+export const revokeSession: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const id = requireUuid({ id: requireParam(req, 'id') }, 'id');
+  await authService.revokeSession(user.id, id, readRefreshCookie(req.cookies));
+  res.json({ success: true });
+};
+
+/** POST /auth/sessions/revoke-others */
+export const revokeOtherSessions: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const result = await authService.revokeOtherSessions(user.id, readRefreshCookie(req.cookies));
+  res.json({ success: true, ...result });
+};
+
 /** POST /auth/logout — always succeeds, so the client can always reach a clean state. */
 export const logout: RequestHandler = async (req, res) => {
   await authService.logout(readRefreshCookie(req.cookies));

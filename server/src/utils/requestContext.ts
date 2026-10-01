@@ -22,6 +22,11 @@ export interface RequestContext {
   requestId: string | null;
   /** Express's resolved client IP, truncated to fit `audit_logs.client_ip`, or null. */
   ip: string | null;
+  /**
+   * Phase 38a — the `User-Agent` header, truncated, for the sessions list.
+   * Display only: a client can send any value.
+   */
+  userAgent: string | null;
   /** Set by `authenticate` once the access token verifies. Null before that, and forever on an unauthenticated route. */
   userId: string | null;
   orgId: string | null;

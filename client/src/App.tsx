@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { OrgProvider } from './context/OrgContext';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -14,7 +14,6 @@ import InvitePage from './Pages/auth/InvitePage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
-import OrganizationsPage from './Pages/organizations/OrganizationsPage';
 import NewOrganizationPage from './Pages/organizations/NewOrganizationPage';
 import DocumentTitle from './components/DocumentTitle';
 
@@ -55,7 +54,8 @@ export default function App() {
                   <Route path="/account" element={<AccountPage />} />
                   <Route path="/documents" element={<DocumentsPage />} />
                   {/* Phase 37 — outside SetupGate, like /account: reachable from an organization mid-setup. */}
-                  <Route path="/organizations" element={<OrganizationsPage />} />
+                  {/* Phase 38a — the list moved into Account settings. */}
+                  <Route path="/organizations" element={<Navigate to="/account?tab=organizations" replace />} />
                   <Route path="/organizations/new" element={<NewOrganizationPage />} />
                 </Route>
 

@@ -45,6 +45,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **35a ✅ done** | Accounting + inventory — inventory ties out to the general ledger: every inventory account becomes a real control account (Σ stock movements = Σ GL lines, integrity check #7), a value-only `RECLASS_OUT`/`RECLASS_IN` movement pair moves an item's value between GL accounts whenever its mapping changes, `GET /inventory/valuation` + `POST /reconcile/true-up`/`reconcile/reclass`/`items/link-all`, a settings UI for the four inventory posting accounts, and manual receipts/issues gain a `purpose`/`expenseAccountId` so a count gain or a consumption issue posts to the right account; migration `076` — see [Phase 35a, as delivered](#phase-35a-as-delivered) below | Needs 25, 32, 5 |
 | **36 ✅ done** | Accounting — CSV import throughout: one importer registry with column mapping, templates and a step wizard (36a), products and tracked items with opening stock (36b), manual journals (36c), invoices and bills with draft/post and conversion mode (36d); migration `078` — see [Phase 36a, as delivered](#phase-36a-as-delivered) and the steps after it | Needs 9b, 24, 32 |
 | **37 ✅ done** | Platform — several organizations per user: add an organization (its own setup wizard), switch from a top-bar menu, login opens the last-used one, leave; invitations by email + role through a copyable link (accepting needs the link and the matching signed-in email), registering from an invite, member role changes and removal with an "at least one OWNER" invariant; migration `079` — see [Phase 37, as delivered](#phase-37-as-delivered) below | Needs 1, 3.5, 33 |
+| **38a ✅ done** | Platform — user settings vs organization settings: `/account` becomes user-only (profile, change password, sessions with sign-out-others, your organizations), organization profile and members move under `/settings`; session id across rotation and revocation tombstones; migrations `080`, `081` — see [Phase 38a, as delivered](#phase-38a-as-delivered) below. 38b (email via Brevo) and 38c (custom roles and permissions) follow | Needs 37 |
 
 **Phase 18 is numbered after 17 but applied before it** — 17 stays deferred; migration numbers and phase numbers both simply follow build order from here, not a fixed sequence decided in advance. This is the first phase of the suite's second stage — showcase, integrate, guide, automate — laid out in full in the strategic plan that opened it. Phase 19 delivered the AP-Flow slice of that plan's "multi-provider AI layer" theme; Phase 19.1 (AI usage metering), 19.2 (Google Drive intake), 19.3 (that intake promoted to the platform) and 19.4 (duplicate-content capture, a bug found through 19.3's own real-world use) delivered the rest of the "automations" theme's AP-Flow slice, as half-steps rather than a renumbering. Phases 20–23 (a verification sweep, app enablement and cross-app connections, an in-app help center, and the remainder of the automations theme beyond AP-Flow) **keep their reserved names and stay unstarted** — Phase 24 is a direct feature request (payment terms, an item catalogue, a party importer, UI corrections), outside that strategic sequence, and takes the next free number rather than colliding with 20–23, the same reasoning that let Phase 18 jump ahead of 17.
 
@@ -1263,6 +1264,42 @@ A direct feature request (2026-10-01), numbered like 24/30/32/34/35a/36: "a sing
 - Immediate revocation: a removed member keeps access for up to 15 minutes, per the existing trade-off.
 
 **Study notes:** extended [transactions-isolation-pooling.md](../study/postgresql/transactions-isolation-pooling.md) (row-lock strengths: `FOR NO KEY UPDATE` vs `FOR UPDATE` vs FK `KEY SHARE`, and the "at least one owner" invariant) and [jwt-and-refresh-rotation.md](../study/security-auth/jwt-and-refresh-rotation.md) (invitation links as bearer tokens: hash at rest, binding to an email when emails are unverified, and the refresh cookie's path deciding the URL design).
+
+## Phase 38a, as delivered
+
+A direct feature request (2026-10-01): "two settings — one user-level, one organization-level", plus a role system with customisable access and real email. The plan splits it into three steps, each committed separately: **38a** (this), **38b** (email through Brevo: verification, change of login email, organization sender settings, notification preferences), **38c** (custom roles over a per-area permission catalogue).
+
+**Server.**
+- New `/auth` routes, all identity-scoped by `user_id`:
+  - `PATCH /me`: name.
+  - `POST /change-password`: needs the current password. A wrong one is `400`, not `401`, so the client's auto-refresh is not triggered. It revokes every other session and any reset link, and keeps this one.
+  - `GET /sessions`.
+  - `DELETE /sessions/:id`.
+  - `POST /sessions/revoke-others`.
+- Migration `080` gives `refresh_tokens` a `session_id` that `issueSession` carries forward through rotation, switch-org and the Phase 37 create/accept/leave routes (via `retireRefreshRow`), plus `session_started_at`, `user_agent` and `ip`. The user agent was added to the request context.
+- **A real bug found by the tests:** revoking a session by deleting its row made that browser's next refresh indistinguishable from a replayed token. Reuse detection then signed out *every* session, the revoker's included. Migration `081` adds `revoked_at`: revocation leaves a tombstone, refresh refuses it quietly, and `retireRefreshRow` refuses it too.
+  - That closes a second hole. A revoked (or logged-out) browser could otherwise use its still-valid access token on switch-org or create-org to mint a fresh session.
+  - It is a separate migration because `080` was already applied when the bug surfaced (rule 13).
+
+**Client.**
+- `/account` is now **Account settings**, with tabs in `?tab=`:
+  - Profile: editable name.
+  - Password.
+  - Sessions: devices described from the user agent, sign out one or all others; the token countdown moved behind a "developer" disclosure.
+  - Organizations: the Phase 37 list, moved here.
+  - Status.
+- `/settings/profile` (organization profile and business identification, moved out of `AccountPage`) and `/settings/members` (`MembersPanel`) join the settings hub's Organization section.
+- Redirects: `/account?tab=members|organization` and `/organizations` go to the new locations.
+- Top-bar user menu: Account settings, Organization settings, Sign out.
+
+**Tests.**
+- Server: 10 new (`platform/accountSelfService.test.ts`). They cover the password change (wrong current password, other sessions out and this one kept, rules), the session list, the id surviving refresh and org creation, revoke one and refuse current, revoke others, a revoked browser unable to mint a session, the user agent, and cross-user isolation.
+- Client: 6 rewritten or new `AccountPage` tests; the top-bar and general-settings tests were updated for the moved links.
+- **1910 server tests passing (2 skipped) + 539 client tests passing**; typecheck and lint clean in both packages.
+
+**Deliberately not built:** a device name the user can edit, geolocation from IP, and a sweep of expired tombstones (they expire with the row and are never read once past `expires_at`).
+
+**Study notes:** extended [jwt-and-refresh-rotation.md](../study/security-auth/jwt-and-refresh-rotation.md): a session id across rotation, revocation tombstones vs reuse detection, and why the change-password wrong-password answer is 400.
 
 ## Cross-cutting infrastructure
 

@@ -100,3 +100,19 @@ export interface IssuedSession {
   refreshToken: string;
   session: SessionPayload;
 }
+
+/**
+ * Phase 38a — one signed-in browser, as the sessions list shows it. Built
+ * from the live refresh row; `id` is the session id carried across rotation,
+ * not the row id (which changes every ~15 minutes).
+ */
+export interface ActiveSession {
+  id: string;
+  startedAt: string;
+  /** When its tokens were last issued — login, refresh, or an org switch. */
+  lastActiveAt: string;
+  userAgent: string | null;
+  ip: string | null;
+  organizationName: string | null;
+  current: boolean;
+}

@@ -61,13 +61,14 @@ function renderTopBar() {
 }
 
 describe('AppTopBar', () => {
-  it("the user menu holds Sign out and a link to Account", async () => {
+  it('the user menu links to Account settings and Organization settings, and holds Sign out', async () => {
     const user = userEvent.setup();
     renderTopBar();
 
     await user.click(await screen.findByRole('button', { name: /ada@example\.com/i }));
 
-    expect(screen.getByRole('menuitem', { name: 'Account' })).toHaveAttribute('href', '/account');
+    expect(screen.getByRole('menuitem', { name: 'Account settings' })).toHaveAttribute('href', '/account');
+    expect(screen.getByRole('menuitem', { name: 'Organization settings' })).toHaveAttribute('href', '/settings');
     expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument();
   });
 

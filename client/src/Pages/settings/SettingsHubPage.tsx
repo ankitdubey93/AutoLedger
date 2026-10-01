@@ -28,7 +28,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Building2,
     links: [
       { to: '/settings/general', label: 'General' },
-      { to: '/account', label: 'Profile & members' },
+      { to: '/settings/profile', label: 'Profile' },
+      { to: '/settings/members', label: 'Members & invitations' },
     ],
   },
   {

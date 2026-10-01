@@ -28,7 +28,7 @@ const COMMANDS: Command[] = [
       to: item.to,
     })),
   ),
-  { id: '/account', label: 'Account', group: 'Workspace', icon: UserCog, to: '/account' },
+  { id: '/account', label: 'Account settings', group: 'Workspace', icon: UserCog, to: '/account' },
 ];
 
 /** Simple case-insensitive substring match — no dependency, rule 14. */

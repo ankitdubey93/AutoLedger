@@ -92,6 +92,11 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 | POST | `/leave-org` | access cookie | Phase 37. Leave the **active** organization → session body in the oldest remaining one. `422` for the last `OWNER`, or for the user's only organization |
 | GET | `/invitations/:token` | none | Phase 37. Invite-link preview: `{ invitation: { organizationName, invitedByName, email, role, status, expiresAt } }`. `404` for an unknown token. Rate limited |
 | POST | `/invitations/:token/accept` | access cookie | Phase 37. Join the inviting organization → session body in it. `403` when the signed-in email is not the invited one, `409` already a member, `410` used/revoked/expired. Rate limited |
+| PATCH | `/me` | access cookie | Phase 38a. `{ name }` → `{ user }`. Your own display name; empty clears it |
+| POST | `/change-password` | access cookie | Phase 38a. `{ currentPassword, newPassword }` → `{ signedOutSessions }`. A wrong current password is **`400`, not `401`** (a 401 on an authenticated route reads as an expired token to the client's auto-refresh). The new password obeys the registration rules. Revokes every **other** session and any outstanding reset link; this one stays signed in. Rate limited |
+| GET | `/sessions` | access cookie | Phase 38a. `{ sessions: [{ id, startedAt, lastActiveAt, userAgent, ip, organizationName, current }] }` — your live, unrevoked sessions, newest activity first. `id` is the session id carried across token rotation |
+| DELETE | `/sessions/:id` | access cookie | Phase 38a. Sign one other browser out. Another user's or an unknown id is `404`; the current session is `422` (use `/logout`) |
+| POST | `/sessions/revoke-others` | access cookie | Phase 38a. Sign out everywhere except here → `{ signedOutSessions }` |
 
 **`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
 
@@ -100,6 +105,8 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 **`/register` and `/login` are rate limited** — 10 failed attempts per 15 minutes per IP, returning `429` in the standard error envelope. Successful logins are not counted, so a shared office NAT cannot lock colleagues out. `/refresh` and `/logout` are deliberately **not** limited: a legitimate client refreshes on a schedule, and the one moment you most want to clear cookies is the moment you must be able to.
 
 `/logout` is public on purpose: clearing cookies must work even when the access token has already expired.
+
+**Sessions and revocation (Phase 38a).** A browser's session id is minted at login and carried through every rotation, switch-org, create, accept and leave, so it stays one entry in `GET /sessions`. Revoking a session (one, all others, or by changing your password) marks its refresh row `revoked_at` instead of deleting it. A deleted row would make that browser's next refresh look like a replayed token, and reuse detection would sign out **every** session, the revoker's included. A revoked row is refused quietly on refresh (`401`, cookies cleared, other sessions untouched), and the session-moving routes refuse it too, so a revoked browser cannot use its still-valid access token to mint a new session. Its access token itself lasts up to 15 minutes, the same trade-off as logout.
 
 **Session-moving organization routes live under `/auth` (Phase 37).** Creating, leaving and accepting all re-issue the session in another organization, exactly as `/switch-org` does — and the refresh cookie is path-scoped to `/api/v1/auth`, so only here can the presented refresh row be retired. Under `/organizations` the old row would linger until it expired. **Login opens the last-used organization** (`users.last_active_org_id`, written on every session issue), falling back to the oldest membership if the user has since left it.
 
