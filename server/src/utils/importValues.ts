@@ -112,12 +112,6 @@ export function parseImportCell(spec: CellSpec, text: string, dateFormat: DateFo
 
     case 'signedMoney':
     case 'money': {
-      // parseMoneyText strips a trailing 3-letter currency code, so a digit-free
-      // word like "abc" would otherwise parse as 0. Only "-", an em dash and
-      // "n/a" (its own zero spellings) may lack a digit.
-      if (!/\d/.test(trimmed) && !/^(-|—|n\/a)$/i.test(trimmed)) {
-        return { ok: false, error: `${spec.label} "${text}" is not an amount` };
-      }
       try {
         const cents = parseMoneyText(text);
         if (cents < 0 && spec.type === 'money') {

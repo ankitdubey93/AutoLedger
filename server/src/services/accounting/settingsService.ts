@@ -280,7 +280,9 @@ async function assertInventoryAccount(
   );
   const account = rows[0];
   if (account === undefined) throw new ApiError(422, `${label} does not exist in this organization`);
-  if (account.type !== type) throw new ApiError(422, `${label} must be a ${type} account`);
+  if (account.type !== type) {
+    throw new ApiError(422, `${label} must be ${/^[AEIOU]/.test(type) ? 'an' : 'a'} ${type} account`);
+  }
   if (!account.is_postable) throw new ApiError(422, `${label} must be postable`);
 }
 

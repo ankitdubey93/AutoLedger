@@ -202,7 +202,8 @@ async function assertAccount(
     throw new ApiError(422, `${wantType} account does not exist in this organization`);
   }
   if (account.type !== wantType) {
-    throw new ApiError(422, `Item ${wantType.toLowerCase()} account must be a ${wantType} account`);
+    const article = /^[AEIOU]/.test(wantType) ? 'an' : 'a';
+    throw new ApiError(422, `Item ${wantType.toLowerCase()} account must be ${article} ${wantType} account`);
   }
   if (!account.is_postable) {
     throw new ApiError(422, `Item ${wantType.toLowerCase()} account must be postable`);

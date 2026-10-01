@@ -217,7 +217,9 @@ describe('parseMoneyText', () => {
     });
   }
 
-  const rejectCases = ['1234.567', 'twelve', '1.2.3'];
+  // 'abc', 'USD' and 'CR' used to parse as 0: the trailing-currency-code and
+  // CR/DR strips consumed the whole text.
+  const rejectCases = ['1234.567', 'twelve', '1.2.3', 'abc', 'USD', 'CR'];
 
   for (const input of rejectCases) {
     it(`rejects "${input}"`, () => {

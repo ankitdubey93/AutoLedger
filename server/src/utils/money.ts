@@ -273,8 +273,10 @@ export function parseMoneyText(raw: string): Cents {
   // of the space above, so this is now "1234.56GBP").
   text = text.replace(/[A-Za-z]{3}$/, '');
 
+  // Nothing left means the input was only letters ("abc", "USD", "CR") — the
+  // genuine blank spellings returned 0 above, so this is not an amount.
   if (text === '') {
-    return cents(0);
+    throw new ApiError(400, `Unparseable amount "${raw}"`);
   }
 
   const hasDot = text.includes('.');

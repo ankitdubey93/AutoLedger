@@ -1147,7 +1147,9 @@ Step four of four of "CSV import throughout" (2026-10-01) — **Phase 36 is comp
 
 **Deliberately not built.** Discounts; negative lines and credit-note / debit-note import; automatic contact creation (import customers and vendors first); partial commit (one bad document rolls back the import); line-level lot/serial pre-checks at validation.
 
-**Pre-existing gaps found and reported, not fixed here.** `parseMoneyText('abc')` returns `0` in the legacy opening-balance and bank-statement importers (the new data kinds guard it); accounting's `itemService.assertAccount` does not check `is_active`; and the Phase 35a settings message "Inventory account must be a Asset account" has the same a/an grammar bug the import message had.
+**Pre-existing gaps found during Phase 36, fixed afterwards (2026-10-01).** `parseMoneyText` turned letters-only text (`abc`, `USD`, `CR`) into `0`: the trailing-currency-code and CR/DR strips consumed the whole string. It now throws `Unparseable amount`, which every caller already turns into a row error — so the legacy opening-balance and bank-statement importers report it instead of importing a zero, and the data-kind guard in `parseImportCell` was removed as redundant. The a/an grammar is fixed in the product-account message (`itemService.assertAccount`, which also said "a Expense") and the Phase 35a settings message ("Inventory account must be an Asset account").
+
+**Open policy question, not changed.** No posting path checks `accounts.is_active` — manual journals, invoices, bills and product defaults all accept a retired account; "inactive" means hidden from pickers. The CSV importers are stricter and refuse inactive accounts. Whether posting to a retired account should be refused everywhere is a product decision, not a one-path fix.
 
 ## Pre-showcase polish (2026-09-29)
 

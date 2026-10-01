@@ -329,7 +329,7 @@ describe('settings — the four inventory accounts', () => {
   it('wrong type is refused', async () => {
     const res = await agentA.patch(SETTINGS).send({ inventoryAccountId: await accountId(orgA, '4100') });
     expect(res.status).toBe(422);
-    expect(res.body.error).toBe('Inventory account must be a Asset account');
+    expect(res.body.error).toBe('Inventory account must be an Asset account');
   });
 
   it('a header account is refused', async () => {
