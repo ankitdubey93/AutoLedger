@@ -68,3 +68,10 @@ export function clearAuthCookies(res: Response): void {
   res.clearCookie(ACCESS_COOKIE_NAME, accessCookieOptions);
   res.clearCookie(REFRESH_COOKIE_NAME, { ...baseOptions, path: REFRESH_COOKIE_PATH });
 }
+
+/** Reads the refresh cookie, which is absent for a first-time or logged-out caller. */
+export function readRefreshCookie(cookies: unknown): string | null {
+  if (typeof cookies !== 'object' || cookies === null) return null;
+  const value = (cookies as Record<string, unknown>)[REFRESH_COOKIE_NAME];
+  return typeof value === 'string' && value !== '' ? value : null;
+}

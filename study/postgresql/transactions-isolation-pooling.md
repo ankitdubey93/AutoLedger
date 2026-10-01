@@ -327,6 +327,48 @@ The advisory lock was chosen so the profile-apply function stays exactly the one
 
 **Rollback releases everything.** `pg_advisory_xact_lock` is released at `ROLLBACK` as well as `COMMIT`. A failed product create therefore leaves no setup rows and no held lock. The integration test asserts that `stock_settings` is still empty after a `422` on opening stock.
 
+### Locking the parent row to protect a cross-row invariant: "at least one OWNER" (Phase 37)
+
+The invariant spans rows: *the set of `organization_members` rows with `role = 'OWNER'` for this org must never be empty.* A CHECK constraint sees one row, so it cannot express this. The service does count-then-write:
+
+```sql
+SELECT COUNT(*) FROM organization_members WHERE org_id = $1 AND role = 'OWNER';  -- 2, fine
+UPDATE organization_members SET role = 'ADMIN' WHERE org_id = $1 AND user_id = $2;
+```
+
+**The race is write skew, not a lost update.** Alice and Bob are both owners. Alice demotes Bob while Bob demotes Alice. Under READ COMMITTED each transaction counts 2, and each updates a **different** row, so no row lock ever conflicts. Both commit, and the organization has zero owners. No single row was written twice, so `FOR UPDATE` on the member rows does not help; there is no shared row to collide on.
+
+**The fix is to create a shared row to collide on: the parent.** `organizationService.lockOrganizationOnClient` runs first in every member change and in `leaveOrganization`:
+
+```sql
+SELECT id FROM organizations WHERE id = $1 FOR NO KEY UPDATE;
+```
+
+The second transaction blocks on that row until the first commits. Its `COUNT(*)` then runs as a **new statement**, and READ COMMITTED takes a fresh snapshot per statement, so it sees one owner and refuses with `422`. Two things make this work:
+- The lock comes **before** the count.
+- The isolation level is READ COMMITTED. Under REPEATABLE READ the snapshot is fixed at the transaction's first statement (the lock `SELECT` itself, taken before it blocks), so the count would still see two owners. The organization row was only locked, never modified, so no serialization error would fire either. **This is reasoned, not tested here**; it is the same failure shape as the check → lock → re-check section above.
+
+**Why `FOR NO KEY UPDATE` and not `FOR UPDATE`.** Every insert into a child table (a customer, an invoice, a ledger line) runs the foreign-key check, which takes `FOR KEY SHARE` on the referenced `organizations` row. The row-lock conflict table (PostgreSQL docs, *Explicit Locking → Row-Level Locks*):
+
+| Held \ Requested | `KEY SHARE` | `SHARE` | `NO KEY UPDATE` | `UPDATE` |
+|---|---|---|---|---|
+| `KEY SHARE` | | | | ✗ |
+| `SHARE` | | | ✗ | ✗ |
+| `NO KEY UPDATE` | | ✗ | ✗ | ✗ |
+| `UPDATE` | ✗ | ✗ | ✗ | ✗ |
+
+`FOR UPDATE` on the organization row would stall **every posting in that organization** for the length of a member change. `FOR NO KEY UPDATE` still conflicts with itself, which serialises member changes, but not with `KEY SHARE`. **Verified on PG 16.15**: with one session holding each lock and a second session inserting a customer under `lock_timeout = 500ms`, the insert went through under `NO KEY UPDATE` and timed out under `UPDATE`. A plain `UPDATE organizations SET name = …` takes `NO KEY UPDATE` implicitly, so a member change and a rename also serialise. That is harmless.
+
+The same reasoning puts `FOR NO KEY UPDATE` on the **user** row in `authService.createOrganization`, where the invariant is "at most 25 owned organizations" (count-then-insert, same write-skew shape). The `users` row is referenced by `created_by`-style FKs all over the schema.
+
+**Alternatives rejected:**
+- **`SERIALIZABLE`.** SSI would detect the write skew and abort one transaction with `40001`. But every caller would then need a retry loop, and it would apply to the whole transaction, not one invariant.
+- **A trigger that counts owners after each update.** A plain `AFTER` trigger in each transaction still sees only its own snapshot, so it races exactly like the service does.
+- **A `DEFERRABLE INITIALLY DEFERRED` constraint trigger.** It checks at `COMMIT`, but two concurrent commits still each see the other's change as uncommitted. Like the over-allocation pair in [deferred-constraint-triggers.md](deferred-constraint-triggers.md), deferral alone is not race-free; it needs a row lock anyway.
+- **An advisory lock** keyed on the org would also work. A real row exists here, though, and locking it is self-documenting and needs no key-hashing scheme.
+
+The proof is `server/src/__tests__/platform/multiOrg.test.ts`, "keeps exactly one owner when two owners demote each other at the same time". Two `updateMemberRole` calls run under `Promise.allSettled`; exactly one is fulfilled, and the owner count afterwards is 1.
+
 ## Why we chose it here
 
 | Decision | Reasoning |
@@ -448,6 +490,12 @@ A: The order has to be the *same* across every code path that ever needs to lock
 
 **Q: Why would you reach for `pg_advisory_xact_lock` instead of `SELECT ... FOR UPDATE`?**
 A: `FOR UPDATE` locks a row that exists. Sometimes what needs to serialize isn't a row at all — a brand-new entity that doesn't exist yet (so two concurrent "find or create" calls could both find nothing and both create), or a whole cross-cutting operation with no single natural row to represent it (an organization's entire inventory-reconciliation state, in this codebase's case). `pg_advisory_xact_lock` takes an application-defined numeric key and blocks any other transaction requesting the *same* key, released automatically at commit or rollback — no table involved at all. Since the natural key is usually a string (an org id, a normalized name), I hash it into the `bigint` the function wants, and I always namespace the hashed string with a purpose tag rather than hashing a bare id, so two unrelated features that both happen to key off "this org" don't collide and serialize against each other for no reason.
+
+**Q: Two owners each demote the other at the same instant. Your service checks "more than one owner?" before demoting. What goes wrong, and how did you fix it?**
+A: It's write skew. Both transactions count two owners under READ COMMITTED, and each updates a different membership row, so no row lock conflicts and both commit, leaving zero owners. Locking the member rows doesn't help because they aren't the same row. I fixed it by locking the shared parent first, `SELECT … FROM organizations WHERE id = $1 FOR NO KEY UPDATE`, then counting. The second transaction waits, and its count is a new statement with a fresh READ COMMITTED snapshot, so it sees one owner and gets a 422. A test runs the two demotions concurrently and asserts exactly one succeeds and one owner remains.
+
+**Q: Why `FOR NO KEY UPDATE` rather than `FOR UPDATE` on that parent row?**
+A: Every insert into a child table takes `FOR KEY SHARE` on the parent through the foreign-key check, and `FOR UPDATE` conflicts with `KEY SHARE`. So `FOR UPDATE` on the organization row would block every invoice, journal and customer insert in that tenant while a member change ran. `NO KEY UPDATE` conflicts with itself (enough to serialise member changes) but not with `KEY SHARE`. I checked this on PostgreSQL 16.15 with two sessions and a lock timeout: the child insert passed under `NO KEY UPDATE` and timed out under `UPDATE`. The rule of thumb: use `NO KEY UPDATE` whenever you won't change the key, which is also the lock a plain non-key `UPDATE` takes.
 
 **Q: You need to create a per-tenant singleton (a settings row plus seed data) lazily, inside a request's existing transaction, exactly once under concurrency. How?**
 A: Check, lock, re-check. First an unlocked `SELECT`. If the row exists you're done, which is the common path, and it takes no lock. That shortcut is only safe because the row is never deleted. If the row is missing, take `pg_advisory_xact_lock` on a hash of "setup:" plus the tenant id, then `SELECT` again, and create only if it is still missing. The re-check works because at READ COMMITTED each statement gets a fresh snapshot. If another transaction created the row while you waited on the lock, your re-check sees its commit. The lock is transaction-scoped, so a rollback releases it and undoes the half-done setup together with the rest of the request. At REPEATABLE READ the re-check would still see the old snapshot. The duplicate `INSERT … ON CONFLICT DO NOTHING` then fails with a serialization error rather than doing nothing (I checked this on PG 16.15), so you would need a retry loop. An alternative is to make the singleton's own `INSERT … ON CONFLICT DO NOTHING RETURNING` the first statement and let whoever gets a row back do the seeding.

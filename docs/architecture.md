@@ -49,6 +49,12 @@ The access token carries the active `org_id`. Switching organization means issui
 
 `switch-org` rotates the **refresh** token too, not just the access token. The refresh row stores the session's active org, so replacing only the access token would let the next silent refresh read the stale value and quietly drag the user back to the previous organization.
 
+**Several organizations per user (Phase 37).** A signed-in user adds an organization they own with `POST /auth/organizations` (the same `createOrganizationOnClient` that `/register` uses: organization, `OWNER` membership, chart of accounts, payment terms, one transaction) and the session moves into it; it has no `ledger_settings` row, so the client's `SetupGate` runs its own setup wizard — onboarding is per organization because everything it writes is `org_id`-scoped. Every session issue writes `users.last_active_org_id`, and login opens there after re-validating the membership (falling back to the oldest). Creating, leaving and accepting an invitation all live under `/auth` beside `switch-org`, because the refresh cookie is path-scoped there and each of them retires it.
+
+**Invitations.** An `OWNER`/`ADMIN` invites an email address with a role (`organization_invitations`). The link's token is a bearer credential stored only as a SHA-256; accepting needs the token **and** a signed-in account whose email matches. Emails are not verified in this codebase, so matching on email alone would hand the invite to whoever registers that address first — and a token alone would admit anyone a link is forwarded to. A new user can register straight from the link (`/register` with `inviteToken`), joining instead of creating an organization.
+
+**At least one `OWNER`.** Only an `OWNER` grants, changes or removes `OWNER`, and the last one cannot be demoted, removed or leave. The count-then-write is serialised by locking the organization row with `SELECT … FOR NO KEY UPDATE` first — not `FOR UPDATE`, which would also block every concurrent FK check (`FOR KEY SHARE`) from a child-table insert in that organization, i.e. stall all posting for the duration. A user cannot leave their only organization either: a session must carry an org, so a user with none could not sign in to create or join another.
+
 ### The 15-minute revocation window — a deliberate trade
 
 `middleware/auth.ts` performs **no database query**. The token's signature proves we issued it and that it was not altered, and that is treated as sufficient for its 15-minute life.

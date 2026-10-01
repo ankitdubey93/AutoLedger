@@ -41,6 +41,21 @@ export const REFRESH_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const PASSWORD_RESET_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 /**
+ * Phase 37 — how long an organization invitation link stays usable. Longer
+ * than a reset link: it is pasted into an email or chat by the inviter and
+ * may sit unread for a few days.
+ */
+export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Phase 37 — the most organizations one user may own (hold OWNER in). Each
+ * new organization seeds a chart of accounts and payment terms, so an
+ * uncapped POST /organizations is a cheap way to grow the database; the
+ * auth limiter cannot help because it only counts failed requests.
+ */
+export const MAX_OWNED_ORGANIZATIONS = 25;
+
+/**
  * Cookies are keyed by name + domain + path and **ignore the port**, so every
  * app on localhost shares one jar. A generic `access_token` would be clobbered
  * by any other project you run; the prefix makes collisions impossible.

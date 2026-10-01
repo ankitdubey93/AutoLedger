@@ -10,9 +10,12 @@ import LoginPage from './Pages/auth/LoginPage';
 import RegisterPage from './Pages/auth/RegisterPage';
 import ForgotPasswordPage from './Pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './Pages/auth/ResetPasswordPage';
+import InvitePage from './Pages/auth/InvitePage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
+import OrganizationsPage from './Pages/organizations/OrganizationsPage';
+import NewOrganizationPage from './Pages/organizations/NewOrganizationPage';
 import DocumentTitle from './components/DocumentTitle';
 
 /**
@@ -41,6 +44,8 @@ export default function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/reset-password" element={<ResetPasswordPage />} />
+            {/* Phase 37 — public: the invitee may not have an account yet. */}
+            <Route path="/invite/:token" element={<InvitePage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>
@@ -49,6 +54,9 @@ export default function App() {
                 <Route element={<WorkspaceLayout />}>
                   <Route path="/account" element={<AccountPage />} />
                   <Route path="/documents" element={<DocumentsPage />} />
+                  {/* Phase 37 — outside SetupGate, like /account: reachable from an organization mid-setup. */}
+                  <Route path="/organizations" element={<OrganizationsPage />} />
+                  <Route path="/organizations/new" element={<NewOrganizationPage />} />
                 </Route>
 
                 <Route path="/*" element={<ProductRoutes />} />

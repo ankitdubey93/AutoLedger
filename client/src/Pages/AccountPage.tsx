@@ -1,18 +1,16 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   getHealth,
-  listMembers,
   updateOrganization,
-  ApiRequestError,
   type HealthResponse,
-  type OrganizationMember,
 } from '../services/fetchServices';
 import { useAuth, useAuthActions } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
 import AccountTabs, { type AccountTab } from './AccountTabs';
 import OrganizationProfilePanel from './OrganizationProfilePanel';
+import MembersPanel from './MembersPanel';
 import { initials } from '../utils/initials';
-import LoadingState from '../components/ui/LoadingState';
 
 /**
  * The account page: identity, organization, membership, and session details.
@@ -47,85 +45,6 @@ function useCountdown(isoTarget: string): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${String(minutes)}:${String(seconds).padStart(2, '0')}`;
-}
-
-function MembersPanel() {
-  const { role } = useOrg();
-  const [members, setMembers] = useState<OrganizationMember[] | null>(null);
-  const [denied, setDenied] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // `ignore` rather than AbortController — see the note in AuthContext.tsx:
-  // aborting a StrictMode-discarded request mid-CORS-preflight made the
-  // surviving request fail with "Failed to fetch".
-  useEffect(() => {
-    let ignore = false;
-
-    listMembers()
-      .then((res) => {
-        if (!ignore) setMembers(res.members);
-      })
-      .catch((err: unknown) => {
-        if (ignore) return;
-        // A 403 is not a failure — it is RBAC working, and worth showing as
-        // such rather than as an error.
-        if (err instanceof ApiRequestError && err.status === 403) {
-          setDenied(true);
-          return;
-        }
-        setError(err instanceof Error ? err.message : 'Could not load members');
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, []);
-
-  return (
-    <section className="card">
-      <h2>Members</h2>
-
-      {denied && (
-        <p className="muted">
-          Visible to <code>OWNER</code> and <code>ADMIN</code> only. Your role is{' '}
-          <code>{role ?? 'unknown'}</code>.
-        </p>
-      )}
-
-      {error !== null && <p className="status status--bad">{error}</p>}
-
-      {!denied && error === null && members === null && <LoadingState />}
-
-      {members !== null && (
-        <div className="table-scroll">
-          <div className="overflow-x-auto">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Joined</th>
-                </tr>
-              </thead>
-              <tbody>
-                {members.map((m) => (
-                  <tr key={m.userId}>
-                    <td>{m.name ?? '—'}</td>
-                    <td>{m.email}</td>
-                    <td>
-                      <span className="chip">{m.role}</span>
-                    </td>
-                    <td>{new Date(m.joinedAt).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </section>
-  );
 }
 
 function BusinessIdentificationPanel() {
@@ -377,7 +296,9 @@ export default function AccountPage() {
               <dt>You joined</dt>
               <dd>{joinedAt === undefined ? '—' : formatDay(joinedAt)}</dd>
               <dt>Organizations</dt>
-              <dd>{auth.memberships.length}</dd>
+              <dd>
+                {auth.memberships.length} · <Link to="/organizations">Manage</Link>
+              </dd>
             </dl>
           )}
         </section>

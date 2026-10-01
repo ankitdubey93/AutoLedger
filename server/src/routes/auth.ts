@@ -33,4 +33,14 @@ router.post('/logout', authController.logout);
 router.get('/check', authenticate, authController.check);
 router.post('/switch-org', authenticate, authController.switchOrg);
 
+// Phase 37 — session-moving organization routes. Under /auth because the
+// refresh cookie (path=/api/v1/auth) is only sent here; see authController.
+router.post('/organizations', authenticate, authController.createOrganization);
+router.post('/leave-org', authenticate, authController.leaveOrganization);
+// Public: the invitee may not have an account yet. Throttled like login —
+// an unthrottled lookup by token is a guessing oracle (hopeless at 256 bits,
+// but the limiter costs nothing).
+router.get('/invitations/:token', authLimiter, authController.previewInvitation);
+router.post('/invitations/:token/accept', authLimiter, authenticate, authController.acceptInvitation);
+
 export default router;

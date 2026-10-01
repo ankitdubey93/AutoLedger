@@ -43,6 +43,7 @@ The currency CHECK is not decoration: `CHAR(3)` alone accepts `'usd'`, `'123'` a
 **`users`** — global identity, no `org_id`
 `id` UUID PK · `name` TEXT · `email` TEXT NOT NULL · `password` TEXT NOT NULL (bcrypt) · `email_verified` BOOLEAN NOT NULL DEFAULT false · `email_verification_token` TEXT · `email_verification_token_expires` TIMESTAMPTZ · `created_at` · `updated_at`
 Constraint: `UNIQUE (LOWER(email))` via `ux_users_email_lower`.
+Phase 37 (migration `079`) adds `last_active_org_id` UUID NULL FK → `organizations` ON DELETE SET NULL (index `idx_users_last_active_org_id`): the organization the next login opens in, written on every session issue, re-validated against `organization_members` before use.
 
 The three `email_verification*` columns exist but **nothing writes them**. There is no mailer and no verify endpoint, and login deliberately does not check `email_verified`. Generating a token nobody can redeem would be dead scaffolding; they are wired up in a later phase.
 
@@ -745,6 +746,16 @@ A direct feature request, numbered like Phase 24/30/32/34. Migration `076`, one 
 - **`migration_import_rows`** gains `data` JSONB nullable (object) and `group_key` TEXT nullable (`length <= 220`) for the later kinds, whose rows are too different for fixed typed columns (36a writes neither; the four legacy kinds keep their typed columns). `idx_migration_rows_group` — `(org_id, import_id, group_key) WHERE group_key IS NOT NULL`.
 
 No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.md#phase-36--csv-import-throughout-36a-foundation) and [api.md](api.md#migration-imports--apiv1migration-imports--phase-9b-phase-24-phase-36a).
+
+## Phase 37 — several organizations per user, invitations (platform) — applied
+
+`079_platform_multi_org.sql`, additive and idempotent.
+
+- **`users.last_active_org_id`** — see `users` above. `SET NULL`, never `CASCADE`: deleting an organization must not delete a user; a NULL falls back to the oldest membership.
+- **`organization_invitations`** — `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE CASCADE · `email` TEXT NOT NULL (CHECK lowercased and non-empty, rule 9) · `role` TEXT NOT NULL CHECK IN (`OWNER`,`ADMIN`,`ACCOUNTANT`,`VIEWER`) · `token_hash` TEXT NOT NULL (SHA-256 of the link's token) · `invited_by` UUID NULL FK → `users` ON DELETE SET NULL · `expires_at` TIMESTAMPTZ NOT NULL · `accepted_at` TIMESTAMPTZ NULL · `accepted_by` UUID NULL FK → `users` ON DELETE SET NULL · `revoked_at` TIMESTAMPTZ NULL · `created_at`.
+  Constraints: `ux_organization_invitations_token_hash UNIQUE (token_hash)`; `ck_organization_invitations_expires_after_created`; `ck_organization_invitations_single_outcome` (not both accepted and revoked); `ck_organization_invitations_accepted_by` (`accepted_at` and `accepted_by` set together).
+  Indexes: `idx_organization_invitations_org_id`, `_invited_by`, `_accepted_by`; partial unique `ux_organization_invitations_open_email (org_id, email) WHERE accepted_at IS NULL AND revoked_at IS NULL` — one open invitation per address per organization (an expired one is closed out by the service before a re-invite).
+  Status (`PENDING`/`ACCEPTED`/`REVOKED`/`EXPIRED`) is derived from the timestamps, never stored; the transition table is `INVITATION_TRANSITIONS` in `types/organization.ts` (rule 10). **Not audited**, like `refresh_tokens` and `password_reset_tokens`: the trail would copy `token_hash`. The membership an acceptance creates is audited through `organization_members`' trigger.
 
 ## Phase 17 — target tables
 

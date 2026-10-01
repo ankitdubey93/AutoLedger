@@ -4,9 +4,8 @@ import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
 import { beginTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
-import { slugify } from '../utils/validate.js';
-import { seedDefaultChart } from './accounting/accountService.js';
-import { seedStandardPaymentTerms } from './accounting/paymentTermService.js';
+import { createOrganizationOnClient, deleteMembershipOnClient, lockOrganizationOnClient } from './organizationService.js';
+import { acceptInvitationOnClient } from './invitationService.js';
 import {
   accessTokenExpiry,
   hashRefreshToken,
@@ -14,7 +13,12 @@ import {
   signRefreshToken,
   verifyRefreshToken,
 } from '../utils/jwt.js';
-import { BCRYPT_COST, PASSWORD_RESET_TOKEN_TTL_MS, REFRESH_TOKEN_TTL_MS } from '../config/constants.js';
+import {
+  BCRYPT_COST,
+  MAX_OWNED_ORGANIZATIONS,
+  PASSWORD_RESET_TOKEN_TTL_MS,
+  REFRESH_TOKEN_TTL_MS,
+} from '../config/constants.js';
 import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import {
@@ -204,6 +208,11 @@ async function issueSession(
     [userId, hashRefreshToken(refreshToken), orgId, expiresAt],
   );
 
+  // Phase 37 — every session issue (login, refresh, switch, create, accept,
+  // leave) records the organization it opened in, so the next login opens
+  // there too. One write site, so no flow can forget it.
+  await client.query('UPDATE users SET last_active_org_id = $2 WHERE id = $1', [userId, orgId]);
+
   const session = await buildSession(client, userId, orgId);
   return { accessToken, refreshToken, session };
 }
@@ -236,24 +245,33 @@ export interface RegisterInput {
   name: string | null;
   email: string;
   password: string;
-  organizationName: string;
+  /**
+   * Exactly one of these two (Phase 37). `organizationName` creates the new
+   * user's own organization; `inviteToken` joins the organization that
+   * invited them instead, creating none.
+   */
+  organizationName: string | null;
+  inviteToken?: string | null;
 }
 
 /**
- * Creates the user, their organization, the OWNER membership binding them, and
- * the default 44-account chart of accounts — all or nothing, in one
- * transaction. An organization without a chart cannot post anything, so
- * seeding it is part of creating one, not a follow-up step that could fail on
- * its own and leave a half-usable tenant behind.
+ * Creates the user and either their own organization (OWNER, default chart
+ * of accounts, payment terms — `createOrganizationOnClient`) or, given an
+ * invite token, their membership in the inviting organization — all or
+ * nothing, in one transaction. A bad or mismatched invite rolls the user
+ * back too, so no orphan account without an organization is left behind.
  *
  * Registration does not log you in; the client calls /login next. Issuing
  * tokens here would drag session state into the identity transaction for no
- * benefit. It also does not collect Accounting's onboarding details (fiscal
- * year, base currency, cash account) — that is `POST
- * /ledger-core/settings/onboarding`, completed once the user picks Accounting
- * for the first time (Phase 3.5).
+ * benefit. Accounting's onboarding details (fiscal year, base currency, cash
+ * account) are the setup wizard's job (`POST /settings/onboarding`).
  */
 export async function register(input: RegisterInput): Promise<PublicUser> {
+  const inviteToken = input.inviteToken ?? null;
+  if ((inviteToken === null) === (input.organizationName === null)) {
+    throw new ApiError(400, 'Provide either an organization name or an invitation, not both');
+  }
+
   const passwordHash = await bcrypt.hash(input.password, BCRYPT_COST);
   const client = await pool.connect();
 
@@ -279,45 +297,12 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
       throw err;
     }
 
-    // Slug is globally unique and organization names collide constantly
-    // ("Acme"). ON CONFLICT DO NOTHING is what makes retrying possible inside
-    // a transaction: a caught 23505 would have poisoned the block, forcing a
-    // SAVEPOINT round trip per attempt.
-    const base = slugify(input.organizationName);
-    let orgId: string | undefined;
-
-    for (let attempt = 0; attempt < 5 && orgId === undefined; attempt += 1) {
-      const candidate = attempt === 0 ? base : `${base}-${Math.random().toString(16).slice(2, 8)}`;
-      const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO organizations (name, slug) VALUES ($1, $2)
-         ON CONFLICT (slug) DO NOTHING
-         RETURNING id`,
-        [input.organizationName, candidate],
-      );
-      orgId = rows[0]?.id;
+    if (inviteToken !== null) {
+      await acceptInvitationOnClient(client, inviteToken, { id: userId, email: input.email });
+    } else if (input.organizationName !== null) {
+      // `client`, never `pool` (rule 5) — see createOrganizationOnClient.
+      await createOrganizationOnClient(client, userId, input.organizationName);
     }
-
-    if (orgId === undefined) {
-      throw new ApiError(409, 'Could not allocate a unique organization slug — try another name');
-    }
-
-    // The creator owns the organization they just created.
-    await client.query(
-      'INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, $3)',
-      [orgId, userId, 'OWNER'],
-    );
-
-    // An organization without a chart of accounts cannot post anything, so the
-    // chart is part of creating one — not a follow-up step that could fail on
-    // its own and leave a half-usable tenant behind.
-    //
-    // `client`, never `pool`: a stray pool.query here would run on a different
-    // connection and commit immediately, leaving a chart of accounts behind for
-    // an organization that the rollback erased (guardrails rule 5).
-    await seedDefaultChart(client, orgId);
-    // Same client, same transaction (rule 5) — a fresh organization gets the
-    // seven standard payment terms alongside its chart of accounts.
-    await seedStandardPaymentTerms(client, orgId);
 
     const user = await loadUser(client, userId);
     await client.query('COMMIT');
@@ -341,8 +326,8 @@ export async function login(email: string, password: string): Promise<IssuedSess
     // LOWER(email) on both sides, matching the ux_users_email_lower index.
     // The prior build matched exactly here and case-insensitively on register,
     // which locked people out of accounts they had successfully created.
-    const { rows } = await client.query<{ id: string; password: string }>(
-      'SELECT id, password FROM users WHERE LOWER(email) = LOWER($1)',
+    const { rows } = await client.query<{ id: string; password: string; last_active_org_id: string | null }>(
+      'SELECT id, password, last_active_org_id FROM users WHERE LOWER(email) = LOWER($1)',
       [email],
     );
     const row = rows[0];
@@ -355,8 +340,11 @@ export async function login(email: string, password: string): Promise<IssuedSess
       throw new ApiError(401, 'Invalid email or password');
     }
 
+    // Phase 37 — open in the organization used last. resolveActiveOrg
+    // re-validates the membership, so a stale id (the user has since left or
+    // been removed) falls back to the oldest membership.
     const memberships = await listMemberships(client, row.id);
-    const { orgId, role } = resolveActiveOrg(memberships, null);
+    const { orgId, role } = resolveActiveOrg(memberships, row.last_active_org_id);
 
     const issued = await issueSession(client, row.id, orgId, role);
     await client.query('COMMIT');
@@ -479,6 +467,110 @@ export async function switchOrg(
   } finally {
     client.release();
   }
+}
+
+/* ------------------------------------------- Phase 37 — organizations */
+
+/**
+ * Runs `fn` in a transaction and then hands the session over to `targetOrg`:
+ * the presented refresh row is deleted and a fresh pair is issued, exactly
+ * as `switchOrg` does (rotating only the access token would let the next
+ * silent refresh drag the user back via the old row's `org_id`).
+ */
+async function inTransactionThenSwitch(
+  userId: string,
+  currentRefreshToken: string | null,
+  fn: (client: PoolClient) => Promise<{ orgId: string; role: Role }>,
+): Promise<IssuedSession> {
+  const client = await pool.connect();
+  try {
+    await beginTransaction(client);
+    const target = await fn(client);
+    if (currentRefreshToken !== null) {
+      await client.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [hashRefreshToken(currentRefreshToken)]);
+    }
+    const issued = await issueSession(client, userId, target.orgId, target.role);
+    await client.query('COMMIT');
+    return issued;
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * POST /organizations — an existing user adds another organization they own,
+ * and the session moves into it. The new organization has no
+ * `ledger_settings` row, so the client's setup gate sends the user straight
+ * into its own setup wizard.
+ *
+ * Capped at MAX_OWNED_ORGANIZATIONS. The user row is locked first (`NO KEY
+ * UPDATE`, which does not block the many FK checks that reference users) so
+ * two concurrent creates cannot both pass the count.
+ */
+export async function createOrganization(
+  userId: string,
+  name: string,
+  currentRefreshToken: string | null,
+): Promise<IssuedSession> {
+  return inTransactionThenSwitch(userId, currentRefreshToken, async (client) => {
+    await client.query('SELECT id FROM users WHERE id = $1 FOR NO KEY UPDATE', [userId]);
+    const { rows } = await client.query<{ n: number }>(
+      "SELECT COUNT(*)::int AS n FROM organization_members WHERE user_id = $1 AND role = 'OWNER'",
+      [userId],
+    );
+    if ((rows[0]?.n ?? 0) >= MAX_OWNED_ORGANIZATIONS) {
+      throw new ApiError(422, `You can own at most ${String(MAX_OWNED_ORGANIZATIONS)} organizations`);
+    }
+    const orgId = await createOrganizationOnClient(client, userId, name);
+    return { orgId, role: 'OWNER' };
+  });
+}
+
+/**
+ * POST /invitations/:token/accept — a signed-in user joins the inviting
+ * organization and the session moves into it. The checks (pending, email
+ * match, not already a member) live in `acceptInvitationOnClient`.
+ */
+export async function acceptInvitation(
+  userId: string,
+  token: string,
+  currentRefreshToken: string | null,
+): Promise<IssuedSession> {
+  return inTransactionThenSwitch(userId, currentRefreshToken, async (client) => {
+    const user = await loadUser(client, userId);
+    return acceptInvitationOnClient(client, token, { id: user.id, email: user.email });
+  });
+}
+
+/**
+ * POST /organizations/leave — the caller removes their own membership in the
+ * active organization and the session moves to their oldest remaining one.
+ *
+ * Refused for the last OWNER (the organization would be ownerless) and for a
+ * user's only organization: a session must carry an org, so a user with none
+ * could not sign in again to create or join another.
+ */
+export async function leaveOrganization(
+  userId: string,
+  orgId: string,
+  currentRefreshToken: string | null,
+): Promise<IssuedSession> {
+  return inTransactionThenSwitch(userId, currentRefreshToken, async (client) => {
+    await lockOrganizationOnClient(client, orgId);
+    const memberships = await listMemberships(client, userId);
+    const current = memberships.find((m) => m.orgId === orgId);
+    if (current === undefined) throw new ApiError(403, 'You are not a member of that organization');
+
+    const remaining = memberships.filter((m) => m.orgId !== orgId);
+    if (remaining.length === 0) {
+      throw new ApiError(422, 'This is your only organization — create or join another before leaving it');
+    }
+    await deleteMembershipOnClient(client, orgId, userId, current.role);
+    return resolveActiveOrg(remaining, null);
+  });
 }
 
 /* ------------------------------------------------------------------- logout */

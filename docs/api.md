@@ -80,7 +80,7 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 
 | Method | Path | Auth | Description |
 |---|---|---|---|
-| POST | `/register` | none | Create user + organization + OWNER membership, in one transaction |
+| POST | `/register` | none | Create user + organization + OWNER membership, in one transaction. Phase 37: `{ inviteToken }` in place of `organizationName` creates the user inside the inviting organization instead (no organization of their own) |
 | POST | `/login` | none | Sets access + refresh tokens as httpOnly cookies |
 | POST | `/refresh` | refresh cookie | Rotate both tokens |
 | POST | `/logout` | none | Clear cookies + delete the refresh token row |
@@ -88,6 +88,10 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 | POST | `/switch-org` | access cookie | Re-issue the session scoped to another org the user belongs to |
 | POST | `/forgot-password` | none | 2026-09-29. `{ email }` → always `202 { success, message }`, whether or not the account exists. Issues a single-use reset token (30 minutes, newest only) — see below |
 | POST | `/reset-password` | none | 2026-09-29. `{ token, password }` → `200`. Sets the password and signs the user out everywhere. `400` for an invalid, used or expired token, or a password failing the registration rules |
+| POST | `/organizations` | access cookie | Phase 37. `{ name }` (2–120 chars) → `201` session body. Creates an organization the caller owns (chart of accounts and payment terms seeded, no settings — the client's setup gate opens its wizard) and moves the session into it. `422` past 25 owned organizations |
+| POST | `/leave-org` | access cookie | Phase 37. Leave the **active** organization → session body in the oldest remaining one. `422` for the last `OWNER`, or for the user's only organization |
+| GET | `/invitations/:token` | none | Phase 37. Invite-link preview: `{ invitation: { organizationName, invitedByName, email, role, status, expiresAt } }`. `404` for an unknown token. Rate limited |
+| POST | `/invitations/:token/accept` | access cookie | Phase 37. Join the inviting organization → session body in it. `403` when the signed-in email is not the invited one, `409` already a member, `410` used/revoked/expired. Rate limited |
 
 **`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
 
@@ -97,11 +101,13 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 
 `/logout` is public on purpose: clearing cookies must work even when the access token has already expired.
 
+**Session-moving organization routes live under `/auth` (Phase 37).** Creating, leaving and accepting all re-issue the session in another organization, exactly as `/switch-org` does — and the refresh cookie is path-scoped to `/api/v1/auth`, so only here can the presented refresh row be retired. Under `/organizations` the old row would linger until it expired. **Login opens the last-used organization** (`users.last_active_org_id`, written on every session issue), falling back to the oldest membership if the user has since left it.
+
 **Password reset (2026-09-29).** `/forgot-password` never reveals whether an email has an account: the status and body are identical either way, and the email's format is not validated (a format error would be a different answer). The token is 256 random bits; only its SHA-256 is stored (`password_reset_tokens`, migration `077`). `/reset-password` consumes it with an atomic `DELETE ... RETURNING` — so a link works once — then sets the new bcrypt hash and deletes every one of the user's reset and refresh tokens in the same transaction. **Delivery is a log line, not an email:** there is no mail transport. Outside production the link (`<FRONTEND_URL origin>/reset-password?token=…`) is logged at `info`; in production only a warning that a reset was requested. Both endpoints are rate limited like `/login`.
 
 #### Session body
 
-Returned by `/login`, `/check`, `/refresh` and `/switch-org`:
+Returned by `/login`, `/check`, `/refresh`, `/switch-org` and (Phase 37) `/organizations`, `/leave-org` and `/invitations/:token/accept`:
 
 ```json
 {
@@ -149,6 +155,11 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
 | GET | `/profile` | any member | The organization's postal identity — address, contact details, logo — Phase 30 |
 | PATCH | `/profile` | `OWNER`, `ADMIN` | Edit the organization's postal identity; creates the row on first write — Phase 30 |
+| PATCH | `/members/:userId` | `OWNER`, `ADMIN` | Phase 37. `{ role }` → `{ member }`. Only an `OWNER` may grant, change or remove `OWNER` (`403`); demoting the last `OWNER` is `422`. Another organization's member is `404` |
+| DELETE | `/members/:userId` | `OWNER`, `ADMIN` | Phase 37. Remove someone else (yourself: `422`, use `POST /auth/leave-org`). Same `OWNER` rules. Takes effect at the member's next refresh — up to 15 minutes ([architecture.md](architecture.md#the-15-minute-revocation-window--a-deliberate-trade)) |
+| GET | `/invitations` | `OWNER`, `ADMIN` | Phase 37. Open invitations (pending, or expired and not yet closed out), newest first |
+| POST | `/invitations` | `OWNER`, `ADMIN` | Phase 37. `{ email, role }` → `201 { invitation, acceptUrl }`. **The link is returned this once** — only the token's SHA-256 is stored, and there is no mail transport (outside production it is also logged). `409` if the address is already a member or has a pending invitation; `403` for an `ADMIN` inviting an `OWNER`. Expires after 7 days |
+| DELETE | `/invitations/:id` | `OWNER`, `ADMIN` | Phase 37. Revoke. Another organization's invitation is `404`; an accepted one is `409` |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 

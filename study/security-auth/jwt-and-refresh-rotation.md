@@ -3,7 +3,7 @@
 > A signed token proves who issued it, not whether it should still be honoured. Everything else follows from that.
 
 **Category:** Security
-**Introduced by:** Phase 1 — login, session persistence, and `POST /auth/refresh`
+**Introduced by:** Phase 1 — login, session persistence, and `POST /auth/refresh`; extended Phase 37 — invitation tokens
 **Verified against:** Node 24.4.1, `jsonwebtoken` 9.0.3, PostgreSQL 16
 
 ---
@@ -89,6 +89,25 @@ it('gives two tokens issued in the same second different values', () => {
 
 ---
 
+### Invitation links: a second bearer token, bound to an email (Phase 37)
+
+An organization invitation is delivered as a link the inviter copies (`/invite/<token>`; there is no mail transport). It reuses the refresh token's storage rules:
+- **256 random bits** (`randomBytes(32).toString('base64url')`).
+- **Only the SHA-256 stored** (`organization_invitations.token_hash`, unique). The same fast-hash reasoning as above applies: the token is generated, not chosen, so guessing it is infeasible regardless of hash speed.
+- **Returned exactly once**, in the `POST /organizations/invitations` response, and never retrievable again. A lost link means revoke and re-invite.
+
+**Accepting needs two factors: the token *and* a signed-in account whose email matches the invitation.** Both single-factor designs were rejected:
+- *Email only* (show pending invites to any account with that address). This codebase does not verify emails: the `email_verified` columns exist, nothing writes them. Whoever registers `alice@corp.com` first, including an attacker who knows an invite is coming, would get Alice's access.
+- *Token only.* A link forwarded, pasted into the wrong chat, or left in browser history would admit anyone holding it.
+
+Together, the attacker needs the link and control of an account with the invited address. Without email verification, that second factor is weaker than it looks, and the note should say so: an attacker who sees the link before Alice registers can register her address first. Email verification is the real fix, and it is recorded as not built.
+
+**Single use under concurrency.** `acceptInvitationOnClient` reads the row `SELECT … FOR UPDATE`, derives the status from timestamps, and refuses anything not `PENDING` with `410`. Two simultaneous accepts of one link serialise on that lock: the second waits, re-reads `accepted_at`, and gets `410`. This is a lock rather than refresh rotation's `DELETE … RETURNING` claim, because the row must survive as history (who accepted, when). It also needs distinct errors for used, revoked and expired, which a zero-row `DELETE` cannot distinguish.
+
+**Registration from a link is one transaction.** `/register` with `inviteToken` inserts the user, then accepts the invitation on the same client. A mismatched email throws, the rollback takes the new user with it, and no orphan account without an organization is left behind.
+
+**Why the session-moving routes live under `/auth`.** Accepting an invitation, creating an organization and leaving one all move the session to another org. Like `switch-org`, each must retire the presented refresh row and issue a new pair; otherwise the next refresh reads the old `org_id` off the old row and drags the user back. The refresh cookie is path-scoped to `/api/v1/auth`, so a browser never sends it to `/api/v1/organizations`. A route there would get `null` for the old token, issue a new pair, and leave the old row alive until expiry. The plan said `POST /organizations`; the code says `POST /auth/organizations`. The cookie's `Path` attribute decided the URL design.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -108,6 +127,9 @@ it('gives two tokens issued in the same second different values', () => {
 - `server/src/middleware/auth.ts` — verify-only, no DB round trip
 - `server/src/config/env.ts` — length and distinctness checks on both secrets
 - `server/src/__tests__/auth.test.ts` — rotation, replay, family invalidation
+- `server/src/services/invitationService.ts` — Phase 37 invitation tokens: `createInvitation` (hash at rest, link returned once), `acceptInvitationOnClient` (`FOR UPDATE`, status FSM, email binding)
+- `server/src/services/authService.ts` — `acceptInvitation`, `createOrganization`, `leaveOrganization` (each retires the refresh row and issues a new pair via `inTransactionThenSwitch`); `register` with `inviteToken`
+- `server/src/__tests__/platform/invitations.test.ts` — single use, email mismatch, revoked/expired `410`, register-from-invite rollback, cross-tenant revoke
 
 ## Gotchas
 
@@ -139,6 +161,12 @@ A: Because with one secret a refresh token verifies as an access token. Someone 
 
 **Q: Tell me about a bug you hit implementing this.**
 A: Logging in twice within the same second threw a unique-constraint violation. `jwt.sign` is deterministic given the payload and `iat`, and `iat` has one-second resolution — so both calls produced a byte-identical token, and therefore an identical SHA-256, colliding on the `token_hash` unique index. The fix is `jwtid: randomUUID()` on every refresh token. What I took from it is that "the token is random" was an assumption I had never checked; the randomness has to be *put there*. It's a test now.
+
+**Q: How would you design invitation links when your app has no email verification?**
+A: I'd store only a SHA-256 of a 256-bit random token and show the link once. Accepting requires both the token and a signed-in account whose email matches the invitation. Email-only matching hands the seat to whoever registers that address first. Token-only admits anyone the link is forwarded to. I'd be honest that without verification the email factor is weak: someone who sees the link before the invitee registers could claim the address. Verifying emails is the real fix. Accepting locks the invitation row `FOR UPDATE`, so a double-click or a race gets a `410` rather than two memberships.
+
+**Q: Your refresh cookie is path-scoped. What did that change about your API design?**
+A: Any endpoint that moves the session to another organization has to rotate the refresh token, or the next silent refresh reads the stale org off the old row and drags the user back. The browser only sends the refresh cookie to `/api/v1/auth`, so a "create organization" endpoint under `/organizations` would never see the old token and would leave its row alive. I moved create, leave and accept-invitation under `/auth` next to `switch-org`, and a test asserts exactly one refresh row remains after creating an organization.
 
 ## Follow-ups they'll dig into
 

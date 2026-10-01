@@ -141,12 +141,15 @@ export interface SessionResponse {
   accessTokenExpiresAt: string;
 }
 
-export interface RegisterInput {
+/**
+ * Exactly one of `organizationName` (create your own organization) or
+ * `inviteToken` (Phase 37 — join the organization that invited you).
+ */
+export type RegisterInput = {
   name: string;
   email: string;
   password: string;
-  organizationName: string;
-}
+} & ({ organizationName: string; inviteToken?: never } | { inviteToken: string; organizationName?: never });
 
 /**
  * The auth endpoints opt out of auto-refresh. A 401 from login is a wrong
@@ -224,6 +227,82 @@ export function listMembers(signal?: AbortSignal): Promise<{
   members: OrganizationMember[];
 }> {
   return apiFetch('/organizations/members', { signal: signal ?? null });
+}
+
+/* ---------------------------------------------- Phase 37 — organizations */
+
+/**
+ * The session-moving organization calls live under /auth on the server,
+ * like /auth/switch-org, because the refresh cookie is only sent there.
+ */
+
+/** POST /auth/organizations — create an organization you own; the session moves into it. */
+export function createOrganization(name: string): Promise<SessionResponse> {
+  return apiFetch('/auth/organizations', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+/** POST /auth/leave-org — leave the active organization; the session moves to another. */
+export function leaveOrganization(): Promise<SessionResponse> {
+  return apiFetch('/auth/leave-org', { method: 'POST' });
+}
+
+export type InvitationStatus = 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: Role;
+  status: InvitationStatus;
+  invitedByName: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
+export interface InvitationPreview {
+  organizationName: string;
+  invitedByName: string | null;
+  email: string;
+  role: Role;
+  status: InvitationStatus;
+  expiresAt: string;
+}
+
+/** GET /auth/invitations/:token — public; what the invite link is for. */
+export function previewInvitation(token: string): Promise<{ success: boolean; invitation: InvitationPreview }> {
+  return apiFetch(`/auth/invitations/${encodeURIComponent(token)}`, {}, NO_AUTO_REFRESH);
+}
+
+/** POST /auth/invitations/:token/accept — join the organization; the session moves into it. */
+export function acceptInvitation(token: string): Promise<SessionResponse> {
+  return apiFetch(`/auth/invitations/${encodeURIComponent(token)}/accept`, { method: 'POST' });
+}
+
+/** GET /organizations/invitations — OWNER and ADMIN only. */
+export function listInvitations(): Promise<{ success: boolean; count: number; invitations: Invitation[] }> {
+  return apiFetch('/organizations/invitations');
+}
+
+/** POST /organizations/invitations — the accept link is returned this once and never again. */
+export function createInvitation(input: {
+  email: string;
+  role: Role;
+}): Promise<{ success: boolean; invitation: Invitation; acceptUrl: string }> {
+  return apiFetch('/organizations/invitations', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** DELETE /organizations/invitations/:id */
+export function revokeInvitation(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/organizations/invitations/${id}`, { method: 'DELETE' });
+}
+
+/** PATCH /organizations/members/:userId — only an OWNER may grant or change OWNER. */
+export function updateMemberRole(userId: string, role: Role): Promise<{ success: boolean; member: OrganizationMember }> {
+  return apiFetch(`/organizations/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+}
+
+/** DELETE /organizations/members/:userId — someone else; leaving yourself is leaveOrganization(). */
+export function removeMember(userId: string): Promise<{ success: boolean }> {
+  return apiFetch(`/organizations/members/${userId}`, { method: 'DELETE' });
 }
 
 /* -------------------------------------------------------------- accounting */

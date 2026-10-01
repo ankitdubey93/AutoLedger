@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { switchOrg as switchOrgRequest } from '../services/fetchServices';
 import { useAuth, useAuthActions } from './AuthContext';
-import type { Membership, OrganizationSummary, Role } from '../services/fetchServices';
+import type { Membership, OrganizationSummary, Role, SessionResponse } from '../services/fetchServices';
 
 /**
  * The active organization and the switcher.
@@ -21,6 +22,12 @@ interface OrgContextValue {
   error: string | null;
   switchTo: (orgId: string) => Promise<void>;
   /**
+   * Phase 37 — adopts a session the server already moved to another
+   * organization (create, accept an invitation, leave) exactly as a switch
+   * does: new auth state, a remount of org-scoped pages, and the dashboard.
+   */
+  enterSession: (session: SessionResponse) => void;
+  /**
    * Increments on every successful switch. Components key their org-scoped
    * subtrees on it so they remount and refetch, rather than showing the
    * previous tenant's data until some effect happens to re-run. Cache
@@ -37,6 +44,20 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orgVersion, setOrgVersion] = useState(0);
+  const navigate = useNavigate();
+
+  // Phase 37: always land on the dashboard. Staying on the current URL would
+  // load a detail page for the previous organization's record under the new
+  // one (a 404 at best), and the dashboard is where SetupGate sends a
+  // not-yet-set-up organization to its own setup wizard.
+  const enterSession = useCallback(
+    (session: SessionResponse) => {
+      applySession(session);
+      setOrgVersion((v) => v + 1);
+      navigate('/');
+    },
+    [applySession, navigate],
+  );
 
   const switchTo = useCallback(
     async (orgId: string) => {
@@ -46,16 +67,14 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         // The server re-validates membership and rotates BOTH tokens. If it
         // only moved the access token, the next silent refresh would read the
         // stale org off the refresh row and quietly switch back.
-        const session = await switchOrgRequest(orgId);
-        applySession(session);
-        setOrgVersion((v) => v + 1);
+        enterSession(await switchOrgRequest(orgId));
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Could not switch organization');
       } finally {
         setSwitching(false);
       }
     },
-    [applySession],
+    [enterSession],
   );
 
   const authenticated = auth.status === 'authenticated' ? auth : null;
@@ -67,6 +86,7 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     switching,
     error,
     switchTo,
+    enterSession,
     orgVersion,
   };
 

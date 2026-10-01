@@ -1,6 +1,7 @@
-import { useState, type FormEvent } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, Navigate, useSearchParams } from 'react-router-dom';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
+import { previewInvitation, type InvitationPreview } from '../../services/fetchServices';
 import AuthLayout from './AuthLayout';
 
 /**
@@ -10,6 +11,10 @@ import AuthLayout from './AuthLayout';
  *
  * The organization name is asked for here rather than in a second onboarding
  * step precisely because the two must be created atomically.
+ *
+ * Phase 37 — `?invite=<token>` switches to invite mode: no organization is
+ * created, the email is the invited one (locked), and the new account joins
+ * the inviting organization in the same transaction.
  */
 export default function RegisterPage() {
   const auth = useAuth();
@@ -22,6 +27,27 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const [searchParams] = useSearchParams();
+  const inviteToken = searchParams.get('invite');
+  const [invite, setInvite] = useState<InvitationPreview | null>(null);
+
+  useEffect(() => {
+    if (inviteToken === null) return;
+    let ignore = false;
+    previewInvitation(inviteToken)
+      .then((res) => {
+        if (ignore) return;
+        setInvite(res.invitation);
+        setEmail(res.invitation.email);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setError(err instanceof Error ? err.message : 'This invitation link is not valid');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [inviteToken]);
+
   if (auth.status === 'authenticated') return <Navigate to="/" replace />;
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -30,7 +56,9 @@ export default function RegisterPage() {
     setSubmitting(true);
     try {
       // register() also logs in, so the user experiences one action.
-      await register({ name, email, password, organizationName });
+      await (inviteToken === null
+        ? register({ name, email, password, organizationName })
+        : register({ name, email, password, inviteToken }));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create your account');
     } finally {
@@ -39,17 +67,28 @@ export default function RegisterPage() {
   }
 
   return (
-    <AuthLayout title="Create your organization" subtitle="You will be its owner. Setup takes about two minutes.">
+    <AuthLayout
+      title={inviteToken === null ? 'Create your organization' : `Join ${invite?.organizationName ?? 'your team'}`}
+      subtitle={
+        inviteToken === null
+          ? 'You will be its owner. Setup takes about two minutes.'
+          : `Create your account to join as ${invite?.role ?? 'a member'}.`
+      }
+    >
 
       <form className="card form" onSubmit={(e) => void onSubmit(e)}>
-        <label htmlFor="organizationName">Organization name</label>
-        <input
-          id="organizationName"
-          required
-          minLength={2}
-          value={organizationName}
-          onChange={(e) => setOrganizationName(e.target.value)}
-        />
+        {inviteToken === null && (
+          <>
+            <label htmlFor="organizationName">Organization name</label>
+            <input
+              id="organizationName"
+              required
+              minLength={2}
+              value={organizationName}
+              onChange={(e) => setOrganizationName(e.target.value)}
+            />
+          </>
+        )}
 
         <label htmlFor="name">Your name</label>
         <input
@@ -65,6 +104,8 @@ export default function RegisterPage() {
           type="email"
           autoComplete="email"
           required
+          // In invite mode the address is the invited one; the server refuses any other.
+          readOnly={inviteToken !== null}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
@@ -88,7 +129,7 @@ export default function RegisterPage() {
           </p>
         )}
 
-        <button type="submit" className="btn" disabled={submitting}>
+        <button type="submit" className="btn" disabled={submitting || (inviteToken !== null && invite === null)}>
           {submitting ? 'Creating…' : 'Create account'}
         </button>
       </form>

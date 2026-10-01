@@ -8,6 +8,8 @@ const EXACT_TITLES: Record<string, string> = {
   '/reset-password': 'Choose a new password',
   '/onboarding': 'Set up',
   '/account': 'Account',
+  '/organizations': 'Organizations',
+  '/organizations/new': 'Add organization',
   '/invoices/new': 'New invoice',
   '/credit-notes/new': 'New credit note',
   '/expenses/new': 'New expense',
@@ -35,6 +37,7 @@ export function pageTitleFor(pathname: string): string {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname;
   const exact = EXACT_TITLES[path];
   if (exact !== undefined) return `${exact} · AutoLedger`;
+  if (path.startsWith('/invite/')) return 'Invitation · AutoLedger';
 
   const aliasFrom = Object.keys(PREFIX_ALIASES).find((p) => path === p || path.startsWith(`${p}/`));
   const resolved = aliasFrom === undefined ? path : `${PREFIX_ALIASES[aliasFrom] ?? ''}${path.slice(aliasFrom.length)}`;
