@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Boxes, Plus, Tags } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { INVENTORY_BASE } from '../../routes/paths';
 import { formatQuantityMilli } from '../../utils/quantity';
 import { formatCents } from '../../utils/money';
@@ -23,14 +22,15 @@ import EmptyState from '../../components/ui/EmptyState';
 import Pagination from '../../components/ui/Pagination';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { inputClass } from '../../components/ui/formClasses';
+import { useCan } from '../../context/AuthContext';
 
 const PAGE_SIZE = 20;
 
 /** Inventory's item list: search, filter, paginate, select items for a QR label sheet. */
 export default function InventoryItemsPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.operate');
   const navigate = useNavigate();
   const base = INVENTORY_BASE;
 

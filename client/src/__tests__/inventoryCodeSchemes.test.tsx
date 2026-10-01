@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import ItemCodesSettingsPage from '../Pages/settings/ItemCodesSettingsPage';
 import type { StockCategory, StockCodeSchemePreset } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Inventory (Phase 28) — the item-code scheme builder. Reads `useAuth()`
@@ -22,7 +23,8 @@ function sessionFor(role: 'OWNER' | 'ACCOUNTANT') {
     user: { id: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: false, createdAt: new Date().toISOString() },
     organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: new Date().toISOString() },
     role,
-    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, joinedAt: new Date().toISOString() }],
+    permissions: permissionsFor(role),
+    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, roleName: role, joinedAt: new Date().toISOString() }],
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };
 }

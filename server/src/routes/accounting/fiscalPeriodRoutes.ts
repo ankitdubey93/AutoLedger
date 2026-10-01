@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as fiscalPeriodController from '../../controllers/accounting/fiscalPeriodController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/fiscal-periods — see docs/api.md.
@@ -22,11 +22,11 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, fiscalPeriodController.list);
-router.post('/generate', authenticate, requireRole('OWNER', 'ADMIN'), fiscalPeriodController.generate);
-router.get('/:id', authenticate, fiscalPeriodController.getOne);
-router.post('/:id/close', authenticate, requireRole('OWNER', 'ADMIN'), fiscalPeriodController.close);
-router.post('/:id/reopen', authenticate, requireRole('OWNER', 'ADMIN'), fiscalPeriodController.reopen);
-router.post('/:id/lock', authenticate, requireRole('OWNER'), fiscalPeriodController.lock);
+router.get('/', authenticate, requirePermission('periods.view'), fiscalPeriodController.list);
+router.post('/generate', authenticate, requirePermission('periods.close'), fiscalPeriodController.generate);
+router.get('/:id', authenticate, requirePermission('periods.view'), fiscalPeriodController.getOne);
+router.post('/:id/close', authenticate, requirePermission('periods.close'), fiscalPeriodController.close);
+router.post('/:id/reopen', authenticate, requirePermission('periods.close'), fiscalPeriodController.reopen);
+router.post('/:id/lock', authenticate, requirePermission('periods.lock'), fiscalPeriodController.lock);
 
 export default router;

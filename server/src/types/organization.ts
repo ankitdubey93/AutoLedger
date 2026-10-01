@@ -81,6 +81,9 @@ export interface Invitation {
   id: string;
   email: string;
   role: Role;
+  /** Phase 38c — set when `role` is 'CUSTOM'. */
+  customRoleId: string | null;
+  roleName: string;
   status: InvitationStatus;
   invitedByName: string | null;
   expiresAt: string;
@@ -93,6 +96,7 @@ export interface InvitationPreview {
   invitedByName: string | null;
   email: string;
   role: Role;
+  roleName: string;
   status: InvitationStatus;
   expiresAt: string;
 }

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as locationController from '../../controllers/inventory/locationController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/locations — see docs/api.md.
@@ -12,8 +12,8 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, locationController.list);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), locationController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN'), locationController.update);
+router.get('/', authenticate, requirePermission('inventory.view'), locationController.list);
+router.post('/', authenticate, requirePermission('inventory.configure'), locationController.create);
+router.patch('/:id', authenticate, requirePermission('inventory.configure'), locationController.update);
 
 export default router;

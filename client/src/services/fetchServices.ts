@@ -95,7 +95,9 @@ export function getHealth(signal?: AbortSignal): Promise<HealthResponse> {
 /* ------------------------------------------------------------------ identity */
 
 /** Mirrors server/src/types/auth.ts. Nullable columns are `| null`, never optional. */
-export type Role = 'OWNER' | 'ADMIN' | 'ACCOUNTANT' | 'VIEWER';
+/** Built-in roles; 'CUSTOM' (Phase 38c) means an organization-defined role — see `roleName`. */
+export type BuiltinRole = 'OWNER' | 'ADMIN' | 'ACCOUNTANT' | 'VIEWER';
+export type Role = BuiltinRole | 'CUSTOM';
 
 export interface PublicUser {
   id: string;
@@ -120,6 +122,7 @@ export interface Membership {
   orgName: string;
   orgSlug: string;
   role: Role;
+  roleName: string;
   joinedAt: string;
 }
 
@@ -128,6 +131,8 @@ export interface OrganizationMember {
   name: string | null;
   email: string;
   role: Role;
+  customRoleId: string | null;
+  roleName: string;
   joinedAt: string;
 }
 
@@ -137,6 +142,10 @@ export interface SessionResponse {
   user: PublicUser;
   organization: OrganizationSummary | null;
   role: Role | null;
+  /** Phase 38c — the active role's display name (a custom role's own name). */
+  roleName: string | null;
+  /** Phase 38c — permission keys held in the active organization (display only; the server re-checks). */
+  permissions: string[];
   memberships: Membership[];
   accessTokenExpiresAt: string;
 }
@@ -357,6 +366,8 @@ export interface Invitation {
   id: string;
   email: string;
   role: Role;
+  customRoleId: string | null;
+  roleName: string;
   status: InvitationStatus;
   invitedByName: string | null;
   expiresAt: string;
@@ -368,6 +379,7 @@ export interface InvitationPreview {
   invitedByName: string | null;
   email: string;
   role: Role;
+  roleName: string;
   status: InvitationStatus;
   expiresAt: string;
 }
@@ -388,10 +400,12 @@ export function listInvitations(): Promise<{ success: boolean; count: number; in
 }
 
 /** POST /organizations/invitations — the accept link is returned this once and never again. */
-export function createInvitation(input: {
-  email: string;
-  role: Role;
-}): Promise<{ success: boolean; invitation: Invitation; acceptUrl: string }> {
+/** Phase 38c — a member's role is either built in or one of the organization's custom roles. */
+export type RoleChoice = { role: BuiltinRole } | { customRoleId: string };
+
+export function createInvitation(
+  input: { email: string } & RoleChoice,
+): Promise<{ success: boolean; invitation: Invitation; acceptUrl: string }> {
   return apiFetch('/organizations/invitations', { method: 'POST', body: JSON.stringify(input) });
 }
 
@@ -401,8 +415,58 @@ export function revokeInvitation(id: string): Promise<{ success: boolean }> {
 }
 
 /** PATCH /organizations/members/:userId — only an OWNER may grant or change OWNER. */
-export function updateMemberRole(userId: string, role: Role): Promise<{ success: boolean; member: OrganizationMember }> {
-  return apiFetch(`/organizations/members/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+export function updateMemberRole(userId: string, choice: RoleChoice): Promise<{ success: boolean; member: OrganizationMember }> {
+  return apiFetch(`/organizations/members/${userId}`, { method: 'PATCH', body: JSON.stringify(choice) });
+}
+
+/* -------------------------------------------- Phase 38c — custom roles */
+
+export interface PermissionDefinition {
+  key: string;
+  area: string;
+  label: string;
+  tier: 'V' | 'A' | 'M' | 'O';
+  requires?: string[];
+}
+
+export interface CustomRole {
+  id: string;
+  name: string;
+  description: string | null;
+  permissions: string[];
+  memberCount: number;
+}
+
+export interface RolesOverview {
+  builtin: Array<{ role: BuiltinRole; permissions: string[] }>;
+  custom: CustomRole[];
+  catalogue: PermissionDefinition[];
+}
+
+/** GET /organizations/roles */
+export function listRoles(): Promise<{ success: boolean } & RolesOverview> {
+  return apiFetch('/organizations/roles');
+}
+
+export interface RoleInput {
+  name: string;
+  description: string | null;
+  permissions: string[];
+}
+
+/** POST /organizations/roles — the server closes the set over `requires`. */
+export function createRole(input: RoleInput): Promise<{ success: boolean; role: CustomRole }> {
+  return apiFetch('/organizations/roles', { method: 'POST', body: JSON.stringify(input) });
+}
+
+/** PATCH /organizations/roles/:id — applies to every holder on their next request. */
+export function updateRole(id: string, input: RoleInput): Promise<{ success: boolean; role: CustomRole }> {
+  return apiFetch(`/organizations/roles/${id}`, { method: 'PATCH', body: JSON.stringify(input) });
+}
+
+/** DELETE /organizations/roles/:id — 409 while anyone holds it. */
+export function deleteRole(id: string): Promise<{ success: boolean }> {
+  return apiFetch(`/organizations/roles/${id}`, { method: 'DELETE' });
 }
 
 /** DELETE /organizations/members/:userId — someone else; leaving yourself is leaveOrganization(). */

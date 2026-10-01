@@ -11,6 +11,8 @@ export interface SidebarNavItem {
   label: string;
   icon: LucideIcon;
   end: boolean;
+  /** Phase 38c — the permission needed to see this entry; absent means every member. */
+  permission?: string;
 }
 
 export interface SidebarNavGroup {

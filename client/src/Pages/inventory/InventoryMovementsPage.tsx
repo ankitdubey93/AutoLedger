@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import AttributeFields from './AttributeFields';
 import { parseQuantityToMilli } from '../../utils/quantity';
 import { formatCents, parseCentsInput } from '../../utils/money';
@@ -28,6 +27,7 @@ import {
 import { humanizeEnum } from '../../utils/enumLabel';
 import { ArrowRightLeft } from 'lucide-react';
 import PageHeader from '../../components/ui/PageHeader';
+import { useCan } from '../../context/AuthContext';
 
 const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]';
 
@@ -91,9 +91,9 @@ function emptyLine(): LineState {
  * uses (`utils/quantity.ts`, `utils/money.ts`) — never `parseFloat`.
  */
 export default function InventoryMovementsPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.operate');
 
   // `?item=<stockItemId>&tab=ADJUST` — deep link from a stock item's "Receive / adjust stock".
   const [params] = useSearchParams();

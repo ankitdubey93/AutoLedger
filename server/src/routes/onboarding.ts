@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as onboardingController from '../controllers/onboardingController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/rbac.js';
+import { allowAnyMember, requirePermission } from '../middleware/rbac.js';
 
 /**
  * /api/v1/onboarding — see docs/api.md.
@@ -20,17 +20,17 @@ import { requireRole } from '../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, onboardingController.checklist);
-router.get('/:module', authenticate, onboardingController.getOne);
+router.get('/', authenticate, allowAnyMember, onboardingController.checklist);
+router.get('/:module', authenticate, allowAnyMember, onboardingController.getOne);
 
 router.put(
   '/:module/draft',
   authenticate,
-  requireRole('OWNER', 'ADMIN'),
+  requirePermission('settings.manage'),
   onboardingController.saveDraft,
 );
 
-router.post('/:module/skip', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.skip);
-router.post('/:module/resume', authenticate, requireRole('OWNER', 'ADMIN'), onboardingController.resume);
+router.post('/:module/skip', authenticate, requirePermission('settings.manage'), onboardingController.skip);
+router.post('/:module/resume', authenticate, requirePermission('settings.manage'), onboardingController.resume);
 
 export default router;

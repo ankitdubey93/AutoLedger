@@ -77,7 +77,7 @@ export default function OrganizationsPage() {
                         {active && <span className="chip ml-2">Current</span>}
                       </td>
                       <td>
-                        <span className="chip">{m.role}</span>
+                        <span className="chip">{m.roleName}</span>
                       </td>
                       <td>{new Date(m.joinedAt).toLocaleDateString()}</td>
                       <td className="text-right">

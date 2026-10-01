@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as vendorController from '../../controllers/accounting/vendorController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/vendors — see docs/api.md.
@@ -14,12 +14,12 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, vendorController.list);
-router.get('/:id', authenticate, vendorController.getOne);
-router.get('/:id/ledger', authenticate, vendorController.ledger);
-router.get('/:id/open-items', authenticate, vendorController.openItems);
+router.get('/', authenticate, requirePermission('vendors.view'), vendorController.list);
+router.get('/:id', authenticate, requirePermission('vendors.view'), vendorController.getOne);
+router.get('/:id/ledger', authenticate, requirePermission('vendors.view'), vendorController.ledger);
+router.get('/:id/open-items', authenticate, requirePermission('vendors.view'), vendorController.openItems);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), vendorController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), vendorController.update);
+router.post('/', authenticate, requirePermission('vendors.manage'), vendorController.create);
+router.patch('/:id', authenticate, requirePermission('vendors.manage'), vendorController.update);
 
 export default router;

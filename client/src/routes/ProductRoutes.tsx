@@ -67,6 +67,7 @@ import TrialBalancePage from '../Pages/reports/TrialBalancePage';
 import OrganizationProfileSettingsPage from '../Pages/settings/OrganizationProfileSettingsPage';
 import MembersSettingsPage from '../Pages/settings/MembersSettingsPage';
 import EmailSettingsPage from '../Pages/settings/EmailSettingsPage';
+import RolesSettingsPage from '../Pages/settings/RolesSettingsPage';
 import SettingsHubPage from '../Pages/settings/SettingsHubPage';
 import GeneralSettingsPage from '../Pages/settings/GeneralSettingsPage';
 import FinancialSettingsPage from '../Pages/settings/FinancialSettingsPage';
@@ -191,6 +192,7 @@ export default function ProductRoutes() {
           <Route path="/settings/profile" element={<OrganizationProfileSettingsPage />} />
           <Route path="/settings/members" element={<MembersSettingsPage />} />
           <Route path="/settings/email" element={<EmailSettingsPage />} />
+          <Route path="/settings/roles" element={<RolesSettingsPage />} />
           <Route path="/settings/financial" element={<FinancialSettingsPage />} />
           <Route path="/settings/chart" element={<ChartSettingsPage />} />
           <Route path="/settings/conversion-balances" element={<ConversionBalancesPage />} />

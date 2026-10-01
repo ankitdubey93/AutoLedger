@@ -11,6 +11,7 @@ const EXACT_TITLES: Record<string, string> = {
   '/settings/profile': 'Organization profile',
   '/settings/members': 'Members',
   '/settings/email': 'Email settings',
+  '/settings/roles': 'Roles & permissions',
   '/verify-email': 'Verify email',
   '/confirm-email-change': 'Confirm new email',
   '/organizations/new': 'Add organization',

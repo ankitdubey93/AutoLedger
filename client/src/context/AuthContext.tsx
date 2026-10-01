@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode, useCallback } from 'react';
 import {
   checkSession,
   login as loginRequest,
@@ -35,6 +35,8 @@ export type AuthState =
       user: PublicUser;
       organization: OrganizationSummary | null;
       role: Role | null;
+      roleName: string | null;
+      permissions: string[];
       memberships: Membership[];
       accessTokenExpiresAt: string;
     }
@@ -55,6 +57,8 @@ function toAuthenticated(session: SessionResponse): AuthState {
     user: session.user,
     organization: session.organization,
     role: session.role,
+    roleName: session.roleName ?? session.role,
+    permissions: session.permissions ?? [],
     memberships: session.memberships,
     accessTokenExpiresAt: session.accessTokenExpiresAt,
   };
@@ -166,3 +170,18 @@ export function useCurrentUser() {
 
 // Exported for the test that asserts the provider leaves `checking`.
 export { AuthStateContext };
+
+/**
+ * Phase 38c — "would the server allow this?" for the active organization,
+ * from the session's permission list. Display only: every route re-checks
+ * on the server. Lives on AuthContext (not OrgContext) so any page can use
+ * it without needing the org provider.
+ */
+export function useCan(): (permission: string) => boolean {
+  const state = useAuth();
+  const permissions = useMemo(
+    () => new Set(state.status === 'authenticated' ? state.permissions : []),
+    [state],
+  );
+  return useCallback((permission: string) => permissions.has(permission), [permissions]);
+}

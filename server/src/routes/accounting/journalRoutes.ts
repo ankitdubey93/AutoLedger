@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as journalController from '../../controllers/accounting/journalController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/journals — see docs/api.md.
@@ -16,15 +16,15 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, journalController.list);
-router.get('/:id', authenticate, journalController.getOne);
+router.get('/', authenticate, requirePermission('journals.view'), journalController.list);
+router.get('/:id', authenticate, requirePermission('journals.view'), journalController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), journalController.create);
+router.post('/', authenticate, requirePermission('journals.create'), journalController.create);
 
 router.post(
   '/:id/reverse',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('journals.create'),
   journalController.reverse,
 );
 

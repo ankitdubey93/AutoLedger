@@ -30,6 +30,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
       { to: '/settings/general', label: 'General' },
       { to: '/settings/profile', label: 'Profile' },
       { to: '/settings/members', label: 'Members & invitations' },
+      { to: '/settings/roles', label: 'Roles & permissions' },
       { to: '/settings/email', label: 'Email' },
     ],
   },

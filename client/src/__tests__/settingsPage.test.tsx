@@ -7,6 +7,7 @@ import { OrgProvider } from '../context/OrgContext';
 import { LedgerSettingsProvider } from '../context/LedgerSettingsContext';
 import ProductRoutes from '../routes/ProductRoutes';
 import FinancialSettingsPage from '../Pages/settings/FinancialSettingsPage';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Characterisation of Accounting's Organization settings page (`/settings`).
@@ -43,8 +44,9 @@ const session = {
   },
   organization,
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [
-    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', joinedAt: new Date().toISOString() },
+    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', roleName: 'OWNER', joinedAt: new Date().toISOString() },
   ],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as captureDocumentController from '../../controllers/capture/captureDocumentController.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/capture/review-queue — see docs/api.md. Open to every member
@@ -8,6 +9,6 @@ import { authenticate } from '../../middleware/auth.js';
  */
 const router = Router();
 
-router.get('/', authenticate, captureDocumentController.reviewQueue);
+router.get('/', authenticate, requirePermission('capture.view'), captureDocumentController.reviewQueue);
 
 export default router;

@@ -122,6 +122,7 @@ Two genres, deliberately distinct. **Foundations** notes answer "what is this te
 | [file-upload-threat-model.md](security-auth/file-upload-threat-model.md) | **Why a multipart `Content-Type` header is an attacker-controlled claim, magic-byte sniffing vs the client's label, the UTF-8-round-trip carve-out for a format (CSV) with no signature, path traversal through a filename or hash and why a positive allowlist regex beats a post-join `startsWith` check, `Content-Disposition: attachment` + `X-Content-Type-Options: nosniff` as the pair that stops stored XSS, CRLF header injection through an unsanitized filename, why the size cap must live in the parser's own streaming limits, and decompression bombs as a stated non-defense here** |
 | [oauth2-pkce-and-secrets-at-rest.md](security-auth/oauth2-pkce-and-secrets-at-rest.md) | **The authorization-code flow and what PKCE's `S256` challenge/verifier actually defeats, why `state` doubles as both CSRF binding and the only credential a session-less OAuth callback has, hashing `state` (compare-only) vs encrypting the verifier and refresh token (must be read back), AES-256-GCM's authentication tag and why the 12-byte IV must never repeat under a key, a `v1.` version prefix for a format that may need to change, why the master encryption key stays a plain env var rather than itself being encrypted, and why two Drive-intake tables are deliberately exempt from the append-only CDC audit trail** |
 | [service-accounts-and-jwt-bearer.md](security-auth/service-accounts-and-jwt-bearer.md) | **RFC 7523's JWT-bearer grant as authenticate-as-yourself instead of three-legged consent, why it issues no refresh token at all (and is therefore structurally immune to Google's 7-day Testing-mode refresh expiry), RS256 signing with `node:crypto` and no SDK, PKCS#8 vs PKCS#1 private-key PEM formats, delegation-by-sharing vs domain-wide delegation (`sub`) and why the latter was refused, and a single-flight in-flight-promise cache proving 20 concurrent callers on a cold cache produce exactly one token request** |
+| [rbac-to-permission-based-access.md](security-auth/rbac-to-permission-based-access.md) | **Phase 38c — role names vs permission keys and when to switch, a tiered catalogue from which built-in roles are derived (never stored), proving a 225-route authorization refactor with a per-route tier-equivalence assertion plus unchanged role tests, `requires` closure applied at save time, per-request permission resolution vs claims in the JWT (and immediate removal as a side effect), a router-walking coverage test that was mutation-checked, the privilege-escalation subset rules under a row lock, and composite FKs keeping custom roles tenant-local** |
 
 ---
 
@@ -278,7 +279,8 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | Password reset token design | 2026-09-29 (`password-hashing-and-timing.md`) | ✅ |
 | Structured logging and request correlation | 2026-09-29 (`async-local-storage-request-context.md`) | ✅ |
 | bcrypt: salts, cost factor, timing attacks | 1 | ✅ |
-| RBAC vs ABAC modelling | 1 | ✅ |
+| RBAC vs ABAC modelling | 1, 38c (role names → permission keys, custom roles, escalation guards) | ✅ |
+| Permission-based access control: catalogue, derived presets, per-request resolution, route-coverage test | 38c | ✅ |
 | SQL injection & why parameterisation works | 1 | ✅ |
 | OWASP Top 10 mapped to this codebase | later | ⬜ |
 | File upload threat model: MIME spoofing, path traversal, zip bombs | 9.5 (Document Vault) | ✅ |

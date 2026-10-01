@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as valuationController from '../../controllers/inventory/valuationController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/valuation — read-only report of inventory accounts tying
@@ -21,9 +21,9 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/valuation', authenticate, valuationController.get);
-router.post('/reconcile/true-up', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), valuationController.trueUp);
-router.post('/reconcile/reclass', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), valuationController.reclass);
-router.post('/items/link-all', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), valuationController.linkAll);
+router.get('/valuation', authenticate, requirePermission('inventory.view'), valuationController.get);
+router.post('/reconcile/true-up', authenticate, requirePermission('inventory.operate'), valuationController.trueUp);
+router.post('/reconcile/reclass', authenticate, requirePermission('inventory.operate'), valuationController.reclass);
+router.post('/items/link-all', authenticate, requirePermission('inventory.operate'), valuationController.linkAll);
 
 export default router;

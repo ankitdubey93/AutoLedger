@@ -1,4 +1,5 @@
 import type { AuthUser } from './auth.js';
+import type { MemberAccess } from '../services/permissionService.js';
 
 /**
  * Declaration merging: teaches TypeScript that `req.user` exists, so
@@ -20,6 +21,11 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthUser;
+      /**
+       * Phase 38c — the caller's current membership and permissions, resolved
+       * once per request by `requirePermission` and reused by later handlers.
+       */
+      access?: MemberAccess;
     }
   }
 }

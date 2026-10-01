@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as bankRuleController from '../../controllers/accounting/bankRuleController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/bank-rules — see docs/api.md.
@@ -14,10 +14,10 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, bankRuleController.list);
+router.get('/', authenticate, requirePermission('bank.view'), bankRuleController.list);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), bankRuleController.create);
-router.post('/apply', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), bankRuleController.apply);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), bankRuleController.update);
+router.post('/', authenticate, requirePermission('bank.reconcile'), bankRuleController.create);
+router.post('/apply', authenticate, requirePermission('bank.reconcile'), bankRuleController.apply);
+router.patch('/:id', authenticate, requirePermission('bank.reconcile'), bankRuleController.update);
 
 export default router;

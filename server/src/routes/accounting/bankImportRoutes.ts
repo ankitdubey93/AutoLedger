@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as bankImportController from '../../controllers/accounting/bankImportController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/bank-imports — see docs/api.md.
@@ -15,9 +15,9 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, bankImportController.list);
-router.get('/:id', authenticate, bankImportController.getOne);
+router.get('/', authenticate, requirePermission('bank.view'), bankImportController.list);
+router.get('/:id', authenticate, requirePermission('bank.view'), bankImportController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), bankImportController.create);
+router.post('/', authenticate, requirePermission('bank.reconcile'), bankImportController.create);
 
 export default router;

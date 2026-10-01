@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as paymentController from '../../controllers/accounting/paymentController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/payments — see docs/api.md.
@@ -14,14 +14,14 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, paymentController.list);
-router.get('/:id', authenticate, paymentController.getOne);
+router.get('/', authenticate, requirePermission('payments.view'), paymentController.list);
+router.get('/:id', authenticate, requirePermission('payments.view'), paymentController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), paymentController.create);
+router.post('/', authenticate, requirePermission('payments.create'), paymentController.create);
 router.post(
   '/:id/void',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('payments.void'),
   paymentController.void_,
 );
 

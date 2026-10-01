@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as itemController from '../../controllers/inventory/itemController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/items — see docs/api.md.
@@ -13,17 +13,17 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, itemController.list);
-router.get('/:id', authenticate, itemController.getOne);
+router.get('/', authenticate, requirePermission('inventory.view'), itemController.list);
+router.get('/:id', authenticate, requirePermission('inventory.view'), itemController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.create);
+router.post('/', authenticate, requirePermission('inventory.operate'), itemController.create);
 router.post(
   '/from-product/:productId',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('inventory.operate'),
   itemController.createFromProduct,
 );
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.update);
-router.post('/:id/link-product', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), itemController.linkProduct);
+router.patch('/:id', authenticate, requirePermission('inventory.operate'), itemController.update);
+router.post('/:id/link-product', authenticate, requirePermission('inventory.operate'), itemController.linkProduct);
 
 export default router;

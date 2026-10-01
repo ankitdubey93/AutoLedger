@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Plus } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import { INVENTORY_BASE } from '../../routes/paths';
 import {
   STOCK_TOP_LEVEL_LOCATION_KINDS,
@@ -18,6 +17,7 @@ import PageHeader from '../../components/ui/PageHeader';
 import EmptyState from '../../components/ui/EmptyState';
 import { SkeletonRows } from '../../components/ui/Skeleton';
 import { inputClass } from '../../components/ui/formClasses';
+import { useCan } from '../../context/AuthContext';
 
 const NESTED_KINDS: readonly StockLocationKind[] = ['ZONE', 'BIN'];
 
@@ -28,9 +28,9 @@ const NESTED_KINDS: readonly StockLocationKind[] = ['ZONE', 'BIN'];
  * counterpart of `locationService.createLocation`'s own check).
  */
 export default function InventoryLocationsPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.configure');
   const navigate = useNavigate();
   const base = INVENTORY_BASE;
 

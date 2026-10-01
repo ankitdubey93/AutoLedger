@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as creditNoteController from '../../controllers/accounting/creditNoteController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/credit-notes — see docs/api.md (Phase 26).
@@ -13,28 +13,28 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, creditNoteController.list);
-router.get('/:id', authenticate, creditNoteController.getOne);
+router.get('/', authenticate, requirePermission('credit_notes.view'), creditNoteController.list);
+router.get('/:id', authenticate, requirePermission('credit_notes.view'), creditNoteController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), creditNoteController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), creditNoteController.update);
-router.delete('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), creditNoteController.remove);
+router.post('/', authenticate, requirePermission('credit_notes.edit'), creditNoteController.create);
+router.patch('/:id', authenticate, requirePermission('credit_notes.edit'), creditNoteController.update);
+router.delete('/:id', authenticate, requirePermission('credit_notes.edit'), creditNoteController.remove);
 router.post(
   '/:id/issue',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('credit_notes.issue'),
   creditNoteController.issue,
 );
 router.post(
   '/:id/void',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('credit_notes.void'),
   creditNoteController.void_,
 );
 router.post(
   '/:id/allocations',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('credit_notes.issue'),
   creditNoteController.apply,
 );
 

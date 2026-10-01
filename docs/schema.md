@@ -778,6 +778,27 @@ No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.m
 - **`organization_email_settings`** — `org_id` PK FK CASCADE · `sender_name` (1–100) · `reply_to` (lowercased) · timestamps, with an `updated_at` trigger. **Audited.**
 - **`user_notification_preferences`** — `(user_id, event)` PK · `user_id` FK CASCADE · `event` (CHECK `bill_awaiting_approval`/`invitation_accepted`) · `enabled`. Opt-outs only; no row means enabled.
 
+## Phase 38c — custom roles (platform) — applied
+
+`083_platform_custom_roles.sql`, idempotent.
+
+- **`org_roles`**
+  - Columns: `id` · `org_id` FK CASCADE · `name` (1–60) · `description` (≤ 300) · `created_by` FK users SET NULL · timestamps.
+  - `UNIQUE (org_id, id)` is the composite FK target. `ux_org_roles_org_name` enforces `(org_id, LOWER(name))`.
+  - Has an `updated_at` trigger and is audited.
+- **`org_role_permissions`**
+  - Columns: `(role_id, permission)` PK · `org_id` · FK `(org_id, role_id) → org_roles(org_id, id)` ON DELETE CASCADE · `permission` CHECK `^[a-z_]+\.[a-z_]+$`.
+  - Keys are validated against the code catalogue, not a CHECK list (the catalogue grows with the product).
+  - Audited.
+- **`organization_members`**
+  - The role CHECK is dropped and re-added to admit `'CUSTOM'`, the technique `078` used.
+  - New `custom_role_id`, with `fk_organization_members_custom_role` `(org_id, custom_role_id) → org_roles(org_id, id)` ON DELETE **RESTRICT** (a role in use cannot be deleted).
+  - `ck_organization_members_custom_role`: `(role = 'CUSTOM') = (custom_role_id IS NOT NULL)`.
+  - Partial index on `(org_id, custom_role_id)`.
+- **`organization_invitations`** gets the same role CHECK, `custom_role_id` (composite FK ON DELETE **CASCADE**: deleting a role withdraws its open invitations) and CHECK.
+
+The built-in roles' permissions are **not** in the database. They live in `config/permissions.ts`, derived from each key's tier.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

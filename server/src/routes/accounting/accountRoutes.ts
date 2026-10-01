@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as accountController from '../../controllers/accounting/accountController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/accounts — see docs/api.md.
@@ -16,19 +16,19 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, accountController.list);
+router.get('/', authenticate, requirePermission('accounts.view'), accountController.list);
 // Registered before /:id — otherwise Express would match "balances" as an
 // account id and this route would never run.
-router.get('/balances', authenticate, accountController.balances);
-router.get('/:id', authenticate, accountController.getOne);
-router.get('/:id/ledger', authenticate, accountController.ledger);
+router.get('/balances', authenticate, requirePermission('accounts.view'), accountController.balances);
+router.get('/:id', authenticate, requirePermission('accounts.view'), accountController.getOne);
+router.get('/:id/ledger', authenticate, requirePermission('accounts.view'), accountController.ledger);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), accountController.create);
+router.post('/', authenticate, requirePermission('accounts.manage'), accountController.create);
 
 router.patch(
   '/:id',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('accounts.manage'),
   accountController.update,
 );
 

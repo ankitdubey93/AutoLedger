@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as setupController from '../../controllers/inventory/setupController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/settings and /api/v1/inventory/setup — see docs/api.md.
@@ -11,9 +11,9 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/settings', authenticate, setupController.getSettings);
-router.get('/setup/profiles', authenticate, setupController.listProfiles);
-router.patch('/settings', authenticate, requireRole('OWNER', 'ADMIN'), setupController.updateSettings);
-router.post('/setup', authenticate, requireRole('OWNER', 'ADMIN'), setupController.apply);
+router.get('/settings', authenticate, requirePermission('inventory.view'), setupController.getSettings);
+router.get('/setup/profiles', authenticate, requirePermission('inventory.view'), setupController.listProfiles);
+router.patch('/settings', authenticate, requirePermission('inventory.configure'), setupController.updateSettings);
+router.post('/setup', authenticate, requirePermission('inventory.configure'), setupController.apply);
 
 export default router;

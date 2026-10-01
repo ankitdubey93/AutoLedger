@@ -15,6 +15,8 @@ import type { StockItem, StockSerial } from '../services/fetchServices';
 vi.mock('../services/fetchServices');
 vi.mock('../context/AuthContext', () => ({
   useAuth: () => ({ status: 'authenticated', role: 'OWNER' }),
+  // Phase 38c — pages gate on permissions; an OWNER holds them all.
+  useCan: () => () => true,
 }));
 
 const item: StockItem = {

@@ -4,12 +4,15 @@ import {
   createInvitation,
   listInvitations,
   listMembers,
+  listRoles,
   removeMember,
   revokeInvitation,
   updateMemberRole,
+  type BuiltinRole,
+  type CustomRole,
   type Invitation,
   type OrganizationMember,
-  type Role,
+  type RoleChoice,
 } from '../services/fetchServices';
 import { useAuth } from '../context/AuthContext';
 import { useOrg } from '../context/OrgContext';
@@ -17,24 +20,63 @@ import LoadingState from '../components/ui/LoadingState';
 import ConfirmDialog from '../components/ConfirmDialog';
 import { inputClass, primaryButtonClass, secondaryButtonClass } from '../components/ui/formClasses';
 
-const ROLES: Role[] = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER'];
+const BUILTIN: BuiltinRole[] = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER'];
+
+/**
+ * Phase 38c — a role select's value encodes either a built-in role or a
+ * custom role id, since one <select> offers both.
+ */
+function encodeRole(member: { role: string; customRoleId: string | null }): string {
+  return member.role === 'CUSTOM' && member.customRoleId !== null ? `custom:${member.customRoleId}` : `builtin:${member.role}`;
+}
+
+function decodeRole(value: string): RoleChoice {
+  return value.startsWith('custom:') ? { customRoleId: value.slice(7) } : { role: value.slice(8) as BuiltinRole };
+}
+
+/** The options of a role select: built-ins (OWNER only for an owner) then this organization's custom roles. */
+function RoleOptions({ customRoles, includeOwner }: { customRoles: CustomRole[]; includeOwner: boolean }) {
+  return (
+    <>
+      <optgroup label="Built-in">
+        {BUILTIN.filter((r) => includeOwner || r !== 'OWNER').map((r) => (
+          <option key={r} value={`builtin:${r}`}>
+            {r}
+          </option>
+        ))}
+      </optgroup>
+      {customRoles.length > 0 && (
+        <optgroup label="Custom">
+          {customRoles.map((r) => (
+            <option key={r.id} value={`custom:${r.id}`}>
+              {r.name}
+            </option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
+}
 
 /**
  * Account → Members. Everyone in the active organization, plus (Phase 37)
  * inviting people, changing roles and removing members.
  *
- * Visible to OWNER and ADMIN only — the server answers 403 to anyone else,
- * shown as RBAC working rather than as an error. The OWNER role can only be
- * granted, changed or removed by an OWNER, and the last OWNER cannot be
- * demoted or removed; the selects below offer only what the server allows,
- * and the server enforces it regardless.
+ * Needs the "View members" permission (Phase 38c); changing anything needs
+ * "Invite, change roles and remove members". The OWNER role can only be
+ * granted, changed or removed by an OWNER, the last OWNER cannot be demoted
+ * or removed, and nobody can hand out permissions they do not hold — the
+ * server enforces all of it and its message is shown when a choice is
+ * refused.
  *
  * An invitation is emailed (Phase 38b). Its link is also shown once, here,
  * as a fallback the inviter can copy if the email does not arrive.
  */
 export default function MembersPanel() {
   const auth = useAuth();
-  const { role } = useOrg();
+  const { role, roleName, can } = useOrg();
+  const canManage = can('members.manage');
+  const [customRoles, setCustomRoles] = useState<CustomRole[]>([]);
   const myId = auth.status === 'authenticated' ? auth.user.id : null;
 
   const [members, setMembers] = useState<OrganizationMember[] | null>(null);
@@ -47,7 +89,8 @@ export default function MembersPanel() {
   // Members and invitations load independently: a failed invitations request
   // must not hide the member list (Promise.all would reject both).
   const reload = useCallback(async () => {
-    const [m, i] = await Promise.allSettled([listMembers(), listInvitations()]);
+    const [m, i, r] = await Promise.allSettled([listMembers(), listInvitations(), listRoles()]);
+    if (r.status === 'fulfilled') setCustomRoles(r.value.custom);
     if (m.status === 'rejected') {
       // A 403 is not a failure — it is RBAC working, and worth showing as such.
       if (m.reason instanceof ApiRequestError && m.reason.status === 403) {
@@ -90,7 +133,7 @@ export default function MembersPanel() {
       <section className="card">
         <h2>Members</h2>
         <p className="muted">
-          Visible to <code>OWNER</code> and <code>ADMIN</code> only. Your role is <code>{role ?? 'unknown'}</code>.
+          Your role (<code>{roleName ?? role ?? 'unknown'}</code>) does not include viewing members.
         </p>
       </section>
     );
@@ -126,7 +169,7 @@ export default function MembersPanel() {
                   {members.map((m) => {
                     const isMe = m.userId === myId;
                     // Only an owner touches an owner; the last owner stays an owner.
-                    const locked = (m.role === 'OWNER' && (!isOwner || ownerCount <= 1)) || busy;
+                    const locked = !canManage || (m.role === 'OWNER' && (!isOwner || ownerCount <= 1)) || busy;
                     return (
                       <tr key={m.userId}>
                         <td>
@@ -138,15 +181,11 @@ export default function MembersPanel() {
                           <select
                             aria-label={`Role for ${m.email}`}
                             className={inputClass}
-                            value={m.role}
+                            value={encodeRole(m)}
                             disabled={locked}
-                            onChange={(e) => void run(() => updateMemberRole(m.userId, e.target.value as Role))}
+                            onChange={(e) => void run(() => updateMemberRole(m.userId, decodeRole(e.target.value)))}
                           >
-                            {ROLES.filter((r) => isOwner || r !== 'OWNER' || r === m.role).map((r) => (
-                              <option key={r} value={r}>
-                                {r}
-                              </option>
-                            ))}
+                            <RoleOptions customRoles={customRoles} includeOwner={isOwner || m.role === 'OWNER'} />
                           </select>
                         </td>
                         <td>{new Date(m.joinedAt).toLocaleDateString()}</td>
@@ -172,8 +211,9 @@ export default function MembersPanel() {
         )}
       </section>
 
-      {members !== null && (
+      {members !== null && canManage && (
         <InvitationsCard
+          customRoles={customRoles}
           invitations={invitations}
           canInviteOwner={isOwner}
           onChanged={() => void reload()}
@@ -202,12 +242,14 @@ export default function MembersPanel() {
 }
 
 function InvitationsCard({
+  customRoles,
   invitations,
   canInviteOwner,
   onChanged,
   onRevoke,
   busy,
 }: {
+  customRoles: CustomRole[];
   invitations: Invitation[];
   canInviteOwner: boolean;
   onChanged: () => void;
@@ -215,7 +257,7 @@ function InvitationsCard({
   busy: boolean;
 }) {
   const [email, setEmail] = useState('');
-  const [inviteRole, setInviteRole] = useState<Role>('ACCOUNTANT');
+  const [inviteRole, setInviteRole] = useState('builtin:ACCOUNTANT');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<{ email: string; url: string } | null>(null);
@@ -227,7 +269,7 @@ function InvitationsCard({
     setError(null);
     setCopied(false);
     try {
-      const res = await createInvitation({ email: email.trim(), role: inviteRole });
+      const res = await createInvitation({ email: email.trim(), ...decodeRole(inviteRole) });
       setLink({ email: res.invitation.email, url: res.acceptUrl });
       setEmail('');
       onChanged();
@@ -269,12 +311,8 @@ function InvitationsCard({
         </label>
         <label className="flex flex-col gap-1 text-sm">
           Role
-          <select className={inputClass} value={inviteRole} onChange={(e) => setInviteRole(e.target.value as Role)}>
-            {ROLES.filter((r) => canInviteOwner || r !== 'OWNER').map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
+          <select className={inputClass} value={inviteRole} onChange={(e) => setInviteRole(e.target.value)}>
+            <RoleOptions customRoles={customRoles} includeOwner={canInviteOwner} />
           </select>
         </label>
         <button type="submit" className={primaryButtonClass} disabled={sending || email.trim() === ''}>
@@ -321,7 +359,7 @@ function InvitationsCard({
                   <tr key={i.id}>
                     <td>{i.email}</td>
                     <td>
-                      <span className="chip">{i.role}</span>
+                      <span className="chip">{i.roleName}</span>
                     </td>
                     <td>{i.invitedByName ?? '—'}</td>
                     <td>

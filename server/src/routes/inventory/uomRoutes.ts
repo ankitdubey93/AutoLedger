@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as catalogueController from '../../controllers/inventory/catalogueController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/uoms — see docs/api.md.
@@ -12,8 +12,8 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, catalogueController.listUoms);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), catalogueController.createUom);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN'), catalogueController.updateUom);
+router.get('/', authenticate, requirePermission('inventory.view'), catalogueController.listUoms);
+router.post('/', authenticate, requirePermission('inventory.configure'), catalogueController.createUom);
+router.patch('/:id', authenticate, requirePermission('inventory.configure'), catalogueController.updateUom);
 
 export default router;

@@ -10,6 +10,7 @@ import InvitePage from '../Pages/auth/InvitePage';
 import RegisterPage from '../Pages/auth/RegisterPage';
 import MembersPanel from '../Pages/MembersPanel';
 import type { Role } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Phase 37 — several organizations per user: the top-bar organization menu,
@@ -21,8 +22,8 @@ function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-const ALPHA = { orgId: 'o1', orgName: 'Alpha Ltd', orgSlug: 'alpha', role: 'OWNER' as Role, joinedAt: '2026-01-01T00:00:00.000Z' };
-const BETA = { orgId: 'o2', orgName: 'Beta Ltd', orgSlug: 'beta', role: 'ACCOUNTANT' as Role, joinedAt: '2026-02-01T00:00:00.000Z' };
+const ALPHA = { orgId: 'o1', orgName: 'Alpha Ltd', orgSlug: 'alpha', role: 'OWNER' as Role, roleName: 'OWNER', joinedAt: '2026-01-01T00:00:00.000Z' };
+const BETA = { orgId: 'o2', orgName: 'Beta Ltd', orgSlug: 'beta', role: 'ACCOUNTANT' as Role, roleName: 'ACCOUNTANT', joinedAt: '2026-02-01T00:00:00.000Z' };
 
 function session(active: typeof ALPHA, memberships = [ALPHA], email = 'ada@example.com') {
   return {
@@ -38,6 +39,7 @@ function session(active: typeof ALPHA, memberships = [ALPHA], email = 'ada@examp
       createdAt: '2026-01-01T00:00:00.000Z',
     },
     role: active.role,
+    permissions: permissionsFor(active.role),
     memberships,
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };
@@ -48,6 +50,7 @@ const PREVIEW = {
   invitedByName: 'Bea',
   email: 'ada@example.com',
   role: 'ACCOUNTANT',
+  permissions: permissionsFor('ACCOUNTANT'),
   status: 'PENDING',
   expiresAt: '2026-12-01T00:00:00.000Z',
 };
@@ -252,6 +255,7 @@ describe('MembersPanel', () => {
             id: 'i1',
             email: 'bob@example.com',
             role: 'VIEWER',
+            permissions: permissionsFor('VIEWER'),
             status: 'PENDING',
             invitedByName: 'Ada',
             expiresAt: PREVIEW.expiresAt,

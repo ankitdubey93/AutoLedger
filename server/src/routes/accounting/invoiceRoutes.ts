@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as invoiceController from '../../controllers/accounting/invoiceController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/invoices — see docs/api.md.
@@ -17,22 +17,22 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, invoiceController.list);
-router.get('/:id', authenticate, invoiceController.getOne);
+router.get('/', authenticate, requirePermission('invoices.view'), invoiceController.list);
+router.get('/:id', authenticate, requirePermission('invoices.view'), invoiceController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), invoiceController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), invoiceController.update);
-router.delete('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), invoiceController.remove);
+router.post('/', authenticate, requirePermission('invoices.edit'), invoiceController.create);
+router.patch('/:id', authenticate, requirePermission('invoices.edit'), invoiceController.update);
+router.delete('/:id', authenticate, requirePermission('invoices.edit'), invoiceController.remove);
 router.post(
   '/:id/issue',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('invoices.issue'),
   invoiceController.issue,
 );
 router.post(
   '/:id/void',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('invoices.void'),
   invoiceController.void_,
 );
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as billController from '../../controllers/accounting/billController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/bills — see docs/api.md.
@@ -22,23 +22,23 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, billController.list);
-router.get('/:id', authenticate, billController.getOne);
+router.get('/', authenticate, requirePermission('bills.view'), billController.list);
+router.get('/:id', authenticate, requirePermission('bills.view'), billController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), billController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), billController.update);
-router.delete('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), billController.remove);
+router.post('/', authenticate, requirePermission('bills.edit'), billController.create);
+router.patch('/:id', authenticate, requirePermission('bills.edit'), billController.update);
+router.delete('/:id', authenticate, requirePermission('bills.edit'), billController.remove);
 router.post(
   '/:id/submit',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bills.edit'),
   billController.submit,
 );
-router.post('/:id/approve', authenticate, requireRole('OWNER', 'ADMIN'), billController.approve);
+router.post('/:id/approve', authenticate, requirePermission('bills.approve'), billController.approve);
 router.post(
   '/:id/void',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bills.void'),
   billController.void_,
 );
 

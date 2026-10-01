@@ -8,6 +8,7 @@ import { ThemeProvider } from '../context/ThemeContext';
 import { ShellProvider } from '../components/layout/ShellContext';
 import AppTopBar from '../components/layout/AppTopBar';
 import type { Role } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -19,7 +20,8 @@ function session(role: Role) {
     user: { id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com', emailVerified: false, createdAt: new Date().toISOString() },
     organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: new Date().toISOString() },
     role,
-    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, joinedAt: new Date().toISOString() }],
+    permissions: permissionsFor(role),
+    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, roleName: role, joinedAt: new Date().toISOString() }],
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };
 }

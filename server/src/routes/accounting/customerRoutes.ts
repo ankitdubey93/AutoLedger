@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as customerController from '../../controllers/accounting/customerController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/customers — see docs/api.md.
@@ -14,12 +14,12 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, customerController.list);
-router.get('/:id', authenticate, customerController.getOne);
-router.get('/:id/ledger', authenticate, customerController.ledger);
-router.get('/:id/open-items', authenticate, customerController.openItems);
+router.get('/', authenticate, requirePermission('customers.view'), customerController.list);
+router.get('/:id', authenticate, requirePermission('customers.view'), customerController.getOne);
+router.get('/:id/ledger', authenticate, requirePermission('customers.view'), customerController.ledger);
+router.get('/:id/open-items', authenticate, requirePermission('customers.view'), customerController.openItems);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), customerController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), customerController.update);
+router.post('/', authenticate, requirePermission('customers.manage'), customerController.create);
+router.patch('/:id', authenticate, requirePermission('customers.manage'), customerController.update);
 
 export default router;

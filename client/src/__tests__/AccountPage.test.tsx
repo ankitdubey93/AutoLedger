@@ -6,6 +6,7 @@ import AccountPage from '../Pages/AccountPage';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import type { Role } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Account settings (Phase 38a): user-level tabs only — Profile, Password,
@@ -34,7 +35,8 @@ function session(role: Role) {
     user: { id: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: false, createdAt: USER_CREATED },
     organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: ORG_CREATED },
     role,
-    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, joinedAt: JOINED }],
+    permissions: permissionsFor(role),
+    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, roleName: role, joinedAt: JOINED }],
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };
 }

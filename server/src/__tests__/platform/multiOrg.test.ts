@@ -192,8 +192,8 @@ describe('member administration', () => {
       bob.id,
     ]);
     const results = await Promise.allSettled([
-      organizationService.updateMemberRole(alice.orgId, { id: alice.id }, bob.id, 'ADMIN'),
-      organizationService.updateMemberRole(alice.orgId, { id: bob.id }, alice.id, 'ADMIN'),
+      organizationService.updateMemberRole(alice.orgId, { id: alice.id }, bob.id, { role: 'ADMIN', customRoleId: null }),
+      organizationService.updateMemberRole(alice.orgId, { id: bob.id }, alice.id, { role: 'ADMIN', customRoleId: null }),
     ]);
 
     expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);

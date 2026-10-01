@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Scale } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
+import { useAuth, useCan } from '../../context/AuthContext';
 import PageHeader from '../../components/ui/PageHeader';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { formatCents } from '../../utils/money';
@@ -27,8 +27,9 @@ import LoadingState from '../../components/ui/LoadingState';
 export default function InventoryValuationPage() {
   const auth = useAuth();
   const currency = auth.status === 'authenticated' ? (auth.organization?.baseCurrency ?? '') : '';
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.operate');
 
   const [valuation, setValuation] = useState<InventoryValuation | null>(null);
   const [error, setError] = useState<string | null>(null);

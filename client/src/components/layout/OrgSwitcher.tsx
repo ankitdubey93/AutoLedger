@@ -18,7 +18,7 @@ export default function OrgSwitcher() {
     ...memberships.map((m) => {
       const active = m.orgId === organization?.id;
       return {
-        label: `${m.orgName} · ${m.role}`,
+        label: `${m.orgName} · ${m.roleName}`,
         icon: active ? Check : Building2,
         disabled: switching,
         onSelect: () => {

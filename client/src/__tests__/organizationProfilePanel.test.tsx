@@ -7,6 +7,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import * as fetchServices from '../services/fetchServices';
 import type { OrganizationProfile, Role } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * OrganizationProfilePanel — Phase 30, Step 17's UI. The organization's postal
@@ -60,7 +61,8 @@ function session(role: Role) {
     user: { id: 'u1', name: 'Ada', email: 'ada@example.com', emailVerified: false, createdAt: '2026-03-04T10:00:00.000Z' },
     organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: '2026-02-01T10:00:00.000Z' },
     role,
-    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, joinedAt: '2026-05-06T10:00:00.000Z' }],
+    permissions: permissionsFor(role),
+    memberships: [{ orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role, roleName: role, joinedAt: '2026-05-06T10:00:00.000Z' }],
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };
 }

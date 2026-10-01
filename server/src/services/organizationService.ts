@@ -6,6 +6,7 @@ import { slugify } from '../utils/validate.js';
 import { seedDefaultChart } from './accounting/accountService.js';
 import { seedStandardPaymentTerms } from './accounting/paymentTermService.js';
 import { isRole, type OrganizationMember, type OrganizationSummary, type Role } from '../types/auth.js';
+import { isSubset, permissionsOfRole, resolveMemberAccess, type MemberAccess } from './permissionService.js';
 
 /**
  * Organization reads and updates, scoped to the caller's active organization.
@@ -154,11 +155,15 @@ export async function listMembers(orgId: string): Promise<OrganizationMember[]> 
     name: string | null;
     email: string;
     role: string;
+    custom_role_id: string | null;
+    custom_role_name: string | null;
     joined_at: Date;
   }>(
-    `SELECT u.id AS user_id, u.name, u.email, m.role, m.created_at AS joined_at
+    `SELECT u.id AS user_id, u.name, u.email, m.role, m.custom_role_id, r.name AS custom_role_name,
+            m.created_at AS joined_at
        FROM organization_members m
        JOIN users u ON u.id = m.user_id
+       LEFT JOIN org_roles r ON r.org_id = m.org_id AND r.id = m.custom_role_id
       WHERE m.org_id = $1
       ORDER BY m.created_at ASC`,
     [orgId],
@@ -171,6 +176,8 @@ export async function listMembers(orgId: string): Promise<OrganizationMember[]> 
       name: r.name,
       email: r.email,
       role: r.role,
+      customRoleId: r.custom_role_id,
+      roleName: r.role === 'CUSTOM' ? (r.custom_role_name ?? 'Custom role') : r.role,
       joinedAt: r.joined_at.toISOString(),
     };
   });
@@ -254,46 +261,48 @@ async function countOwners(client: Queryable, orgId: string): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
-async function findMemberRole(client: Queryable, orgId: string, userId: string): Promise<Role | null> {
-  const { rows } = await client.query<{ role: string }>(
-    'SELECT role FROM organization_members WHERE org_id = $1 AND user_id = $2',
-    [orgId, userId],
-  );
-  const role = rows[0]?.role;
-  return isRole(role) ? role : null;
-}
-
 /**
- * The actor's role as of now, read under the organization lock — not the
+ * The actor's access as of now, read under the organization lock — not the
  * role in their access token, which can be up to 15 minutes stale. Without
  * this, an owner demoted a minute ago could still grant or remove OWNER, and
  * two owners demoting each other could each act on a role they had just lost.
  */
-async function currentActorRole(client: Queryable, orgId: string, actorId: string): Promise<Role> {
-  const role = await findMemberRole(client, orgId, actorId);
-  if (role !== 'OWNER' && role !== 'ADMIN') {
-    throw new ApiError(403, 'Only an owner or admin can manage members');
+async function currentActorAccess(client: Queryable, orgId: string, actorId: string): Promise<MemberAccess> {
+  const access = await resolveMemberAccess(client, orgId, actorId);
+  if (access === null || !access.permissions.has('members.manage')) {
+    throw new ApiError(403, 'You need the "Invite, change roles and remove members" permission');
   }
-  return role;
+  return access;
 }
 
 /**
- * Who may touch whose membership. OWNER is the only role that can grant,
- * change or remove OWNER — otherwise an ADMIN could promote themselves past
- * the person who made them ADMIN.
+ * Who may touch whose membership (Phase 37, extended in 38c):
+ *
+ * - Only an OWNER grants, changes or removes the OWNER role — otherwise an
+ *   ADMIN could promote themselves past the person who made them ADMIN.
+ * - **No privilege escalation.** A non-owner may only manage a member whose
+ *   current permissions are a subset of their own, and may only hand out a
+ *   role whose permissions are a subset of their own. A custom "Team lead"
+ *   role holding `members.manage` therefore cannot make anyone an ADMIN, nor
+ *   demote one.
  */
-function assertMayManage(actorRole: Role, targetRole: Role, newRole: Role | null): void {
-  if ((targetRole === 'OWNER' || newRole === 'OWNER') && actorRole !== 'OWNER') {
+export function assertMayManage(
+  actor: MemberAccess,
+  target: { role: Role; permissions: ReadonlySet<string> } | null,
+  next: { role: Role; permissions: ReadonlySet<string> } | null,
+): void {
+  if ((target?.role === 'OWNER' || next?.role === 'OWNER') && actor.role !== 'OWNER') {
     throw new ApiError(403, 'Only an owner can grant, change or remove the owner role');
   }
+  if (actor.role === 'OWNER') return;
+  if (target !== null && !isSubset(target.permissions, actor.permissions)) {
+    throw new ApiError(403, 'You cannot change the access of someone with permissions you do not have');
+  }
+  if (next !== null && !isSubset(next.permissions, actor.permissions)) {
+    throw new ApiError(403, 'You cannot give someone permissions you do not have yourself');
+  }
 }
 
-/**
- * Removes a membership on the caller's transaction, refusing to remove the
- * last OWNER. Shared by `removeMember` (an admin removes someone) and
- * `authService.leaveOrganization` (a member removes themselves), which also
- * has to issue a new session in the same transaction.
- */
 export async function deleteMembershipOnClient(
   client: Queryable,
   orgId: string,
@@ -306,29 +315,32 @@ export async function deleteMembershipOnClient(
   await client.query('DELETE FROM organization_members WHERE org_id = $1 AND user_id = $2', [orgId, userId]);
 }
 
-/** PATCH /organizations/members/:userId — change a member's role. */
+/** PATCH /organizations/members/:userId — change a member's role (built-in or custom). */
 export async function updateMemberRole(
   orgId: string,
   actor: { id: string },
   targetUserId: string,
-  role: Role,
+  next: { role: Role; customRoleId: string | null },
 ): Promise<OrganizationMember> {
   await withTransaction(async (client) => {
     await lockOrganizationOnClient(client, orgId);
-    const actorRole = await currentActorRole(client, orgId, actor.id);
-    const current = await findMemberRole(client, orgId, targetUserId);
+    const actorAccess = await currentActorAccess(client, orgId, actor.id);
+    const current = await resolveMemberAccess(client, orgId, targetUserId);
     if (current === null) throw new ApiError(404, 'Member not found');
-    assertMayManage(actorRole, current, role);
-    if (current === role) return;
+    // A custom role id from another organization resolves to null here
+    // (scoped by org_id) — and the composite FK refuses it regardless.
+    const nextPermissions = await permissionsOfRole(client, orgId, next);
+    if (nextPermissions === null) throw new ApiError(404, 'Role not found');
+    assertMayManage(actorAccess, current, { role: next.role, permissions: nextPermissions });
+    if (current.role === next.role && current.customRoleId === next.customRoleId) return;
 
-    if (current === 'OWNER' && (await countOwners(client, orgId)) <= 1) {
+    if (current.role === 'OWNER' && (await countOwners(client, orgId)) <= 1) {
       throw new ApiError(422, 'An organization must keep at least one owner — make someone else an owner first');
     }
-    await client.query('UPDATE organization_members SET role = $3 WHERE org_id = $1 AND user_id = $2', [
-      orgId,
-      targetUserId,
-      role,
-    ]);
+    await client.query(
+      'UPDATE organization_members SET role = $3, custom_role_id = $4 WHERE org_id = $1 AND user_id = $2',
+      [orgId, targetUserId, next.role, next.customRoleId],
+    );
   });
 
   const member = (await listMembers(orgId)).find((m) => m.userId === targetUserId);
@@ -338,11 +350,12 @@ export async function updateMemberRole(
 
 /**
  * DELETE /organizations/members/:userId — remove someone else. Removing
- * yourself goes through POST /organizations/leave instead, which also moves
- * your session to another organization; this route has no session to move.
+ * yourself goes through POST /auth/leave-org instead, which also moves your
+ * session to another organization; this route has no session to move.
  *
- * The removed user's access token stays valid for up to 15 minutes; their
- * next refresh re-validates membership and drops them out (docs/architecture.md).
+ * Since Phase 38c a removed member loses access on their next request:
+ * every route re-reads membership (`requirePermission`), so the 15-minute
+ * access-token window no longer applies to removal.
  */
 export async function removeMember(orgId: string, actor: { id: string }, targetUserId: string): Promise<void> {
   if (targetUserId === actor.id) {
@@ -350,10 +363,10 @@ export async function removeMember(orgId: string, actor: { id: string }, targetU
   }
   await withTransaction(async (client) => {
     await lockOrganizationOnClient(client, orgId);
-    const actorRole = await currentActorRole(client, orgId, actor.id);
-    const current = await findMemberRole(client, orgId, targetUserId);
+    const actorAccess = await currentActorAccess(client, orgId, actor.id);
+    const current = await resolveMemberAccess(client, orgId, targetUserId);
     if (current === null) throw new ApiError(404, 'Member not found');
-    assertMayManage(actorRole, current, null);
-    await deleteMembershipOnClient(client, orgId, targetUserId, current);
+    assertMayManage(actorAccess, current, null);
+    await deleteMembershipOnClient(client, orgId, targetUserId, current.role);
   });
 }

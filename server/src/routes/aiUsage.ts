@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as aiUsageController from '../controllers/aiUsageController.js';
 import { authenticate } from '../middleware/auth.js';
+import { requirePermission } from '../middleware/rbac.js';
 
 /**
  * /api/v1/ai-usage — see docs/api.md.
@@ -16,6 +17,6 @@ import { authenticate } from '../middleware/auth.js';
  */
 const router = Router();
 
-router.get('/', authenticate, aiUsageController.summary);
+router.get('/', authenticate, requirePermission('capture.view'), aiUsageController.summary);
 
 export default router;

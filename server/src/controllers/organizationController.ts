@@ -2,8 +2,10 @@ import type { RequestHandler } from 'express';
 import * as invitationService from '../services/invitationService.js';
 import * as emailSettingsService from '../services/mail/organizationEmailSettingsService.js';
 import * as organizationService from '../services/organizationService.js';
+import * as roleService from '../services/roleService.js';
 import {
   createInvitationSchema,
+  roleBodySchema,
   updateEmailSettingsSchema,
   updateMemberRoleSchema,
   updateOrganizationSchema,
@@ -55,8 +57,11 @@ function uuidParam(req: Parameters<RequestHandler>[0], name: string): string {
 /** PATCH /organizations/members/:userId — change a member's role. */
 export const updateMemberRole: RequestHandler = async (req, res) => {
   const user = requireUser(req);
-  const { role } = parseBody(updateMemberRoleSchema, req.body);
-  const member = await organizationService.updateMemberRole(user.orgId, user, uuidParam(req, 'userId'), role);
+  const body = parseBody(updateMemberRoleSchema, req.body);
+  const member = await organizationService.updateMemberRole(user.orgId, user, uuidParam(req, 'userId'), {
+    role: body.role ?? 'CUSTOM',
+    customRoleId: body.customRoleId ?? null,
+  });
   res.json({ success: true, member });
 };
 
@@ -77,8 +82,12 @@ export const listInvitations: RequestHandler = async (req, res) => {
 /** POST /organizations/invitations — invite an email address; the link is returned once. */
 export const createInvitation: RequestHandler = async (req, res) => {
   const user = requireUser(req);
-  const input = parseBody(createInvitationSchema, req.body);
-  const { invitation, acceptUrl } = await invitationService.createInvitation(user.orgId, user, input);
+  const body = parseBody(createInvitationSchema, req.body);
+  const { invitation, acceptUrl } = await invitationService.createInvitation(user.orgId, user, {
+    email: body.email,
+    role: body.role ?? 'CUSTOM',
+    customRoleId: body.customRoleId ?? null,
+  });
   res.status(201).json({ success: true, invitation, acceptUrl });
 };
 
@@ -102,4 +111,36 @@ export const updateEmailSettings: RequestHandler = async (req, res) => {
   const input = parseBody(updateEmailSettingsSchema, req.body);
   const settings = await emailSettingsService.updateEmailSettings(user.orgId, input);
   res.json({ success: true, settings });
+};
+
+/* ------------------------------------------------------------ Phase 38c */
+
+/** GET /organizations/roles — built-in presets, custom roles, and the permission catalogue. */
+export const listRoles: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const roles = await roleService.listRoles(user.orgId);
+  res.json({ success: true, ...roles });
+};
+
+/** POST /organizations/roles */
+export const createRole: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(roleBodySchema, req.body);
+  const role = await roleService.createRole(user.orgId, user, input);
+  res.status(201).json({ success: true, role });
+};
+
+/** PATCH /organizations/roles/:id */
+export const updateRole: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(roleBodySchema, req.body);
+  const role = await roleService.updateRole(user.orgId, user, uuidParam(req, 'id'), input);
+  res.json({ success: true, role });
+};
+
+/** DELETE /organizations/roles/:id */
+export const deleteRole: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  await roleService.deleteRole(user.orgId, user, uuidParam(req, 'id'));
+  res.json({ success: true });
 };

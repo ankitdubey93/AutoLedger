@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as bankTransactionController from '../../controllers/accounting/bankTransactionController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/bank-transactions — see docs/api.md.
@@ -14,43 +14,43 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, bankTransactionController.list);
-router.get('/:id', authenticate, bankTransactionController.getOne);
+router.get('/', authenticate, requirePermission('bank.view'), bankTransactionController.list);
+router.get('/:id', authenticate, requirePermission('bank.view'), bankTransactionController.getOne);
 
 router.post(
   '/:id/rescore',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.rescore,
 );
 router.post(
   '/:id/match',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.match,
 );
 router.post(
   '/:id/post-journal',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.postJournal,
 );
 router.post(
   '/:id/unmatch',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.unmatch,
 );
 router.post(
   '/:id/ignore',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.ignore,
 );
 router.post(
   '/:id/unignore',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('bank.reconcile'),
   bankTransactionController.unignore,
 );
 

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as auditController from '../controllers/auditController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/rbac.js';
+import { requirePermission } from '../middleware/rbac.js';
 
 /**
  * /api/v1/audit-logs — see docs/api.md.
@@ -17,7 +17,7 @@ import { requireRole } from '../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, requireRole('OWNER', 'ADMIN'), auditController.list);
-router.get('/:id', authenticate, requireRole('OWNER', 'ADMIN'), auditController.getOne);
+router.get('/', authenticate, requirePermission('audit.view'), auditController.list);
+router.get('/:id', authenticate, requirePermission('audit.view'), auditController.getOne);
 
 export default router;

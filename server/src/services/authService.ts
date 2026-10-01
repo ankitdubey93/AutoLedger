@@ -6,6 +6,7 @@ import { beginTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
 import { createOrganizationOnClient, deleteMembershipOnClient, lockOrganizationOnClient } from './organizationService.js';
 import { acceptInvitationOnClient } from './invitationService.js';
+import { resolveMemberAccess } from './permissionService.js';
 import {
   accessTokenExpiry,
   hashRefreshToken,
@@ -109,12 +110,14 @@ export async function listMemberships(q: Queryable, userId: string): Promise<Mem
     org_name: string;
     org_slug: string;
     role: string;
+    custom_role_name: string | null;
     joined_at: Date;
   }>(
     `SELECT o.id AS org_id, o.name AS org_name, o.slug AS org_slug,
-            m.role, m.created_at AS joined_at
+            m.role, r.name AS custom_role_name, m.created_at AS joined_at
        FROM organization_members m
        JOIN organizations o ON o.id = m.org_id
+       LEFT JOIN org_roles r ON r.org_id = m.org_id AND r.id = m.custom_role_id
       WHERE m.user_id = $1
       ORDER BY m.created_at ASC`,
     [userId],
@@ -129,6 +132,7 @@ export async function listMemberships(q: Queryable, userId: string): Promise<Mem
       orgName: r.org_name,
       orgSlug: r.org_slug,
       role: r.role,
+      roleName: r.role === 'CUSTOM' ? (r.custom_role_name ?? 'Custom role') : r.role,
       joinedAt: r.joined_at.toISOString(),
     };
   });
@@ -186,8 +190,19 @@ export async function buildSession(
   const [user, memberships] = await Promise.all([loadUser(q, userId), listMemberships(q, userId)]);
   const organization = orgId === null ? null : await loadOrganization(q, orgId);
   const role = memberships.find((m) => m.orgId === orgId)?.role ?? null;
+  // Phase 38c — the active organization's permissions, for the client to
+  // hide what the server would refuse. Every route re-checks regardless.
+  const access = orgId === null ? null : await resolveMemberAccess(q, orgId, userId);
 
-  return { user, organization, role, memberships, accessTokenExpiresAt: accessTokenExpiry() };
+  return {
+    user,
+    organization,
+    role,
+    roleName: access?.roleName ?? null,
+    permissions: access === null ? [] : [...access.permissions].sort(),
+    memberships,
+    accessTokenExpiresAt: accessTokenExpiry(),
+  };
 }
 
 /* ----------------------------------------------------------------- sessions */

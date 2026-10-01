@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as paymentTermController from '../../controllers/accounting/paymentTermController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { allowAnyMember, requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/payment-terms — see docs/api.md.
@@ -14,9 +14,9 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, paymentTermController.list);
+router.get('/', authenticate, allowAnyMember, paymentTermController.list);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), paymentTermController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), paymentTermController.update);
+router.post('/', authenticate, requirePermission('payment_terms.manage'), paymentTermController.create);
+router.patch('/:id', authenticate, requirePermission('payment_terms.manage'), paymentTermController.update);
 
 export default router;

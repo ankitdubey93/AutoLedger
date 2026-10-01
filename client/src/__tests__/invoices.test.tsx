@@ -9,6 +9,7 @@ import InvoicesPage from '../Pages/sales/InvoicesPage';
 import NewInvoicePage from '../Pages/sales/NewInvoicePage';
 import InvoiceDetailPage from '../Pages/sales/InvoiceDetailPage';
 import type { Account, Customer, Invoice, InvoiceSettings } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * The invoice register, the draft editor, and the invoice detail page.
@@ -243,8 +244,9 @@ const session = {
     createdAt: new Date().toISOString(),
   },
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [
-    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', joinedAt: new Date().toISOString() },
+    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', roleName: 'OWNER', joinedAt: new Date().toISOString() },
   ],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

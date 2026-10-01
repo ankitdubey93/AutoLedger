@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Search, UserCog } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useShell } from './ShellContext';
+import { useCan } from '../../context/AuthContext';
 import { NAV_GROUPS } from './nav';
 import { cx } from '../../utils/cx';
 
@@ -12,6 +13,7 @@ interface Command {
   group: string;
   icon: LucideIcon;
   to: string;
+  permission?: string;
 }
 
 /**
@@ -26,6 +28,7 @@ const COMMANDS: Command[] = [
       group: group.heading,
       icon: item.icon,
       to: item.to,
+      ...(item.permission === undefined ? {} : { permission: item.permission }),
     })),
   ),
   { id: '/account', label: 'Account settings', group: 'Workspace', icon: UserCog, to: '/account' },
@@ -43,13 +46,16 @@ function matches(query: string, label: string): boolean {
  */
 export default function CommandPalette() {
   const { paletteOpen, closePalette } = useShell();
+  // Phase 38c — the same filtering as the sidebar.
+  const can = useCan();
+  const allowed = COMMANDS.filter((c) => c.permission === undefined || can(c.permission));
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const filtered = query.trim() === '' ? COMMANDS : COMMANDS.filter((c) => matches(query, c.label) || matches(query, c.group));
+  const filtered = query.trim() === '' ? allowed : allowed.filter((c) => matches(query, c.label) || matches(query, c.group));
 
   useEffect(() => {
     if (paletteOpen) {

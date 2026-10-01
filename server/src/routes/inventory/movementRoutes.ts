@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as movementController from '../../controllers/inventory/movementController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/receipts, /issues, /transfers, /adjustments, /balances,
@@ -17,16 +17,16 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.post('/receipts', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), movementController.receive);
-router.post('/issues', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), movementController.issue);
-router.post('/transfers', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), movementController.transfer);
-router.post('/adjustments', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), movementController.adjust);
+router.post('/receipts', authenticate, requirePermission('inventory.operate'), movementController.receive);
+router.post('/issues', authenticate, requirePermission('inventory.operate'), movementController.issue);
+router.post('/transfers', authenticate, requirePermission('inventory.operate'), movementController.transfer);
+router.post('/adjustments', authenticate, requirePermission('inventory.operate'), movementController.adjust);
 
-router.get('/balances', authenticate, movementController.balances);
-router.get('/movements', authenticate, movementController.movements);
-router.get('/items/:id/lots', authenticate, movementController.itemLots);
-router.get('/items/:id/serials', authenticate, movementController.itemSerials);
-router.get('/summary', authenticate, movementController.summary);
-router.get('/product-balances', authenticate, movementController.productBalances);
+router.get('/balances', authenticate, requirePermission('inventory.view'), movementController.balances);
+router.get('/movements', authenticate, requirePermission('inventory.view'), movementController.movements);
+router.get('/items/:id/lots', authenticate, requirePermission('inventory.view'), movementController.itemLots);
+router.get('/items/:id/serials', authenticate, requirePermission('inventory.view'), movementController.itemSerials);
+router.get('/summary', authenticate, requirePermission('inventory.view'), movementController.summary);
+router.get('/product-balances', authenticate, requirePermission('inventory.view'), movementController.productBalances);
 
 export default router;

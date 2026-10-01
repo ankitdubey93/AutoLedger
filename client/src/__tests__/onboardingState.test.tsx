@@ -6,6 +6,7 @@ import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import ProductRoutes from '../routes/ProductRoutes';
 import SetupChecklist from '../Pages/home/SetupChecklist';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Phase 9a — the soft onboarding gate, Skip, and the suite-level checklist.
@@ -27,8 +28,9 @@ const session = {
   },
   organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: new Date().toISOString() },
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [
-    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', joinedAt: new Date().toISOString() },
+    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', roleName: 'OWNER', joinedAt: new Date().toISOString() },
   ],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

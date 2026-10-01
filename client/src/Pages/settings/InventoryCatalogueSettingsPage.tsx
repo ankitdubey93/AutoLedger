@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Settings as SettingsIcon } from 'lucide-react';
-import { useAuth } from '../../context/AuthContext';
 import TabBar from '../../components/ui/TabBar';
 import PageHeader from '../../components/ui/PageHeader';
+import { useCan } from '../../context/AuthContext';
 import {
   STOCK_ATTRIBUTE_TYPES,
   STOCK_ITEM_TYPES,
@@ -32,12 +32,13 @@ const inputClass =
  * Inventory's own catalogue: units of measure, categories (nested up to
  * 3 levels) and, for the selected category, its ITEM and SERIAL custom
  * fields. Writing is catalogue configuration, so every form here is OWNER
- * or ADMIN only, matching the server's own role gate on these routes.
+ * holders of `inventory.configure` (OWNER and ADMIN among the built-in roles),
+ * matching the server's own permission gate on these routes.
  */
 export default function InventoryCatalogueSettingsPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.configure');
 
   const [uoms, setUoms] = useState<StockUom[]>([]);
   const [categories, setCategories] = useState<StockCategory[]>([]);

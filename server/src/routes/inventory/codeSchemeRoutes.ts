@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as codeSchemeController from '../../controllers/inventory/codeSchemeController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/code-schemes — see docs/api.md.
@@ -14,10 +14,10 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, codeSchemeController.list);
-router.get('/presets', authenticate, codeSchemeController.presets);
-router.post('/preview', authenticate, codeSchemeController.preview);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), codeSchemeController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN'), codeSchemeController.update);
+router.get('/', authenticate, requirePermission('inventory.view'), codeSchemeController.list);
+router.get('/presets', authenticate, requirePermission('inventory.view'), codeSchemeController.presets);
+router.post('/preview', authenticate, requirePermission('inventory.view'), codeSchemeController.preview);
+router.post('/', authenticate, requirePermission('inventory.configure'), codeSchemeController.create);
+router.patch('/:id', authenticate, requirePermission('inventory.configure'), codeSchemeController.update);
 
 export default router;

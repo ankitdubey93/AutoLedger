@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as serialController from '../../controllers/inventory/serialController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/serials — see docs/api.md.
@@ -12,7 +12,7 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.post('/:id/status', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), serialController.changeStatus);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), serialController.updateAttributes);
+router.post('/:id/status', authenticate, requirePermission('inventory.operate'), serialController.changeStatus);
+router.patch('/:id', authenticate, requirePermission('inventory.operate'), serialController.updateAttributes);
 
 export default router;

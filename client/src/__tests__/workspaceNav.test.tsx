@@ -1,10 +1,13 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { ShellProvider } from '../components/layout/ShellContext';
 import Sidebar from '../components/layout/Sidebar';
 import { NAV_GROUPS } from '../components/layout/nav';
+
+// Phase 38c — the sidebar shows only what the member may open; an OWNER may open everything.
+vi.mock('../context/AuthContext', () => ({ useCan: () => () => true }));
 
 /**
  * Phase 33: one sidebar for the whole product. Accounting, the bill inbox and

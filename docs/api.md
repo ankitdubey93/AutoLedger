@@ -163,6 +163,8 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 
 ### Organizations — `/api/v1/organizations`
 
+**Phase 38c — the Auth column below names permissions.** Since Phase 38c every route is gated by a permission key (`config/permissions.ts`), not a role list. For the built-in roles nothing changed: each key's tier admits exactly the roles the old list did. `OWNER`, `ADMIN` in an older row means a tier-`M` key such as `settings.manage` or `members.manage`. A 403 now reads *This action needs the "…" permission.* `PATCH /members/:userId` and `POST /invitations` take `{ role }` (built-in) **or** `{ customRoleId }`, and refuse handing out permissions the caller lacks (`403`). The session body gains `roleName` and `permissions`. Member, membership and invitation objects gain `roleName` (and `customRoleId`).
+
 | Method | Path | Auth | Description |
 |---|---|---|---|
 | GET | `/` | any member | The caller's active organization |
@@ -177,6 +179,10 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 | DELETE | `/invitations/:id` | `OWNER`, `ADMIN` | Phase 37. Revoke. Another organization's invitation is `404`; an accepted one is `409` |
 | GET | `/email-settings` | `OWNER`, `ADMIN` | Phase 38b. `{ settings: { senderName, replyTo, fromEmail, transport } }` — how email sent for this organization presents itself. `fromEmail` is the platform's verified sender and is read-only |
 | PATCH | `/email-settings` | `OWNER`, `ADMIN` | Phase 38b. `{ senderName?, replyTo? }`; `null` resets a field to the default |
+| GET | `/roles` | `members.view` | Phase 38c. `{ builtin: [{ role, permissions }], custom: [{ id, name, description, permissions, memberCount }], catalogue: [{ key, area, label, tier, requires? }] }` |
+| POST | `/roles` | `roles.manage` | Phase 38c. `{ name, description?, permissions[] }` → `201 { role }`. The set is closed over `requires`. `400` unknown key or empty, `422` an owner-only key, `403` a key you do not hold (non-owners), `409` duplicate name (case-insensitive) |
+| PATCH | `/roles/:id` | `roles.manage` | Phase 38c. Same body; replaces name, description and permissions. Takes effect for every holder on their next request. `403` if the role already exceeds your permissions; another organization's role is `404` |
+| DELETE | `/roles/:id` | `roles.manage` | Phase 38c. `409` while any member holds it; its open invitations go with it |
 
 The active organization comes **only** from the verified access token. `orgId` in a query string, an `X-Org-Id` header, or a request body is ignored — there is a test that sends all three pointing at another tenant and asserts the response is unchanged.
 

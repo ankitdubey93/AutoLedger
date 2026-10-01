@@ -8,6 +8,7 @@ import { LedgerSettingsProvider } from '../context/LedgerSettingsContext';
 import BillsPage from '../Pages/purchases/BillsPage';
 import BillDetailPage from '../Pages/purchases/BillDetailPage';
 import type { Bill } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * The bill register and the bill detail page.
@@ -33,8 +34,9 @@ const session = {
   },
   organization: { id: 'o1', name: 'Acme', slug: 'acme', baseCurrency: 'USD', createdAt: new Date().toISOString() },
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [
-    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', joinedAt: new Date().toISOString() },
+    { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', roleName: 'OWNER', joinedAt: new Date().toISOString() },
   ],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

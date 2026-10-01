@@ -82,8 +82,9 @@ function orNull(value: string): string | null {
 }
 
 export default function OrganizationProfilePanel() {
-  const { role } = useOrg();
-  const canEdit = role === 'OWNER' || role === 'ADMIN';
+  // Phase 38c — PATCH /organizations/profile needs settings.manage.
+  const { can } = useOrg();
+  const canEdit = can('settings.manage');
 
   const [form, setForm] = useState<FormState | null>(null);
   const [logoDocumentId, setLogoDocumentId] = useState<string | null>(null);

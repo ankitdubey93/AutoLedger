@@ -20,6 +20,7 @@ import {
   Inbox,
 } from 'lucide-react';
 import { useOrg } from '../../context/OrgContext';
+import { visibleNavGroups } from '../../components/layout/nav';
 import { getLedgerDashboard, type DashboardSummary } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import TrendChart from '../../components/TrendChart';
@@ -49,7 +50,49 @@ function entryTotalCents(lines: { debitCents: number }[]): number {
   return lines.reduce((sum, line) => sum + line.debitCents, 0);
 }
 
+/**
+ * Phase 38c — the home page for a member whose role does not include
+ * "View dashboard and reports" (a custom "Invoice clerk", say). The full
+ * dashboard's one request would be refused, so instead of an error they get
+ * a start page linking to the sections their role can open.
+ */
+function RoleHome() {
+  const { organization, roleName, can } = useOrg();
+  const sections = visibleNavGroups(can).flatMap((group) => group.items).filter((item) => item.to !== '/');
+  return (
+    <section className="flex flex-col gap-5">
+      <PageHeader
+        as="h2"
+        icon={LayoutDashboard}
+        title={organization?.name ?? 'Welcome'}
+        subtitle={roleName === null ? undefined : `Your role: ${roleName}`}
+      />
+      <div className="card">
+        <h3 className="m-0 mb-3 text-sm font-semibold">Where you can go</h3>
+        {sections.length === 0 ? (
+          <p className="muted m-0">Your role does not include any sections yet. Ask an owner or admin for access.</p>
+        ) : (
+          <ul className="m-0 p-0 list-none grid gap-2 sm:grid-cols-2">
+            {sections.map((item) => (
+              <li key={item.to}>
+                <Link to={item.to} className="flex items-center gap-2 no-underline">
+                  <item.icon size={15} aria-hidden="true" /> {item.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function DashboardPage() {
+  const { can } = useOrg();
+  return can('reports.view') ? <FullDashboard /> : <RoleHome />;
+}
+
+function FullDashboard() {
   const { organization } = useOrg();
   const currency = organization?.baseCurrency ?? '';
   const [dashboard, setDashboard] = useState<DashboardSummary | null>(null);

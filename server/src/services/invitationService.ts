@@ -9,6 +9,8 @@ import { enqueueEmailOnClient } from './mail/emailOutboxService.js';
 import { notifyInvitationAcceptedOnClient } from './mail/notificationService.js';
 import { INVITATION_TTL_MS } from '../config/constants.js';
 import { isRole, type Role } from '../types/auth.js';
+import { permissionsOfRole, resolveMemberAccess } from './permissionService.js';
+import { assertMayManage } from './organizationService.js';
 import {
   canTransitionInvitation,
   type Invitation,
@@ -56,15 +58,6 @@ function statusOf(row: Pick<InvitationRow, 'expires_at' | 'accepted_at' | 'revok
   return 'PENDING';
 }
 
-async function currentRoleOnClient(q: Queryable, orgId: string, userId: string): Promise<Role | null> {
-  const { rows } = await q.query<{ role: string }>(
-    'SELECT role FROM organization_members WHERE org_id = $1 AND user_id = $2',
-    [orgId, userId],
-  );
-  const role = rows[0]?.role;
-  return isRole(role) ? role : null;
-}
-
 function roleOf(value: string): Role {
   // The CHECK constraint guarantees this; a silent cast would hide a future
   // migration that widened the column.
@@ -92,22 +85,24 @@ function acceptUrlFor(token: string): string {
 export async function createInvitation(
   orgId: string,
   inviter: { id: string },
-  input: { email: string; role: Role },
+  input: { email: string; role: Role; customRoleId: string | null },
 ): Promise<{ invitation: Invitation; acceptUrl: string }> {
   const email = input.email.toLowerCase();
   const token = randomBytes(32).toString('base64url');
 
   const invitation = await withTransaction(async (client) => {
-    // The inviter's role is re-read here, not taken from the access token,
+    // The inviter's access is re-read here, not taken from the access token,
     // which can be up to 15 minutes stale: an owner demoted a minute ago must
-    // not still be able to invite an owner.
-    const inviterRole = await currentRoleOnClient(client, orgId, inviter.id);
-    if (inviterRole !== 'OWNER' && inviterRole !== 'ADMIN') {
-      throw new ApiError(403, 'Only an owner or admin can invite people');
+    // not still be able to invite an owner. Phase 38c: the same
+    // no-escalation rule as changing a member's role — you can only invite
+    // someone into a role whose permissions you hold yourself.
+    const inviterAccess = await resolveMemberAccess(client, orgId, inviter.id);
+    if (inviterAccess === null || !inviterAccess.permissions.has('members.manage')) {
+      throw new ApiError(403, 'You need the "Invite, change roles and remove members" permission');
     }
-    if (input.role === 'OWNER' && inviterRole !== 'OWNER') {
-      throw new ApiError(403, 'Only an owner can invite another owner');
-    }
+    const rolePermissions = await permissionsOfRole(client, orgId, input);
+    if (rolePermissions === null) throw new ApiError(404, 'Role not found');
+    assertMayManage(inviterAccess, null, { role: input.role, permissions: rolePermissions });
 
     const { rows: memberRows } = await client.query(
       `SELECT 1
@@ -132,21 +127,30 @@ export async function createInvitation(
 
     try {
       const { rows } = await client.query<{ id: string }>(
-        `INSERT INTO organization_invitations (org_id, email, role, token_hash, invited_by, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6)
+        `INSERT INTO organization_invitations (org_id, email, role, custom_role_id, token_hash, invited_by, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id`,
-        [orgId, email, input.role, hashRefreshToken(token), inviter.id, new Date(Date.now() + INVITATION_TTL_MS)],
+        [
+          orgId,
+          email,
+          input.role,
+          input.customRoleId,
+          hashRefreshToken(token),
+          inviter.id,
+          new Date(Date.now() + INVITATION_TTL_MS),
+        ],
       );
       const id = rows[0]?.id;
       if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
       // Phase 38b — the invitation email, on this same transaction: if the
       // insert rolls back, no email about it can exist (rule 5).
-      const { rows: ctxRows } = await client.query<{ org_name: string; inviter_name: string }>(
-        `SELECT o.name AS org_name, COALESCE(u.name, u.email) AS inviter_name
+      const { rows: ctxRows } = await client.query<{ org_name: string; inviter_name: string; role_name: string | null }>(
+        `SELECT o.name AS org_name, COALESCE(u.name, u.email) AS inviter_name,
+                (SELECT r.name FROM org_roles r WHERE r.org_id = o.id AND r.id = $3::uuid) AS role_name
            FROM organizations o, users u
           WHERE o.id = $1 AND u.id = $2`,
-        [orgId, inviter.id],
+        [orgId, inviter.id, input.customRoleId],
       );
       await enqueueEmailOnClient(client, {
         orgId,
@@ -155,7 +159,7 @@ export async function createInvitation(
         data: {
           organizationName: ctxRows[0]?.org_name ?? '',
           inviterName: ctxRows[0]?.inviter_name ?? 'Someone',
-          roleLabel: input.role,
+          roleLabel: ctxRows[0]?.role_name ?? input.role,
         },
         link: acceptUrlFor(token),
       });
@@ -182,11 +186,14 @@ async function loadInvitation(q: Queryable, orgId: string, id: string): Promise<
 }
 
 async function selectInvitations(q: Queryable, orgId: string, id: string | null): Promise<Invitation[]> {
-  const { rows } = await q.query<InvitationRow & { invited_by_name: string | null }>(
+  const { rows } = await q.query<
+    InvitationRow & { invited_by_name: string | null; custom_role_id: string | null; custom_role_name: string | null }
+  >(
     `SELECT i.id, i.org_id, i.email, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at,
-            COALESCE(u.name, u.email) AS invited_by_name
+            COALESCE(u.name, u.email) AS invited_by_name, i.custom_role_id, r.name AS custom_role_name
        FROM organization_invitations i
        LEFT JOIN users u ON u.id = i.invited_by
+       LEFT JOIN org_roles r ON r.org_id = i.org_id AND r.id = i.custom_role_id
       WHERE i.org_id = $1
         AND ($2::uuid IS NULL OR i.id = $2::uuid)
         AND ($2::uuid IS NOT NULL OR (i.accepted_at IS NULL AND i.revoked_at IS NULL))
@@ -197,6 +204,8 @@ async function selectInvitations(q: Queryable, orgId: string, id: string | null)
     id: r.id,
     email: r.email,
     role: roleOf(r.role),
+    customRoleId: r.custom_role_id,
+    roleName: r.role === 'CUSTOM' ? (r.custom_role_name ?? 'Custom role') : r.role,
     status: statusOf(r),
     invitedByName: r.invited_by_name,
     expiresAt: r.expires_at.toISOString(),
@@ -245,12 +254,15 @@ export async function revokeInvitation(orgId: string, id: string): Promise<void>
  * nothing about why.
  */
 export async function previewInvitation(token: string): Promise<InvitationPreview> {
-  const { rows } = await pool.query<InvitationRow & { org_name: string; invited_by_name: string | null }>(
+  const { rows } = await pool.query<
+    InvitationRow & { org_name: string; invited_by_name: string | null; custom_role_name: string | null }
+  >(
     `SELECT i.id, i.org_id, i.email, i.role, i.expires_at, i.accepted_at, i.revoked_at, i.created_at,
-            o.name AS org_name, COALESCE(u.name, u.email) AS invited_by_name
+            o.name AS org_name, COALESCE(u.name, u.email) AS invited_by_name, r.name AS custom_role_name
        FROM organization_invitations i
        JOIN organizations o ON o.id = i.org_id
        LEFT JOIN users u ON u.id = i.invited_by
+       LEFT JOIN org_roles r ON r.org_id = i.org_id AND r.id = i.custom_role_id
       WHERE i.token_hash = $1`,
     [hashRefreshToken(token)],
   );
@@ -261,6 +273,7 @@ export async function previewInvitation(token: string): Promise<InvitationPrevie
     invitedByName: row.invited_by_name,
     email: row.email,
     role: roleOf(row.role),
+    roleName: row.role === 'CUSTOM' ? (row.custom_role_name ?? 'Custom role') : row.role,
     status: statusOf(row),
     expiresAt: row.expires_at.toISOString(),
   };
@@ -281,8 +294,8 @@ export async function acceptInvitationOnClient(
   token: string,
   user: { id: string; email: string },
 ): Promise<{ orgId: string; role: Role }> {
-  const { rows } = await client.query<InvitationRow & { invited_by: string | null }>(
-    `SELECT id, org_id, email, role, expires_at, accepted_at, revoked_at, created_at, invited_by
+  const { rows } = await client.query<InvitationRow & { invited_by: string | null; custom_role_id: string | null }>(
+    `SELECT id, org_id, email, role, expires_at, accepted_at, revoked_at, created_at, invited_by, custom_role_id
        FROM organization_invitations
       WHERE token_hash = $1
       FOR UPDATE`,
@@ -306,10 +319,11 @@ export async function acceptInvitationOnClient(
   if (existing.length > 0) throw new ApiError(409, 'You are already a member of this organization');
 
   const role = roleOf(row.role);
-  await client.query('INSERT INTO organization_members (org_id, user_id, role) VALUES ($1, $2, $3)', [
+  await client.query('INSERT INTO organization_members (org_id, user_id, role, custom_role_id) VALUES ($1, $2, $3, $4)', [
     row.org_id,
     user.id,
     role,
+    row.custom_role_id,
   ]);
   await client.query(
     'UPDATE organization_invitations SET accepted_at = now(), accepted_by = $3 WHERE org_id = $1 AND id = $2',

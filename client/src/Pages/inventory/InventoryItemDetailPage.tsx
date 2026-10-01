@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import { INVENTORY_BASE } from '../../routes/paths';
 import AttributeFields from './AttributeFields';
 import BackLink from '../../components/BackLink';
@@ -28,6 +27,7 @@ import {
 import { humanizeEnum } from '../../utils/enumLabel';
 import { formatDate } from '../../utils/date';
 import LoadingState from '../../components/ui/LoadingState';
+import { useCan } from '../../context/AuthContext';
 
 /**
  * One item, in full: its custom fields (editable), where it's on hand,
@@ -39,9 +39,9 @@ import LoadingState from '../../components/ui/LoadingState';
  */
 export default function InventoryItemDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN' || role === 'ACCOUNTANT';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.operate');
   const navigate = useNavigate();
   const base = INVENTORY_BASE;
 

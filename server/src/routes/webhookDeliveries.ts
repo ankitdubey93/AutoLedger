@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as webhookDeliveryController from '../controllers/webhookDeliveryController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/rbac.js';
+import { requirePermission } from '../middleware/rbac.js';
 
 /**
  * /api/v1/webhook-deliveries — see docs/api.md.
@@ -15,8 +15,8 @@ import { requireRole } from '../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, requireRole('OWNER', 'ADMIN'), webhookDeliveryController.list);
-router.get('/:id', authenticate, requireRole('OWNER', 'ADMIN'), webhookDeliveryController.getOne);
-router.post('/:id/retry', authenticate, requireRole('OWNER', 'ADMIN'), webhookDeliveryController.retry);
+router.get('/', authenticate, requirePermission('webhooks.manage'), webhookDeliveryController.list);
+router.get('/:id', authenticate, requirePermission('webhooks.manage'), webhookDeliveryController.getOne);
+router.post('/:id/retry', authenticate, requirePermission('webhooks.manage'), webhookDeliveryController.retry);
 
 export default router;

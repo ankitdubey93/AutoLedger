@@ -13,7 +13,6 @@ import {
   type Payment,
 } from '../../services/fetchServices';
 import { formatCents, formatQuantity, formatRate } from '../../utils/money';
-import { useAuth } from '../../context/AuthContext';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -21,6 +20,7 @@ import PaymentDialog from '../sales/PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 import { formatDate } from '../../utils/date';
+import { useCan } from '../../context/AuthContext';
 
 /**
  * One bill, in full. Approve and Void are both gated by a confirmation
@@ -42,8 +42,7 @@ function statusLabel(status: Bill['status']): string {
 export default function BillDetailPage() {
   const { billId } = useParams<{ billId: string }>();
   const navigate = useNavigate();
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
+  const can = useCan();
   const ledgerSettings = useLedgerSettings();
 
   const [bill, setBill] = useState<Bill | null>(null);
@@ -166,7 +165,8 @@ export default function BillDetailPage() {
     );
   }
 
-  const canApprove = role === 'OWNER' || role === 'ADMIN';
+  // Phase 38c — the permission the server checks on these routes.
+  const canApprove = can('bills.approve');
 
   return (
     <section className="flex flex-col gap-6">

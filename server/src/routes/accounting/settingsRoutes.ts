@@ -2,7 +2,7 @@ import { Router } from 'express';
 import * as settingsController from '../../controllers/accounting/settingsController.js';
 import * as invoiceSettingsController from '../../controllers/accounting/invoiceSettingsController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { allowAnyMember, requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/settings — see docs/api.md.
@@ -15,18 +15,18 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, settingsController.get);
+router.get('/', authenticate, allowAnyMember, settingsController.get);
 
 router.post(
   '/onboarding',
   authenticate,
-  requireRole('OWNER', 'ADMIN'),
+  requirePermission('settings.manage'),
   settingsController.onboard,
 );
 
-router.patch('/', authenticate, requireRole('OWNER', 'ADMIN'), settingsController.update);
+router.patch('/', authenticate, requirePermission('settings.manage'), settingsController.update);
 
-router.get('/invoicing', authenticate, invoiceSettingsController.get);
-router.patch('/invoicing', authenticate, requireRole('OWNER', 'ADMIN'), invoiceSettingsController.update);
+router.get('/invoicing', authenticate, allowAnyMember, invoiceSettingsController.get);
+router.patch('/invoicing', authenticate, requirePermission('settings.manage'), invoiceSettingsController.update);
 
 export default router;

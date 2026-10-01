@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as reportController from '../../controllers/accounting/reportController.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/reports — see docs/api.md.
@@ -11,13 +12,13 @@ import { authenticate } from '../../middleware/auth.js';
  */
 const router = Router();
 
-router.get('/trial-balance', authenticate, reportController.trialBalance);
-router.get('/profit-and-loss', authenticate, reportController.profitAndLoss);
-router.get('/balance-sheet', authenticate, reportController.balanceSheet);
-router.get('/dashboard', authenticate, reportController.dashboard);
-router.get('/ar-aging', authenticate, reportController.arAging);
-router.get('/ap-aging', authenticate, reportController.apAging);
-router.get('/bank-reconciliation', authenticate, reportController.bankReconciliation);
-router.get('/fx-exposure', authenticate, reportController.fxExposure);
+router.get('/trial-balance', authenticate, requirePermission('reports.view'), reportController.trialBalance);
+router.get('/profit-and-loss', authenticate, requirePermission('reports.view'), reportController.profitAndLoss);
+router.get('/balance-sheet', authenticate, requirePermission('reports.view'), reportController.balanceSheet);
+router.get('/dashboard', authenticate, requirePermission('reports.view'), reportController.dashboard);
+router.get('/ar-aging', authenticate, requirePermission('reports.view'), reportController.arAging);
+router.get('/ap-aging', authenticate, requirePermission('reports.view'), reportController.apAging);
+router.get('/bank-reconciliation', authenticate, requirePermission('reports.view'), reportController.bankReconciliation);
+router.get('/fx-exposure', authenticate, requirePermission('reports.view'), reportController.fxExposure);
 
 export default router;

@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as captureSettingsController from '../../controllers/capture/captureSettingsController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/capture/settings — see docs/api.md. Read is open to every member
@@ -11,7 +11,7 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, captureSettingsController.getSettings);
-router.put('/', authenticate, requireRole('OWNER', 'ADMIN'), captureSettingsController.updateSettings);
+router.get('/', authenticate, requirePermission('capture.view'), captureSettingsController.getSettings);
+router.put('/', authenticate, requirePermission('capture.settings'), captureSettingsController.updateSettings);
 
 export default router;

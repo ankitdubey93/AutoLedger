@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as migrationImportController from '../../controllers/accounting/migrationImportController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/migration-imports — see docs/api.md.
@@ -14,41 +14,41 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), migrationImportController.create);
-router.get('/', authenticate, migrationImportController.list);
-router.get('/kinds', authenticate, migrationImportController.kinds);
-router.post('/inspect', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), migrationImportController.inspect);
-router.get('/:id', authenticate, migrationImportController.getOne);
-router.get('/:id/rows', authenticate, migrationImportController.listRows);
+router.post('/', authenticate, requirePermission('imports.stage'), migrationImportController.create);
+router.get('/', authenticate, requirePermission('imports.view'), migrationImportController.list);
+router.get('/kinds', authenticate, requirePermission('imports.view'), migrationImportController.kinds);
+router.post('/inspect', authenticate, requirePermission('imports.stage'), migrationImportController.inspect);
+router.get('/:id', authenticate, requirePermission('imports.view'), migrationImportController.getOne);
+router.get('/:id/rows', authenticate, requirePermission('imports.view'), migrationImportController.listRows);
 router.patch(
   '/:id/rows/:rowId',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('imports.stage'),
   migrationImportController.patchRow,
 );
 router.post(
   '/:id/rows/status',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('imports.stage'),
   migrationImportController.setRowsStatus,
 );
 router.post(
   '/:id/validate',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('imports.stage'),
   migrationImportController.validate,
 );
 router.get(
   '/:id/preview',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('imports.stage'),
   migrationImportController.preview,
 );
-router.post('/:id/commit', authenticate, requireRole('OWNER', 'ADMIN'), migrationImportController.commit);
+router.post('/:id/commit', authenticate, requirePermission('imports.commit'), migrationImportController.commit);
 router.delete(
   '/:id',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('imports.stage'),
   migrationImportController.remove,
 );
 

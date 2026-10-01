@@ -74,7 +74,7 @@ export default function InvitePage() {
   }
 
   const inviter = preview.invitedByName ?? 'Someone';
-  const subtitle = `${inviter} invited ${preview.email} to join as ${preview.role}.`;
+  const subtitle = `${inviter} invited ${preview.email} to join as ${preview.roleName}.`;
 
   if (preview.status !== 'PENDING') {
     const why = preview.status === 'ACCEPTED' ? 'has already been used' : `has ${preview.status.toLowerCase()}`;

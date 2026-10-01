@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as webhookController from '../controllers/webhookController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireRole } from '../middleware/rbac.js';
+import { requirePermission } from '../middleware/rbac.js';
 
 /**
  * /api/v1/webhooks — see docs/api.md.
@@ -14,11 +14,11 @@ import { requireRole } from '../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, requireRole('OWNER', 'ADMIN'), webhookController.list);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), webhookController.create);
-router.get('/:id', authenticate, requireRole('OWNER', 'ADMIN'), webhookController.getOne);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN'), webhookController.update);
-router.delete('/:id', authenticate, requireRole('OWNER'), webhookController.remove);
-router.post('/:id/rotate-secret', authenticate, requireRole('OWNER'), webhookController.rotate);
+router.get('/', authenticate, requirePermission('webhooks.manage'), webhookController.list);
+router.post('/', authenticate, requirePermission('webhooks.manage'), webhookController.create);
+router.get('/:id', authenticate, requirePermission('webhooks.manage'), webhookController.getOne);
+router.patch('/:id', authenticate, requirePermission('webhooks.manage'), webhookController.update);
+router.delete('/:id', authenticate, requirePermission('webhooks.secrets'), webhookController.remove);
+router.post('/:id/rotate-secret', authenticate, requirePermission('webhooks.secrets'), webhookController.rotate);
 
 export default router;

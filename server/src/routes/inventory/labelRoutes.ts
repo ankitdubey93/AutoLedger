@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import * as labelController from '../../controllers/inventory/labelController.js';
 import { authenticate } from '../../middleware/auth.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/lookup and /api/v1/inventory/labels — see docs/api.md.
@@ -11,7 +12,7 @@ import { authenticate } from '../../middleware/auth.js';
  */
 const router = Router();
 
-router.get('/lookup', authenticate, labelController.lookup);
-router.post('/labels', authenticate, labelController.labels);
+router.get('/lookup', authenticate, requirePermission('inventory.view'), labelController.lookup);
+router.post('/labels', authenticate, requirePermission('inventory.view'), labelController.labels);
 
 export default router;

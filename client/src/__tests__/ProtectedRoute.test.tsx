@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProtectedRoute from '../components/ProtectedRoute';
 import { AuthProvider } from '../context/AuthContext';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Guards the login-flash bug: on reload the session lives in an httpOnly
@@ -35,6 +36,7 @@ const session = {
     createdAt: new Date().toISOString(),
   },
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

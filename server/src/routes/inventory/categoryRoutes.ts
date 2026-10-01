@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as catalogueController from '../../controllers/inventory/catalogueController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/inventory/categories — see docs/api.md.
@@ -12,16 +12,16 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, catalogueController.listCategories);
-router.get('/:id', authenticate, catalogueController.getCategory);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), catalogueController.createCategory);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN'), catalogueController.updateCategory);
+router.get('/', authenticate, requirePermission('inventory.view'), catalogueController.listCategories);
+router.get('/:id', authenticate, requirePermission('inventory.view'), catalogueController.getCategory);
+router.post('/', authenticate, requirePermission('inventory.configure'), catalogueController.createCategory);
+router.patch('/:id', authenticate, requirePermission('inventory.configure'), catalogueController.updateCategory);
 
-router.post('/:id/attributes', authenticate, requireRole('OWNER', 'ADMIN'), catalogueController.createAttribute);
+router.post('/:id/attributes', authenticate, requirePermission('inventory.configure'), catalogueController.createAttribute);
 router.patch(
   '/:id/attributes/:attributeId',
   authenticate,
-  requireRole('OWNER', 'ADMIN'),
+  requirePermission('inventory.configure'),
   catalogueController.updateAttribute,
 );
 

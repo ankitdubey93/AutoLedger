@@ -2,6 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * LoginPage — the demo entry point. The demo credentials are read from
@@ -18,6 +19,7 @@ const session = {
   user: { id: 'u1', name: 'Demo', email: 'demo@autoledger.dev', emailVerified: false, createdAt: new Date().toISOString() },
   organization: { id: 'o1', name: 'Harbor Point Fabrication', slug: 'harbor-point', baseCurrency: 'USD', createdAt: new Date().toISOString() },
   role: 'OWNER',
+  permissions: permissionsFor('OWNER'),
   memberships: [],
   accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
 };

@@ -9,6 +9,7 @@ import InvoiceTemplatePage from '../Pages/settings/InvoiceTemplatePage';
 import { SAMPLE_CUSTOMER_NAME, SAMPLE_INVOICE } from '../Pages/sales/sampleInvoice';
 import * as fetchServices from '../services/fetchServices';
 import type { InvoiceSettings, OrganizationProfile } from '../services/fetchServices';
+import { permissionsFor } from './helpers/permissions';
 
 /**
  * Invoice template editor and shared renderer (Phase 30, Step 15).
@@ -97,8 +98,9 @@ function makeSession() {
       createdAt: new Date().toISOString(),
     },
     role: 'OWNER',
+    permissions: permissionsFor('OWNER'),
     memberships: [
-      { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', joinedAt: new Date().toISOString() },
+      { orgId: 'o1', orgName: 'Acme', orgSlug: 'acme', role: 'OWNER', roleName: 'OWNER', joinedAt: new Date().toISOString() },
     ],
     accessTokenExpiresAt: new Date(Date.now() + 900_000).toISOString(),
   };

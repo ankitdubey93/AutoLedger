@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as fxRevaluationController from '../../controllers/accounting/fxRevaluationController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/fx-revaluations — see docs/api.md.
@@ -18,8 +18,8 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, fxRevaluationController.list);
-router.get('/:id', authenticate, fxRevaluationController.getOne);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN'), fxRevaluationController.run);
+router.get('/', authenticate, requirePermission('fx.view'), fxRevaluationController.list);
+router.get('/:id', authenticate, requirePermission('fx.view'), fxRevaluationController.getOne);
+router.post('/', authenticate, requirePermission('fx.revalue'), fxRevaluationController.run);
 
 export default router;

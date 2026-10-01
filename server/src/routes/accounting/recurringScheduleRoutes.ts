@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as recurringScheduleController from '../../controllers/accounting/recurringScheduleController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/recurring-schedules — see docs/api.md.
@@ -14,13 +14,13 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, recurringScheduleController.list);
-router.get('/:id', authenticate, recurringScheduleController.getOne);
+router.get('/', authenticate, requirePermission('recurring.view'), recurringScheduleController.list);
+router.get('/:id', authenticate, requirePermission('recurring.view'), recurringScheduleController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), recurringScheduleController.create);
-router.post('/:id/pause', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), recurringScheduleController.pause);
-router.post('/:id/resume', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), recurringScheduleController.resume);
-router.post('/:id/end', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), recurringScheduleController.end);
-router.post('/:id/run', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), recurringScheduleController.run);
+router.post('/', authenticate, requirePermission('recurring.manage'), recurringScheduleController.create);
+router.post('/:id/pause', authenticate, requirePermission('recurring.manage'), recurringScheduleController.pause);
+router.post('/:id/resume', authenticate, requirePermission('recurring.manage'), recurringScheduleController.resume);
+router.post('/:id/end', authenticate, requirePermission('recurring.manage'), recurringScheduleController.end);
+router.post('/:id/run', authenticate, requirePermission('recurring.manage'), recurringScheduleController.run);
 
 export default router;

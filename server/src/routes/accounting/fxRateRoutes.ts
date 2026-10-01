@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as fxRateController from '../../controllers/accounting/fxRateController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { allowAnyMember, requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/fx-rates — see docs/api.md.
@@ -17,9 +17,9 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, fxRateController.list);
-router.get('/latest', authenticate, fxRateController.latest);
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), fxRateController.upsert);
-router.delete('/:id', authenticate, requireRole('OWNER', 'ADMIN'), fxRateController.remove);
+router.get('/', authenticate, requirePermission('fx.view'), fxRateController.list);
+router.get('/latest', authenticate, allowAnyMember, fxRateController.latest);
+router.post('/', authenticate, requirePermission('fx.rates_edit'), fxRateController.upsert);
+router.delete('/:id', authenticate, requirePermission('fx.rates_delete'), fxRateController.remove);
 
 export default router;

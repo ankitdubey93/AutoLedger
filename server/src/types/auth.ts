@@ -9,11 +9,13 @@
  */
 
 /**
- * The four roles, fixed until a module genuinely needs a fifth. Mirrored by a
- * CHECK constraint in migration 001 — application validation and a database
- * constraint are belt and braces, and we write both.
+ * The four built-in roles. Phase 38c adds a fifth stored value, 'CUSTOM',
+ * meaning "see `custom_role_id`" — an organization-defined role over the
+ * permission catalogue (config/permissions.ts). Mirrored by the CHECK on
+ * `organization_members.role` (001, re-stated in 083).
  */
-export const ROLES = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER'] as const;
+export const BUILTIN_ROLES = ['OWNER', 'ADMIN', 'ACCOUNTANT', 'VIEWER'] as const;
+export const ROLES = [...BUILTIN_ROLES, 'CUSTOM'] as const;
 
 export type Role = (typeof ROLES)[number];
 
@@ -67,6 +69,8 @@ export interface Membership {
   orgName: string;
   orgSlug: string;
   role: Role;
+  /** Phase 38c — what to show: the built-in role, or the custom role's name. */
+  roleName: string;
   joinedAt: string;
 }
 
@@ -76,6 +80,9 @@ export interface OrganizationMember {
   name: string | null;
   email: string;
   role: Role;
+  /** Phase 38c — the custom role when `role` is 'CUSTOM', else null. */
+  customRoleId: string | null;
+  roleName: string;
   joinedAt: string;
 }
 
@@ -90,6 +97,14 @@ export interface SessionPayload {
   user: PublicUser;
   organization: OrganizationSummary | null;
   role: Role | null;
+  /** Phase 38c — the active role's display name (a custom role's own name). */
+  roleName: string | null;
+  /**
+   * Phase 38c — every permission key held in the active organization, so
+   * the client can hide what the server would refuse. Display only: every
+   * route re-checks on the server.
+   */
+  permissions: string[];
   memberships: Membership[];
   accessTokenExpiresAt: string;
 }

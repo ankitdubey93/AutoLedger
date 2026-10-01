@@ -59,7 +59,7 @@ The access token carries the active `org_id`. Switching organization means issui
 
 `middleware/auth.ts` performs **no database query**. The token's signature proves we issued it and that it was not altered, and that is treated as sufficient for its 15-minute life.
 
-The consequence, stated plainly: **removing someone from an organization does not take effect until their current access token expires — up to 15 minutes.** Refresh *does* re-validate membership, so the window is bounded and cannot be extended.
+The consequence, stated plainly: **removing someone from an organization does not take effect until their current access token expires — up to 15 minutes.** Refresh *does* re-validate membership, so the window is bounded and cannot be extended. *(Phase 38c: no longer true for organization routes. `requirePermission` re-reads membership on every request, so removal and role changes apply at once. The window still applies to the `/auth` identity routes, which act on the caller's own account.)*
 
 The alternative — checking membership on every request — puts a query in front of every route and gives up the reason for using stateless tokens at all. If a module ever needs immediate revocation (a compliance requirement, say), the answer is a short-lived denylist in Redis from Phase 5, not a per-request join.
 
@@ -83,11 +83,30 @@ Token-bearing links (reset, invitation, verification, change of email) are the o
 Transports are plain `fetch`: Brevo (`POST /v3/smtp/email`), Mailpit (local inbox, `POST /api/v1/send`), or `log`. An organization sets its sender **display name** and **reply-to**. The From address is always the platform's verified sender, because a free Brevo account only sends from verified senders.
 
 Notification preferences are per user, stored as opt-outs. "Bill awaiting approval" goes to every member who can approve, except the submitter; "invitation accepted" goes to the inviter.
-### Roles
+### Roles and permissions
 
-Start with a small fixed set and expand only when a module needs it: `OWNER`, `ADMIN`, `ACCOUNTANT`, `VIEWER`. Stored as a TEXT column with a CHECK constraint (Phase 1).
+Phase 1 started with four fixed roles, `OWNER`, `ADMIN`, `ACCOUNTANT` and `VIEWER`, with the rule "move to roles/permissions tables only when granular per-module permissions genuinely require it". **Phase 38c is that point.** The trigger was a direct request: a member who may only see and issue invoices.
 
-Move to `roles`/`permissions` tables only when granular per-module permissions genuinely require it — do not build a permission engine before there are permissions to manage.
+**The catalogue (`server/src/config/permissions.ts`)** is about 60 keys of the form `area.action` (`invoices.issue`, `bills.approve`, `inventory.configure`…). Each key has a **tier**:
+- `V`: every member.
+- `A`: OWNER, ADMIN, ACCOUNTANT.
+- `M`: OWNER, ADMIN.
+- `O`: OWNER only.
+
+The four built-in roles are *derived* from the tiers in code, never stored. When the routes were converted, a script asserted for every one of the 225 authenticated routes that the new key's tier admits exactly the roles the old `requireRole(...)` list did. The pre-existing role tests pass unchanged. A key may `require` others (issuing invoices requires seeing them). Saving a role stores the closed set, so a role is never half-usable.
+
+**Custom roles** (`org_roles`, `org_role_permissions`) are any set of non-owner keys. A member holds a built-in role or `CUSTOM` plus `custom_role_id`, and a composite FK `(org_id, custom_role_id) → org_roles(org_id, id)` makes another organization's role unassignable at the database level.
+
+**Enforcement.** Every authenticated route carries `requirePermission(key)` or the explicit `allowAnyMember` (for app-shell reads: the current organization, ledger settings, onboarding state, payment terms, the latest FX rate). A meta-test walks the router and fails if a route has neither. `requirePermission` resolves the caller's **current** membership and permissions from the database: one indexed query per request, memoised on `req`. This deliberately reverses the "no database read in auth" trade-off below for permissions. With editable roles, a 15-minute stale role is a correctness bug: an owner who removes "void invoices" from a role expects it to stop working now. It also means **a removed member loses access on their next request**. The token still carries the role name, for display only.
+
+**No privilege escalation.** Only an OWNER grants, changes or removes OWNER. Owner-tier keys cannot be put in a custom role. A non-owner may only:
+- create or edit a role whose keys they hold themselves;
+- assign or invite into a role whose permissions are a subset of their own;
+- change the access of a member whose permissions are a subset of their own.
+
+All of this is checked under the organization lock (`FOR NO KEY UPDATE`).
+
+The client receives `permissions` in the session body. `useCan()` (on `AuthContext`) hides navigation, "New" menu entries and actions the server would refuse. That is display only: every route re-checks.
 
 ---
 

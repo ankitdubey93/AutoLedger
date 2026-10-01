@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../../context/AuthContext';
+import { useCan } from '../../context/AuthContext';
 import {
   createStockCodeScheme,
   fetchStockCategories,
@@ -31,9 +31,9 @@ interface PreviewResult {
  * list of saved schemes with a default-swap action per row.
  */
 export default function ItemCodesSettingsPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.configure');
 
   const [schemes, setSchemes] = useState<StockCodeScheme[]>([]);
   const [categories, setCategories] = useState<StockCategory[]>([]);

@@ -47,6 +47,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **37 ✅ done** | Platform — several organizations per user: add an organization (its own setup wizard), switch from a top-bar menu, login opens the last-used one, leave; invitations by email + role through a copyable link (accepting needs the link and the matching signed-in email), registering from an invite, member role changes and removal with an "at least one OWNER" invariant; migration `079` — see [Phase 37, as delivered](#phase-37-as-delivered) below | Needs 1, 3.5, 33 |
 | **38a ✅ done** | Platform — user settings vs organization settings: `/account` becomes user-only (profile, change password, sessions with sign-out-others, your organizations), organization profile and members move under `/settings`; session id across rotation and revocation tombstones; migrations `080`, `081` — see [Phase 38a, as delivered](#phase-38a-as-delivered) below. 38b (email via Brevo) and 38c (custom roles and permissions) follow | Needs 37 |
 | **38b ✅ done** | Platform — real email through Brevo (free, `fetch`, no SDK) via a transactional outbox drained by the worker: invitations, password reset, email verification, change of sign-in email, organization sender name and reply-to, and per-user notification preferences (bill awaiting approval, invitation accepted); Mailpit for local inboxes; migration `082` — see [Phase 38b, as delivered](#phase-38b-as-delivered) below | Needs 7, 37, 38a |
+| **38c ✅ done** | Platform, all modules — custom roles: a ~60-key `area.action` permission catalogue with tiers from which the four built-in roles are derived; every authenticated route gated by `requirePermission`/`allowAnyMember` (proven route-for-route equivalent for built-ins), resolved from the database per request; org-defined roles with a checkbox editor; no-escalation rules; permission-aware navigation; migration `083` — see [Phase 38c, as delivered](#phase-38c-as-delivered) below | Needs 37, 38a |
 
 **Phase 18 is numbered after 17 but applied before it** — 17 stays deferred; migration numbers and phase numbers both simply follow build order from here, not a fixed sequence decided in advance. This is the first phase of the suite's second stage — showcase, integrate, guide, automate — laid out in full in the strategic plan that opened it. Phase 19 delivered the AP-Flow slice of that plan's "multi-provider AI layer" theme; Phase 19.1 (AI usage metering), 19.2 (Google Drive intake), 19.3 (that intake promoted to the platform) and 19.4 (duplicate-content capture, a bug found through 19.3's own real-world use) delivered the rest of the "automations" theme's AP-Flow slice, as half-steps rather than a renumbering. Phases 20–23 (a verification sweep, app enablement and cross-app connections, an in-app help center, and the remainder of the automations theme beyond AP-Flow) **keep their reserved names and stay unstarted** — Phase 24 is a direct feature request (payment terms, an item catalogue, a party importer, UI corrections), outside that strategic sequence, and takes the next free number rather than colliding with 20–23, the same reasoning that let Phase 18 jump ahead of 17.
 
@@ -1359,6 +1360,55 @@ Step two of Phase 38 (2026-10-01). The user chose **Brevo** (free, 300 emails/da
 - Encrypting links when no key is configured outside production (development keeps them in plaintext until sent).
 
 **Study notes:** extended [transactional-outbox.md](../study/architecture/transactional-outbox.md) (an existing note on the same pattern, so not a new one): claim-then-send outside a transaction, retries on the row, permanent vs retryable errors, and a bearer link encrypted at rest and cleared by a CHECK.
+
+## Phase 38c, as delivered
+
+Step three of Phase 38 (2026-10-01): "a user with customizable access — e.g. someone who can only issue and see invoices". The user chose per-area + action permissions, not record-level rules.
+
+**Server.**
+- `config/permissions.ts`:
+  - About 60 keys across nine areas. Each has a tier (V/A/M/O) and optional `requires`.
+  - `BUILTIN_ROLE_PERMISSIONS` derived from the tiers.
+  - `withRequiredPermissions` (transitive closure).
+- Migration `083` (`org_roles`, `org_role_permissions`, `custom_role_id` on members and invitations with composite FKs, `'CUSTOM'` admitted by re-stated CHECKs); see [schema.md](schema.md#phase-38c--custom-roles-platform--applied).
+- `permissionService.resolveMemberAccess` reads the caller's **current** role and permissions (one indexed query, memoised on `req`). `requirePermission(key)` and `allowAnyMember` are in `middleware/rbac.ts`.
+- **All 225 authenticated routes converted by script.** It mapped each route by (file, method, path) and asserted that the new key's tier admits exactly the old `requireRole` list (or all four roles for an un-gated read) before writing anything.
+  - Most of the 94 previously un-gated reads got a `.view` key, so a narrow role really is narrow.
+  - The app-shell reads (current organization, ledger and invoice settings, onboarding state, payment terms, the latest FX rate) are explicit `allowAnyMember`.
+- `roleService`: list, create, edit, delete. A role in use returns 409 on delete.
+- Members and invitations accept `{ role }` or `{ customRoleId }`.
+- **No privilege escalation**, checked under `FOR NO KEY UPDATE` on the organization:
+  - Owner-only keys never go in a custom role, and only an OWNER touches OWNER.
+  - A non-owner can only create, edit or assign roles within their own permissions, and only manage members whose permissions are within theirs.
+- The session gains `roleName` and `permissions`.
+- **Behaviour changes worth knowing:**
+  - A 403 now names the missing permission.
+  - A removed member, or one whose role was edited, is affected on the **next request**, not after the 15-minute access token; this applies to organization routes.
+
+**Client.**
+- `useCan()` on `AuthContext`; the role-name comparisons in inventory pages, `BillDetailPage` and `OrganizationProfilePanel` became permission checks.
+- `visibleNavGroups` filters the sidebar and command palette, and the "New" menu offers only what you can create.
+- A role-aware home page for members without `reports.view`.
+- `/settings/roles`: a checkbox matrix by area with start-from-preset. Ticking adds what a permission needs and unticking removes dependants; owner-only keys and keys you lack are disabled.
+- Custom roles are offered in the member and invite pickers, and role names are displayed everywhere.
+- Test fixtures build `permissions` from the **server's** catalogue (`__tests__/helpers/permissions.ts`), so they cannot drift.
+
+**Tests.**
+- Server, 19 new:
+  - `platform/routePermissions.test.ts`: walks the Express router and fails on any authenticated route without an access decision (mutation-checked), plus catalogue invariants (nested presets, presets closed under `requires`, no dead keys).
+  - `platform/customRoles.test.ts`: the invoice clerk end to end, an edit applying with no new token, immediate removal, escalation cases, delete-in-use, invitation into a custom role, a cross-tenant role refused by the composite FK (23503), and cross-tenant isolation of roles.
+  - **Every pre-existing role test passed unchanged**, which is the proof built-in roles behave as before.
+- Client: 6 new (`customRoles.test.tsx`); 21 fixture files gained `permissions`/`roleName`.
+- **1951 server tests passing (2 skipped) + 553 client tests passing**; typecheck and lint clean in both packages.
+
+**Deliberately not built:**
+- Record-level permissions ("only invoices they created").
+- Per-module permission inheritance beyond `requires`.
+- A permission cache (the per-request query is a primary-key lookup).
+- Showing a member's effective permissions on the Members page.
+- Audit-trail display of role edits (they are recorded by the CDC triggers on `org_roles`/`org_role_permissions`).
+
+**Study notes:** new [rbac-to-permission-based-access.md](../study/security-auth/rbac-to-permission-based-access.md).
 
 ## Cross-cutting infrastructure
 

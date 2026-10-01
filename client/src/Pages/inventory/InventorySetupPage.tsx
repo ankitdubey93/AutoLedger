@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuth } from '../../context/AuthContext';
 import {
   applyStockProfile,
   fetchStockProfiles,
@@ -11,6 +10,7 @@ import {
 } from '../../services/fetchServices';
 import { humanizeEnum } from '../../utils/enumLabel';
 import LoadingState from '../../components/ui/LoadingState';
+import { useCan } from '../../context/AuthContext';
 
 /**
  * Inventory setup: choose an industry, preview what it seeds, apply it.
@@ -23,9 +23,9 @@ import LoadingState from '../../components/ui/LoadingState';
  * it records nothing.
  */
 export default function InventorySetupPage() {
-  const auth = useAuth();
-  const role = auth.status === 'authenticated' ? auth.role : null;
-  const canWrite = role === 'OWNER' || role === 'ADMIN';
+  const can = useCan();
+  // Phase 38c — the permission the server checks on these routes.
+  const canWrite = can('inventory.configure');
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const welcome = searchParams.get('welcome') === '1';

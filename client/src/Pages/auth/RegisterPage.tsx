@@ -72,7 +72,7 @@ export default function RegisterPage() {
       subtitle={
         inviteToken === null
           ? 'You will be its owner. Setup takes about two minutes.'
-          : `Create your account to join as ${invite?.role ?? 'a member'}.`
+          : `Create your account to join as ${invite?.roleName ?? 'a member'}.`
       }
     >
 

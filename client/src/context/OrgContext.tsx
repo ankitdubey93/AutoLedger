@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { switchOrg as switchOrgRequest } from '../services/fetchServices';
 import { useAuth, useAuthActions } from './AuthContext';
@@ -17,6 +17,15 @@ import type { Membership, OrganizationSummary, Role, SessionResponse } from '../
 interface OrgContextValue {
   organization: OrganizationSummary | null;
   role: Role | null;
+  /** Phase 38c — the active role's display name. */
+  roleName: string | null;
+  /** Phase 38c — permission keys in the active organization. */
+  permissions: ReadonlySet<string>;
+  /**
+   * Phase 38c — "would the server allow this?" Used to hide controls a
+   * member cannot use. Display only: every route re-checks on the server.
+   */
+  can: (permission: string) => boolean;
   memberships: Membership[];
   switching: boolean;
   error: string | null;
@@ -78,10 +87,15 @@ export function OrgProvider({ children }: { children: ReactNode }) {
   );
 
   const authenticated = auth.status === 'authenticated' ? auth : null;
+  const permissions = useMemo(() => new Set(authenticated?.permissions ?? []), [authenticated?.permissions]);
+  const can = useCallback((permission: string) => permissions.has(permission), [permissions]);
 
   const value: OrgContextValue = {
     organization: authenticated?.organization ?? null,
     role: authenticated?.role ?? null,
+    roleName: authenticated?.roleName ?? null,
+    permissions,
+    can,
     memberships: authenticated?.memberships ?? [],
     switching,
     error,

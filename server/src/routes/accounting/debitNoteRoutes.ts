@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import * as debitNoteController from '../../controllers/accounting/debitNoteController.js';
 import { authenticate } from '../../middleware/auth.js';
-import { requireRole } from '../../middleware/rbac.js';
+import { requirePermission } from '../../middleware/rbac.js';
 
 /**
  * /api/v1/debit-notes — see docs/api.md (Phase 26).
@@ -13,28 +13,28 @@ import { requireRole } from '../../middleware/rbac.js';
  */
 const router = Router();
 
-router.get('/', authenticate, debitNoteController.list);
-router.get('/:id', authenticate, debitNoteController.getOne);
+router.get('/', authenticate, requirePermission('debit_notes.view'), debitNoteController.list);
+router.get('/:id', authenticate, requirePermission('debit_notes.view'), debitNoteController.getOne);
 
-router.post('/', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), debitNoteController.create);
-router.patch('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), debitNoteController.update);
-router.delete('/:id', authenticate, requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'), debitNoteController.remove);
+router.post('/', authenticate, requirePermission('debit_notes.edit'), debitNoteController.create);
+router.patch('/:id', authenticate, requirePermission('debit_notes.edit'), debitNoteController.update);
+router.delete('/:id', authenticate, requirePermission('debit_notes.edit'), debitNoteController.remove);
 router.post(
   '/:id/issue',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('debit_notes.issue'),
   debitNoteController.issue,
 );
 router.post(
   '/:id/void',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('debit_notes.void'),
   debitNoteController.void_,
 );
 router.post(
   '/:id/allocations',
   authenticate,
-  requireRole('OWNER', 'ADMIN', 'ACCOUNTANT'),
+  requirePermission('debit_notes.issue'),
   debitNoteController.apply,
 );
 
