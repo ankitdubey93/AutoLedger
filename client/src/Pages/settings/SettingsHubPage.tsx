@@ -47,11 +47,14 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   },
   {
     title: 'Sales',
-    description: 'Invoice numbering, the invoice template and payment terms.',
+    description: 'Invoice numbering, the invoice and statement templates, and payment terms.',
     icon: Receipt,
     links: [
       { to: '/settings/invoicing', label: 'Invoicing' },
       { to: '/settings/invoice-template', label: 'Invoice template' },
+      { to: '/settings/statement-template', label: 'Statement template' },
+      { to: '/settings/email-templates', label: 'Statement emails' },
+      { to: '/settings/online-payments', label: 'Online payments' },
       { to: '/settings/payment-terms', label: 'Payment terms' },
     ],
   },

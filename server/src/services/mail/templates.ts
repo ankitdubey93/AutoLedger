@@ -102,6 +102,24 @@ export function renderEmail(template: EmailTemplate, data: Record<string, unknow
       ];
       return { subject: `Bill awaiting approval — ${vendor}`, html: layout('A bill needs your approval', lines.map(esc), action), text: textBody(lines, action) };
     }
+    case 'party_statement': {
+      // Phase 39b. `subject` and `body` were filled from the organization's
+      // own template at send time (utils/placeholders.ts) and are plain
+      // text; every paragraph is escaped here like any other value, so
+      // neither a template author nor a customer name can inject markup.
+      const org = str(data, 'organizationName');
+      const subject = str(data, 'subject', `Statement from ${org}`);
+      const paragraphs = str(data, 'body')
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter((p) => p !== '');
+      const action = { label: data.actionLabel === 'view' ? 'View statement' : 'Review and pay', url };
+      return {
+        subject,
+        html: layout(`Statement from ${org}`, paragraphs.map((p) => esc(p).replace(/\n/g, '<br>')), action),
+        text: textBody(paragraphs, action),
+      };
+    }
     case 'invitation_accepted': {
       const org = str(data, 'organizationName');
       const who = str(data, 'memberName');

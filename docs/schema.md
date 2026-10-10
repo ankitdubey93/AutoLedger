@@ -799,6 +799,46 @@ No new `*_id` column, so no new FK. See [accounting.md § Phase 36](accounting.m
 
 The built-in roles' permissions are **not** in the database. They live in `config/permissions.ts`, derived from each key's tier.
 
+## Phase 39 — customer & vendor statements, statement emails, online payment (accounting) — applied
+
+Three migrations, all additive and idempotent.
+
+**`084_ledger-core_statement_settings.sql` (39a)**
+
+- **`ledger_statement_settings`** — one row per org; no row means the defaults in `statementSettingsService`.
+  - Columns: `org_id` PK FK CASCADE · `template_id` (`classic`/`modern`/`compact`; must match `INVOICE_TEMPLATE_IDS`) · `document_title` (1–24, default `STATEMENT`) · `default_type` (`OUTSTANDING`/`ACTIVITY`; matches `STATEMENT_TYPES`) · `show_logo` · `show_org_address` · `show_aging_summary` · `show_remittance` · `footer_notes` (≤ 500) · `accent_color` (hex) · timestamps.
+  - Each CHECK is named and sits in a `pg_constraint`-guarded block.
+  - Has an `updated_at` trigger and is audited.
+
+**`085_ledger-core_statement_email.sql` (39b)**
+
+- **`statement_email_templates`**
+  - Columns: `id` · `org_id` FK CASCADE · `party_kind` (`CUSTOMER`/`VENDOR`) · `name` (1–100) · `subject` (1–200) · `body` (1–5000, plain text with `{{placeholders}}` validated in code) · `is_default` · `created_by` FK users SET NULL · timestamps.
+  - `UNIQUE (org_id, id)` is the composite-FK target. **`ux_statement_email_templates_default`** is a partial unique index on `(org_id, party_kind) WHERE is_default`: at most one default per kind.
+  - Has an `updated_at` trigger and is audited.
+- **`statement_sends`** — one row per statement emailed.
+  - Columns: `id` · `org_id` · `party_kind` · `customer_id` / `vendor_id` · `statement_type` · `as_of` / `period_from` / `period_to` · `template_id` · `to_email` (lowercased) · `sent_by` FK users RESTRICT · **`token_hash`** (`UNIQUE`; SHA-256 of the link token; the token itself is never stored) · `expires_at` · `revoked_at` · `last_viewed_at` · `created_at`.
+  - Composite FKs to `customers`/`vendors` (RESTRICT) and `statement_email_templates` (`ON DELETE SET NULL (template_id)`).
+  - CHECKs:
+    - exactly one party column, matching `party_kind`;
+    - dates match the type (OUTSTANDING ⇒ `as_of` only; ACTIVITY ⇒ `period_from ≤ period_to`);
+    - `expires_at > created_at`.
+  - Partial indexes per party for the "last sent" and history reads.
+  - **Not audited**: it carries the token hash.
+- **`email_outbox.template`** — the inline CHECK from 082 (Postgres-named `email_outbox_template_check`) is dropped and replaced by a named **`ck_email_outbox_template`** admitting `party_statement`. It must match `EMAIL_TEMPLATES` in `types/email.ts`.
+
+**`086_ledger-core_online_payments.sql` (39c)**
+
+- **`ledger_online_payment_settings`** — `org_id` PK · `enabled` · `deposit_account_id` (composite FK → `accounts`, RESTRICT) · timestamps.
+  - CHECK: enabled ⇒ an account is set. The service also requires a postable, active `Asset`.
+  - Audited.
+- **`online_payments`** — one row per Stripe PaymentIntent created from a statement link. **No card data anywhere.**
+  - Columns: `id` · `org_id` · `statement_send_id` (composite FK RESTRICT) · `customer_id` (composite FK) · `provider` (`stripe`) · `provider_intent_id` · `currency_code` · `amount_cents` BIGINT > 0 · `status` (`PENDING`/`RECORDED`/`NEEDS_REVIEW`/`FAILED`/`CANCELED`, FSM `ONLINE_PAYMENT_TRANSITIONS`) · `payment_id` (composite FK → `payments`) · `failure_reason` (≤ 500) · timestamps.
+  - **`UNIQUE (provider, provider_intent_id)`** is what makes settlement idempotent.
+  - `ck_online_payments_recorded`: `(status = 'RECORDED') = (payment_id IS NOT NULL)`.
+  - Audited. This table posts nothing to the GL; the receipt is an ordinary `payments` row.
+- **`online_payment_invoices`** — `(online_payment_id, invoice_id)` unique · `amount_cents` > 0 (the outstanding amount the server computed at pricing time) · composite FKs (CASCADE from the online payment, RESTRICT to the invoice).
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

@@ -56,7 +56,7 @@ function localityLine(profile: OrganizationProfile): string | null {
 }
 
 /** The organization's address lines, in the documented order, nulls skipped. */
-function addressLines(profile: OrganizationProfile): string[] {
+export function addressLines(profile: OrganizationProfile): string[] {
   const candidates: (string | null)[] = [
     profile.streetAddress1,
     profile.streetAddress2,

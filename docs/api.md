@@ -910,6 +910,70 @@ Failure paths: `400` from the schema (`POST` body and `GET /`'s `?kind=`/`?statu
 
 **Not built:** recurring credit/debit notes, editing a schedule in place, emailing a generated invoice, catch-up beyond 12 occurrences in one `run` call.
 
+#### Statements — `/api/v1/statements`, `/api/v1/statement-sends`, `/api/v1/online-payments`, public `/api/v1/public/*` — Phase 39
+
+Customer and vendor statements are a **read** over the Phase 25 subledger, with nothing stored to produce one. Every amount is in base currency.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/statements/customers` · `/statements/vendors` | `customers.view` · `vendors.view` | Every party's `outstandingCents` and `overdueCents` **as at** `?asOf=` (default today), with `lastSentAt`. `?q=` filters names; `?includeZero=true` adds active parties with nothing open. Parties in net credit are kept (aging drops them) |
+| GET | `/statements/customers/:id` · `/statements/vendors/:id` | `customers.view` · `vendors.view` | One statement. `?type=OUTSTANDING&asOf=` (default) or `?type=ACTIVITY&from=&to=` (from required; at most 3660 days). Returns `{ statement: PartyStatement }` |
+| POST | `/statements/customers/send` · `/statements/vendors/send` | `statements.send` | Body `{ partyIds[1..200], type?, asOf?, from?, to?, templateId?, toEmail? }`. Each party gets a `statement_sends` row and one `party_statement` outbox email in **one transaction**. `toEmail` only with one party. 201 `{ sent: [{partyId, sendId, toEmail}], skipped: [{partyId, name, reason: 'NO_EMAIL'}] }` |
+| POST | `/statements/customers/preview-email` · `/statements/vendors/preview-email` | `statements.send` | Body `{ partyId, type?, …, templateId? }` → `{ preview: { toEmail, subject, body } }`: exactly what that party would receive |
+| GET | `/statements/customers/:id/sends` · `/statements/vendors/:id/sends` | `customers.view` · `vendors.view` | The last 50 sends, newest first. Never includes a token |
+| POST | `/statement-sends/:id/revoke` | `statements.send` | The link stops working. Idempotent |
+| GET | `/settings/statements` | any member | Statement template settings (defaults until saved, `configured: false`) |
+| PATCH | `/settings/statements` | `settings.manage` | `templateId`, `documentTitle`, `defaultType`, `showLogo`, `showOrgAddress`, `showAgingSummary`, `showRemittance`, `footerNotes`, `accentColor` |
+| GET | `/settings/statement-email-templates?kind=` | `statements.send` | The org's templates, plus a `builtIn: true` default for any kind with none |
+| POST · PATCH /:id · DELETE /:id | `/settings/statement-email-templates` | `settings.manage` | `{ partyKind, name, subject, body, isDefault }`. The first of a kind becomes the default; making one default clears the other; deleting the default promotes the most recent; `isDefault: false` returns 422 |
+| GET · PATCH | `/settings/online-payments` | any member · `settings.manage` | `{ enabled, depositAccountId, providerConfigured }`. Enabling needs a postable, active Asset account |
+| GET | `/online-payments?status=` | `payments.view` | Card payments from statement links (at most 200), with their invoices. `NEEDS_REVIEW` rows are the ones to apply by hand |
+
+**OUTSTANDING is true as-at.**
+- A document counts if its journal entry is dated on or before the date and it had not been voided by then.
+- Payment allocations count by their payment's entry date and void date; note allocations by `allocation_date`.
+- The total equals `/customers/:id/ledger?to=<date>`'s `closingBalanceCents`.
+- **`/customers/:id/open-items` and `/reports/ar-aging` are unchanged**: they still use current settlement.
+
+**Placeholders** in `subject`/`body`:
+- The whole list: `{{contact_name}}`, `{{organization_name}}`, `{{balance_due}}`, `{{overdue_amount}}`, `{{statement_date}}`, `{{period_from}}`, `{{period_to}}`, `{{open_invoice_count}}`.
+- Anything else returns `422 Unknown placeholder: {{x}}` on save.
+- Substitution is a single pass, so a value containing `{{…}}` is inserted literally. The HTML part escapes everything.
+
+**The emailed link** is `FRONTEND_URL/statement/<token>`. The token is 32 random bytes; only its SHA-256 is stored. It expires after 60 days and can be revoked.
+
+**Public routes** have no `authenticate`. Each is rate-limited by `publicLinkLimiter`, which counts successes too:
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/public/statements/:token` | `{ merchant: {name, addressLines, hasLogo, baseCurrency}, partyKind, partyName, statement (as sent, recomputed), current (open items today), settings, bankDetails, payment: {enabled, publishableKey}, expiresAt }`. Stamps `last_viewed_at`. `Cache-Control: no-store` |
+| GET | `/public/statements/:token/logo` | The org logo bytes (PNG/JPEG/GIF/WebP only), or 404 |
+| POST | `/public/statements/:token/payments` | Body `{ invoiceIds[1..100] }`. The **server** computes each invoice's outstanding amount under `FOR UPDATE`, commits a PENDING `online_payments` row, then creates a Stripe PaymentIntent (`Idempotency-Key`). 201 `{ payment: { onlinePaymentId, clientSecret, publishableKey, amountCents, currencyCode } }` |
+| POST | `/public/statements/:token/payments/:intentId/confirm` | The browser reports success. The server re-reads the intent from Stripe and settles idempotently. `{ status, paymentId }` |
+| POST | `/public/stripe/webhook` | Raw body (`express.raw`, mounted before `express.json`). Verified by `Stripe-Signature` (HMAC-SHA256, 300 s tolerance). Handles `payment_intent.succeeded`/`.canceled`/`.payment_failed` through the same settlement; unknown intents are ignored. Not rate-limited |
+
+**Settlement.** A succeeded intent becomes one ordinary `payments` row (`method: 'CARD'`, `reference: <intent id>`) into the configured deposit account. It is attributed to the user who sent the statement and dated today. If it can't be applied (an invoice paid or voided meanwhile, a closed period, a missing FX rate, an amount mismatch), the row goes to `NEEDS_REVIEW` with the reason.
+
+**Failure paths:**
+- `400` — schema; `from` after `to`; ACTIVITY without `from`; unknown `type`; a bad, stale or missing `Stripe-Signature`.
+- `403` — missing permission.
+- `404`:
+  - another org's party, template, send, invoice or intent;
+  - `This statement link is not valid or has expired` (unknown, expired or revoked, all the same).
+- `409`:
+  - `Online payment is not available for this statement` (vendor link, disabled, or Stripe not configured);
+  - a racing default-template change.
+- `422`:
+  - unknown placeholder;
+  - a template for the other kind;
+  - `toEmail` with several parties;
+  - a paid or non-issued invoice;
+  - mixed currencies;
+  - a non-2-decimal currency (JPY, KRW, BHD…);
+  - an invalid deposit account.
+- `502` — Stripe refused or was unreachable; the online payment goes to `FAILED`.
+- `503` — Stripe is not configured (webhook).
+
 ### Documents — `/api/v1/documents` — Phase 9.5
 
 Platform-level (rule 16): accounting attaching a PDF to an invoice and capture attaching a source image (Phase 10) are both modules talking to the platform, never to each other. Full spec: [accounting.md](accounting.md) is silent on this — see [roadmap.md](roadmap.md#phase-95-as-delivered) instead.

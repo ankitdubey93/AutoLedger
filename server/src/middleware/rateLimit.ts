@@ -1,7 +1,12 @@
 import rateLimit from 'express-rate-limit';
 import type { RequestHandler } from 'express';
 import { ApiError } from '../utils/apiError.js';
-import { AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS } from '../config/constants.js';
+import {
+  AUTH_RATE_LIMIT_MAX,
+  AUTH_RATE_LIMIT_WINDOW_MS,
+  PUBLIC_LINK_RATE_LIMIT_MAX,
+  PUBLIC_LINK_RATE_LIMIT_WINDOW_MS,
+} from '../config/constants.js';
 
 /**
  * Throttles credential endpoints — carried debt from Phase 1, scheduled for
@@ -19,7 +24,7 @@ import { AUTH_RATE_LIMIT_MAX, AUTH_RATE_LIMIT_WINDOW_MS } from '../config/consta
  * small limit without lowering it for every other test in the suite.
  */
 export function createAuthLimiter(
-  options: { windowMs?: number; max?: number } = {},
+  options: { windowMs?: number; max?: number; skipSuccessfulRequests?: boolean } = {},
 ): RequestHandler {
   return rateLimit({
     windowMs: options.windowMs ?? AUTH_RATE_LIMIT_WINDOW_MS,
@@ -31,7 +36,7 @@ export function createAuthLimiter(
 
     // Count only failures. A successful login should not consume a user's
     // budget, or a shared office NAT would lock out colleagues in turn.
-    skipSuccessfulRequests: true,
+    skipSuccessfulRequests: options.skipSuccessfulRequests ?? true,
 
     /**
      * Route the rejection through `errorHandler` rather than letting the
@@ -47,3 +52,16 @@ export function createAuthLimiter(
 }
 
 export const authLimiter: RequestHandler = createAuthLimiter();
+
+/**
+ * Phase 39b — the public statement-link routes (`/public/statements/*`).
+ * Unlike the credential limiter it counts successful requests too: a valid
+ * link is a bearer token, and a page that answers 200 for every guess of a
+ * live token is exactly what must stay throttled. The budget is generous
+ * enough for a customer to view, select invoices and pay several times over.
+ */
+export const publicLinkLimiter: RequestHandler = createAuthLimiter({
+  windowMs: PUBLIC_LINK_RATE_LIMIT_WINDOW_MS,
+  max: PUBLIC_LINK_RATE_LIMIT_MAX,
+  skipSuccessfulRequests: false,
+});

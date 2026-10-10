@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { listPayments, voidPayment, type Payment, type PaymentDirection } from '../../services/fetchServices';
+import OnlinePaymentsReview from '../../components/statements/OnlinePaymentsReview';
 import { formatCents } from '../../utils/money';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { formatDate } from '../../utils/date';
@@ -99,6 +100,8 @@ export default function PaymentsPage() {
         </p>
       </header>
 
+      <OnlinePaymentsReview />
+
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Direction</span>
@@ -147,7 +150,14 @@ export default function PaymentsPage() {
                     <tr key={payment.id} className="border-t border-[var(--border)]">
                       <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(payment.paymentDate)}</td>
                       <td className="p-3">{directionLabel(payment.direction)}</td>
-                      <td className="p-3">{payment.counterpartyName}</td>
+                      <td className="p-3">
+                        {payment.counterpartyName}
+                        {payment.method === 'CARD' && payment.reference?.startsWith('pi_') === true && (
+                          <span className="ml-2 text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-[var(--accent-soft)] text-[var(--accent)]">
+                            Paid online
+                          </span>
+                        )}
+                      </td>
                       <td className="p-3">
                         {payment.status === 'VOID' ? (
                           <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">

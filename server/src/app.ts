@@ -46,6 +46,11 @@ export function createApp(): Express {
   // second secret to manage.
   app.use(cookieParser());
 
+  // Phase 39c — Stripe signs the exact bytes it sends, so its webhook gets
+  // the raw body. Mounted first: express.json then sees an already-read body
+  // and leaves it alone.
+  app.use(`${API_BASE_PATH}/public/stripe/webhook`, express.raw({ type: 'application/json', limit: JSON_BODY_LIMIT }));
+
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
 
   app.use(API_BASE_PATH, apiRouter);

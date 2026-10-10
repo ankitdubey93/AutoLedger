@@ -145,6 +145,8 @@ No application secrets live here.
 | `MAIL_FROM_EMAIL` | only when `MAIL_TRANSPORT=brevo` — defaults `no-reply@autoledger.local` | The From address of every email. With Brevo it must be a **verified sender** in your Brevo account (Senders, Domains & Dedicated IPs → Senders); a free account can verify a single address without owning a domain. Organizations choose only the display name and reply-to |
 | `MAIL_FROM_NAME` | no — defaults `AutoLedger` | The From display name when an organization has not set its own |
 | `MAILPIT_URL` | no — defaults `http://localhost:8025` | Where the `mailpit` transport posts (`/api/v1/send`) |
+| `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` | no — both default `''`; set together | Phase 39c — card payment on emailed statement links. Outside production both must be **test** keys (`sk_test_`/`rk_test_`, `pk_test_`) or the server refuses to boot. Unset, the public statement page shows remittance details instead of a card form. The secret key is sent only as `Authorization: Bearer` to `api.stripe.com` and never logged; the publishable key is sent to the public page |
+| `STRIPE_WEBHOOK_SECRET` | no — defaults `''` | Phase 39c — verifies `Stripe-Signature` on `POST /api/v1/public/stripe/webhook`; must start `whsec_`. Locally, `stripe listen --forward-to localhost:5000/api/v1/public/stripe/webhook` prints one. Without it, settlement still happens when the customer's browser confirms; the webhook covers a closed tab |
 
 Parsing lives in `server/src/config/env.ts`. It collects **every** problem and throws once, so a fresh checkout gets the full list rather than one variable per restart.
 

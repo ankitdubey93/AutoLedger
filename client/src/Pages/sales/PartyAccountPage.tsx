@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { AlarmClock, FileText, Scale } from 'lucide-react';
+import { AlarmClock, FileText, Scale, ScrollText } from 'lucide-react';
 import {
   ApiRequestError,
   getCustomerLedger,
@@ -211,13 +211,18 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
     <section className="flex flex-col gap-4">
       {backLink}
 
-      <header className="flex flex-col gap-1">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
         <h2 className="text-lg font-semibold m-0 mt-1">{ledger.party.name}</h2>
         <p className="text-sm text-[var(--muted)] m-0">
           {kind === 'CUSTOMER' ? 'Customer account' : 'Vendor account'}
           {ledger.controlAccount !== null &&
             ` · under ${ledger.controlAccount.code} ${ledger.controlAccount.name}`}
         </p>
+        </div>
+        <Link to={`/statements/${copy.list}/${ledger.party.id}`} className="btn btn--ghost inline-flex items-center gap-1.5">
+          <ScrollText size={15} aria-hidden="true" /> Statement
+        </Link>
       </header>
 
       <div className="grid">

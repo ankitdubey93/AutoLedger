@@ -16,6 +16,7 @@ import type {
   INVOICE_TEMPLATE_IDS,
   INVOICE_FONT_FAMILIES,
   INVOICE_DENSITIES,
+  STATEMENT_TYPES,
 } from '../config/constants.js';
 
 /* ------------------------------------------- Phase 30 — invoice templates */
@@ -1597,4 +1598,155 @@ export interface RecurringRun {
 export interface RecurringScheduleDetail extends RecurringSchedule {
   /** Newest first, at most 50. */
   runs: RecurringRun[];
+}
+
+// --------------------------------- Phase 39 — customer & vendor statements
+
+export type StatementType = (typeof STATEMENT_TYPES)[number];
+
+export interface StatementSettings {
+  templateId: InvoiceTemplateId;
+  documentTitle: string;
+  defaultType: StatementType;
+  showLogo: boolean;
+  showOrgAddress: boolean;
+  showAgingSummary: boolean;
+  /** Prints the invoice settings' bank details as remittance advice. */
+  showRemittance: boolean;
+  footerNotes: string | null;
+  accentColor: string;
+  /** `false` until the organization has saved statement settings at least once. */
+  configured: boolean;
+}
+
+export interface StatementParty {
+  kind: PartyKind;
+  id: string;
+  name: string;
+  email: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+}
+
+/**
+ * One party's statement, all in base currency (as the subledger is).
+ *
+ * OUTSTANDING: `statementDate` is the as-at date; `rows` is empty and
+ * `openingBalanceCents`/`from` are null. ACTIVITY: `from`..`statementDate`
+ * is the range, `rows` every ledger row in it with a running balance, and
+ * `closingBalanceCents` the ledger's balance at `statementDate`. Both carry
+ * the as-at open items and aging on `statementDate`.
+ */
+export interface PartyStatement {
+  type: StatementType;
+  party: StatementParty;
+  statementDate: string;
+  from: string | null;
+  openingBalanceCents: number | null;
+  periodDebitCents: number;
+  periodCreditCents: number;
+  closingBalanceCents: number;
+  rows: PartyLedgerRow[];
+  openItems: PartyOpenItem[];
+  outstandingCents: number;
+  overdueCents: number;
+  aging: Record<AgingBucket, number>;
+}
+
+export interface StatementListRow {
+  partyId: string;
+  name: string;
+  email: string | null;
+  isActive: boolean;
+  outstandingCents: number;
+  overdueCents: number;
+  /** Phase 39b — when a statement was last emailed; null if never. */
+  lastSentAt: string | null;
+}
+
+/** Phase 39b — a statement email template; `builtIn` ones are code defaults, never stored. */
+export interface StatementEmailTemplate {
+  id: string | null;
+  partyKind: PartyKind;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+  builtIn: boolean;
+  updatedAt: string | null;
+}
+
+/** Phase 39b — one emailed statement (its link token is never returned). */
+export interface StatementSend {
+  id: string;
+  partyKind: PartyKind;
+  partyId: string;
+  statementType: StatementType;
+  asOf: string | null;
+  from: string | null;
+  to: string | null;
+  toEmail: string;
+  templateName: string | null;
+  sentByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+}
+
+export interface SendStatementsResult {
+  sent: { partyId: string; sendId: string; toEmail: string }[];
+  skipped: { partyId: string; name: string; reason: 'NO_EMAIL' }[];
+}
+
+// --------------------------------- Phase 39c — online payment of a statement
+
+export const ONLINE_PAYMENT_STATUSES = ['PENDING', 'RECORDED', 'NEEDS_REVIEW', 'FAILED', 'CANCELED'] as const;
+export type OnlinePaymentStatus = (typeof ONLINE_PAYMENT_STATUSES)[number];
+
+/**
+ * The one transition table for `online_payments.status` (rule 10).
+ *
+ * - PENDING: the PaymentIntent exists; the customer is (or was) entering a
+ *   card. A declined card leaves it PENDING — Stripe lets the same intent be
+ *   retried with another card.
+ * - PENDING → RECORDED: the intent succeeded and became a `payments` row.
+ * - PENDING → NEEDS_REVIEW: the intent succeeded but could not be recorded
+ *   as chosen (an invoice was paid or voided meanwhile, a closed period, an
+ *   amount mismatch) — money arrived, so a person must record it by hand.
+ * - PENDING → FAILED: the intent could not even be created at Stripe.
+ * - PENDING → CANCELED: the intent was canceled at Stripe.
+ */
+export const ONLINE_PAYMENT_TRANSITIONS: Readonly<Record<OnlinePaymentStatus, readonly OnlinePaymentStatus[]>> = {
+  PENDING: ['RECORDED', 'NEEDS_REVIEW', 'FAILED', 'CANCELED'],
+  RECORDED: [],
+  NEEDS_REVIEW: [],
+  FAILED: [],
+  CANCELED: [],
+};
+
+export function canTransitionOnlinePayment(from: OnlinePaymentStatus, to: OnlinePaymentStatus): boolean {
+  return ONLINE_PAYMENT_TRANSITIONS[from].includes(to);
+}
+
+export interface OnlinePaymentSettings {
+  enabled: boolean;
+  depositAccountId: string | null;
+  /** Whether this deployment has Stripe keys at all (server env, not per org). */
+  providerConfigured: boolean;
+}
+
+export interface OnlinePayment {
+  id: string;
+  customerId: string;
+  customerName: string;
+  providerIntentId: string | null;
+  currencyCode: string;
+  amountCents: number;
+  status: OnlinePaymentStatus;
+  paymentId: string | null;
+  failureReason: string | null;
+  invoices: { invoiceId: string; invoiceNumber: string | null; amountCents: number }[];
+  createdAt: string;
+  updatedAt: string;
 }

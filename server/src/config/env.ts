@@ -206,6 +206,16 @@ const parsed = {
   MAIL_FROM_NAME: optional('MAIL_FROM_NAME', 'AutoLedger'),
   MAILPIT_URL: optional('MAILPIT_URL', 'http://localhost:8025'),
 
+  // Phase 39c — online payment of an emailed statement, through Stripe. All
+  // optional: unset, the public statement page simply offers no card form.
+  // One platform Stripe account (no Connect): the secret key never leaves the
+  // server, the publishable key is sent to the public page, and the webhook
+  // secret verifies Stripe's signature on POST /public/stripe/webhook. No
+  // SDK — plain fetch, as Brevo, Gemini and Drive are called.
+  STRIPE_SECRET_KEY: optional('STRIPE_SECRET_KEY', ''),
+  STRIPE_PUBLISHABLE_KEY: optional('STRIPE_PUBLISHABLE_KEY', ''),
+  STRIPE_WEBHOOK_SECRET: optional('STRIPE_WEBHOOK_SECRET', ''),
+
   // Two separate keys, deliberately. See docs/guardrails.md rule 11 — there is
   // no JWT_SECRET.
   ACCESS_TOKEN_SECRET: secret('ACCESS_TOKEN_SECRET'),
@@ -239,6 +249,21 @@ if (parsed.NODE_ENV === 'production' && parsed.MAIL_TRANSPORT !== 'log' && parse
   problems.push(
     'A real MAIL_TRANSPORT in production requires INTEGRATION_ENCRYPTION_KEY, which encrypts emailed links at rest.',
   );
+}
+
+// Phase 39c — Stripe keys come as a pair, and outside production only test
+// keys are accepted: a live key on a developer machine would move real money.
+if (parsed.STRIPE_SECRET_KEY !== '' || parsed.STRIPE_PUBLISHABLE_KEY !== '') {
+  if (parsed.STRIPE_SECRET_KEY === '' || parsed.STRIPE_PUBLISHABLE_KEY === '') {
+    problems.push('STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY must be set together.');
+  } else if (parsed.NODE_ENV !== 'production') {
+    if (!/^(sk|rk)_test_/.test(parsed.STRIPE_SECRET_KEY) || !parsed.STRIPE_PUBLISHABLE_KEY.startsWith('pk_test_')) {
+      problems.push('Outside production, STRIPE_SECRET_KEY and STRIPE_PUBLISHABLE_KEY must be test keys (sk_test_…, pk_test_…).');
+    }
+  }
+}
+if (parsed.STRIPE_WEBHOOK_SECRET !== '' && !parsed.STRIPE_WEBHOOK_SECRET.startsWith('whsec_')) {
+  problems.push('STRIPE_WEBHOOK_SECRET must start with whsec_ (from `stripe listen` or the Stripe dashboard).');
 }
 
 // A service-account key that is set but malformed is a misconfiguration worth

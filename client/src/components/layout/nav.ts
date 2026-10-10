@@ -23,6 +23,7 @@ import {
   RefreshCw,
   Repeat,
   Scale,
+  ScrollText,
   Search,
   Settings as SettingsIcon,
   Tags,
@@ -55,6 +56,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
       { to: '/invoices', label: 'Invoices', icon: FileText, end: false, permission: 'invoices.view' },
       { to: '/credit-notes', label: 'Credit notes', icon: FileMinus, end: false, permission: 'credit_notes.view' },
       { to: '/customers', label: 'Customers', icon: Users, end: false, permission: 'customers.view' },
+      { to: '/statements/customers', label: 'Statements', icon: ScrollText, end: false, permission: 'customers.view' },
       { to: '/payments', label: 'Payments', icon: Banknote, end: false, permission: 'payments.view' },
     ],
   },
@@ -66,6 +68,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
       { to: '/inbox/review', label: 'Review queue', icon: ListChecks, end: false, permission: 'capture.view' },
       { to: '/debit-notes', label: 'Debit notes', icon: FileMinus, end: false, permission: 'debit_notes.view' },
       { to: '/vendors', label: 'Vendors', icon: Building2, end: false, permission: 'vendors.view' },
+      { to: '/statements/vendors', label: 'Vendor statements', icon: ScrollText, end: false, permission: 'vendors.view' },
     ],
   },
   {

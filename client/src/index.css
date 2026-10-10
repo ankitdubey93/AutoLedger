@@ -695,6 +695,17 @@ select:hover {
   }
 }
 
+/* ------------------------------------- printing a batch of statements (39a) */
+
+@media print {
+  .statement-page {
+    break-after: page;
+  }
+  .statement-page:last-child {
+    break-after: auto;
+  }
+}
+
 /* -------------------------------------------- printing a StockLedger label sheet */
 
 @page {

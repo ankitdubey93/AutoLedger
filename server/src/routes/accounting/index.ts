@@ -8,6 +8,11 @@ import journalRoutes from './journalRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
+import statementRoutes from './statementRoutes.js';
+import statementSendRoutes from './statementSendRoutes.js';
+import publicStatementRoutes from './publicStatementRoutes.js';
+import stripeWebhookRoutes from './stripeWebhookRoutes.js';
+import onlinePaymentRoutes from './onlinePaymentRoutes.js';
 import creditNoteRoutes from './creditNoteRoutes.js';
 import customerRoutes from './customerRoutes.js';
 import debitNoteRoutes from './debitNoteRoutes.js';
@@ -49,6 +54,12 @@ router.use('/payment-terms', paymentTermRoutes);
 router.use('/recurring-schedules', recurringScheduleRoutes);
 router.use('/reports', reportRoutes);
 router.use('/settings', settingsRoutes);
+router.use('/statements', statementRoutes);
+router.use('/statement-sends', statementSendRoutes);
+// Phase 39b — unauthenticated, token-scoped. See publicStatementRoutes.ts.
+router.use('/public/statements', publicStatementRoutes);
+router.use('/public/stripe', stripeWebhookRoutes);
+router.use('/online-payments', onlinePaymentRoutes);
 router.use('/vendors', vendorRoutes);
 
 export default router;

@@ -58,6 +58,7 @@ const DEFS = [
   { key: 'credit_notes.void', area: 'Sales', label: 'Void credit notes', tier: 'A', requires: ['credit_notes.view'] },
   { key: 'customers.view', area: 'Sales', label: 'View customers', tier: 'V' },
   { key: 'customers.manage', area: 'Sales', label: 'Create and edit customers', tier: 'A', requires: ['customers.view'] },
+  { key: 'statements.send', area: 'Sales', label: 'Email customer and vendor statements', tier: 'A', requires: ['customers.view', 'vendors.view'] },
 
   // Purchases
   { key: 'bills.view', area: 'Purchases', label: 'View expenses (bills)', tier: 'V', requires: ['vendors.view'] },

@@ -11,6 +11,7 @@ export const EMAIL_TEMPLATES = [
   'email_changed_notice',
   'bill_awaiting_approval',
   'invitation_accepted',
+  'party_statement',
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
 

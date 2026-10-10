@@ -143,3 +143,91 @@ export async function settledCentsOnClient(
     noteAppliedCents: parseCents(noteRows[0]?.total ?? '0'),
   };
 }
+
+// ---------------------------------------------------------------- Phase 39 — as-at settlement
+
+/**
+ * A positional SQL parameter, e.g. `'$2'`. Typed as a template literal so a
+ * caller cannot pass anything but a placeholder into the fragments below —
+ * the same rule-4 reasoning as `alias`/`column`.
+ */
+export type SqlParam = `$${number}`;
+
+/**
+ * POSTED-at-the-date payment allocations against one document (Phase 39).
+ *
+ * The "now" subqueries above read a payment's *current* status. An as-at
+ * statement must instead ask what was true on `asOf`: the payment's journal
+ * entry was dated on or before it, and it had not yet been voided — i.e. it
+ * has no void journal entry, or that entry is dated after `asOf`. Both dates
+ * are the journal entries' `entry_date`, the same date the party ledger
+ * (`partyLedgerService.ledger`) filters on, which is what keeps
+ * Σ as-at open items equal to the ledger's closing balance at `asOf`.
+ */
+export function allocatedAsOfCentsSubquery(
+  alias: string,
+  column: SettlementColumn,
+  amountColumn: SettlementAmountColumn,
+  asOf: SqlParam,
+): string {
+  return `COALESCE((SELECT SUM(pa.${amountColumn})
+                      FROM payment_allocations pa
+                      JOIN payments p         ON p.id = pa.payment_id AND p.org_id = pa.org_id
+                      JOIN journal_entries pe ON pe.id = p.journal_entry_id AND pe.org_id = p.org_id
+                 LEFT JOIN journal_entries pv ON pv.id = p.void_journal_entry_id AND pv.org_id = p.org_id
+                     WHERE pa.org_id = ${alias}.org_id
+                       AND pa.${column} = ${alias}.id
+                       AND pe.entry_date <= ${asOf}::date
+                       AND (pv.id IS NULL OR pv.entry_date > ${asOf}::date)), 0)::text`;
+}
+
+/**
+ * Note allocations applied on or before `asOf` (by their own
+ * `allocation_date` — a note allocation posts no journal entry) whose note
+ * was not yet voided at that date.
+ */
+export function noteAppliedAsOfCentsSubquery(
+  alias: string,
+  column: SettlementColumn,
+  amountColumn: SettlementAmountColumn,
+  asOf: SqlParam,
+): string {
+  const source = NOTE_SOURCES[column];
+  return `COALESCE((SELECT SUM(na.${amountColumn})
+                      FROM ${source.allocations} na
+                      JOIN ${source.notes} n       ON n.id = na.${source.noteColumn} AND n.org_id = na.org_id
+                 LEFT JOIN journal_entries nv      ON nv.id = n.void_journal_entry_id AND nv.org_id = n.org_id
+                     WHERE na.org_id = ${alias}.org_id
+                       AND na.${column} = ${alias}.id
+                       AND na.allocation_date <= ${asOf}::date
+                       AND (nv.id IS NULL OR nv.entry_date > ${asOf}::date)), 0)::text`;
+}
+
+/** Payments + applied notes, as they stood on `asOf`. */
+export function settledAsOfCentsSubquery(
+  alias: string,
+  column: SettlementColumn,
+  amountColumn: SettlementAmountColumn,
+  asOf: SqlParam,
+): string {
+  return `(${allocatedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint + ${noteAppliedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint)::text`;
+}
+
+/**
+ * How much of a note itself had been applied by `asOf`. The caller has
+ * already established the note was alive (issued, not yet voided) on that
+ * date, so only the allocation date matters.
+ */
+export function noteOwnAppliedAsOfCentsSubquery(
+  alias: string,
+  kind: 'credit' | 'debit',
+  amountColumn: SettlementAmountColumn,
+  asOf: SqlParam,
+): string {
+  const source = NOTE_OWN[kind];
+  return `COALESCE((SELECT SUM(oa.${amountColumn})
+                      FROM ${source.allocations} oa
+                     WHERE oa.org_id = ${alias}.org_id
+                       AND oa.${source.noteColumn} = ${alias}.id
+                       AND oa.allocation_date <= ${asOf}::date), 0)::text`;
+}

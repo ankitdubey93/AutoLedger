@@ -12,6 +12,8 @@ import ForgotPasswordPage from './Pages/auth/ForgotPasswordPage';
 import ResetPasswordPage from './Pages/auth/ResetPasswordPage';
 import InvitePage from './Pages/auth/InvitePage';
 import EmailLinkPage from './Pages/auth/EmailLinkPage';
+import PublicStatementPage from './Pages/public/PublicStatementPage';
+import StripePayPanel from './Pages/public/StripePayPanel';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
@@ -49,6 +51,11 @@ export default function App() {
             {/* Phase 38b — emailed links; public, the token is the proof. */}
             <Route path="/verify-email" element={<EmailLinkPage kind="verify" />} />
             <Route path="/confirm-email-change" element={<EmailLinkPage kind="change" />} />
+            {/* Phase 39 — an emailed statement; public, the token is the proof. */}
+            <Route
+              path="/statement/:token"
+              element={<PublicStatementPage renderPayPanel={(props) => <StripePayPanel {...props} />} />}
+            />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>

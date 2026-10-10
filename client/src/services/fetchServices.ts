@@ -1734,6 +1734,386 @@ export function getVendorOpenItems(
   return partyOpenItems('vendors', id, asOf, signal);
 }
 
+/* ------------------------------------------- accounting: statements (Phase 39) */
+
+export const STATEMENT_TYPES = ['OUTSTANDING', 'ACTIVITY'] as const;
+/** Mirrors server/src/types/accounting.ts's StatementType. */
+export type StatementType = (typeof STATEMENT_TYPES)[number];
+
+/** Mirrors server/src/types/accounting.ts's StatementSettings. */
+export interface StatementSettings {
+  templateId: InvoiceTemplateId;
+  documentTitle: string;
+  defaultType: StatementType;
+  showLogo: boolean;
+  showOrgAddress: boolean;
+  showAgingSummary: boolean;
+  showRemittance: boolean;
+  footerNotes: string | null;
+  accentColor: string;
+  configured: boolean;
+}
+
+/** Mirrors server/src/types/accounting.ts's StatementParty. */
+export interface StatementParty {
+  kind: PartyKind;
+  id: string;
+  name: string;
+  email: string | null;
+  billingAddress: string | null;
+  taxNumber: string | null;
+}
+
+/** Mirrors server/src/types/accounting.ts's PartyStatement. Every amount is base currency. */
+export interface PartyStatement {
+  type: StatementType;
+  party: StatementParty;
+  statementDate: string;
+  from: string | null;
+  openingBalanceCents: number | null;
+  periodDebitCents: number;
+  periodCreditCents: number;
+  closingBalanceCents: number;
+  rows: PartyLedgerRow[];
+  openItems: PartyOpenItem[];
+  outstandingCents: number;
+  overdueCents: number;
+  aging: Record<AgingBucket, number>;
+}
+
+/** Mirrors server/src/types/accounting.ts's StatementListRow. */
+export interface StatementListRow {
+  partyId: string;
+  name: string;
+  email: string | null;
+  isActive: boolean;
+  outstandingCents: number;
+  overdueCents: number;
+  lastSentAt: string | null;
+}
+
+/** What a statement is asked for: OUTSTANDING on `asOf`, or ACTIVITY over `from`..`to`. */
+export type StatementRequest =
+  | { type: 'OUTSTANDING'; asOf: string }
+  | { type: 'ACTIVITY'; from: string; to: string };
+
+export type StatementPartyPath = 'customers' | 'vendors';
+
+export function statementQuery(request: StatementRequest): string {
+  const query = new URLSearchParams({ type: request.type });
+  if (request.type === 'OUTSTANDING') query.set('asOf', request.asOf);
+  else {
+    query.set('from', request.from);
+    query.set('to', request.to);
+  }
+  return query.toString();
+}
+
+/** GET /statements/customers|vendors — outstanding and overdue per party on `asOf`. */
+export function listStatementParties(
+  path: StatementPartyPath,
+  params: { asOf: string; q?: string; includeZero?: boolean },
+  signal?: AbortSignal,
+): Promise<{ success: boolean; asOf: string; count: number; parties: StatementListRow[] }> {
+  const query = new URLSearchParams({ asOf: params.asOf });
+  if (params.q !== undefined && params.q.trim() !== '') query.set('q', params.q.trim());
+  if (params.includeZero === true) query.set('includeZero', 'true');
+  return apiFetch(`/statements/${path}?${query.toString()}`, { signal: signal ?? null });
+}
+
+/** GET /statements/customers|vendors/:id */
+export async function getPartyStatement(
+  path: StatementPartyPath,
+  id: string,
+  request: StatementRequest,
+  signal?: AbortSignal,
+): Promise<PartyStatement> {
+  const body = await apiFetch<{ success: boolean; statement: PartyStatement }>(
+    `/statements/${path}/${id}?${statementQuery(request)}`,
+    { signal: signal ?? null },
+  );
+  return body.statement;
+}
+
+/** GET /settings/statements — defaults returned until the org saves one. */
+export async function getStatementSettings(signal?: AbortSignal): Promise<StatementSettings> {
+  const body = await apiFetch<{ success: boolean; statementSettings: StatementSettings }>(
+    '/settings/statements',
+    { signal: signal ?? null },
+  );
+  return body.statementSettings;
+}
+
+/** PATCH /settings/statements — OWNER/ADMIN only. */
+export async function updateStatementSettings(
+  input: Partial<StatementSettings>,
+): Promise<StatementSettings> {
+  const body = await apiFetch<{ success: boolean; statementSettings: StatementSettings }>(
+    '/settings/statements',
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.statementSettings;
+}
+
+/* ------------------------------------- statements: email & public link (Phase 39b) */
+
+export const STATEMENT_PLACEHOLDERS = [
+  'contact_name',
+  'organization_name',
+  'balance_due',
+  'overdue_amount',
+  'statement_date',
+  'period_from',
+  'period_to',
+  'open_invoice_count',
+] as const;
+export type StatementPlaceholder = (typeof STATEMENT_PLACEHOLDERS)[number];
+
+/** Mirrors server/src/types/accounting.ts's StatementEmailTemplate. */
+export interface StatementEmailTemplate {
+  id: string | null;
+  partyKind: PartyKind;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+  builtIn: boolean;
+  updatedAt: string | null;
+}
+
+/** Mirrors server/src/types/accounting.ts's StatementSend. */
+export interface StatementSend {
+  id: string;
+  partyKind: PartyKind;
+  partyId: string;
+  statementType: StatementType;
+  asOf: string | null;
+  from: string | null;
+  to: string | null;
+  toEmail: string;
+  templateName: string | null;
+  sentByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+}
+
+export interface SendStatementsResult {
+  sent: { partyId: string; sendId: string; toEmail: string }[];
+  skipped: { partyId: string; name: string; reason: 'NO_EMAIL' }[];
+}
+
+export interface StatementEmailPreview {
+  toEmail: string | null;
+  subject: string;
+  body: string;
+}
+
+function requestBody(request: StatementRequest): Record<string, string> {
+  return request.type === 'OUTSTANDING'
+    ? { type: request.type, asOf: request.asOf }
+    : { type: request.type, from: request.from, to: request.to };
+}
+
+/** GET /settings/statement-email-templates — built-in defaults included when none are saved. */
+export async function listStatementEmailTemplates(kind?: PartyKind): Promise<StatementEmailTemplate[]> {
+  const suffix = kind === undefined ? '' : `?kind=${kind}`;
+  const body = await apiFetch<{ success: boolean; templates: StatementEmailTemplate[] }>(
+    `/settings/statement-email-templates${suffix}`,
+  );
+  return body.templates;
+}
+
+export async function createStatementEmailTemplate(input: {
+  partyKind: PartyKind;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+}): Promise<StatementEmailTemplate> {
+  const body = await apiFetch<{ success: boolean; template: StatementEmailTemplate }>(
+    '/settings/statement-email-templates',
+    { method: 'POST', body: JSON.stringify(input) },
+  );
+  return body.template;
+}
+
+export async function updateStatementEmailTemplate(
+  id: string,
+  input: Partial<{ name: string; subject: string; body: string; isDefault: boolean }>,
+): Promise<StatementEmailTemplate> {
+  const body = await apiFetch<{ success: boolean; template: StatementEmailTemplate }>(
+    `/settings/statement-email-templates/${id}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.template;
+}
+
+export async function deleteStatementEmailTemplate(id: string): Promise<void> {
+  await apiFetch(`/settings/statement-email-templates/${id}`, { method: 'DELETE' });
+}
+
+/** POST /statements/customers|vendors/send */
+export function sendStatements(
+  path: StatementPartyPath,
+  input: { partyIds: string[]; request: StatementRequest; templateId: string | null; toEmail: string | null },
+): Promise<{ success: boolean } & SendStatementsResult> {
+  return apiFetch(`/statements/${path}/send`, {
+    method: 'POST',
+    body: JSON.stringify({
+      ...requestBody(input.request),
+      partyIds: input.partyIds,
+      templateId: input.templateId,
+      toEmail: input.toEmail,
+    }),
+  });
+}
+
+/** POST /statements/customers|vendors/preview-email */
+export async function previewStatementEmail(
+  path: StatementPartyPath,
+  input: { partyId: string; request: StatementRequest; templateId: string | null },
+): Promise<StatementEmailPreview> {
+  const body = await apiFetch<{ success: boolean; preview: StatementEmailPreview }>(
+    `/statements/${path}/preview-email`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ ...requestBody(input.request), partyId: input.partyId, templateId: input.templateId }),
+    },
+  );
+  return body.preview;
+}
+
+/** GET /statements/customers|vendors/:id/sends */
+export async function listStatementSends(path: StatementPartyPath, partyId: string): Promise<StatementSend[]> {
+  const body = await apiFetch<{ success: boolean; sends: StatementSend[] }>(`/statements/${path}/${partyId}/sends`);
+  return body.sends;
+}
+
+/** POST /statement-sends/:id/revoke */
+export async function revokeStatementSend(id: string): Promise<StatementSend> {
+  const body = await apiFetch<{ success: boolean; send: StatementSend }>(`/statement-sends/${id}/revoke`, {
+    method: 'POST',
+  });
+  return body.send;
+}
+
+/** What the public statement link shows — no session involved. */
+export interface PublicStatementView {
+  merchant: { name: string; addressLines: string[]; hasLogo: boolean; baseCurrency: string };
+  partyKind: PartyKind;
+  partyName: string;
+  statement: PartyStatement;
+  current: PartyOpenItems;
+  settings: StatementSettings;
+  bankDetails: string | null;
+  payment: { enabled: boolean; publishableKey: string | null };
+  expiresAt: string;
+}
+
+/** GET /public/statements/:token — public; the token is the credential. */
+export async function getPublicStatement(token: string, signal?: AbortSignal): Promise<PublicStatementView> {
+  return apiFetch<{ success: boolean } & PublicStatementView>(
+    `/public/statements/${encodeURIComponent(token)}`,
+    { signal: signal ?? null, credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
+/** GET /public/statements/:token/logo as a blob (the API is cross-origin, so no bare <img>). */
+export async function getPublicStatementLogo(token: string, signal?: AbortSignal): Promise<Blob | null> {
+  if (!API_BASE_URL) return null;
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/public/statements/${encodeURIComponent(token)}/logo`, {
+    credentials: 'omit',
+    signal: signal ?? null,
+  });
+  return response.ok ? response.blob() : null;
+}
+
+/* ------------------------------------- statements: online payment (Phase 39c) */
+
+export type OnlinePaymentStatus = 'PENDING' | 'RECORDED' | 'NEEDS_REVIEW' | 'FAILED' | 'CANCELED';
+
+/** Mirrors server/src/types/accounting.ts's OnlinePaymentSettings. */
+export interface OnlinePaymentSettings {
+  enabled: boolean;
+  depositAccountId: string | null;
+  providerConfigured: boolean;
+}
+
+/** Mirrors server/src/types/accounting.ts's OnlinePayment. */
+export interface OnlinePayment {
+  id: string;
+  customerId: string;
+  customerName: string;
+  providerIntentId: string | null;
+  currencyCode: string;
+  amountCents: number;
+  status: OnlinePaymentStatus;
+  paymentId: string | null;
+  failureReason: string | null;
+  invoices: { invoiceId: string; invoiceNumber: string | null; amountCents: number }[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function getOnlinePaymentSettings(): Promise<OnlinePaymentSettings> {
+  const body = await apiFetch<{ success: boolean; onlinePaymentSettings: OnlinePaymentSettings }>(
+    '/settings/online-payments',
+  );
+  return body.onlinePaymentSettings;
+}
+
+export async function updateOnlinePaymentSettings(input: {
+  enabled?: boolean;
+  depositAccountId?: string | null;
+}): Promise<OnlinePaymentSettings> {
+  const body = await apiFetch<{ success: boolean; onlinePaymentSettings: OnlinePaymentSettings }>(
+    '/settings/online-payments',
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.onlinePaymentSettings;
+}
+
+/** GET /online-payments?status= */
+export async function listOnlinePayments(status?: OnlinePaymentStatus): Promise<OnlinePayment[]> {
+  const body = await apiFetch<{ success: boolean; onlinePayments: OnlinePayment[] }>(
+    `/online-payments${status === undefined ? '' : `?status=${status}`}`,
+  );
+  return body.onlinePayments;
+}
+
+export interface StartedStatementPayment {
+  onlinePaymentId: string;
+  clientSecret: string;
+  publishableKey: string;
+  amountCents: number;
+  currencyCode: string;
+}
+
+/** POST /public/statements/:token/payments — public; the server computes the amount. */
+export async function startStatementPayment(token: string, invoiceIds: string[]): Promise<StartedStatementPayment> {
+  const body = await apiFetch<{ success: boolean; payment: StartedStatementPayment }>(
+    `/public/statements/${encodeURIComponent(token)}/payments`,
+    { method: 'POST', body: JSON.stringify({ invoiceIds }), credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+  return body.payment;
+}
+
+/** POST /public/statements/:token/payments/:intentId/confirm — public. */
+export function confirmStatementPayment(
+  token: string,
+  intentId: string,
+): Promise<{ success: boolean; status: OnlinePaymentStatus; paymentId: string | null }> {
+  return apiFetch(
+    `/public/statements/${encodeURIComponent(token)}/payments/${encodeURIComponent(intentId)}/confirm`,
+    { method: 'POST', credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
 /** Mirrors server/src/types/accounting.ts's AgingReport. */
 export interface AgingReport {
   asOf: string;

@@ -357,3 +357,25 @@ export const INVOICE_FONT_FAMILIES = ['sans', 'serif'] as const;
 
 /** Line density options for invoice layout. */
 export const INVOICE_DENSITIES = ['comfortable', 'compact'] as const;
+
+// -------------------------------------------------- statements (39)
+
+/**
+ * OUTSTANDING: open items on one date. ACTIVITY: every transaction in a date
+ * range with opening/closing balance. Must match the IN list in
+ * ck_statement_settings_default_type (migration 084).
+ */
+export const STATEMENT_TYPES = ['OUTSTANDING', 'ACTIVITY'] as const;
+
+/** Longest ACTIVITY range a statement may cover — a guard on an unpaginated read. */
+export const STATEMENT_MAX_RANGE_DAYS = 3660;
+
+/** How long an emailed statement's "Review and pay" link works (39b). */
+export const STATEMENT_LINK_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+
+/** Most parties one "Email statements" request may send to (39b). */
+export const STATEMENT_SEND_MAX_PARTIES = 200;
+
+/** Public statement-link routes: requests per window per IP, counting successes too (39b). */
+export const PUBLIC_LINK_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+export const PUBLIC_LINK_RATE_LIMIT_MAX = env.isTest ? 10_000 : 120;

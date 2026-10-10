@@ -3,8 +3,8 @@
 > A webhook receiver has no TLS client cert and no session cookie to trust — an HMAC over the raw body, verified with the same shared secret both sides hold, is the entire authentication story. And a webhook *sender* fetching a user-supplied URL is the server voluntarily stepping outside its own trust boundary, which is a problem with a name: SSRF.
 
 **Category:** Security & Auth
-**Introduced by:** Phase 7 — `utils/webhookSignature.ts`, `utils/webhookUrl.ts`
-**Verified against:** Node 22 `node:crypto`, WHATWG `URL`
+**Introduced by:** Phase 7 — `utils/webhookSignature.ts`, `utils/webhookUrl.ts`. **Extended in Phase 39c** — the receiving side: verifying Stripe's webhook (`services/payments/stripeClient.ts`)
+**Verified against:** Node 22 `node:crypto`, WHATWG `URL`; Express 5.2 `express.raw`. The Stripe scheme below is checked against our own signer in `onlinePayments.test.ts`, **not yet against a real Stripe-sent event** — run `stripe listen` + `stripe trigger payment_intent.succeeded` before relying on it
 
 ---
 
@@ -70,6 +70,20 @@ Validating at write time checks where `hooks.example.com` resolves **right now**
 
 Even with the URL guard, the *response* to that first request could be an HTTP redirect pointing anywhere — including a private address the guard would have rejected if it were the original URL. `fetch(..., { redirect: 'manual' })` tells the client to treat a 3xx response as a normal (non-following) response rather than automatically issuing a second request to `Location`. This is not a convenience setting; without it, the write-time URL validation is provably bypassable by any receiver willing to return a redirect.
 
+### Receiving a signed webhook: Stripe (Phase 39c)
+
+Phase 7 made AutoLedger a webhook *sender*; Phase 39c makes it a *receiver*, for Stripe's `payment_intent.*` events. The scheme is the mirror image of ours:
+
+- Header `Stripe-Signature: t=<unix seconds>,v1=<hex>[,v1=<hex>…]`.
+- Expected value: `HMAC-SHA256(key = the endpoint's whole "whsec_…" secret, message = "<t>." + raw body bytes)`.
+- Accept if **any** `v1` matches (Stripe sends more than one while a secret is being rolled) **and** `|now − t| ≤ 300 s`.
+
+**Why the raw body, mechanically.** `express.json()` reads the request stream, `JSON.parse`s it and replaces `req.body` with an object; the original bytes are gone. Re-serialising that object with `JSON.stringify` does not reproduce them: key order, whitespace, escaped `\u` sequences and number formatting (`1.0` vs `1`) can all differ, and one changed byte changes the HMAC. So the webhook path gets `express.raw({ type: 'application/json' })`, mounted in `app.ts` **before** the global `express.json()`. The JSON parser then skips the request: in `body-parser` 2.3 (Express 5's), `read()` first checks `onFinished.isFinished(req)`, and a stream `express.raw` has already consumed counts as finished. (1.x tracked this with a `req._body` flag instead.) So the handler receives a `Buffer`. The controller refuses anything that is not a `Buffer`, so a future middleware reorder fails loudly instead of failing every signature.
+
+**Trust boundary, beyond the signature.** A valid signature only proves Stripe sent *some* event. The handler still does not trust the event's contents: it takes only the intent id, checks that the id is one of **ours** (an indexed read, before any network call), and then **re-reads the intent from Stripe's API** before acting. That costs one round trip, but it means a replayed old event, an event for another integration on the same Stripe account, or a stale status can never move money in our books.
+
+**What is deliberately absent.** There is no rate limiter on the webhook route. A bad signature costs one HMAC, and throttling Stripe's retries would only delay settlement. There is no `authenticate` either, which is why the router-walking permission test (Phase 38c) passes over the route by design.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -85,6 +99,8 @@ Even with the URL guard, the *response* to that first request could be an HTTP r
 - `server/src/utils/webhookSignature.ts` — `generateWebhookSecret`, `signWebhookBody`, `verifyWebhookSignature` (used by the test suite to prove our own signing is internally consistent)
 - `server/src/utils/webhookUrl.ts` — `assertDeliverableUrl`, called from `webhookService.createEndpoint`/`updateEndpoint`
 - `server/src/queue/handlers/webhookDeliverHandler.ts` — builds the signed request, sets `redirect: 'manual'` and `AbortSignal.timeout(WEBHOOK_TIMEOUT_MS)`
+- `server/src/services/payments/stripeClient.ts` — `verifyWebhook` (Phase 39c, the receiving side): parses `t=`/`v1=`, checks the 300 s tolerance, compares with `timingSafeEqual` after a hex-format check, parses the event
+- `server/src/app.ts` — `express.raw` mounted for `/api/v1/public/stripe/webhook` ahead of `express.json`
 - `server/src/db/migrations/020_platform_outbox_and_webhooks.sql` — `webhook_endpoints.secret`, stored in plaintext (unlike a password) because the server must reproduce the exact key on every send, never selected into any API response (`webhookService.ts`'s `ENDPOINT_SELECT`)
 
 ## Gotchas
@@ -94,6 +110,9 @@ Even with the URL guard, the *response* to that first request could be an HTTP r
 - **Forgetting `redirect: 'manual'`.** Silently defeats every SSRF check that came before it.
 - **Assuming write-time validation is sufficient.** DNS rebinding is real; this codebase records the gap rather than claiming coverage it doesn't have.
 - **Logging the secret, the signature header, or the full request body "for debugging."** The secret in a log is a secret that leaked — guardrails rule 11's spirit extended past JWTs.
+- **(Receiving) Verifying a re-serialised body.** If `express.json` runs first, the signature never matches, and the tempting "fix" of skipping verification in that case is a forged-payment hole. Mount the raw parser first, and check for a `Buffer`.
+- **(Receiving) `timingSafeEqual` throws on unequal lengths.** Validate that the signature is exactly 64 hex characters *before* comparing, or a malformed header becomes a 500 instead of a 400.
+- **(Receiving) Acting on the event body.** It is signed, but it can still be stale or replayed within the tolerance window. Re-read the object from the provider and make the handler idempotent.
 - **Treating a public IPv4 literal as automatically safe.** The guard only blocks *private/reserved* ranges — `http://8.8.8.8/hook` is legal, and correctly so; the point is blocking the internal network, not IP literals generally.
 
 ## Interview Q&A
@@ -116,6 +135,12 @@ A: DNS rebinding — a hostname that resolves to a public IP when you validate i
 **Q: Why does `redirect: 'manual'` matter here specifically?**
 A: The URL guard only ever inspects the URL the tenant *typed*. If the request to that URL comes back with a 3xx and the client follows redirects automatically, the *second* request goes wherever the `Location` header says — which the guard never saw and never validated. A malicious or compromised receiver could pass the initial URL check and then redirect every delivery to an internal address. `redirect: 'manual'` stops the fetch from automatically following that redirect, so the guard's coverage isn't silently bypassable by the receiver's own response.
 
+**Q: (Phase 39c) Your Stripe webhook verifies fine in tests but fails in production with every event. What's your first guess?**
+A: The body was parsed before verification. The signature covers the exact bytes Stripe sent. If `express.json()` ran first, `req.body` is an object, and any re-serialisation of it differs from the original bytes, so the HMAC never matches. The fix is `express.raw({ type: 'application/json' })` on the webhook path, mounted before the JSON parser so the handler gets a `Buffer`. In our code the controller rejects a non-`Buffer` body outright, so the misconfiguration is obvious. The second guess is the wrong secret: `stripe listen` prints a different `whsec_` from the dashboard endpoint's.
+
+**Q: (Phase 39c) The signature is valid. Why do you still call Stripe's API before recording a payment?**
+A: A valid signature proves the event came from Stripe, not that it describes what is true now. An event can be a legitimate delivery replayed inside the 300-second window, an out-of-order retry, or an event for another integration on the same account. So the handler uses only the intent id. It checks the id is in our `online_payments` table, re-reads the intent's current status and amount from Stripe, and settles idempotently under a row lock. The event acts as a wake-up call, not as the source of truth.
+
 ## Follow-ups they'll dig into
 
 - "How would you fully close the DNS-rebinding gap?" (Resolve the hostname yourself with `dns.lookup`, validate the resolved IP against the same private-range rules, then make the request with an explicit IP and a `Host` header — or use a fetch agent that pins the connection.)
@@ -125,6 +150,7 @@ A: The URL guard only ever inspects the URL the tenant *typed*. If the request t
 
 ## See also
 
+- [../architecture/payment-gateway-integration.md](../architecture/payment-gateway-integration.md) — what the verified Stripe event then drives (Phase 39c)
 - [../architecture/transactional-outbox.md](../architecture/transactional-outbox.md)
 - [jwt-and-refresh-rotation.md](jwt-and-refresh-rotation.md) — the other HMAC-based signing scheme in this codebase
 - [password-hashing-and-timing.md](password-hashing-and-timing.md) — timing attacks in a different context, and why hashing is right there but wrong here

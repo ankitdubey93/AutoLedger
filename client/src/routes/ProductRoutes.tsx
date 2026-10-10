@@ -58,6 +58,10 @@ import FxRevaluationsPage from '../Pages/accounting/FxRevaluationsPage';
 import MigrationImportsPage from '../Pages/accounting/MigrationImportsPage';
 import NewMigrationImportPage from '../Pages/accounting/NewMigrationImportPage';
 import MigrationImportDetailPage from '../Pages/accounting/MigrationImportDetailPage';
+// Statements (Phase 39)
+import StatementsListPage from '../Pages/statements/StatementsListPage';
+import StatementPage from '../Pages/statements/StatementPage';
+import StatementPrintPage from '../Pages/statements/StatementPrintPage';
 // Reports
 import ReportsPage from '../Pages/reports/ReportsPage';
 import ProfitAndLossPage from '../Pages/reports/ProfitAndLossPage';
@@ -75,6 +79,9 @@ import ChartSettingsPage from '../Pages/settings/ChartSettingsPage';
 import ConversionBalancesPage from '../Pages/settings/ConversionBalancesPage';
 import InvoiceSettingsPage from '../Pages/settings/InvoiceSettingsPage';
 import InvoiceTemplatePage from '../Pages/settings/InvoiceTemplatePage';
+import StatementTemplatePage from '../Pages/settings/StatementTemplatePage';
+import EmailTemplatesPage from '../Pages/settings/EmailTemplatesPage';
+import OnlinePaymentsSettingsPage from '../Pages/settings/OnlinePaymentsSettingsPage';
 import PaymentTermsSettingsPage from '../Pages/settings/PaymentTermsSettingsPage';
 import InventoryCatalogueSettingsPage from '../Pages/settings/InventoryCatalogueSettingsPage';
 import ItemCodesSettingsPage from '../Pages/settings/ItemCodesSettingsPage';
@@ -132,6 +139,15 @@ export default function ProductRoutes() {
           <Route path="/debit-notes/:noteId/edit" element={<NewDebitNotePage />} />
           <Route path="/vendors" element={<VendorsPage />} />
           <Route path="/vendors/:partyId" element={<PartyAccountPage kind="VENDOR" />} />
+
+          {/* Statements (Phase 39). The literal "print" route must precede ":partyId". */}
+          <Route path="/statements" element={<Navigate to="/statements/customers" replace />} />
+          <Route path="/statements/customers" element={<StatementsListPage kind="CUSTOMER" />} />
+          <Route path="/statements/customers/print" element={<StatementPrintPage kind="CUSTOMER" />} />
+          <Route path="/statements/customers/:partyId" element={<StatementPage kind="CUSTOMER" />} />
+          <Route path="/statements/vendors" element={<StatementsListPage kind="VENDOR" />} />
+          <Route path="/statements/vendors/print" element={<StatementPrintPage kind="VENDOR" />} />
+          <Route path="/statements/vendors/:partyId" element={<StatementPage kind="VENDOR" />} />
 
           {/* Bill inbox. The literal "review" route must precede ":id". */}
           <Route path="/inbox" element={<InboxPage />} />
@@ -198,6 +214,9 @@ export default function ProductRoutes() {
           <Route path="/settings/conversion-balances" element={<ConversionBalancesPage />} />
           <Route path="/settings/invoicing" element={<InvoiceSettingsPage />} />
           <Route path="/settings/invoice-template" element={<InvoiceTemplatePage />} />
+          <Route path="/settings/statement-template" element={<StatementTemplatePage />} />
+          <Route path="/settings/email-templates" element={<EmailTemplatesPage />} />
+          <Route path="/settings/online-payments" element={<OnlinePaymentsSettingsPage />} />
           <Route path="/settings/payment-terms" element={<PaymentTermsSettingsPage />} />
           <Route path="/settings/inbox" element={<InboxSettingsPage />} />
           <Route path="/settings/ai-usage" element={<AiUsagePage />} />

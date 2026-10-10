@@ -1410,6 +1410,85 @@ Step three of Phase 38 (2026-10-01): "a user with customizable access — e.g. s
 
 **Study notes:** new [rbac-to-permission-based-access.md](../study/security-auth/rbac-to-permission-based-access.md).
 
+## Phase 39, as delivered
+
+A direct feature request (2026-10-10), numbered like 24/30/32/34. The user reviewed Xero and QuickBooks and asked for:
+- customer and vendor **statements** (Outstanding on a date, Activity over a range), with a template in Settings;
+- printing them, and emailing them with **user-editable email templates**;
+- a list showing outstanding and overdue amounts;
+- an emailed **"Review and pay"** link that opens a page with the merchant name, the overdue invoices, and a card form on the right.
+
+Decisions taken with the user:
+- **Stripe in test mode** for cards, with card data only in Stripe's iframe;
+- the email carries **a summary and a secure link**, with no PDF attachment.
+
+Shipped in three steps, each green on its own.
+
+**39a — statements.**
+- **True as-at open items.** `settlementSql.ts` gains `settledAsOfCentsSubquery` and `noteOwnAppliedAsOfCentsSubquery`, and `partyLedgerService` gains `buildAsOfOpenDocsCte`, `partyOpenItemsAsOf` and `partyBalancesAsOf`.
+  - Documents count by their journal entry date and void entry date; payments by theirs; note allocations by `allocation_date`.
+  - An Outstanding statement for 10 July therefore ignores a 20 July payment, an August invoice and an August void.
+  - **Proven** by as-at total = `ledger({to})` closing balance on seven dates of one scenario.
+- `ledger()` accepts `limit: null` for an unpaginated statement; the HTTP cap is unchanged.
+- `statementService`, `statementSettingsService`, migration `084`, and `GET /statements/{customers|vendors}[/:id]`.
+- Client:
+  - `StatementDocument` — presentational, three layouts, shared with the editor preview and the public page;
+  - the statements list (outstanding, overdue in red, totals, type and date controls in the URL);
+  - the single statement page, bulk print with page breaks, and the split-pane `/settings/statement-template`;
+  - nav entries "Statements" (Sales) and "Vendor statements" (Purchases), and a "Statement" button on the party account page.
+
+**39b — email.**
+- Migration `085`:
+  - `statement_email_templates`, at most one default per kind via a partial unique index;
+  - `statement_sends`, which stores only the link token's SHA-256;
+  - `email_outbox.template` admits `party_statement`. The inline 082 CHECK is replaced by a named one.
+- `utils/placeholders.ts`: a closed whitelist of eight `{{names}}`, single-pass, unknown names rejected with 422.
+- `statementEmailService`:
+  - template CRUD with default promotion;
+  - `previewStatementEmail`;
+  - `sendStatements`, which writes the send row and the outbox email in one transaction, reports skipped parties with no email, and allows a recipient override for one party.
+- Public `GET /public/statements/:token` (and `/logo`), resolved by `statementLinkService.resolveLiveSend`, the only org-less lookup. Unknown, expired and revoked tokens return the same 404.
+- New permission **`statements.send`** (tier A).
+- `publicLinkLimiter` counts successes too.
+- Client: `/settings/email-templates` (placeholder chips insert at the cursor, live sample preview, the built-in default is read-only until copied), `SendStatementDialog` (bulk or single, with a real preview), the "Emailed" history with revoke, and the public `/statement/:token` page.
+
+**39c — card payment.**
+- Migration `086`: `ledger_online_payment_settings`, `online_payments` (`UNIQUE (provider, provider_intent_id)`, FSM `ONLINE_PAYMENT_TRANSITIONS`) and `online_payment_invoices`.
+- `stripeClient.ts`, **no SDK**: `fetch` with form encoding, `Idempotency-Key`, a pinned `Stripe-Version`, and webhook HMAC verification with `timingSafeEqual` and a 300 s tolerance.
+- `onlinePaymentService`:
+  - The **server prices** the chosen invoices under `FOR UPDATE`, commits PENDING, then creates the intent.
+  - `settleIntent`, reached from both the browser's `/confirm` and the webhook, checks the intent is ours, re-reads it from Stripe, locks the row, and records one `payments` row (`CARD`, reference `pi_…`) through `createPaymentOnClient`. It runs the deferred checks inside a savepoint (`SET CONSTRAINTS ALL IMMEDIATE`), so an unappliable payment goes to `NEEDS_REVIEW` instead of being lost.
+- `express.raw` is mounted for the webhook path before `express.json`.
+- New env vars: `STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`. Test keys are enforced outside production.
+- Client:
+  - `@stripe/stripe-js` 10 and `@stripe/react-stripe-js` 7, the phase's only new dependencies;
+  - `StripePayPanel` (two steps, Payment Element, 3-D Secure return handling);
+  - `/settings/online-payments`;
+  - a "Paid online" badge and a NEEDS_REVIEW panel on Payments.
+
+**Tests.**
+- Server, 39 new:
+  - `partyStatements.test.ts` (12) — as-at correctness, activity over 100 rows, the list, settings, isolation;
+  - `statementEmail.test.ts` (13) — placeholders, templates, send, escaping, outbox link cleared, the public token, isolation;
+  - `onlinePayments.test.ts` (14) — server pricing, idempotent settlement under a three-way race, NEEDS_REVIEW, amount mismatch, decline, signature failures, raw-body mount, isolation.
+- Client: `partyStatements.test.tsx`, `statementEmail.test.tsx`, `stripePayPanel.test.tsx`; one nav expectation updated (a role with `customers.view` now also sees "Statements").
+- **1990 server tests passing (2 skipped) + 568 client tests passing**; typecheck and lint clean in both packages.
+- **Not yet run against real Stripe**: the Stripe path is proven against an in-memory fake. Before demoing, run once with test keys and `stripe listen`.
+
+**Deliberately not built:**
+- AR/AP aging moved onto as-at settlement (`/reports/ar-aging` with a past `asOf` keeps its old limitation).
+- Per-currency statements (everything is in base currency, like the subledger).
+- PDF attachments.
+- Stripe Connect per org, refunds from AutoLedger, partial payment of an invoice, card surcharges.
+- A sweep for PENDING intents whose webhook never arrived.
+- Scheduled or automatic statement runs.
+- Zero-decimal and three-decimal currencies online.
+- Resolving a NEEDS_REVIEW row in the UI (it is applied with a manual receipt).
+
+**Study notes:**
+- New: [payment-gateway-integration.md](../study/architecture/payment-gateway-integration.md) and [user-authored-templates-and-bearer-links.md](../study/security-auth/user-authored-templates-and-bearer-links.md).
+- Extended: [webhook-signing-and-ssrf.md](../study/security-auth/webhook-signing-and-ssrf.md) (receiving Stripe's webhook, raw bodies) and [subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md) (as-at reads).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

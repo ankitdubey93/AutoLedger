@@ -185,6 +185,31 @@ These are the same two independently-derived numbers as before; they agree becau
 
 ---
 
+### Reading the past: as-at open items for a statement (Phase 39a)
+
+**Verified against:** PostgreSQL 16, pinned by `partyStatements.test.ts` (as-at total = ledger closing balance on seven dates of one scenario, including a payment voided after the date and a credit note allocated before it).
+
+An **Outstanding statement dated 10 July** must show what was open *on 10 July*. The aging query above can't answer that, even with `asOf = '2026-07-10'`, because `asOf` only feeds the bucket `CASE`. The rest of the query reads the present:
+
+- `d.status = 'ISSUED'` uses today's status, so an invoice voided on 1 August disappears from a July statement;
+- `settledCentsSubquery` sums today's POSTED payments, so a payment made on 20 July is subtracted from a 10 July balance;
+- an invoice issued on 10 August is included.
+
+The fix uses only facts the schema already stores immutably: every document, payment and note has a **journal entry with an `entry_date`**, and every void has a **void journal entry with its own `entry_date`**. "Was it in force on date D?" therefore becomes a pure predicate over dates, with no history table:
+
+```sql
+-- a document existed and was not yet voided on $2
+JOIN journal_entries ie ON ie.id = d.journal_entry_id
+LEFT JOIN journal_entries ve ON ve.id = d.void_journal_entry_id
+WHERE ie.entry_date <= $2 AND (ve.id IS NULL OR ve.entry_date > $2)
+```
+
+The same shape, inside the correlated settlement subquery (`settledAsOfCentsSubquery`), counts only the payments posted by D and not voided by D. Note allocations post no journal entry, so they use their own `allocation_date`. A note's *own* applied amount uses the same date, which keeps both sides of a note-to-invoice allocation in the same period.
+
+**Why it reconciles.** The party ledger (`ledger({to: D})`) sums control-account lines with `entry_date <= D`. The as-at open items now select and settle documents by those same `entry_date`s, so the two independent computations must agree. Running both on many dates of one scenario is the strongest cheap test there is: a predicate that is off by one (`<` vs `<=`), or one that uses a document date instead of an entry date, breaks the equality on some date.
+
+**What it is not.** This is "as-at by event date", not bitemporal. A transaction *recorded* later but *dated* earlier (a back-dated payment) changes what a re-run July statement shows. Usually that is right: a statement reflects the books as they are now known, for that date. Reproducing exactly what was emailed in July would need transaction time (`created_at`) as a second axis. Statements here store their parameters (`statement_sends.as_of`), not a snapshot. **Aging (`/reports/ar-aging`) was deliberately not moved onto these predicates in Phase 39**, so its past-dated `asOf` still has the original limitation.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -204,6 +229,9 @@ These are the same two independently-derived numbers as before; they agree becau
 ---
 
 ## Where it lives in this codebase
+
+- `server/src/services/accounting/settlementSql.ts` — `settledAsOfCentsSubquery`, `noteOwnAppliedAsOfCentsSubquery` (Phase 39a; the placeholder argument is typed `` `$${number}` ``, so only a bind-parameter reference can be interpolated)
+- `server/src/services/accounting/partyLedgerService.ts` — `buildAsOfOpenDocsCte`, `partyOpenItemsAsOf`, `partyBalancesAsOf` (the statements list, which, unlike aging, keeps parties in net credit)
 
 - `server/src/services/accounting/agingService.ts` — `buildOpenDocsCte`, `loadBuckets`, `loadCounterpartyRows`, `resolveControlAccount`, `loadControlAccountBalance`
 - `server/src/types/accounting.ts` — `AGING_BUCKETS`, `AGING_BUCKET_LABELS`, `AgingReport`
@@ -299,6 +327,12 @@ A: Three assertions after a commit, all integer equality: the ageing total equal
 A: To 3400 Opening Balance Equity instead of a revenue account, so no P&L account moves. The opening trial balance already contains the revenue those unpaid invoices represent; posting it again as revenue would double-count it. The AR leg is what the subledger and control account both need, and later payments settle it through the usual allocations.
 
 ---
+
+**Q: (Phase 39) How do you produce a customer statement "as at" a past date when you never stored historical balances?**
+A: Every financial event in the books is an immutable row with an accounting date, and a reversal is a separate row with its own date, not an update. So the state on date D is a filter, not a snapshot. A document counts if its journal entry is dated on or before D and it had no void entry dated on or before D. A payment allocation counts if the payment's entry is dated on or before D and the payment wasn't voided by D. Outstanding is the total minus the allocations that count. I prove it by checking that the as-at total equals the party ledger's closing balance at D on many dates. The two are computed independently, one from documents and one from ledger lines.
+
+**Q: Why not just keep a nightly balance snapshot table?**
+A: A snapshot is only right if nothing dated before it changes after it's taken, and accounting dates move: back-dated payments, voids posted into an earlier date, credit notes applied to old invoices. Each of those would need the snapshot rewritten, or it goes stale silently. Deriving from immutable dated rows is always consistent with the ledger by construction. The cost is a heavier read, which is fine for an on-demand document like a statement. If we ever needed "exactly what we emailed", I'd store the rendered statement, not a balance table.
 
 ## Follow-ups they'll dig into
 

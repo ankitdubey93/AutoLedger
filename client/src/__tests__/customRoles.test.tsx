@@ -127,7 +127,7 @@ describe('navigation follows permissions', () => {
   it('an invoice clerk sees Dashboard, Invoices and Settings only', () => {
     const clerk = new Set(['invoices.view', 'invoices.issue', 'customers.view']);
     const labels = visibleNavGroups((p) => clerk.has(p)).flatMap((g) => g.items.map((i) => i.label));
-    expect(labels).toEqual(['Dashboard', 'Invoices', 'Customers', 'Settings']);
+    expect(labels).toEqual(['Dashboard', 'Invoices', 'Customers', 'Statements', 'Settings']);
   });
 
   it('a VIEWER still sees every section it could before Phase 38c, except importing statements', () => {

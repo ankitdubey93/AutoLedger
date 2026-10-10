@@ -2,7 +2,12 @@ import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
 import * as customerService from './customerService.js';
 import * as vendorService from './vendorService.js';
-import { noteOwnAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
+import {
+  noteOwnAppliedAsOfCentsSubquery,
+  noteOwnAppliedCentsSubquery,
+  settledAsOfCentsSubquery,
+  settledCentsSubquery,
+} from './settlementSql.js';
 import { resolveControlAccounts } from './reportService.js';
 import {
   AGING_BUCKETS,
@@ -94,7 +99,8 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
 
 export interface PartyLedgerOptions {
   page: number;
-  limit: number;
+  /** `null` returns every row — statements only (Phase 39); HTTP callers keep MAX_PAGE_SIZE. */
+  limit: number | null;
   from: string | null;
   to: string | null;
 }
@@ -256,7 +262,7 @@ async function ledger(
   // Running balance as a window over the whole filtered set, evaluated before
   // LIMIT/OFFSET so page 2 continues page 1 — the same explicit ROWS frame and
   // unambiguous ORDER BY as accountLedgerService.accountLedger.
-  const offset = (options.page - 1) * options.limit;
+  const offset = options.limit === null ? 0 : (options.page - 1) * options.limit;
   const { rows: pageRows } = await pool.query<PartyRow>(
     `WITH ${cte}
      SELECT kind, document_id, document_number, entry_id, entry_date,
@@ -358,6 +364,42 @@ function isOpenItemKind(value: string): value is PartyOpenItem['documentKind'] {
   return value === 'INVOICE' || value === 'BILL' || value === 'CREDIT_NOTE' || value === 'DEBIT_NOTE';
 }
 
+/** Maps open-item rows and totals them — shared by the "now" and as-at reads. */
+function summarizeOpenItems(rows: OpenItemRow[]): {
+  outstandingCents: number;
+  overdueCents: number;
+  items: PartyOpenItem[];
+} {
+  let outstandingCents = 0;
+  let overdueCents = 0;
+  const items: PartyOpenItem[] = rows.map((row) => {
+    if (!isAgingBucket(row.bucket)) {
+      throw new Error(`Unknown aging bucket "${row.bucket}" on document ${row.id}`);
+    }
+    if (!isOpenItemKind(row.document_kind)) {
+      throw new Error(`Unknown open item kind "${row.document_kind}" on document ${row.id}`);
+    }
+    const baseOutstandingCents = parseCents(row.outstanding_cents);
+    outstandingCents += baseOutstandingCents;
+    if (row.bucket !== 'CURRENT') overdueCents += baseOutstandingCents;
+    return {
+      documentKind: row.document_kind,
+      documentId: row.id,
+      documentNumber: row.document_number,
+      documentDate: row.document_date,
+      dueDate: row.due_date,
+      currencyCode: row.currency_code,
+      totalCents: parseCents(row.total_cents),
+      baseTotalCents: parseCents(row.base_total_cents),
+      baseOutstandingCents,
+      daysOverdue: Number(row.days_overdue),
+      bucket: row.bucket,
+    };
+  });
+
+  return { outstandingCents, overdueCents, items };
+}
+
 /**
  * The party's open documents. The same bucketing as
  * `agingService.buildOpenDocsCte`, plus the party predicate — copied rather
@@ -428,33 +470,7 @@ async function openItems(
     [orgId, on, partyId],
   );
 
-  let outstandingCents = 0;
-  let overdueCents = 0;
-  const items: PartyOpenItem[] = rows.map((row) => {
-    if (!isAgingBucket(row.bucket)) {
-      throw new Error(`Unknown aging bucket "${row.bucket}" on document ${row.id}`);
-    }
-    if (!isOpenItemKind(row.document_kind)) {
-      throw new Error(`Unknown open item kind "${row.document_kind}" on document ${row.id}`);
-    }
-    const baseOutstandingCents = parseCents(row.outstanding_cents);
-    outstandingCents += baseOutstandingCents;
-    if (row.bucket !== 'CURRENT') overdueCents += baseOutstandingCents;
-    return {
-      documentKind: row.document_kind,
-      documentId: row.id,
-      documentNumber: row.document_number,
-      documentDate: row.document_date,
-      dueDate: row.due_date,
-      currencyCode: row.currency_code,
-      totalCents: parseCents(row.total_cents),
-      baseTotalCents: parseCents(row.base_total_cents),
-      baseOutstandingCents,
-      daysOverdue: Number(row.days_overdue),
-      bucket: row.bucket,
-    };
-  });
-
+  const { outstandingCents, overdueCents, items } = summarizeOpenItems(rows);
   return { party, asOf: on, outstandingCents, overdueCents, items };
 }
 
@@ -488,4 +504,170 @@ export async function vendorOpenItems(
   asOf: string | null,
 ): Promise<PartyOpenItems> {
   return openItems(orgId, vendorId, 'VENDOR', asOf);
+}
+
+// ---------------------------------------------------------------- Phase 39 — as-at open items
+
+/**
+ * `open_docs` as they stood on `$2` — the statement's definition of "open".
+ *
+ * `openItems` above answers "what is open now" and uses `asOf` only to age
+ * the documents. A statement dated in the past needs the documents and their
+ * settlement as of that date, so this CTE:
+ *   - takes a document only if its journal entry is dated on or before `$2`
+ *     and it had no void journal entry by then (status-free: a document
+ *     voided after the date was still open on it);
+ *   - subtracts only the payment/note allocations in force on `$2`
+ *     (`settledAsOfCentsSubquery`).
+ * Every date compared is a journal entry's `entry_date` (or a note
+ * allocation's own date — it posts no entry), the same date `ledger()`
+ * filters on, so Σ outstanding here = `ledger({to: $2}).closingBalanceCents`.
+ *
+ * `$1` org, `$2` asOf; with `partyFilter`, `$3` the party.
+ */
+function buildAsOfOpenDocsCte(config: PartyConfig, partyFilter: boolean): string {
+  const docParty = partyFilter ? `AND d.${config.partyColumn} = $3` : '';
+  const noteParty = partyFilter ? `AND n.${config.partyColumn} = $3` : '';
+  return `open_docs AS (
+     SELECT '${config.docKind}'::text AS document_kind,
+            d.${config.partyColumn}  AS party_id,
+            d.id,
+            d.${config.numberColumn} AS document_number,
+            d.${config.dateColumn}   AS document_date,
+            d.due_date,
+            d.currency_code,
+            d.total_cents::text      AS total_cents,
+            d.base_total_cents::text AS base_total_cents,
+            (d.base_total_cents - ${settledAsOfCentsSubquery('d', config.allocationColumn, 'base_amount_cents', '$2')}::bigint) AS outstanding_cents,
+            GREATEST(0, $2::date - d.due_date) AS days_overdue,
+            CASE
+              WHEN d.due_date >= $2::date THEN 'CURRENT'
+              WHEN d.due_date >  $2::date - INTERVAL '30 days' THEN 'D1_30'
+              WHEN d.due_date >  $2::date - INTERVAL '60 days' THEN 'D31_60'
+              WHEN d.due_date >  $2::date - INTERVAL '90 days' THEN 'D61_90'
+              ELSE 'D90_PLUS'
+            END AS bucket
+       FROM ${config.docTable} d
+       JOIN journal_entries ie ON ie.id = d.journal_entry_id AND ie.org_id = d.org_id
+  LEFT JOIN journal_entries ve ON ve.id = d.void_journal_entry_id AND ve.org_id = d.org_id
+      WHERE d.org_id = $1 ${docParty}
+        AND ie.entry_date <= $2::date
+        AND (ve.id IS NULL OR ve.entry_date > $2::date)
+     UNION ALL
+     SELECT '${config.noteKind}'::text,
+            n.${config.partyColumn},
+            n.id,
+            n.${config.noteNumberColumn},
+            n.issue_date,
+            n.issue_date,
+            n.currency_code,
+            n.total_cents::text,
+            n.base_total_cents::text,
+            -(n.base_total_cents - ${noteOwnAppliedAsOfCentsSubquery('n', config.noteSubqueryKind, 'base_amount_cents', '$2')}::bigint),
+            0,
+            'CURRENT'
+       FROM ${config.noteTable} n
+       JOIN journal_entries ne  ON ne.id = n.journal_entry_id AND ne.org_id = n.org_id
+  LEFT JOIN journal_entries nve ON nve.id = n.void_journal_entry_id AND nve.org_id = n.org_id
+      WHERE n.org_id = $1 ${noteParty}
+        AND ne.entry_date <= $2::date
+        AND (nve.id IS NULL OR nve.entry_date > $2::date)
+  )`;
+}
+
+/** One party's open items exactly as they stood on `asOf` (Phase 39 statements). */
+export async function partyOpenItemsAsOf(
+  orgId: string,
+  kind: PartyKind,
+  partyId: string,
+  asOf: string,
+): Promise<PartyOpenItems> {
+  const config = PARTY_CONFIG[kind];
+  const party = await loadParty(orgId, partyId, kind);
+
+  const { rows } = await pool.query<OpenItemRow>(
+    `WITH ${buildAsOfOpenDocsCte(config, true)}
+     SELECT document_kind, id, document_number, document_date, due_date, currency_code, total_cents,
+            base_total_cents, outstanding_cents::text AS outstanding_cents, days_overdue, bucket
+       FROM open_docs
+      WHERE outstanding_cents <> 0
+      ORDER BY due_date ASC, id ASC`,
+    [orgId, asOf, partyId],
+  );
+
+  const { outstandingCents, overdueCents, items } = summarizeOpenItems(rows);
+  return { party, asOf, outstandingCents, overdueCents, items };
+}
+
+export interface PartyBalanceAsOf {
+  partyId: string;
+  name: string;
+  email: string | null;
+  isActive: boolean;
+  outstandingCents: number;
+  overdueCents: number;
+}
+
+interface PartyBalanceRow {
+  id: string;
+  name: string;
+  email: string | null;
+  is_active: boolean;
+  outstanding_cents: string;
+  overdue_cents: string;
+}
+
+/**
+ * Every party's outstanding and overdue balance on `asOf`, in one query —
+ * the statements list. Unlike the aging report it keeps a party whose net
+ * balance is a credit (it is still owed a statement). An inactive party is
+ * listed only while it still has a balance; `includeZero` adds active
+ * parties with nothing open.
+ */
+export async function partyBalancesAsOf(
+  orgId: string,
+  kind: PartyKind,
+  options: { asOf: string; q: string | null; includeZero: boolean },
+): Promise<PartyBalanceAsOf[]> {
+  const config = PARTY_CONFIG[kind];
+  const { rows } = await pool.query<PartyBalanceRow>(
+    `WITH ${buildAsOfOpenDocsCte(config, false)},
+     balances AS (
+       SELECT party_id,
+              SUM(outstanding_cents)                                    AS outstanding_cents,
+              COALESCE(SUM(outstanding_cents) FILTER (WHERE bucket <> 'CURRENT'), 0) AS overdue_cents
+         FROM open_docs
+        WHERE outstanding_cents <> 0
+        GROUP BY party_id
+     )
+     SELECT p.id, p.name, p.email, p.is_active,
+            COALESCE(b.outstanding_cents, 0)::text AS outstanding_cents,
+            COALESCE(b.overdue_cents, 0)::text     AS overdue_cents
+       FROM ${config.partyTable} p
+  LEFT JOIN balances b ON b.party_id = p.id
+      WHERE p.org_id = $1
+        AND ($3::text IS NULL OR p.name ILIKE '%' || $3 || '%')
+        AND (COALESCE(b.outstanding_cents, 0) <> 0 OR ($4::boolean AND p.is_active))
+      ORDER BY p.name ASC, p.id ASC`,
+    [orgId, options.asOf, options.q, options.includeZero],
+  );
+
+  return rows.map((row) => ({
+    partyId: row.id,
+    name: row.name,
+    email: row.email,
+    isActive: row.is_active,
+    outstandingCents: parseCents(row.outstanding_cents),
+    overdueCents: parseCents(row.overdue_cents),
+  }));
+}
+
+/** The party ledger for a statement: unpaginated (Phase 39). */
+export async function partyLedgerForStatement(
+  orgId: string,
+  kind: PartyKind,
+  partyId: string,
+  range: { from: string | null; to: string | null },
+): Promise<PartyLedger> {
+  return ledger(orgId, partyId, kind, { page: 1, limit: null, from: range.from, to: range.to });
 }

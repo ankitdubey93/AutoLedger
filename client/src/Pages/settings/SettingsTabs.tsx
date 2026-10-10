@@ -6,6 +6,7 @@ import {
   Landmark,
   ListTree,
   Receipt,
+  ScrollText,
 } from 'lucide-react';
 import TabBar from '../../components/ui/TabBar';
 
@@ -28,6 +29,7 @@ export default function SettingsTabs() {
         },
         { id: 'invoicing', label: 'Invoicing', icon: Receipt, to: '/settings/invoicing' },
         { id: 'invoice-template', label: 'Invoice template', icon: FileText, to: '/settings/invoice-template' },
+        { id: 'statement-template', label: 'Statement template', icon: ScrollText, to: '/settings/statement-template' },
         { id: 'payment-terms', label: 'Payment terms', icon: FileStack, to: '/settings/payment-terms' },
       ]}
     />
