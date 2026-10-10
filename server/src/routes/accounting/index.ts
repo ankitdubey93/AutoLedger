@@ -11,6 +11,8 @@ import settingsRoutes from './settingsRoutes.js';
 import statementRoutes from './statementRoutes.js';
 import statementSendRoutes from './statementSendRoutes.js';
 import publicStatementRoutes from './publicStatementRoutes.js';
+import publicQuoteRoutes from './publicQuoteRoutes.js';
+import { buildQuoteRouter } from './quoteRoutes.js';
 import stripeWebhookRoutes from './stripeWebhookRoutes.js';
 import onlinePaymentRoutes from './onlinePaymentRoutes.js';
 import creditNoteRoutes from './creditNoteRoutes.js';
@@ -46,6 +48,9 @@ router.use('/fiscal-periods', fiscalPeriodRoutes);
 router.use('/fx-rates', fxRateRoutes);
 router.use('/fx-revaluations', fxRevaluationRoutes);
 router.use('/invoices', invoiceRoutes);
+// Phase 41 — quotes, one router per direction.
+router.use('/quotes', buildQuoteRouter('SALES'));
+router.use('/purchase-quotes', buildQuoteRouter('PURCHASE'));
 router.use('/items', itemRoutes);
 router.use('/journals', journalRoutes);
 router.use('/migration-imports', migrationImportRoutes);
@@ -58,6 +63,8 @@ router.use('/statements', statementRoutes);
 router.use('/statement-sends', statementSendRoutes);
 // Phase 39b — unauthenticated, token-scoped. See publicStatementRoutes.ts.
 router.use('/public/statements', publicStatementRoutes);
+// Phase 41 — unauthenticated, token-scoped. See publicQuoteRoutes.ts.
+router.use('/public/quotes', publicQuoteRoutes);
 router.use('/public/stripe', stripeWebhookRoutes);
 router.use('/online-payments', onlinePaymentRoutes);
 router.use('/vendors', vendorRoutes);

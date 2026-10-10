@@ -2,7 +2,8 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
+import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { computeLineTotals, type LineTotal as DocumentLineTotal } from '../../utils/documentTotals.js';
 import { convertToBase } from '../../utils/fxRate.js';
 import * as journalService from './journalService.js';
 import * as invoiceService from './invoiceService.js';
@@ -380,20 +381,7 @@ export async function listCreditNotes(
 
 // --------------------------------------------------------------------- writes
 
-interface LineTotal {
-  input: CreditNoteLineInput;
-  netCents: number;
-  taxCents: number;
-}
-
-/** Per-line tax, then summed — the same rounding discipline as invoices. */
-function computeLineTotals(lines: CreditNoteLineInput[]): LineTotal[] {
-  return lines.map((line) => {
-    const netCents = scaleCents(cents(line.unitPriceCents), line.quantityMilli, 1000);
-    const taxCents = scaleCents(netCents, line.taxRateBp, 10000);
-    return { input: line, netCents, taxCents };
-  });
-}
+type LineTotal = DocumentLineTotal<CreditNoteLineInput>;
 
 function totalsOf(totals: LineTotal[]): { subtotalCents: number; taxCents: number; totalCents: number } {
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));

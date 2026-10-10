@@ -1184,7 +1184,7 @@ Not a numbered phase — an audit of what an evaluator sees first, then fixes in
 
 **Tests.** 1726 server tests passing (2 skipped — the gated live-provider cases), up from 1708, in a clean full run; `reclassConcurrency.test.ts` failed once in one other full run and passed in every isolated run — the flake Phase 35a already recorded. 479 client tests passing, up from 451. Lint and typecheck clean in both packages.
 
-**Deliberately not done (still open from the audit):** email verification, and delivering the reset link by email (a mail transport, as a queued job); server-side sorting for the other paginated lists (journals, payments, notes, bank lines — they keep their fixed newest-first order); and every missing Xero-standard feature the audit listed (tax rates/returns, multi-user invites — delivered in [Phase 37](#phase-37-as-delivered) — cash-flow statement, report export, quotes, purchase orders, PDF/email).
+**Deliberately not done (still open from the audit):** email verification, and delivering the reset link by email (a mail transport, as a queued job); server-side sorting for the other paginated lists (journals, payments, notes, bank lines — they keep their fixed newest-first order); and every missing Xero-standard feature the audit listed (tax rates/returns, multi-user invites — delivered in [Phase 37](#phase-37-as-delivered) — cash-flow statement, report export, quotes — delivered in [Phase 41](#phase-41-as-delivered) — purchase orders, PDF/email).
 
 **Study notes:** new [docker-images-and-ci.md](../study/tooling/docker-images-and-ci.md) (the owed multi-stage note); extended [deterministic-demo-fixtures.md](../study/architecture/deterministic-demo-fixtures.md) (one replay, two consumers).
 
@@ -1530,6 +1530,46 @@ The user-facing rules are in [accounting.md § Phase 40](accounting.md#phase-40-
 **Deliberately not built:** localized month names (no organization locale setting exists to drive them); placeholders in the stored-but-never-rendered invoice-settings `paymentTerms`; editing a schedule's text in place; template columns on credit/debit notes (they never recur); a picker on the bank-transactions inline "post journal" field (the server fills it anyway).
 
 **Study notes:** extended [user-authored-templates-and-bearer-links.md](../study/security-auth/user-authored-templates-and-bearer-links.md) (registry, one-pass alternation, partial/final, runtime alias vs migration, ICU drift, ISO weeks, parity fixture), [document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md) (child rows before the parent's flip; template columns) and [accessible-dialogs-and-focus.md](../study/react/accessible-dialogs-and-focus.md) (caret insertion through a menu).
+
+## Phase 41, as delivered
+
+A direct feature request (2026-10-10), numbered like 24/30/32/34/39/40: **quotes** — "creating quotes and giving the customers the expected price … customers receive the quote, and from the link get a page where they can accept or decline … a workflow for quotes which can be converted into bills", built to GAAP/IFRS. Decisions taken with the user:
+- **both directions in one model** — sales quotes (→ invoice) and purchase quotes (→ bill), one `quotes` table with a `direction`;
+- **acceptance = typed full name + an "I accept" tick**, recorded with time, IP, user agent and a hash of the content shown; decline takes an optional reason;
+- **conversion is manual** — staff click Convert on an accepted quote and get a **draft** invoice/bill to review.
+
+The accounting position and user-facing rules are in [accounting.md § Phase 41](accounting.md#phase-41--quotes-sales-and-purchase--shipped).
+
+**Step 1 — behaviour-preserving refactors (before any quote code).**
+- `utils/documentTotals.ts` (`computeLineTotals`, `sumDocumentTotals`) replaces four identical private copies in the invoice, bill, credit-note and debit-note services, so a quote rounds exactly like the invoice it becomes.
+- `fxRateService.documentRateOnClient` replaces the two private `resolveDocumentFxRate` copies.
+- `invoiceSettingsService`: Phase 26's `NOTE_COUNTER` generalised to `SERIES_COUNTER` (+ `SALES_QUOTE`, `PURCHASE_QUOTE`); `allocateQuoteNumber`; `getQuoteDefaultsOnClient`.
+- `publicStatementService.addressLines` exported for the quote page. The full suite passed unchanged after this step.
+
+**Migration `089`** — `quotes`, `quote_lines`, `quote_links`, `quote_responses`; quote counters/defaults on `ledger_invoice_settings`; `source_quote_id`/`source_quote_direction` on `invoices` and `bills` (direction-pinned composite FK + convert-once partial unique); `reject_sent_quote_mutation()` (DRAFT may only become SENT; afterwards only `QUOTE_TRANSITIONS`, and only the status/event columns may change); insert-only responses; `quote_sent`/`quote_responded` in the outbox CHECK; `quote_responded` in a now-named notification-preference CHECK. Detail: [schema.md § Phase 41](schema.md#phase-41--quotes-sales-and-purchase-accounting--applied).
+
+**Server.**
+- `types/accounting.ts` — `QUOTE_STATUSES`, `QUOTE_TRANSITIONS`, `canTransitionQuote`, `effectiveQuoteStatus` (a SENT quote past `valid_until` reads EXPIRED), `Quote`/`PublicQuoteView`; `Invoice`/`Bill` gain `sourceQuote`.
+- `quoteService` — CRUD (account type checked per direction, early stock-line checks, party snapshot, indicative FX); `sendQuote` (lock chain → number → re-snapshot → content hash → supersede predecessor → freeze; optional email with a hashed, single-live link); `reviseQuote`; `voidQuote`; `recordResponse` (internal channel, finalizing a draft first); `respondOnClient` (shared with the public link: status + date + hash check under `FOR UPDATE`, insert-only evidence, transition, outbox event, sender notification); `convertQuote` (draft invoice/bill via `createInvoiceOnClient`/`createBillOnClient` with `sourceQuoteId`; due date from request → payment term → `default_due_days`; bill reference from request → party reference → quote number); `expireQuotesForOrg`.
+- `quoteStatusService` — the single writer of post-send statuses, also used by `invoiceService.deleteInvoice` / `billService.deleteBill` to return a converted quote to ACCEPTED (a separate module to avoid an import cycle).
+- `publicQuoteService` — `resolveLiveQuoteLink` (the module's only org-less query), the public projection, logo, accept/decline.
+- Routes: `buildQuoteRouter('SALES' | 'PURCHASE')` at `/quotes` and `/purchase-quotes`; public `/public/quotes/:token` (rate-limited, `no-store`). Eight permission keys (`quotes.*`, `purchase_quotes.*`; convert requires `invoices.edit` / `bills.edit`).
+- Email templates `quote_sent` (sales vs purchase wording) and `quote_responded`; `notifyQuoteRespondedOnClient`; webhook events `quote.sent/accepted/declined/converted`; attachments entity type `quote`.
+- Worker: `quote-expiry-sweep` every hour (per org, `FOR UPDATE SKIP LOCKED`). Correctness never depends on it — reads derive EXPIRED and accept re-checks the date.
+
+**Client.**
+- `Pages/sales/quotes/` — `quoteKinds.ts` (the credit/debit-note kind-config pattern), `QuoteListPage` (effective-status tabs), `QuoteFormPage` (party, dates, currency, payment term, catalogue items, per-line accounts and tax, notes, terms; a revision's party is locked), `QuoteDetailPage` (actions from status and `useCan()`: send/email again, record acceptance/decline, revise, void, convert, delete, print; acceptance evidence panel; link history with revoke; revision list; attachments), `QuoteDocument` (hook-free, shared with the public page). Thin wrappers in `Pages/sales/` and `Pages/purchases/`.
+- `Pages/public/PublicQuotePage.tsx` at `/quote/:token` — the frozen quote; Accept (full name + tick, button disabled until both) or Decline (optional reason); accepted/declined/expired banners.
+- Sidebar (Sales → Quotes, Purchases → Purchase quotes), Create menu, "From quote …" on invoice and expense pages, a "Quotes accepted or declined" notification preference.
+
+**Tests.**
+- Server: `accounting/quoteConstraints.test.ts` (14 — every CHECK, the frozen row and lines, insert-only evidence, convert-once, direction-safe and tenant-local back-links, and the **8×8 trigger/FSM parity walk**, which found the DRAFT → ACCEPTED gap while building), `accounting/quotes.test.ts` (29 — drafts, gapless numbering, immutability, email + hashed link, re-send, revisions and supersede, internal responses, expiry on read and by sweep, void, conversion to invoice and bill with **no ledger rows at any stage**, FX resolved at the invoice's own date, convert-once and delete-reverts, viewer permissions, cross-tenant isolation), `accounting/quotePublicLink.test.ts` (10 — anonymous view, indistinguishable 404s, old link dead after a revision, evidence capture, terms/name/hash/expiry refusals, decline, a concurrent accept-vs-decline race, isolation), `quoteDocuments.test.ts` (7 — shared totals, FSM helpers, both emails incl. escaping). `email.test.ts` expectation updated for the new preference.
+- Client: `quotes.test.tsx` (9 — public accept gating and payload, decline, expired and invalid links, register, permission-hidden "New", detail evidence and conversion for both directions, draft send).
+- **2104 server tests passing (2 skipped) + 616 client tests passing**, up from 2044/607 at Phase 40, in full clean runs; typecheck and lint clean in both packages.
+
+**Deliberately not built:** partial conversion (several invoices from one quote), sales and purchase orders, deposits/prepayments on acceptance, a qualified electronic signature or signer email verification, PDF output (print from the browser), editable quote email templates, a settings UI for the quote prefixes, default validity and default terms (columns and server defaults exist), organization-timezone expiry (UTC today, like every document), auto-conversion on acceptance (declined by the user).
+
+**Study notes:** new [quotes-acceptance-evidence-and-revisions.md](../study/architecture/quotes-acceptance-evidence-and-revisions.md); extended [document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md) (trigger/FSM parity test, revision chains) and [gapless-numbering-and-counters.md](../study/postgresql/gapless-numbering-and-counters.md) (allocate at send, inherit on revision).
 
 ## Cross-cutting infrastructure
 

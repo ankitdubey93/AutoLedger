@@ -315,7 +315,7 @@ Platform-level, not namespaced under any app slug — any app may emit into the 
 }
 ```
 
-`eventTypes` — one to twenty of: `invoice.issued`, `bill.approved`, `payment.recorded`, `fiscal_period.closed`, `bank.large_unmatched`, `fx.revaluation_posted`.
+`eventTypes` — one to twenty of: `invoice.issued`, `bill.approved`, `payment.recorded`, `fiscal_period.closed`, `bank.large_unmatched`, `fx.revaluation_posted`, `quote.sent`, `quote.accepted`, `quote.declined`, `quote.converted` (Phase 41).
 
 `201` response:
 
@@ -691,6 +691,50 @@ Every note carries `lines`, `allocations: [{ id, invoiceId|billId, invoiceNumber
 Failure paths (credit-note wording; the debit-note messages say *debit note*, *bill*, *vendor*, "approved bill" and "debited"): `400` from the schema · `400 status must be one of DRAFT, ISSUED, VOID` · `404 Credit note not found` (also another org's) · `422 Invoice not found` (also another org's) · `422 Only an issued invoice can be credited` · `422 A credit note cannot be dated before its invoice` · `422 A credit note total must be greater than zero` · `422 Credit notes against this invoice would exceed the invoice total` · `422 A foreign-currency credit note cannot exceed the amount still due on its invoice` · `422 A draft credit note cannot be moved to a different invoice` · `409 Only a draft credit note can be edited` / `…deleted` · `409 A credit note that is <status> cannot be issued` · `422 A credit note needs at least one line before it can be issued` · `409 This credit note has already been voided` · `409 Only an issued credit note can be applied` · `422 A foreign-currency credit note can only be applied to its original invoice` · `422 That invoice belongs to a different customer` · `422 Only an issued invoice can have credit applied` · `422 A credit note can only be applied to an invoice in the same currency` · `422 A credit cannot be applied before the credit note or the invoice is dated` · `422 Amount exceeds the credit still available on this credit note` · `422 Amount exceeds the amount still due on this invoice` · `422 … is locked` / `… is closed` (the fiscal-period guard, issue/void) · `403` for a `VIEWER` write.
 
 **Not built:** cash refunds of unapplied credit, bad-debt write-offs, outbox events/webhooks for notes, PDF/email of notes, a settings UI for the `CN-`/`DN-` prefixes.
+
+#### Quotes — `/api/v1/quotes` (sales) · `/api/v1/purchase-quotes` (purchase) — Phase 41
+
+The same resource in two directions, built by one router factory. The direction comes from the path, never the body: a sales quote id is a `404` on `/purchase-quotes` and vice versa.
+
+| Method | Path | Permission (sales · purchase) | Description |
+|---|---|---|---|
+| GET | `/` | `quotes.view` · `purchase_quotes.view` | Paginated summaries — `{ success, count, totalCount, currentPage, totalPages, quotes }` |
+| GET | `/:id` | `…view` | One quote with `lines`, `revisions`, `links`, `response`, `convertedDocument` — `{ success, quote }` |
+| POST | `/` | `…edit` | Create a **DRAFT** — `201` |
+| PATCH | `/:id` | `…edit` | Replace a **draft**'s fields and lines |
+| DELETE | `/:id` | `…edit` | Delete a **draft** — `204` |
+| POST | `/:id/revise` | `…edit` | New DRAFT revision of a SENT/DECLINED/EXPIRED quote (same number, `revision + 1`) — `201` |
+| POST | `/:id/send` | `…send` | Finalize a DRAFT (number, snapshot, content hash, freeze) and/or email the review link |
+| POST | `/:id/accept` | `…send` | Record an acceptance received another way (`channel: INTERNAL`); finalizes a DRAFT first |
+| POST | `/:id/decline` | `…send` | Record a decline received another way |
+| POST | `/:id/void` | `…send` | Withdraw a SENT or ACCEPTED quote; revokes its live link |
+| POST | `/:id/links/:linkId/revoke` | `…send` | Revoke a live review link |
+| POST | `/:id/convert` | `quotes.convert` (needs `invoices.edit`) · `purchase_quotes.convert` (needs `bills.edit`) | ACCEPTED → a **DRAFT** invoice / bill — `201 { document: { kind: 'INVOICE' \| 'BILL', id } }` |
+
+**Nothing here posts to the ledger.** A quote is an offer; under IFRS 15 / ASC 606 a contract exists only on acceptance, and revenue/expense is recognised by the invoice/bill it becomes, when that is issued/approved. Conversion creates a draft through `invoiceService.createInvoiceOnClient` / `billService.createBillOnClient` on the same transaction.
+
+**`POST /`** — `partyId` (customer for sales, vendor for purchase; active, same org), `quoteDate`, `validUntil` (optional; default `quoteDate` + `default_quote_validity_days`, 30), `currencyCode` (optional; base), `partyReference` (≤ 100 — the customer's RFQ/PO number or the vendor's own quote number), `title` (≤ 200), `notes` (≤ 1000), `terms` (≤ 5000; omitted = `default_quote_terms`), `paymentTerms`, `paymentTermsCode` (must exist and be active), `lines` (1–200; each `description`, `quantityMilli`, `unitPriceCents`, `accountId` — a postable **Revenue** account on a sales quote, **Expense/Asset** on a purchase quote — `taxRateBp`, `itemId`). Totals use the shared per-line rounding (`utils/documentTotals.ts`), so a quote's total equals the invoice it becomes. A foreign-currency quote stores `indicativeFxRate` / `indicativeBaseTotalCents` when a rate exists on the quote date — **indicative only**, never frozen.
+
+**`POST /:id/send`** — `{ delivery: 'EMAIL' | 'MANUAL', toEmail, message }`. On a DRAFT: refuses (`422`) a quote already past `validUntil`; allocates `QU-000001` / `PQ-000001` (a revision inherits its predecessor's number, so drafts never burn a number); re-snapshots the party; stores `contentSha256` (SHA-256 of the canonical content); supersedes a SENT predecessor and revokes its links; emits `quote.sent`. `EMAIL` also revokes any live link, stores a new token **as its hash only** in `quote_links` (valid through `validUntil` + 30 days, read-only after expiry) and enqueues `quote_sent` with the `/quote/:token` link. On a SENT quote only `EMAIL` is allowed (re-send).
+
+**`POST /:id/convert`** — `{ documentDate?, dueDate?, vendorReference? }`. Due date: the explicit date, else the quote's payment term, else `default_due_days`. Purchase: `vendorReference` defaults to the quote's `partyReference`, else its number. The new document carries `sourceQuote: { id, quoteNumber, revision }`. Once only (`ux_invoices_source_quote` / `ux_bills_source_quote`, even after a void). **Deleting** that draft returns the quote to ACCEPTED; voiding an issued one does not.
+
+Status filter on `GET /`: `status` is the **effective** status — `SENT` excludes, and `EXPIRED` includes, sent quotes past `validUntil`. With no filter, SUPERSEDED versions are omitted. Also `partyId`, `from`/`to` (quote date), `q` (number, party, title, reference), `sort` (`quoteDate`, `validUntil`, `number`, `party`, `total`, `status`) and `dir`.
+
+Failure paths: `400` from the schema · `404 Quote not found` (also another org's, or the other direction) · `422 Customer not found` / `Vendor not found` · `422 Account … is not a Revenue account` / `must be an Expense or Asset account` · `422 A revision keeps the party of the quote it revises` · `409 Only a draft quote can be edited — create a revision instead` · `409 Only a draft quote can be deleted — void it instead` · `422 This quote’s validity date has passed — change it before sending` · `409 This quote has already been sent` (MANUAL on a SENT quote) · `409 This quote has expired — create a revision to send it again` · `409 A draft revision of this quote already exists` · `409 An accepted quote cannot be revised — void it and create a new quote` · `409 Revision n was accepted while this revision was drafted …` · `409 This quote is no longer open for a response` · `409 This quote has expired and can no longer be accepted or declined` · `409 Only an accepted quote can be converted` · `409 This quote has already been converted` · `409 A bill with this vendor reference already exists …` · `403` without the permission.
+
+**Public review link — `/api/v1/public/quotes/:token`** (no `authenticate`; `publicLinkLimiter`; `Cache-Control: no-store`). An unknown, revoked or expired token is one `404 This quote link is not valid or has expired`.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/public/quotes/:token` | `{ quote: { merchant: {name, addressLines, hasLogo}, direction, quoteNumber, revision, effectiveStatus, canRespond, partyName, partyAddress, partyTaxNumber, partyReference, quoteDate, validUntil, currencyCode, title, notes, terms, paymentTerms, lines[{lineNumber, description, quantityMilli, unitPriceCents, taxRateBp, netCents, taxCents}], subtotalCents, taxCents, totalCents, contentSha256, response: {response, signerName, respondedAt} \| null } }`. No ids, accounts or evidence detail. Stamps `last_viewed_at` |
+| GET | `/public/quotes/:token/logo` | The org logo (PNG/JPEG/GIF/WebP only), or 404 |
+| POST | `/public/quotes/:token/accept` | `{ signerName (1–200), signerEmail?, acceptTerms: true, contentSha256 }`. Writes insert-only evidence (name, email, terms, IP, user agent, the hash) and moves SENT → ACCEPTED; emits `quote.accepted`; emails the sender (`quote_responded`). `400` without `acceptTerms: true` or a name · `409` if the hash no longer matches, the quote expired, or it was already answered |
+| POST | `/public/quotes/:token/decline` | `{ reason? (≤ 1000) }`. SENT → DECLINED; emits `quote.declined` |
+
+Webhook events: `quote.sent`, `quote.accepted`, `quote.declined`, `quote.converted` (payload: `quoteId`, `direction`, `quoteNumber`, and per event `revision`/`totalCents`/`currencyCode`, `channel`, or `documentKind`/`documentId`).
+
+**Not built:** partial conversion (several invoices from one quote), sales/purchase orders, deposits, a qualified electronic signature (acceptance is a typed name + ticked terms + evidence), PDF output (print from the browser), editable quote email templates, a settings UI for the `QU-`/`PQ-` prefixes, default validity and default terms (the columns exist).
 
 #### Products & Services (items) — `/api/v1/items` — Phase 24, extended in Phase 32
 

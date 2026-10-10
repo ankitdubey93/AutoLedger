@@ -531,6 +531,29 @@ Xero-style placeholders: write `Rent for [Month] [Year]` once and every document
 
 **Not built:** localized month names (there is no organization locale setting to choose them by); placeholders in the invoice-settings `paymentTerms` field (stored but never rendered); editing a schedule's text without editing its source document. A Bill-inbox bill approved later by hand is filled like a typed one — only the inbox's own auto-post skips filling.
 
+### Phase 41 — quotes (sales and purchase) ✅ shipped
+
+An offer before the document that bills it: a **sales quote** to a customer becomes an invoice; a **purchase quote** (a vendor's prices, recorded, or a price-confirmation request we send them) becomes an expense (bill).
+
+**The accounting position (GAAP / IFRS).**
+- **A quote posts nothing.** It is not a transaction, so it never touches the general ledger, stock, or a frozen FX rate. Under IFRS 15 / ASC 606 step 1, a contract exists only once both sides have approved it — acceptance — and even then revenue is recognised when the performance obligation is satisfied, which this product records with the **invoice** (or, for purchases, the expense on the **bill**). So conversion creates a **draft** invoice/bill, and the journal entry is posted only when that document is issued/approved, through the existing posting code.
+- **Foreign currency is indicative.** A quote may show an approximate base-currency total at the rate on its date (IAS 21 / ASC 830 measure a transaction at the rate on the *transaction* date, and the quote is not the transaction). The invoice/bill resolves and freezes its own rate on its own date — tested.
+- **What was offered cannot change silently.** Once sent, the quote is frozen in the database (trigger), its party details are snapshotted, and its content is hashed. A change is a numbered **revision** (QU-000012 rev 2) that supersedes the sent one; the history stays.
+- **Evidence of acceptance** is insert-only: the signer's typed name, their tick on the terms, time, IP, browser, and the hash of exactly what they saw. One response per quote, decided by a unique constraint. This is good commercial evidence of agreement; it is not a qualified electronic signature.
+- **Numbering** is gapless per direction (`QU-`, `PQ-`), allocated at first send, so a deleted draft burns no number.
+
+**Lifecycle** (`QUOTE_TRANSITIONS`): DRAFT → SENT → ACCEPTED → CONVERTED, with SENT → DECLINED / EXPIRED / VOID / SUPERSEDED and ACCEPTED → VOID. CONVERTED → ACCEPTED happens only when the draft invoice/bill is *deleted* (voiding an issued one leaves the quote converted — convert once). A sent quote past its validity reads EXPIRED at once and cannot be accepted; an hourly worker sweep records it.
+
+- [x] Sales and purchase quotes in one table (`direction`), one set of pages, one router factory; separate permissions (`quotes.*`, `purchase_quotes.*`)
+- [x] Manual creation: party, dates, currency, catalogue items, revenue (sales) or expense/asset (purchase) accounts, per-line tax, payment term, notes, terms
+- [x] Send by email (hashed, revocable, one-live-link review URL) or mark as sent for print; record an answer received another way
+- [x] Public page `/quote/:token`: read the frozen quote, accept (full name + accept-terms) or decline (optional reason); the sender is notified
+- [x] Revisions with supersede; void with a reason; attachments (e.g. the vendor's PDF quote)
+- [x] Manual conversion to a linked DRAFT invoice/bill; nothing posted until issue/approve; back-link shown on the invoice/expense
+- [x] Database-enforced immutability, FSM parity, convert-once and direction-safe back-links; cross-tenant isolation tested
+
+Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-41--quotes-sales-and-purchase-accounting--applied).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.
@@ -545,6 +568,7 @@ Xero-style placeholders: write `Rent for [Month] [Year]` once and every document
   - emailed statements with user-editable templates and a revocable public link;
   - Stripe card payment from that link, recorded as an ordinary receipt.
   - Not built within it: aging on as-at settlement, per-currency statements, PDF attachments, Stripe Connect, refunds, partial invoice payment, a sweep for PENDING intents, scheduled statement runs — see [Phase 39, as delivered](roadmap.md#phase-39-as-delivered).
+- **Quotes are shipped** (Phase 41). Not built within it: partial conversion, sales and purchase orders, deposits/prepayments on acceptance, a qualified e-signature, PDF output, editable quote emails, a settings UI for quote prefixes/default validity/default terms, organization-timezone expiry (UTC today, like every document) — see [Phase 41, as delivered](roadmap.md#phase-41-as-delivered).
 - **Payment terms, item catalogue and party import are shipped** (Phase 24). Not built within it: discount/end-of-month terms ("2/10 Net 30" — net-days only; a discount needs a second term kind and a GL posting), any inventory mechanic on `items` *within Phase 24* (on-hand quantity, stock movement and COGS posting arrived in Phase 32 — see the Phase 32 section above; item-level reporting is still not built), an importer for anything other than customers and vendors (no contacts, no products, no opening AR/AP balances via this path). The UI-only "Expense" label is a deliberate half-measure, not a gap: the schema, API, types and every test still say `bills` — see [Phase 24, as delivered](roadmap.md#phase-24-as-delivered).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

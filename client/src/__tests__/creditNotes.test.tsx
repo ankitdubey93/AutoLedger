@@ -88,6 +88,7 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
     creditedCents: 0,
     amountDueCents: 1200000,
     settlementStatus: 'UNPAID',
+    sourceQuote: null,
     ...overrides,
   };
 }

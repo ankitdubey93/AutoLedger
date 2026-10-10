@@ -304,7 +304,7 @@ export function confirmEmailChange(token: string): Promise<{ success: boolean }>
   return apiFetch('/auth/confirm-email-change', { method: 'POST', body: JSON.stringify({ token }) }, NO_AUTO_REFRESH);
 }
 
-export type NotificationEvent = 'bill_awaiting_approval' | 'invitation_accepted';
+export type NotificationEvent = 'bill_awaiting_approval' | 'invitation_accepted' | 'quote_responded';
 
 export interface NotificationPreference {
   event: NotificationEvent;
@@ -1353,6 +1353,8 @@ export interface Invoice {
   creditedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
+  /** Phase 41 — the accepted quote this invoice was converted from, if any. */
+  sourceQuote: SourceQuoteRef | null;
 }
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
@@ -2206,6 +2208,8 @@ export interface Bill {
   debitedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
+  /** Phase 41 — the accepted purchase quote this bill was converted from, if any. */
+  sourceQuote: SourceQuoteRef | null;
 }
 
 export type BillSortKey = 'billDate' | 'dueDate' | 'reference' | 'vendor' | 'total' | 'status';
@@ -5447,4 +5451,310 @@ export function buildStockLabels(
   targets: { kind: StockLabelKind; id: string; copies: number }[],
 ): Promise<{ success: boolean; count: number; labels: StockLabel[] }> {
   return apiFetch('/inventory/labels', { method: 'POST', body: JSON.stringify({ targets }) });
+}
+
+/* ------------------------------------------------------- quotes (Phase 41) */
+
+export type QuoteDirection = 'SALES' | 'PURCHASE';
+
+export const QUOTE_STATUSES = [
+  'DRAFT',
+  'SENT',
+  'ACCEPTED',
+  'DECLINED',
+  'EXPIRED',
+  'VOID',
+  'SUPERSEDED',
+  'CONVERTED',
+] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export interface SourceQuoteRef {
+  id: string;
+  quoteNumber: string;
+  revision: number;
+}
+
+export interface QuoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+  itemId: string | null;
+}
+
+export interface QuoteResponse {
+  response: 'ACCEPTED' | 'DECLINED';
+  channel: 'PUBLIC_LINK' | 'INTERNAL';
+  signerName: string | null;
+  signerEmail: string | null;
+  termsAccepted: boolean;
+  declineReason: string | null;
+  clientIp: string | null;
+  userAgent: string | null;
+  recordedBy: string | null;
+  recordedByName: string | null;
+  note: string | null;
+  quoteContentSha256: string;
+  respondedAt: string;
+}
+
+export interface QuoteLinkSummary {
+  id: string;
+  toEmail: string;
+  sentBy: string;
+  sentByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+  live: boolean;
+}
+
+export interface QuoteSummary {
+  id: string;
+  direction: QuoteDirection;
+  quoteNumber: string | null;
+  revision: number;
+  status: QuoteStatus;
+  /** A SENT quote past its validity reads EXPIRED before the sweep persists it. */
+  effectiveStatus: QuoteStatus;
+  partyId: string;
+  partyName: string;
+  quoteDate: string;
+  validUntil: string;
+  currencyCode: string;
+  title: string | null;
+  totalCents: number;
+  createdAt: string;
+}
+
+export interface Quote extends QuoteSummary {
+  rootQuoteId: string;
+  supersedesQuoteId: string | null;
+  partyNameSnapshot: string;
+  partyAddressSnapshot: string | null;
+  partyTaxNumberSnapshot: string | null;
+  partyEmailSnapshot: string | null;
+  partyReference: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  /** Indicative only — never frozen; the invoice/bill uses the rate of its own date. */
+  indicativeFxRate: string | null;
+  indicativeBaseTotalCents: number | null;
+  contentSha256: string | null;
+  sentAt: string | null;
+  sentBy: string | null;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  expiredAt: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  supersededAt: string | null;
+  convertedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  updatedAt: string;
+  lines: QuoteLine[];
+  revisions: { id: string; revision: number; status: QuoteStatus }[];
+  links: QuoteLinkSummary[];
+  response: QuoteResponse | null;
+  convertedDocument: { kind: 'INVOICE' | 'BILL'; id: string; number: string | null; status: string } | null;
+}
+
+export interface QuoteInput {
+  partyId: string;
+  quoteDate: string;
+  validUntil?: string;
+  currencyCode?: string;
+  partyReference: string | null;
+  title: string | null;
+  notes: string | null;
+  terms?: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  lines: {
+    description: string;
+    quantityMilli: number;
+    unitPriceCents: number;
+    accountId: string;
+    taxRateBp: number;
+    itemId: string | null;
+  }[];
+}
+
+export type QuoteSortKey = 'quoteDate' | 'validUntil' | 'number' | 'party' | 'total' | 'status';
+
+export interface QuoteFilters {
+  page?: number;
+  limit?: number;
+  status?: QuoteStatus | '';
+  partyId?: string;
+  q?: string;
+  sort?: QuoteSortKey;
+  dir?: 'asc' | 'desc';
+}
+
+/** `/quotes` for sales, `/purchase-quotes` for purchase — the same resource in two directions. */
+function quoteBase(direction: QuoteDirection): string {
+  return direction === 'SALES' ? '/quotes' : '/purchase-quotes';
+}
+
+/** GET /quotes | /purchase-quotes */
+export function listQuotes(
+  direction: QuoteDirection,
+  params: QuoteFilters = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; totalCount: number; currentPage: number; totalPages: number; quotes: QuoteSummary[] }> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.partyId !== undefined && params.partyId !== '') query.set('partyId', params.partyId);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.sort !== undefined) query.set('sort', params.sort);
+  if (params.dir !== undefined) query.set('dir', params.dir);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`${quoteBase(direction)}${suffix}`, { signal: signal ?? null });
+}
+
+export function getQuote(direction: QuoteDirection, id: string, signal?: AbortSignal): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}`, { signal: signal ?? null });
+}
+
+export function createQuote(direction: QuoteDirection, body: QuoteInput): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(quoteBase(direction), { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function updateQuote(direction: QuoteDirection, id: string, body: QuoteInput): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function deleteQuote(direction: QuoteDirection, id: string): Promise<void> {
+  await apiFetch(`${quoteBase(direction)}/${id}`, { method: 'DELETE' });
+}
+
+export function sendQuote(
+  direction: QuoteDirection,
+  id: string,
+  body: { delivery: 'EMAIL' | 'MANUAL'; toEmail: string | null; message: string | null },
+): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/send`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function reviseQuote(direction: QuoteDirection, id: string): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/revise`, { method: 'POST', body: '{}' });
+}
+
+export function recordQuoteAcceptance(
+  direction: QuoteDirection,
+  id: string,
+  body: { signerName: string; note: string | null },
+): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/accept`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function recordQuoteDecline(
+  direction: QuoteDirection,
+  id: string,
+  body: { reason: string | null; note: string | null },
+): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/decline`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function voidQuote(direction: QuoteDirection, id: string, reason: string): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/void`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+
+export function revokeQuoteLink(direction: QuoteDirection, id: string, linkId: string): Promise<{ success: boolean; quote: Quote }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/links/${linkId}/revoke`, { method: 'POST', body: '{}' });
+}
+
+export function convertQuote(
+  direction: QuoteDirection,
+  id: string,
+  body: { documentDate: string | null; dueDate: string | null; vendorReference: string | null },
+): Promise<{ success: boolean; document: { kind: 'INVOICE' | 'BILL'; id: string } }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/convert`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/* ----------------------------------------------- quotes: public link (no session) */
+
+export interface PublicQuoteView {
+  merchant: { name: string; addressLines: string[]; hasLogo: boolean };
+  direction: QuoteDirection;
+  quoteNumber: string;
+  revision: number;
+  effectiveStatus: QuoteStatus;
+  canRespond: boolean;
+  partyName: string;
+  partyAddress: string | null;
+  partyTaxNumber: string | null;
+  partyReference: string | null;
+  quoteDate: string;
+  validUntil: string;
+  currencyCode: string;
+  title: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  lines: {
+    lineNumber: number;
+    description: string;
+    quantityMilli: number;
+    unitPriceCents: number;
+    taxRateBp: number;
+    netCents: number;
+    taxCents: number;
+  }[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  contentSha256: string;
+  response: { response: 'ACCEPTED' | 'DECLINED'; signerName: string | null; respondedAt: string } | null;
+}
+
+/** GET /public/quotes/:token — no cookies: the token is the credential. */
+export function getPublicQuote(token: string, signal?: AbortSignal): Promise<{ success: boolean; quote: PublicQuoteView }> {
+  return apiFetch(`/public/quotes/${encodeURIComponent(token)}`, { signal: signal ?? null, credentials: 'omit' }, NO_AUTO_REFRESH);
+}
+
+/** GET /public/quotes/:token/logo as a blob (the API is cross-origin, so no bare <img>). */
+export async function getPublicQuoteLogo(token: string, signal?: AbortSignal): Promise<Blob | null> {
+  if (!API_BASE_URL) return null;
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/public/quotes/${encodeURIComponent(token)}/logo`, {
+    credentials: 'omit',
+    signal: signal ?? null,
+  });
+  return response.ok ? response.blob() : null;
+}
+
+export function acceptPublicQuote(
+  token: string,
+  body: { signerName: string; signerEmail: string | null; acceptTerms: true; contentSha256: string },
+): Promise<{ success: boolean; quote: PublicQuoteView }> {
+  return apiFetch(
+    `/public/quotes/${encodeURIComponent(token)}/accept`,
+    { method: 'POST', body: JSON.stringify(body), credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
+export function declinePublicQuote(token: string, reason: string | null): Promise<{ success: boolean; quote: PublicQuoteView }> {
+  return apiFetch(
+    `/public/quotes/${encodeURIComponent(token)}/decline`,
+    { method: 'POST', body: JSON.stringify({ reason }), credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
 }

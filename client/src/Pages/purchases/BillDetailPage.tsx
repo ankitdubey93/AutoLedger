@@ -176,6 +176,15 @@ export default function BillDetailPage() {
         <div>
           <h2 className="text-lg font-semibold m-0">{bill.vendorReference}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(bill.status)}</p>
+          {bill.sourceQuote !== null && (
+            <p className="text-sm text-[var(--muted)] m-0 mt-1">
+              From quote{' '}
+              <Link to={`/purchase-quotes/${bill.sourceQuote.id}`}>
+                {bill.sourceQuote.quoteNumber}
+                {bill.sourceQuote.revision > 1 ? ` rev ${String(bill.sourceQuote.revision)}` : ''}
+              </Link>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {(bill.status === 'DRAFT' || bill.status === 'AWAITING_APPROVAL') && (

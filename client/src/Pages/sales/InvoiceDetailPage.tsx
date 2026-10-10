@@ -185,6 +185,15 @@ export default function InvoiceDetailPage() {
         <div>
           <h2 className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'Draft invoice'}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(invoice.status)}</p>
+          {invoice.sourceQuote !== null && (
+            <p className="text-sm text-[var(--muted)] m-0 mt-1">
+              From quote{' '}
+              <Link to={`/quotes/${invoice.sourceQuote.id}`}>
+                {invoice.sourceQuote.quoteNumber}
+                {invoice.sourceQuote.revision > 1 ? ` rev ${String(invoice.sourceQuote.revision)}` : ''}
+              </Link>
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           {invoice.status === 'DRAFT' && (

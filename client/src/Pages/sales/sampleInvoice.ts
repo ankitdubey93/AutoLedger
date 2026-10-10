@@ -109,4 +109,5 @@ export const SAMPLE_INVOICE: Invoice = Object.freeze({
   creditedCents: 0,
   amountDueCents: 381_500,
   settlementStatus: 'UNPAID',
+  sourceQuote: null,
 });

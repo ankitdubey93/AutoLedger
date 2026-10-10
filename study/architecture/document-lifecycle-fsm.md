@@ -218,6 +218,10 @@ The fill also has to happen *before* anything reads the text downstream. On a bi
 
 **Keeping the text as written.** A posted document is immutable, but a recurring schedule built from it needs the *unfilled* text to fill again next month. A journal entry is posted the instant it is created, so its placeholders would otherwise be gone for good. Migration 087 adds nullable `*_template` columns (`notes_template`, `description_template`, `vendor_reference_template`), written once with `COALESCE(existing, raw)` when filling first changes a field, and reset to `NULL` by a draft edit. They never change on void, so the void trigger's row-diff (which excludes only the void columns) is unaffected. On `journal_entries` the column is written with the `INSERT`, so the insert-only `reject_mutation` trigger never sees it change.
 
+### Phase 41 — proving the trigger and the table agree
+
+Quotes have eight statuses and a trigger (`reject_sent_quote_mutation()`, migration 089) that repeats `QUOTE_TRANSITIONS` in SQL. Rather than trust two hand-kept copies, `quoteConstraints.test.ts` **inserts** a quote in every status (INSERT is unguarded), tries all 56 `from → to` updates with raw SQL, and asserts the database's verdict equals `canTransitionQuote(from, to)`. It failed on its first run: the trigger's "a DRAFT is freely editable" branch returned `NEW` before checking the status, so a raw update could take a draft straight to ACCEPTED. The fix keeps drafts content-editable but restricts their status exit to SENT. Two other quote-specific shapes: a **revision chain** (a sent document is never edited; a new row supersedes it, with partial unique indexes allowing one DRAFT and one SENT per chain) and a **reverse edge driven by another document** (CONVERTED → ACCEPTED fires only when the draft invoice it produced is deleted, from inside the invoice service's delete transaction). Detail: [quotes-acceptance-evidence-and-revisions.md](quotes-acceptance-evidence-and-revisions.md).
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |

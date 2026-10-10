@@ -128,6 +128,7 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
     creditedCents: 0,
     amountDueCents: 29500,
     settlementStatus: 'PARTIALLY_PAID',
+    sourceQuote: null,
     ...overrides,
   };
 }

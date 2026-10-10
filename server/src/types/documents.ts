@@ -16,7 +16,7 @@ import type { AllowedUploadMimeType } from '../config/constants.js';
  * adding an attachable entity adds a string here.
  */
 export const DOCUMENT_ENTITY_TYPES_BY_MODULE = {
-  [MODULE_TAGS.accounting]: ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor'],
+  [MODULE_TAGS.accounting]: ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor', 'quote'],
   [MODULE_TAGS.capture]: ['ap_flow_document'],
 } as const satisfies Record<string, readonly string[]>;
 

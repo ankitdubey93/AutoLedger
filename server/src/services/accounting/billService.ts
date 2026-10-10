@@ -3,7 +3,8 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { allocateCents, cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
-import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
+import { computeLineTotals, type LineTotal as DocumentLineTotal } from '../../utils/documentTotals.js';
+import { convertToBase } from '../../utils/fxRate.js';
 import type { FillMode, PlaceholderContext } from '../../utils/placeholders.js';
 import {
   fillField,
@@ -32,6 +33,7 @@ import {
 } from '../../types/accounting.js';
 import { MODULE_TAGS } from '../../config/modules.js';
 import { notifyBillAwaitingApprovalOnClient } from '../mail/notificationService.js';
+import { revertConversionOnClient } from './quoteStatusService.js';
 
 /**
  * Accounting bills — Phase 3.9's AP source document.
@@ -180,6 +182,9 @@ interface BillRow {
   updated_at: Date;
   allocated_cents: string;
   debited_cents: string;
+  source_quote_id: string | null;
+  source_quote_number: string | null;
+  source_quote_revision: number | null;
 }
 
 interface BillLineRow {
@@ -213,11 +218,14 @@ const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.n
                              b.approved_by, au.name AS approved_by_name,
                              b.created_by, u.name AS created_by_name, b.created_at, b.updated_at,
                              ${allocatedCentsSubquery('b', 'bill_id')} AS allocated_cents,
-                             ${noteAppliedCentsSubquery('b', 'bill_id')} AS debited_cents
+                             ${noteAppliedCentsSubquery('b', 'bill_id')} AS debited_cents,
+                             q.id AS source_quote_id, q.quote_number AS source_quote_number,
+                             q.revision AS source_quote_revision
                         FROM bills b
                         JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
                         LEFT JOIN users u  ON u.id = b.created_by
-                        LEFT JOIN users au ON au.id = b.approved_by`;
+                        LEFT JOIN users au ON au.id = b.approved_by
+                        LEFT JOIN quotes q ON q.id = b.source_quote_id AND q.org_id = b.org_id`;
 
 function toLine(row: BillLineRow): BillLine {
   return {
@@ -298,6 +306,10 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     debitedCents,
     amountDueCents,
     settlementStatus,
+    sourceQuote:
+      row.source_quote_id === null || row.source_quote_number === null || row.source_quote_revision === null
+        ? null
+        : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
   };
 }
 
@@ -467,24 +479,7 @@ export async function assertExpenseAccounts(
   }
 }
 
-interface LineTotal {
-  input: BillLineInput;
-  netCents: number;
-  taxCents: number;
-}
-
-/**
- * Tax is computed per line and then summed — never on the subtotal — so a
- * mixed-rate bill is correct and the stored line values reconcile to the
- * header exactly, which `chk_bills_total` asserts.
- */
-function computeLineTotals(lines: BillLineInput[]): LineTotal[] {
-  return lines.map((line) => {
-    const netCents = scaleCents(cents(line.unitPriceCents), line.quantityMilli, 1000);
-    const taxCents = scaleCents(netCents, line.taxRateBp, 10000);
-    return { input: line, netCents, taxCents };
-  });
-}
+type LineTotal = DocumentLineTotal<BillLineInput>;
 
 function validateBillInput(input: CreateBillInput): void {
   if (input.lines.length === 0) {
@@ -516,25 +511,6 @@ async function resolveBillDueDate(
     paymentTerms: input.paymentTerms ?? resolved.paymentTermsLabel,
     paymentTermsCode: resolved.paymentTermsCode,
   };
-}
-
-/**
- * Resolves the rate to convert `currencyCode` to `baseCurrency` on `onDate`
- * — identity (rate 1) when they match. Called on every draft save (so a
- * draft always displays an honest base total) and again at `approveBill`
- * (which freezes the result). Throws ApiError(422) via
- * fxRateService.requireRateOnClient when no rate exists on or before onDate.
- */
-async function resolveDocumentFxRate(
-  client: PoolClient,
-  orgId: string,
-  currencyCode: string,
-  baseCurrency: string,
-  onDate: string,
-): Promise<string> {
-  if (currencyCode === baseCurrency) return ONE_RATE;
-  const resolved = await fxRateService.requireRateOnClient(client, orgId, currencyCode, baseCurrency, onDate);
-  return resolved.rate;
 }
 
 async function insertBillLines(
@@ -677,6 +653,8 @@ interface InsertBillHeader {
   paymentTermsCode: string | null;
   /** Phase 40 — recurring generation only; see `CreateBillOptions.placeholders`. */
   placeholders?: { occurrence: number; referenceFallbackSuffix: string } | undefined;
+  /** Phase 41 — quote conversion only; see `CreateBillOptions.sourceQuoteId`. */
+  sourceQuoteId?: string | undefined;
 }
 
 /**
@@ -757,7 +735,7 @@ async function insertBillOnClient(
 
   // Resolved on every draft save so the draft always displays an honest
   // base-currency total; frozen for good at approveBill.
-  const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, header.billDate);
+  const fxRate = await fxRateService.documentRateOnClient(client, orgId, currencyCode, baseCurrency, header.billDate);
   const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
   const baseTaxCents = convertToBase(taxCents, fxRate);
   const baseTotalCents = baseSubtotalCents + baseTaxCents;
@@ -768,8 +746,9 @@ async function insertBillOnClient(
         vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by,
-        notes_template, vendor_reference_template)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+        notes_template, vendor_reference_template, source_quote_id, source_quote_direction)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
+             $23, $24)
      RETURNING id`,
     [
       orgId,
@@ -794,6 +773,8 @@ async function insertBillOnClient(
       createdBy,
       notesTemplate,
       vendorReferenceTemplate,
+      header.sourceQuoteId ?? null,
+      header.sourceQuoteId === undefined ? null : 'PURCHASE',
     ],
   );
   const billId = billRows[0]?.id;
@@ -815,6 +796,8 @@ export interface CreateBillOptions {
    * typed instead, so editing it never loses a placeholder.
    */
   placeholders?: { occurrence: number; referenceFallbackSuffix: string };
+  /** Phase 41 — quote conversion only: the accepted PURCHASE quote this draft comes from. Never exposed in billSchema. */
+  sourceQuoteId?: string;
 }
 
 /**
@@ -849,6 +832,7 @@ export async function createBillOnClient(
       paymentTerms: resolvedDue.paymentTerms,
       paymentTermsCode: resolvedDue.paymentTermsCode,
       placeholders: options.placeholders,
+      sourceQuoteId: options.sourceQuoteId,
     },
     totals,
     options.equityAccountId ?? null,
@@ -1031,7 +1015,7 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
       totals.map((t) => t.input.expenseAccountId),
     );
 
-    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.billDate);
+    const fxRate = await fxRateService.documentRateOnClient(client, orgId, currencyCode, baseCurrency, input.billDate);
     const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
     const baseTaxCents = convertToBase(taxCents, fxRate);
     const baseTotalCents = baseSubtotalCents + baseTaxCents;
@@ -1094,14 +1078,17 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
 }
 
 export async function deleteBill(orgId: string, id: string): Promise<void> {
-  const { rows } = await withTransaction((client) =>
-    client.query<{ id: string }>(
+  const { rows } = await withTransaction(async (client) => {
+    const deleted = await client.query<{ id: string; source_quote_id: string | null }>(
       `DELETE FROM bills
         WHERE id = $1 AND org_id = $2 AND status IN ('DRAFT', 'AWAITING_APPROVAL')
-        RETURNING id`,
+        RETURNING id, source_quote_id`,
       [id, orgId],
-    ),
-  );
+    );
+    // Phase 41 — a deleted draft frees the quote it was converted from.
+    await revertConversionOnClient(client, orgId, deleted.rows[0]?.source_quote_id ?? null);
+    return deleted;
+  });
 
   if (rows[0] !== undefined) return;
 
@@ -1243,7 +1230,7 @@ export async function approveBillOnClient(
   );
   const baseCurrency = orgRows[0]?.base_currency.trim();
   if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-  const fxRate = await resolveDocumentFxRate(client, orgId, documentCurrency, baseCurrency, postingDate);
+  const fxRate = await fxRateService.documentRateOnClient(client, orgId, documentCurrency, baseCurrency, postingDate);
   const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
   const baseTaxCents = convertToBase(taxTotalCents, fxRate);
   const baseTotalCents = baseSubtotalCents + baseTaxCents;

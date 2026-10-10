@@ -368,6 +368,8 @@ export interface Invoice {
   creditedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
+  /** Phase 41 — the accepted quote this invoice was converted from, if any. */
+  sourceQuote: SourceQuoteRef | null;
 }
 
 export interface InvoiceSettings {
@@ -541,6 +543,8 @@ export interface Bill {
   debitedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
+  /** Phase 41 — the accepted purchase quote this bill was converted from, if any. */
+  sourceQuote: SourceQuoteRef | null;
 }
 
 export const PAYMENT_DIRECTIONS = ['RECEIVE', 'PAY'] as const;
@@ -1761,4 +1765,226 @@ export interface OnlinePayment {
   invoices: { invoiceId: string; invoiceNumber: string | null; amountCents: number }[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ------------------------------------------------------------ Phase 41 quotes
+
+export const QUOTE_DIRECTIONS = ['SALES', 'PURCHASE'] as const;
+export type QuoteDirection = (typeof QUOTE_DIRECTIONS)[number];
+
+export const QUOTE_STATUSES = [
+  'DRAFT',
+  'SENT',
+  'ACCEPTED',
+  'DECLINED',
+  'EXPIRED',
+  'VOID',
+  'SUPERSEDED',
+  'CONVERTED',
+] as const;
+export type QuoteStatus = (typeof QUOTE_STATUSES)[number];
+
+export function isQuoteStatus(value: string): value is QuoteStatus {
+  return (QUOTE_STATUSES as readonly string[]).includes(value);
+}
+
+/**
+ * The one lifecycle transition table for a quote (guardrails rule 10). The
+ * status CHECK and `reject_sent_quote_mutation()` in migration 089 list the
+ * same statuses and pairs; quoteConstraints.test.ts walks every pair against
+ * the database so the two cannot drift.
+ *
+ * - DRAFT → SENT: numbered, content-hashed, frozen. Deleting is a draft's only other exit.
+ * - SENT → ACCEPTED/DECLINED: the recipient (public link) or staff (recorded) answered.
+ * - SENT → EXPIRED: `valid_until` passed (the sweep; reads derive it earlier).
+ * - SENT → SUPERSEDED: a revision of it was sent.
+ * - ACCEPTED → CONVERTED: became a draft invoice/bill.
+ * - CONVERTED → ACCEPTED: only when that draft invoice/bill is deleted.
+ * - ACCEPTED/SENT → VOID: withdrawn, with a reason.
+ */
+export const QUOTE_TRANSITIONS = {
+  DRAFT: ['SENT'],
+  SENT: ['ACCEPTED', 'DECLINED', 'EXPIRED', 'VOID', 'SUPERSEDED'],
+  ACCEPTED: ['CONVERTED', 'VOID'],
+  CONVERTED: ['ACCEPTED'],
+  DECLINED: [],
+  EXPIRED: [],
+  VOID: [],
+  SUPERSEDED: [],
+} as const satisfies Record<QuoteStatus, readonly QuoteStatus[]>;
+
+export function canTransitionQuote(from: QuoteStatus, to: QuoteStatus): boolean {
+  return (QUOTE_TRANSITIONS[from] as readonly QuoteStatus[]).includes(to);
+}
+
+/**
+ * What a reader should see: a SENT quote whose validity date has passed is
+ * EXPIRED even before the sweep persists it. `validUntil` counts as valid
+ * through that whole (UTC) day.
+ */
+export function effectiveQuoteStatus(status: QuoteStatus, validUntil: string, today: string): QuoteStatus {
+  return status === 'SENT' && validUntil < today ? 'EXPIRED' : status;
+}
+
+/** Which statuses a new revision may be drafted from. */
+export const QUOTE_REVISABLE_STATUSES: readonly QuoteStatus[] = ['SENT', 'DECLINED', 'EXPIRED'];
+
+export interface SourceQuoteRef {
+  id: string;
+  quoteNumber: string;
+  revision: number;
+}
+
+export interface QuoteLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  /** Revenue for a sales quote, Expense/Asset for a purchase quote. */
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+  itemId: string | null;
+}
+
+export type QuoteResponseKind = 'ACCEPTED' | 'DECLINED';
+export type QuoteResponseChannel = 'PUBLIC_LINK' | 'INTERNAL';
+
+/** The acceptance/decline evidence — insert-only in the database. */
+export interface QuoteResponse {
+  response: QuoteResponseKind;
+  channel: QuoteResponseChannel;
+  signerName: string | null;
+  signerEmail: string | null;
+  termsAccepted: boolean;
+  declineReason: string | null;
+  clientIp: string | null;
+  userAgent: string | null;
+  recordedBy: string | null;
+  recordedByName: string | null;
+  note: string | null;
+  quoteContentSha256: string;
+  respondedAt: string;
+}
+
+export interface QuoteLinkSummary {
+  id: string;
+  toEmail: string;
+  sentBy: string;
+  sentByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+  /** Neither revoked nor past its expiry. */
+  live: boolean;
+}
+
+export interface QuoteRevisionSummary {
+  id: string;
+  revision: number;
+  status: QuoteStatus;
+}
+
+export interface QuoteConvertedDocument {
+  kind: 'INVOICE' | 'BILL';
+  id: string;
+  /** null while the invoice is a draft (bills always carry the vendor reference). */
+  number: string | null;
+  status: string;
+}
+
+export interface QuoteSummary {
+  id: string;
+  direction: QuoteDirection;
+  quoteNumber: string | null;
+  revision: number;
+  status: QuoteStatus;
+  effectiveStatus: QuoteStatus;
+  partyId: string;
+  partyName: string;
+  quoteDate: string;
+  validUntil: string;
+  currencyCode: string;
+  title: string | null;
+  totalCents: number;
+  createdAt: string;
+}
+
+export interface Quote extends QuoteSummary {
+  rootQuoteId: string;
+  supersedesQuoteId: string | null;
+  partyNameSnapshot: string;
+  partyAddressSnapshot: string | null;
+  partyTaxNumberSnapshot: string | null;
+  partyEmailSnapshot: string | null;
+  partyReference: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  /** Indicative only — NUMERIC(18,8) as a string; null when no rate existed on the quote date. */
+  indicativeFxRate: string | null;
+  indicativeBaseTotalCents: number | null;
+  contentSha256: string | null;
+  sentAt: string | null;
+  sentBy: string | null;
+  acceptedAt: string | null;
+  declinedAt: string | null;
+  expiredAt: string | null;
+  voidedAt: string | null;
+  voidReason: string | null;
+  supersededAt: string | null;
+  convertedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  updatedAt: string;
+  lines: QuoteLine[];
+  revisions: QuoteRevisionSummary[];
+  links: QuoteLinkSummary[];
+  response: QuoteResponse | null;
+  convertedDocument: QuoteConvertedDocument | null;
+}
+
+/** What the public `/quote/:token` page receives — the frozen document and what the viewer may do. */
+export interface PublicQuoteView {
+  merchant: { name: string; addressLines: string[]; hasLogo: boolean };
+  direction: QuoteDirection;
+  quoteNumber: string;
+  revision: number;
+  effectiveStatus: QuoteStatus;
+  /** True only while SENT and within validity — the accept/decline form shows. */
+  canRespond: boolean;
+  partyName: string;
+  partyAddress: string | null;
+  partyTaxNumber: string | null;
+  partyReference: string | null;
+  quoteDate: string;
+  validUntil: string;
+  currencyCode: string;
+  title: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  lines: {
+    lineNumber: number;
+    description: string;
+    quantityMilli: number;
+    unitPriceCents: number;
+    taxRateBp: number;
+    netCents: number;
+    taxCents: number;
+  }[];
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+  /** Echoed back on accept so the signer can only accept exactly this content. */
+  contentSha256: string;
+  response: { response: QuoteResponseKind; signerName: string | null; respondedAt: string } | null;
 }

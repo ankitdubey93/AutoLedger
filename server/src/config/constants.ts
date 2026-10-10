@@ -379,3 +379,16 @@ export const STATEMENT_SEND_MAX_PARTIES = 200;
 /** Public statement-link routes: requests per window per IP, counting successes too (39b). */
 export const PUBLIC_LINK_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 export const PUBLIC_LINK_RATE_LIMIT_MAX = env.isTest ? 10_000 : 120;
+
+/**
+ * Phase 41 — how long a quote's public link keeps working after the quote's
+ * `valid_until`, so a recipient can still see what they were offered (read
+ * only — an expired quote can never be accepted).
+ */
+export const QUOTE_LINK_GRACE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** How often the worker persists EXPIRED on sent quotes past their validity (Phase 41). */
+export const QUOTE_EXPIRY_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Most lines one quote may carry — a bound on an unpaginated document (Phase 41). */
+export const QUOTE_MAX_LINES = 200;

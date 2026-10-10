@@ -148,3 +148,58 @@ export async function notifyInvitationAcceptedOnClient(
   });
   return true;
 }
+
+/**
+ * Phase 41 — a quote was accepted or declined (on its public page, or
+ * recorded by a colleague): tell the person who sent it, if they are still a
+ * member and have not opted out. Enqueued on the response's own transaction.
+ */
+export async function notifyQuoteRespondedOnClient(
+  client: Queryable,
+  orgId: string,
+  quoteId: string,
+  response: { response: 'ACCEPTED' | 'DECLINED'; signerName: string | null; declineReason: string | null },
+  respondedBy: string | null,
+): Promise<boolean> {
+  const { rows } = await client.query<{
+    sent_by: string | null;
+    direction: string;
+    quote_number: string | null;
+    party_name_snapshot: string;
+    email: string;
+    name: string | null;
+    org_name: string;
+  }>(
+    `SELECT q.sent_by, q.direction, q.quote_number, q.party_name_snapshot, u.email, u.name, o.name AS org_name
+       FROM quotes q
+       JOIN organization_members m ON m.org_id = q.org_id AND m.user_id = q.sent_by
+       JOIN users u ON u.id = q.sent_by
+       JOIN organizations o ON o.id = q.org_id
+      WHERE q.org_id = $1 AND q.id = $2`,
+    [orgId, quoteId],
+  );
+  const quote = rows[0];
+  // Never sent by anyone still in the organization: there is no one to tell.
+  if (quote === undefined || quote.sent_by === null) return false;
+  // Recording your own colleague's answer needs no email to yourself.
+  if (respondedBy !== null && respondedBy === quote.sent_by) return false;
+  if (!(await optedIn(client, [quote.sent_by], 'quote_responded')).has(quote.sent_by)) return false;
+
+  const path = quote.direction === 'PURCHASE' ? `/purchase-quotes/${quoteId}` : `/quotes/${quoteId}`;
+  await enqueueEmailOnClient(client, {
+    orgId,
+    to: quote.email,
+    toName: quote.name,
+    template: 'quote_responded',
+    data: {
+      organizationName: quote.org_name,
+      partyName: quote.party_name_snapshot,
+      quoteNumber: quote.quote_number ?? '',
+      response: response.response,
+      signerName: response.signerName,
+      declineReason: response.declineReason,
+      url: frontendUrl(path),
+    },
+  });
+  return true;
+}

@@ -860,6 +860,29 @@ Three migrations, all additive and idempotent.
 
 - No change to `statement_email_templates` (085): its `body`/`subject` now take `[Bracket]` placeholders as well as the original `{{snake_case}}` names, which are honoured at runtime instead of being rewritten by a data migration.
 
+## Phase 41 — quotes, sales and purchase (accounting) — applied
+
+**`089_ledger-core_quotes.sql`** — one migration, additive and idempotent. Nothing in it posts to the ledger: a quote is a commercial offer, not an accounting event.
+
+- **`ledger_invoice_settings`** gains `quote_prefix` (`QU-`, ≤ 12) · `quote_next_number` (> 0) · `purchase_quote_prefix` (`PQ-`) · `purchase_quote_next_number` · `default_quote_validity_days` (30, 1–365) · `default_quote_terms` (≤ 5000, nullable). The two counters join `invoiceSettingsService.SERIES_COUNTER` (generalised from 063's note counters); a number is allocated at a quote's **first send**, in that transaction.
+- **`quotes`** — one row per *version*.
+  - Identity: `id` · `org_id` FK RESTRICT · `direction` (`SALES`/`PURCHASE`) · `customer_id` / `vendor_id` (**`ck_quotes_party`**: exactly the one matching the direction).
+  - Revision chain: `root_quote_id` (= `id` for revision 1; composite self-FK, `DEFERRABLE INITIALLY DEFERRED` so a first version can name itself) · `supersedes_quote_id` (composite self-FK; **`ux_quotes_supersedes`** makes the chain linear) · `revision` ≥ 1 (**`ck_quotes_revision`**: revision 1 ⇔ no predecessor).
+  - Lifecycle: `quote_number` (NULL while DRAFT) · `status` (`DRAFT`, `SENT`, `ACCEPTED`, `DECLINED`, `EXPIRED`, `VOID`, `SUPERSEDED`, `CONVERTED` — must match `QUOTE_STATUSES`) · `quote_date` · `valid_until` (≥ `quote_date`) · `currency_code`.
+  - Snapshots: `party_name_snapshot` · `party_address_snapshot` · `party_tax_number_snapshot` · `party_email_snapshot`; text: `party_reference` (≤ 100) · `title` (≤ 200) · `notes` (≤ 1000) · `terms` (≤ 5000) · `payment_terms` · `payment_terms_code`.
+  - Money: `subtotal_cents` · `tax_cents` · `total_cents` BIGINT ≥ 0, **`chk_quotes_total`**. `indicative_fx_rate` NUMERIC(18,8) / `indicative_base_total_cents` — both or neither; display only, never frozen.
+  - `content_sha256` (64 hex) — the hash of the canonical frozen content; an acceptance must match it.
+  - Event columns: `sent_at`/`sent_by` · `accepted_at` · `declined_at` · `expired_at` · `voided_at`/`void_reason` (≤ 500) · `superseded_at` · `converted_at`/`converted_by`; plus `created_by`, timestamps. `ck_quotes_*_complete` CHECKs require each status's columns (any non-DRAFT has number, `sent_at` and hash).
+  - Keys: `UNIQUE (org_id, id)`, **`UNIQUE (org_id, id, direction)`** (the back-link FK target), **`ux_quotes_number (org_id, direction, quote_number, revision)`**; partial uniques **`ux_quotes_one_draft_per_root`** / **`ux_quotes_one_sent_per_root`**. Indexes on the list path `(org_id, direction, status, quote_date DESC)`, each FK, and `(valid_until) WHERE status = 'SENT'` for the expiry sweep.
+  - **`trg_quotes_immutable`** (`reject_sent_quote_mutation()`): a DRAFT changes freely but may only become SENT; DELETE only while DRAFT; any other UPDATE must be one of `QUOTE_TRANSITIONS` (SENT → ACCEPTED/DECLINED/EXPIRED/VOID/SUPERSEDED, ACCEPTED → CONVERTED/VOID, CONVERTED → ACCEPTED) and may change only `status` and the event columns — `0A000` otherwise. `quoteConstraints.test.ts` walks all 8×8 pairs against `canTransitionQuote`. `trg_quotes_updated_at`; audited.
+- **`quote_lines`** — `line_number` · `description` (1–500) · `quantity_milli` · `unit_price_cents` · `account_id` (composite FK RESTRICT; Revenue vs Expense/Asset is checked in the service) · `tax_rate_bp` · `net_cents` · `tax_cents` · `item_id` (composite FK RESTRICT). No `stock_location_id`: a quote moves no stock. CASCADE from a deleted draft. **`trg_quote_lines_draft_only`**. Not audited (frozen with the header, whose hash covers them).
+- **`quote_links`** — the emailed review link, a copy of `statement_sends`: `quote_id` (composite FK CASCADE) · `to_email` (lowercased) · `sent_by` · **`token_hash`** (`UNIQUE`; the token is never stored) · `expires_at` (> `created_at`) · `revoked_at` · `last_viewed_at`. **Not audited** (it carries the hash).
+- **`quote_responses`** — the acceptance/decline evidence, **insert-only** (`reject_mutation()` from 004).
+  - Columns: `quote_id` · `link_id` · `response` (`ACCEPTED`/`DECLINED`) · `channel` (`PUBLIC_LINK`/`INTERNAL`) · `signer_name` (≤ 200) · `signer_email` (lowercased) · `terms_accepted` · `decline_reason` (≤ 1000) · `client_ip` (≤ 45) · `user_agent` (≤ 300) · `recorded_by` · `note` · `quote_content_sha256` · `responded_at`.
+  - **`ux_quote_responses_quote (org_id, quote_id)`** — one response per quote, ever: the database decides a race between two responses. `ck_quote_responses_accept` (an acceptance has a name and accepted terms); `ck_quote_responses_channel` (PUBLIC_LINK ⇔ `link_id`, INTERNAL ⇔ `recorded_by`). Audited.
+- **`invoices` / `bills`** gain `source_quote_id` + `source_quote_direction` (`ck_invoices_source_quote` pins `'SALES'`, `ck_bills_source_quote` `'PURCHASE'`), with a composite FK `(org_id, source_quote_id, source_quote_direction) → quotes (org_id, id, direction)` — a sales quote can never become a bill — and partial uniques **`ux_invoices_source_quote`** / **`ux_bills_source_quote`**: convert once, including after a void. Written only at INSERT of a DRAFT, so 009/013's immutability triggers are unaffected.
+- **`email_outbox.template`** — `ck_email_outbox_template` recreated with `quote_sent` and `quote_responded`. **`user_notification_preferences.event`** — 082's inline CHECK (`user_notification_preferences_event_check`) replaced by a named **`ck_user_notification_preferences_event`** admitting `quote_responded`.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

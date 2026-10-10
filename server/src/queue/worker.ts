@@ -10,6 +10,7 @@ import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandl
 import { handleRecurringSweep } from './handlers/recurringSweepHandler.js';
 import { handleRecurringGenerate } from './handlers/recurringGenerateHandler.js';
 import { handleEmailDrain } from './handlers/emailDrainHandler.js';
+import { handleQuoteExpirySweep } from './handlers/quoteExpirySweepHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   EMAIL_DRAIN_INTERVAL_MS,
@@ -17,6 +18,7 @@ import {
   INTEGRITY_CHECK_CRON,
   JOB_ATTEMPTS,
   OUTBOX_DRAIN_INTERVAL_MS,
+  QUOTE_EXPIRY_SWEEP_INTERVAL_MS,
   RECURRING_SWEEP_INTERVAL_MS,
   WEBHOOK_ERROR_SNIPPET_CHARS,
 } from '../config/constants.js';
@@ -39,6 +41,7 @@ const HANDLERS: {
   'recurring-sweep': handleRecurringSweep,
   'recurring-generate': handleRecurringGenerate,
   'email-drain': handleEmailDrain,
+  'quote-expiry-sweep': handleQuoteExpirySweep,
 };
 
 let workers: Worker[] = [];
@@ -142,6 +145,15 @@ export async function startWorkers(): Promise<void> {
     'recurring-sweep-tick',
     { every: RECURRING_SWEEP_INTERVAL_MS },
     { name: 'recurring-sweep', data: {}, opts: { attempts: 1 } },
+  );
+
+  // Phase 41 — persists EXPIRED on sent quotes past their validity. attempts:
+  // 1: the sweep is idempotent, the next tick re-checks, and correctness never
+  // depends on it (reads derive EXPIRED, and accept re-checks the date).
+  await queues['quote-expiry-sweep'].upsertJobScheduler(
+    'quote-expiry-sweep-tick',
+    { every: QUOTE_EXPIRY_SWEEP_INTERVAL_MS },
+    { name: 'quote-expiry-sweep', data: {}, opts: { attempts: 1 } },
   );
 
   // Phase 19.3 — 19.2's scheduler lives in Redis independently of this code,

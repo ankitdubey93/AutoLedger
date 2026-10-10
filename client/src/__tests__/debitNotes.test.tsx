@@ -88,6 +88,7 @@ function bill(overrides: Partial<Bill> = {}): Bill {
     debitedCents: 0,
     amountDueCents: 1200000,
     settlementStatus: 'UNPAID',
+    sourceQuote: null,
     ...overrides,
   };
 }

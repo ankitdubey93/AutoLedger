@@ -9,6 +9,12 @@ import InvoicesPage from '../Pages/sales/InvoicesPage';
 import NewInvoicePage from '../Pages/sales/NewInvoicePage';
 import InvoiceDetailPage from '../Pages/sales/InvoiceDetailPage';
 import CreditNotesPage from '../Pages/sales/CreditNotesPage';
+import QuotesPage from '../Pages/sales/QuotesPage';
+import NewQuotePage from '../Pages/sales/NewQuotePage';
+import SalesQuoteDetailPage from '../Pages/sales/SalesQuoteDetailPage';
+import PurchaseQuotesPage from '../Pages/purchases/PurchaseQuotesPage';
+import NewPurchaseQuotePage from '../Pages/purchases/NewPurchaseQuotePage';
+import PurchaseQuoteDetailPage from '../Pages/purchases/PurchaseQuoteDetailPage';
 import NewCreditNotePage from '../Pages/sales/NewCreditNotePage';
 import CreditNoteDetailPage from '../Pages/sales/CreditNoteDetailPage';
 import CustomersPage from '../Pages/sales/CustomersPage';
@@ -116,6 +122,15 @@ export default function ProductRoutes() {
           <Route path="/invoices/:invoiceId" element={<InvoiceDetailPage />} />
           <Route path="/invoices/:invoiceId/edit" element={<NewInvoicePage />} />
           {/* A new note is always reached from its original document (?invoiceId= / ?billId=). */}
+          {/* Phase 41 — quotes, sales and purchase. */}
+          <Route path="/quotes" element={<QuotesPage />} />
+          <Route path="/quotes/new" element={<NewQuotePage />} />
+          <Route path="/quotes/:quoteId" element={<SalesQuoteDetailPage />} />
+          <Route path="/quotes/:quoteId/edit" element={<NewQuotePage />} />
+          <Route path="/purchase-quotes" element={<PurchaseQuotesPage />} />
+          <Route path="/purchase-quotes/new" element={<NewPurchaseQuotePage />} />
+          <Route path="/purchase-quotes/:quoteId" element={<PurchaseQuoteDetailPage />} />
+          <Route path="/purchase-quotes/:quoteId/edit" element={<NewPurchaseQuotePage />} />
           <Route path="/credit-notes" element={<CreditNotesPage />} />
           <Route path="/credit-notes/new" element={<NewCreditNotePage />} />
           <Route path="/credit-notes/:noteId" element={<CreditNoteDetailPage />} />

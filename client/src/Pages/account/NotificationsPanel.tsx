@@ -16,6 +16,10 @@ const LABELS: Record<NotificationEvent, { title: string; detail: string }> = {
     title: 'Invitations accepted',
     detail: 'When someone you invited joins the organization.',
   },
+  quote_responded: {
+    title: 'Quotes accepted or declined',
+    detail: 'When a customer or vendor answers a quote you sent, or a colleague records their answer.',
+  },
 };
 
 /**

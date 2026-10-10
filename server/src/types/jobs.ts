@@ -13,6 +13,7 @@ export const QUEUE_NAMES = [
   'recurring-sweep',
   'recurring-generate',
   'email-drain',
+  'quote-expiry-sweep',
   'dead-letter',
 ] as const;
 
@@ -39,6 +40,7 @@ export interface JobPayloads {
   'recurring-sweep': Record<string, never>;
   'recurring-generate': { orgId: string; scheduleId: string };
   'email-drain': Record<string, never>;
+  'quote-expiry-sweep': Record<string, never>;
   'dead-letter': {
     queue: QueueName;
     jobId: string;

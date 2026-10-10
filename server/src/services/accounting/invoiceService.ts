@@ -2,8 +2,9 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
-import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
-import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
+import { cents, parseCents, sumCents } from '../../utils/money.js';
+import { computeLineTotals, type LineTotal as DocumentLineTotal } from '../../utils/documentTotals.js';
+import { convertToBase } from '../../utils/fxRate.js';
 import type { FillMode, PlaceholderContext } from '../../utils/placeholders.js';
 import { fillField, fillOptionalField, LINE_DESCRIPTION_MAX, NOTES_MAX } from '../../utils/placeholderFields.js';
 import { emitEvent } from '../outboxService.js';
@@ -26,6 +27,7 @@ import {
   type InvoiceStatus,
 } from '../../types/accounting.js';
 import { MODULE_TAGS } from '../../config/modules.js';
+import { revertConversionOnClient } from './quoteStatusService.js';
 
 /**
  * Accounting sales invoices — Phase 3.8's AR source document.
@@ -162,6 +164,9 @@ interface InvoiceRow {
   updated_at: Date;
   allocated_cents: string;
   credited_cents: string;
+  source_quote_id: string | null;
+  source_quote_number: string | null;
+  source_quote_revision: number | null;
 }
 
 interface InvoiceLineRow {
@@ -192,10 +197,13 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
                                 i.created_by, u.name AS created_by_name, i.created_at, i.updated_at,
                                 ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents,
-                                ${noteAppliedCentsSubquery('i', 'invoice_id')} AS credited_cents
+                                ${noteAppliedCentsSubquery('i', 'invoice_id')} AS credited_cents,
+                                q.id AS source_quote_id, q.quote_number AS source_quote_number,
+                                q.revision AS source_quote_revision
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
-                           LEFT JOIN users u ON u.id = i.created_by`;
+                           LEFT JOIN users u ON u.id = i.created_by
+                           LEFT JOIN quotes q ON q.id = i.source_quote_id AND q.org_id = i.org_id`;
 
 function toLine(row: InvoiceLineRow): InvoiceLine {
   return {
@@ -272,6 +280,10 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     creditedCents,
     amountDueCents,
     settlementStatus,
+    sourceQuote:
+      row.source_quote_id === null || row.source_quote_number === null || row.source_quote_revision === null
+        ? null
+        : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
   };
 }
 
@@ -444,24 +456,7 @@ export async function assertRevenueAccounts(
   }
 }
 
-interface LineTotal {
-  input: InvoiceLineInput;
-  netCents: number;
-  taxCents: number;
-}
-
-/**
- * Tax is computed per line and then summed — never on the subtotal — so a
- * mixed-rate invoice is correct and the stored line values reconcile to the
- * header exactly, which `chk_invoices_total` asserts.
- */
-function computeLineTotals(lines: InvoiceLineInput[]): LineTotal[] {
-  return lines.map((line) => {
-    const netCents = scaleCents(cents(line.unitPriceCents), line.quantityMilli, 1000);
-    const taxCents = scaleCents(netCents, line.taxRateBp, 10000);
-    return { input: line, netCents, taxCents };
-  });
-}
+type LineTotal = DocumentLineTotal<InvoiceLineInput>;
 
 function validateInvoiceInput(input: CreateInvoiceInput): void {
   if (input.lines.length === 0) {
@@ -493,25 +488,6 @@ async function resolveInvoiceDueDate(
     paymentTerms: input.paymentTerms ?? resolved.paymentTermsLabel,
     paymentTermsCode: resolved.paymentTermsCode,
   };
-}
-
-/**
- * Resolves the rate to convert `currencyCode` to `baseCurrency` on `onDate`
- * — identity (rate 1) when they match. Called on every draft save (so a
- * draft always displays an honest base total) and again at `issueInvoice`
- * (which freezes the result). Throws ApiError(422) via
- * fxRateService.requireRateOnClient when no rate exists on or before onDate.
- */
-async function resolveDocumentFxRate(
-  client: PoolClient,
-  orgId: string,
-  currencyCode: string,
-  baseCurrency: string,
-  onDate: string,
-): Promise<string> {
-  if (currencyCode === baseCurrency) return ONE_RATE;
-  const resolved = await fxRateService.requireRateOnClient(client, orgId, currencyCode, baseCurrency, onDate);
-  return resolved.rate;
 }
 
 async function insertInvoiceLines(
@@ -601,6 +577,8 @@ export interface CreateInvoiceOptions {
    * draft is stored as typed instead, so editing it never loses a placeholder.
    */
   placeholders?: { occurrence: number };
+  /** Phase 41 — quote conversion only: the accepted SALES quote this draft comes from. Never exposed in invoiceSchema. */
+  sourceQuoteId?: string;
 }
 
 /**
@@ -671,7 +649,7 @@ export async function createInvoiceOnClient(
 
   // Resolved on every draft save so the draft always displays an honest
   // base-currency total; frozen for good at issueInvoice.
-  const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
+  const fxRate = await fxRateService.documentRateOnClient(client, orgId, currencyCode, baseCurrency, input.issueDate);
   const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
   const baseTaxCents = convertToBase(taxCents, fxRate);
   const baseTotalCents = baseSubtotalCents + baseTaxCents;
@@ -682,8 +660,9 @@ export async function createInvoiceOnClient(
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number,
-        notes_template)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+        notes_template, source_quote_id, source_quote_direction)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
+             $22, $23)
      RETURNING id`,
     [
       orgId,
@@ -707,6 +686,8 @@ export async function createInvoiceOnClient(
       createdBy,
       options.invoiceNumber ?? null,
       notesTemplate,
+      options.sourceQuoteId ?? null,
+      options.sourceQuoteId === undefined ? null : 'SALES',
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
@@ -812,7 +793,7 @@ export async function updateInvoice(
       totals.map((t) => t.input.revenueAccountId),
     );
 
-    const fxRate = await resolveDocumentFxRate(client, orgId, currencyCode, baseCurrency, input.issueDate);
+    const fxRate = await fxRateService.documentRateOnClient(client, orgId, currencyCode, baseCurrency, input.issueDate);
     const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
     const baseTaxCents = convertToBase(taxCents, fxRate);
     const baseTotalCents = baseSubtotalCents + baseTaxCents;
@@ -874,12 +855,15 @@ export async function updateInvoice(
 }
 
 export async function deleteInvoice(orgId: string, id: string): Promise<void> {
-  const { rows } = await withTransaction((client) =>
-    client.query<{ id: string }>(
-      `DELETE FROM invoices WHERE id = $1 AND org_id = $2 AND status = 'DRAFT' RETURNING id`,
+  const { rows } = await withTransaction(async (client) => {
+    const deleted = await client.query<{ id: string; source_quote_id: string | null }>(
+      `DELETE FROM invoices WHERE id = $1 AND org_id = $2 AND status = 'DRAFT' RETURNING id, source_quote_id`,
       [id, orgId],
-    ),
-  );
+    );
+    // Phase 41 — a deleted draft frees the quote it was converted from.
+    await revertConversionOnClient(client, orgId, deleted.rows[0]?.source_quote_id ?? null);
+    return deleted;
+  });
 
   if (rows[0] !== undefined) return;
 
@@ -1020,7 +1004,7 @@ export async function issueInvoiceOnClient(
     );
     const baseCurrency = orgRows[0]?.base_currency.trim();
     if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
-    const fxRate = await resolveDocumentFxRate(client, orgId, documentCurrency, baseCurrency, postingDate);
+    const fxRate = await fxRateService.documentRateOnClient(client, orgId, documentCurrency, baseCurrency, postingDate);
     const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
     const baseTaxCents = convertToBase(taxTotalCents, fxRate);
     const baseTotalCents = baseSubtotalCents + baseTaxCents;

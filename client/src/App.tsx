@@ -13,6 +13,7 @@ import ResetPasswordPage from './Pages/auth/ResetPasswordPage';
 import InvitePage from './Pages/auth/InvitePage';
 import EmailLinkPage from './Pages/auth/EmailLinkPage';
 import PublicStatementPage from './Pages/public/PublicStatementPage';
+import PublicQuotePage from './Pages/public/PublicQuotePage';
 import StripePayPanel from './Pages/public/StripePayPanel';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
@@ -56,6 +57,9 @@ export default function App() {
               path="/statement/:token"
               element={<PublicStatementPage renderPayPanel={(props) => <StripePayPanel {...props} />} />}
             />
+
+            {/* Phase 41 — an emailed quote; public, the token is the proof. */}
+            <Route path="/quote/:token" element={<PublicQuotePage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>

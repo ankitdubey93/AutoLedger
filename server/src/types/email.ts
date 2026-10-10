@@ -2,7 +2,7 @@
  * Phase 38b — outbound email types. Platform-scoped: any module may send.
  */
 
-/** Mirrors the CHECK on `email_outbox.template` (migration 082). */
+/** Mirrors the CHECK on `email_outbox.template` (migrations 082, 085, 089). */
 export const EMAIL_TEMPLATES = [
   'password_reset',
   'invitation',
@@ -12,6 +12,8 @@ export const EMAIL_TEMPLATES = [
   'bill_awaiting_approval',
   'invitation_accepted',
   'party_statement',
+  'quote_sent',
+  'quote_responded',
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
 
@@ -42,8 +44,8 @@ export function canTransitionEmail(from: EmailStatus, to: EmailStatus): boolean 
   return EMAIL_STATUS_TRANSITIONS[from].includes(to);
 }
 
-/** Events a user can opt out of. Mirrors the CHECK on `user_notification_preferences.event`. */
-export const NOTIFICATION_EVENTS = ['bill_awaiting_approval', 'invitation_accepted'] as const;
+/** Events a user can opt out of. Mirrors the CHECK on `user_notification_preferences.event` (082, 089). */
+export const NOTIFICATION_EVENTS = ['bill_awaiting_approval', 'invitation_accepted', 'quote_responded'] as const;
 export type NotificationEvent = (typeof NOTIFICATION_EVENTS)[number];
 
 export function isNotificationEvent(value: string): value is NotificationEvent {

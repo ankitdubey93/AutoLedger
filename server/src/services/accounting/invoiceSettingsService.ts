@@ -333,20 +333,22 @@ export async function advancePastImportedNumbersOnClient(
  * Phase 26 — credit and debit notes each keep their own gapless series
  * (`CN-000001`, `DN-000001`) on the same settings row, allocated exactly like
  * the invoice number: inside the issuing transaction, so a rollback un-burns
- * the number. The identifiers interpolated below come only from this constant
- * map, never request input (guardrails rule 4).
+ * the number. Phase 41 adds the sales (`QU-`) and purchase (`PQ-`) quote
+ * series, allocated at a quote's first send. The identifiers interpolated
+ * below come only from this constant map, never request input (guardrails
+ * rule 4).
  */
-const NOTE_COUNTER = {
+const SERIES_COUNTER = {
   CREDIT_NOTE: { prefix: 'credit_note_prefix', next: 'credit_note_next_number' },
   DEBIT_NOTE: { prefix: 'debit_note_prefix', next: 'debit_note_next_number' },
+  SALES_QUOTE: { prefix: 'quote_prefix', next: 'quote_next_number' },
+  PURCHASE_QUOTE: { prefix: 'purchase_quote_prefix', next: 'purchase_quote_next_number' },
 } as const;
 
-export async function allocateNoteNumber(
-  client: Queryable,
-  orgId: string,
-  kind: 'CREDIT_NOTE' | 'DEBIT_NOTE',
-): Promise<string> {
-  const counter = NOTE_COUNTER[kind];
+type SeriesKind = keyof typeof SERIES_COUNTER;
+
+async function allocateSeriesNumber(client: Queryable, orgId: string, kind: SeriesKind): Promise<string> {
+  const counter = SERIES_COUNTER[kind];
 
   await client.query(
     'INSERT INTO ledger_invoice_settings (org_id) VALUES ($1) ON CONFLICT (org_id) DO NOTHING',
@@ -365,4 +367,51 @@ export async function allocateNoteNumber(
   if (row === undefined) throw new Error('invoice settings row missing after upsert');
 
   return `${row.prefix}${String(row.allocated).padStart(row.number_padding, '0')}`;
+}
+
+export async function allocateNoteNumber(
+  client: Queryable,
+  orgId: string,
+  kind: 'CREDIT_NOTE' | 'DEBIT_NOTE',
+): Promise<string> {
+  return allocateSeriesNumber(client, orgId, kind);
+}
+
+/** Phase 41 — a quote's number, allocated once at its first send; a revision inherits it. */
+export async function allocateQuoteNumber(
+  client: Queryable,
+  orgId: string,
+  direction: 'SALES' | 'PURCHASE',
+): Promise<string> {
+  return allocateSeriesNumber(client, orgId, direction === 'SALES' ? 'SALES_QUOTE' : 'PURCHASE_QUOTE');
+}
+
+/** Mirrors migrations 007 and 089's column DEFAULTs, for an org with no settings row yet. */
+const QUOTE_DEFAULTS = { validityDays: 30, terms: null, defaultDueDays: 30 } as const;
+
+/**
+ * Phase 41 — how long a new quote stays open, the terms a new quote starts
+ * with, and the due days a converted document falls back to when the quote
+ * carries no payment term.
+ */
+export async function getQuoteDefaultsOnClient(
+  client: Queryable,
+  orgId: string,
+): Promise<{ validityDays: number; terms: string | null; defaultDueDays: number }> {
+  const { rows } = await client.query<{
+    default_quote_validity_days: number;
+    default_quote_terms: string | null;
+    default_due_days: number;
+  }>(
+    `SELECT default_quote_validity_days, default_quote_terms, default_due_days
+       FROM ledger_invoice_settings WHERE org_id = $1`,
+    [orgId],
+  );
+  const row = rows[0];
+  if (row === undefined) return { ...QUOTE_DEFAULTS };
+  return {
+    validityDays: row.default_quote_validity_days,
+    terms: row.default_quote_terms,
+    defaultDueDays: row.default_due_days,
+  };
 }

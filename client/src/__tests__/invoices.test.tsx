@@ -133,6 +133,7 @@ function baseInvoice(overrides: Partial<Invoice> = {}): Invoice {
     creditedCents: 0,
     amountDueCents: 0,
     settlementStatus: 'NOT_APPLICABLE',
+    sourceQuote: null,
     ...overrides,
   };
 }

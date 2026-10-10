@@ -85,6 +85,10 @@ UPDATE ledger_invoice_settings SET next_number = GREATEST(next_number, $2::int +
 
 **Concurrency and a lock-order caveat (reasoned, not tested).** The advance takes the settings-row lock at the start and holds it until `COMMIT`, so one large POST import blocks every other user's invoice issuing for its duration (the plan's open risk; capped at 1000 documents, not timed). Separately, the repository's documented order for issuing is *document row → stock balances → invoice number → journal*. The importer acquires the invoice-number lock **first**, then (for an inventory line in POST mode) the stock-balance locks inside `issueInvoiceOnClient`. A concurrent ordinary issue of an inventory invoice takes them in the opposite order. Two transactions each holding what the other wants is a deadlock; PostgreSQL detects it (after `deadlock_timeout`, default 1 s) and aborts one with `40P01`. If the importer were the victim its whole transaction would roll back and surface as a 500. I read this from the code and the lock-order rule and did not reproduce it; treat it as a hypothesis to verify, not a measured defect.
 
+### Phase 41 — allocate at send, inherit on revision
+
+Quotes extend the Phase 26 note counters into one constant map, `SERIES_COUNTER` (`CREDIT_NOTE`, `DEBIT_NOTE`, `SALES_QUOTE`, `PURCHASE_QUOTE` → their column pair), so the interpolated identifiers still come only from code (rule 4). The number is allocated in the **send** transaction — a draft that is deleted never had one, so the series stays gapless — and a **revision inherits** its predecessor's number rather than drawing a new one (`QU-000012 rev 2`); uniqueness is therefore on `(org_id, direction, quote_number, revision)`, with direction in the key because an organization may configure both prefixes to the same text.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |

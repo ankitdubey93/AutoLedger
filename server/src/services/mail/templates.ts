@@ -120,6 +120,55 @@ export function renderEmail(template: EmailTemplate, data: Record<string, unknow
         text: textBody(paragraphs, action),
       };
     }
+    case 'quote_sent': {
+      // Phase 41. The optional `message` is the sender's plain text; it is
+      // escaped paragraph by paragraph like a statement body.
+      const org = str(data, 'organizationName');
+      const purchase = data.direction === 'PURCHASE';
+      const number = str(data, 'quoteNumber');
+      const revision = typeof data.revision === 'number' && data.revision > 1 ? ` (revision ${String(data.revision)})` : '';
+      const title = str(data, 'title');
+      const total = str(data, 'total');
+      const validUntil = str(data, 'validUntil');
+      const kind = purchase ? 'Price confirmation request' : 'Quote';
+      const heading = `${kind} ${number}${revision} from ${org}`;
+      const message = str(data, 'message')
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter((p) => p !== '');
+      const lines = [
+        ...message,
+        `${org} has sent you ${purchase ? 'a price confirmation request' : 'a quote'}${title === '' ? '' : ` for "${title}"`}: ${number}${revision}, total ${total}.`,
+        `${purchase ? 'Please confirm or decline these prices' : 'You can accept or decline it online'} until ${validUntil}.`,
+      ];
+      const action = { label: purchase ? 'Review and confirm' : 'Review and accept', url };
+      return {
+        subject: heading,
+        html: layout(heading, lines.map((p) => esc(p).replace(/\n/g, '<br>')), action),
+        text: textBody(lines, action),
+      };
+    }
+    case 'quote_responded': {
+      const org = str(data, 'organizationName');
+      const party = str(data, 'partyName', 'The recipient');
+      const number = str(data, 'quoteNumber');
+      const accepted = data.response === 'ACCEPTED';
+      const signer = str(data, 'signerName');
+      const reason = str(data, 'declineReason');
+      const verb = accepted ? 'accepted' : 'declined';
+      const lines = [
+        `${party} ${verb} quote ${number} in ${org}${accepted && signer !== '' ? `, signed by ${signer}` : ''}.`,
+        ...(!accepted && reason !== '' ? [`Reason given: ${reason}`] : []),
+        ...(accepted ? ['Convert it to a draft from the quote when you are ready.'] : []),
+        'Turn these emails off in Account settings → Notifications.',
+      ];
+      const action = { label: 'Open the quote', url: str(data, 'url') };
+      return {
+        subject: `Quote ${number} ${verb} — ${party}`,
+        html: layout(`Quote ${number} ${verb}`, lines.map(esc), action),
+        text: textBody(lines, action),
+      };
+    }
     case 'invitation_accepted': {
       const org = str(data, 'organizationName');
       const who = str(data, 'memberName');

@@ -37,7 +37,7 @@ function sentRequest(send: LiveSend): statementService.StatementRequest {
 }
 
 /** Mirrors the client's `addressLines` (InvoiceDocument.tsx) so the public page needs no profile. */
-function addressLines(profile: OrganizationProfile): string[] {
+export function addressLines(profile: OrganizationProfile): string[] {
   const locality = [profile.city, profile.region, profile.postalCode].filter((p) => p !== null && p !== '').join(' ');
   return [
     profile.streetAddress1,

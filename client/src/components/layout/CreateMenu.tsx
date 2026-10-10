@@ -11,7 +11,9 @@ import { useCan } from '../../context/AuthContext';
  * outside-click).
  */
 const ITEMS = [
+  { label: 'Quote', to: '/quotes/new', permission: 'quotes.edit' },
   { label: 'Invoice', to: '/invoices/new', permission: 'invoices.edit' },
+  { label: 'Purchase quote', to: '/purchase-quotes/new', permission: 'purchase_quotes.edit' },
   { label: 'Expense', to: '/expenses/new', permission: 'bills.edit' },
   { label: 'Upload a bill', to: '/inbox', permission: 'capture.process' },
   { label: 'Journal entry', to: '/journals/new', permission: 'journals.create' },

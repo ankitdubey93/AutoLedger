@@ -198,3 +198,22 @@ export async function requireRateOnClient(
   }
   return resolved;
 }
+
+/**
+ * The rate a sales/purchase document converts at: identity (rate 1) when the
+ * document is in the base currency, otherwise `requireRateOnClient`. Called on
+ * every draft save (so a draft always displays an honest base total) and again
+ * at issue/approve, which freezes the result. Throws ApiError(422) when no
+ * rate exists on or before `onDate`.
+ */
+export async function documentRateOnClient(
+  client: Queryable,
+  orgId: string,
+  currencyCode: string,
+  baseCurrency: string,
+  onDate: string,
+): Promise<string> {
+  if (currencyCode === baseCurrency) return ONE_RATE;
+  const resolved = await requireRateOnClient(client, orgId, currencyCode, baseCurrency, onDate);
+  return resolved.rate;
+}

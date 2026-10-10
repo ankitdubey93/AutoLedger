@@ -113,6 +113,7 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
     debitedCents: 0,
     amountDueCents: 0,
     settlementStatus: 'NOT_APPLICABLE',
+    sourceQuote: null,
     ...overrides,
   };
 }

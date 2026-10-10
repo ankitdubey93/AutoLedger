@@ -387,6 +387,7 @@ describe('notifications', () => {
     expect(prefs.body.preferences).toEqual([
       { event: 'bill_awaiting_approval', enabled: false },
       { event: 'invitation_accepted', enabled: true },
+      { event: 'quote_responded', enabled: true },
     ]);
 
     const admin = await createUserWithOrg({ label: 'admin' });
