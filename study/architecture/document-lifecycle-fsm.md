@@ -205,6 +205,19 @@ export const AP_FLOW_DOCUMENT_TRANSITIONS = {
 
 Every FSM elsewhere in this file assumes a single, implicit birth state — a row is `INSERT`ed as `PENDING` (or `DRAFT`, or whatever the one starting point is), and the transition table's job is purely to police what happens *after* that. `DUPLICATE` breaks that assumption on purpose: `captureDocumentService.createApFlowDocument` decides **at INSERT time**, from a business check ("does a non-duplicate row already exist for this content?"), which of two legal starting states a new row gets. The transition table still does real work here — it's what makes `DUPLICATE -> PENDING` (a human confirming "not actually a duplicate, process it") a legal, single, reviewable edge, reusing the exact mechanism (`requestReextraction`) that already un-fails a `FAILED` document, rather than inventing a parallel "confirm" endpoint that would duplicate that logic. What the table does *not* police, and structurally cannot, is the birth-state decision itself — `canTransitionApFlowDocument(from, to)` only ever answers "can a row already in state `from` move to `to`," and a row born `DUPLICATE` was never *in* any other state first. That decision lives entirely in the service function that inserts the row, which is exactly why it has to be the *one* function every entry point funnels through (direct upload, Drive folder intake, and the two-step vault-picker registration all call `createApFlowDocument`) — a second, parallel insert path would be a second place the birth-state decision could drift out of sync with this one.
 
+### Changing a document *at* the moment it posts: child rows before the parent flips (Phase 40)
+
+Phase 40 fills placeholders (`Rent for [Month]`) as an invoice is issued, so a posted invoice never contains one. That means writing to a document in the same transaction that makes it immutable, which the triggers above were built to stop. Two triggers, two different rules:
+
+- **The header trigger looks at `OLD`.** `reject_issued_invoice_mutation` returns `NEW` whenever `OLD.status = 'DRAFT'`. The status-flip `UPDATE` itself has `OLD.status = 'DRAFT'`, so it may change *any* column in the same statement: `SET status = 'ISSUED', notes = $filled, notes_template = COALESCE(notes_template, $raw)` passes.
+- **The line trigger looks at the parent *now*.** `reject_non_draft_invoice_line_mutation` runs `SELECT status FROM invoices WHERE id = NEW.invoice_id` at the moment the line is written. Inside one transaction that read sees the transaction's own earlier writes. Once the flip has run, the parent reads `ISSUED`, and any line `UPDATE` raises `0A000`.
+
+So the order is fixed: **update the child rows first, while the parent still reads DRAFT, then flip the parent.** `issueInvoiceOnClient` fills lines after allocating the number (so `[Invoice Number]` has its value) and before posting the journal entry. Notes ride on the flip. Bills and credit/debit notes follow the same pattern. Because it is all one transaction, an over-long filled description (422) rolls back the allocated number and any stock movement too.
+
+The fill also has to happen *before* anything reads the text downstream. On a bill, the filled vendor reference feeds the stock receipt reference, the journal description and the `bill.approved` event, so `approveBillOnClient` fills first and uses the filled value everywhere after.
+
+**Keeping the text as written.** A posted document is immutable, but a recurring schedule built from it needs the *unfilled* text to fill again next month. A journal entry is posted the instant it is created, so its placeholders would otherwise be gone for good. Migration 087 adds nullable `*_template` columns (`notes_template`, `description_template`, `vendor_reference_template`), written once with `COALESCE(existing, raw)` when filling first changes a field, and reset to `NULL` by a draft edit. They never change on void, so the void trigger's row-diff (which excludes only the void columns) is unaffected. On `journal_entries` the column is written with the `INSERT`, so the insert-only `reject_mutation` trigger never sees it change.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -298,6 +311,12 @@ A: Because the thing deciding "should this row be `DUPLICATE`" isn't a transitio
 **Q: Doesn't letting a document be born in two different states risk each entry point deciding differently, or forgetting the check entirely?**
 A: That's the actual risk, yes, and it's why the check has exactly one home. `captureDocumentService.createApFlowDocument` is the single function every entry point funnels through — direct upload, Google Drive folder intake, and the two-step "register an already-uploaded vault document" route all call it, none of them re-implement the duplicate lookup themselves. That was a deliberate refactor: an earlier draft had the duplicate check living in the *upload* function instead, which meant the two-step registration route — a completely separate code path exercising the same underlying table — silently kept the old behavior (a hard `409` on a second registration) while direct upload and Drive got the new one. Centralizing the check inside `createApFlowDocument` itself, run inside the same transaction as the `INSERT`, means there is structurally only one place this decision can be made, so there's nowhere for a second entry point to diverge from it.
 
+**Q: You need to change a draft's text as it is issued, but your triggers forbid writing to an issued document. How do you order the writes?**
+A: Child rows first, then the parent's status flip. The header trigger only checks `OLD.status`, so the flip `UPDATE` can change other header columns in the same statement while `OLD` is still DRAFT. The line trigger checks the parent's *current* status, read inside the same transaction, so once the flip has happened any line update fails. Lines go before the flip; header fields ride on it. A test that issues a draft with a placeholder in a line description proves the order, because the reverse order would raise the trigger's `0A000`.
+
+**Q: If posted documents are immutable, how does a recurring schedule built from an issued invoice keep regenerating "[Month]"?**
+A: Issuing stores the text as written in a `notes_template` / `description_template` column before overwriting the visible text with the filled version. Recurring generation reads `template ?? text`. The column is written once (`COALESCE(existing, raw)`), so a draft filled at generation and again at issue keeps the original. A draft edit resets it, because the edited text is the new source.
+
 ## Follow-ups they'll dig into
 
 - What if two requests try to issue the same invoice concurrently? (Answered by the `SELECT ... FOR UPDATE` row lock in `issueInvoice` before the transition check — the second request blocks until the first commits, then sees `ISSUED` and gets the FSM's `409`.)
@@ -305,6 +324,8 @@ A: That's the actual risk, yes, and it's why the check has exactly one home. `ca
 - Why does only the bill FSM get a backward edge, and not the invoice FSM? (Because invoices have no review stage to recall *from* — issuing an invoice is a single authorized action with no intermediate "submitted for approval" state. A backward edge only makes sense where there's a state worth stepping back out of.)
 
 ## See also
+
+- [security-auth/user-authored-templates-and-bearer-links.md](../security-auth/user-authored-templates-and-bearer-links.md) — the placeholder engine itself, filled at the issue edge described above (Phase 40)
 
 - [postgresql/deferred-constraint-triggers.md](../postgresql/deferred-constraint-triggers.md) — the same "database enforces it independently of the service" posture, for the ledger's balance invariant
 - [typescript/const-assertions-and-satisfies.md](../typescript/const-assertions-and-satisfies.md) — the `as const` / `satisfies` mechanics this note builds on

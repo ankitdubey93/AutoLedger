@@ -822,9 +822,19 @@ export async function postJournalForTransactionOnClient(
           { accountId: line.account_id, debitCents: 0, creditCents: absAmount },
         ];
 
+  // Phase 40 — a description someone wrote (by hand, or on a bank rule) may
+  // carry placeholders (`Bank fee [Month]`). The bank's own statement text
+  // never is: it is external data and is used as it arrived.
+  const { description } = await journalService.fillJournalDescriptionOnClient(
+    client,
+    orgId,
+    input.description,
+    line.txn_date,
+    'BANK_LINE',
+  );
   const entryId = await journalService.createEntryOnClient(client, orgId, userId, {
     entryDate: line.txn_date,
-    description: input.description ?? line.description,
+    description: description ?? line.description,
     sourceType: 'bank_line',
     sourceId: id,
     lines,

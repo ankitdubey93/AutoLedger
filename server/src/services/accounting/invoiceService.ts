@@ -4,6 +4,8 @@ import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
+import type { FillMode, PlaceholderContext } from '../../utils/placeholders.js';
+import { fillField, fillOptionalField, LINE_DESCRIPTION_MAX, NOTES_MAX } from '../../utils/placeholderFields.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import type { JournalLineInput } from './journalService.js';
@@ -140,6 +142,7 @@ interface InvoiceRow {
   customer_address_snapshot: string | null;
   customer_tax_number_snapshot: string | null;
   notes: string | null;
+  notes_template: string | null;
   payment_terms: string | null;
   payment_terms_code: string | null;
   subtotal_cents: string;
@@ -166,6 +169,7 @@ interface InvoiceLineRow {
   invoice_id: string;
   line_number: number;
   description: string;
+  description_template: string | null;
   quantity_milli: string;
   unit_price_cents: string;
   revenue_account_id: string;
@@ -181,7 +185,7 @@ interface InvoiceLineRow {
 const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, c.name AS customer_name,
                                 i.issue_date, i.due_date, i.currency_code,
                                 i.customer_name_snapshot, i.customer_address_snapshot,
-                                i.customer_tax_number_snapshot, i.notes, i.payment_terms, i.payment_terms_code,
+                                i.customer_tax_number_snapshot, i.notes, i.notes_template, i.payment_terms, i.payment_terms_code,
                                 i.subtotal_cents, i.tax_cents, i.total_cents,
                                 i.fx_rate::text AS fx_rate, i.base_subtotal_cents,
                                 i.base_tax_cents, i.base_total_cents,
@@ -198,6 +202,7 @@ function toLine(row: InvoiceLineRow): InvoiceLine {
     id: row.id,
     lineNumber: row.line_number,
     description: row.description,
+    descriptionTemplate: row.description_template,
     quantityMilli: Number(row.quantity_milli),
     unitPriceCents: parseCents(row.unit_price_cents),
     revenueAccountId: row.revenue_account_id,
@@ -244,6 +249,7 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     customerAddressSnapshot: row.customer_address_snapshot,
     customerTaxNumberSnapshot: row.customer_tax_number_snapshot,
     notes: row.notes,
+    notesTemplate: row.notes_template,
     paymentTerms: row.payment_terms,
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
@@ -278,7 +284,8 @@ async function loadLines(
   if (invoiceIds.length === 0) return byInvoice;
 
   const { rows } = await pool.query<InvoiceLineRow>(
-    `SELECT l.id, l.invoice_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
+    `SELECT l.id, l.invoice_id, l.line_number, l.description, l.description_template,
+            l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
             l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
        FROM invoice_lines l
@@ -512,6 +519,8 @@ async function insertInvoiceLines(
   orgId: string,
   invoiceId: string,
   totals: LineTotal[],
+  /** Phase 40 — per line, the description as written when filling changed it. */
+  descriptionTemplates: (string | null)[] = [],
 ): Promise<void> {
   // Phase 32: early feedback for lot/serial items, fixed assets and a location on a
   // non-stock line (posting re-checks). The revenue account stays whatever the line carries.
@@ -528,14 +537,17 @@ async function insertInvoiceLines(
   await client.query(
     `INSERT INTO invoice_lines
        (org_id, invoice_id, line_number, description, quantity_milli, unit_price_cents,
-        revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)
+        revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
+        description_template)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id
+            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
+            v.description_template
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)`,
+                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
+                    description_template)`,
     [
       orgId,
       invoiceId,
@@ -549,8 +561,32 @@ async function insertInvoiceLines(
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
       totals.map((t) => t.input.stockLocationId ?? null),
+      totals.map((_, i) => descriptionTemplates[i] ?? null),
     ],
   );
+}
+
+/**
+ * Phase 40 — fills an invoice's user-authored text: its notes and each line's
+ * description. Payment terms are a catalogue label, and the journal entry's
+ * description is system text, so neither is ever filled.
+ */
+function fillInvoiceText(
+  notes: string | null,
+  descriptions: string[],
+  ctx: PlaceholderContext,
+  mode: FillMode,
+): { notes: { text: string | null; template: string | null }; lines: { text: string; template: string | null }[] } {
+  return {
+    notes: fillOptionalField(notes, 'INVOICE', ctx, mode, { label: 'Notes', max: NOTES_MAX }),
+    lines: descriptions.map((description, i) =>
+      fillField(description, 'INVOICE', ctx, mode, {
+        label: `Line ${String(i + 1)}'s description`,
+        max: LINE_DESCRIPTION_MAX,
+        required: true,
+      }),
+    ),
+  };
 }
 
 export interface CreateInvoiceOptions {
@@ -558,6 +594,13 @@ export interface CreateInvoiceOptions {
   invoiceNumber?: string;
   /** Import conversion mode only: this one account id (3400) is accepted by assertRevenueAccounts as if it were Revenue. */
   equityAccountId?: string;
+  /**
+   * Phase 40 — recurring generation only: fill the notes' and lines'
+   * placeholders now, against the issue date and this run's number, keeping
+   * any that have no value yet (`[Invoice Number]`) for issue. A hand-saved
+   * draft is stored as typed instead, so editing it never loses a placeholder.
+   */
+  placeholders?: { occurrence: number };
 }
 
 /**
@@ -575,13 +618,13 @@ export async function createInvoiceOnClient(
   options: CreateInvoiceOptions = {},
 ): Promise<string> {
   validateInvoiceInput(input);
-  const totals = computeLineTotals(input.lines);
+  let totals = computeLineTotals(input.lines);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
 
-  const { rows: orgRows } = await client.query<{ base_currency: string }>(
-    'SELECT base_currency FROM organizations WHERE id = $1',
+  const { rows: orgRows } = await client.query<{ name: string; base_currency: string }>(
+    'SELECT name, base_currency FROM organizations WHERE id = $1',
     [orgId],
   );
   const baseCurrency = orgRows[0]?.base_currency.trim();
@@ -600,6 +643,24 @@ export async function createInvoiceOnClient(
   if (customer === undefined) throw new ApiError(422, 'Customer not found');
 
   const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
+
+  let notes = input.notes;
+  let notesTemplate: string | null = null;
+  let descriptionTemplates: (string | null)[] = [];
+  if (options.placeholders !== undefined) {
+    const ctx: PlaceholderContext = {
+      date: input.issueDate,
+      dueDate: resolvedDue.dueDate,
+      contactName: customer.name,
+      organisationName: orgRows[0]?.name ?? null,
+      occurrence: options.placeholders.occurrence,
+    };
+    const filled = fillInvoiceText(input.notes, totals.map((t) => t.input.description), ctx, 'partial');
+    notes = filled.notes.text;
+    notesTemplate = filled.notes.template;
+    descriptionTemplates = filled.lines.map((l) => l.template);
+    totals = totals.map((t, i) => ({ ...t, input: { ...t.input, description: filled.lines[i]?.text ?? t.input.description } }));
+  }
 
   await assertRevenueAccounts(
     client,
@@ -620,8 +681,9 @@ export async function createInvoiceOnClient(
        (org_id, customer_id, issue_date, due_date, currency_code,
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
-        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number,
+        notes_template)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      RETURNING id`,
     [
       orgId,
@@ -632,7 +694,7 @@ export async function createInvoiceOnClient(
       customer.name,
       customer.billing_address,
       customer.tax_number,
-      input.notes,
+      notes,
       resolvedDue.paymentTerms,
       resolvedDue.paymentTermsCode,
       subtotalCents,
@@ -644,12 +706,13 @@ export async function createInvoiceOnClient(
       baseTotalCents,
       createdBy,
       options.invoiceNumber ?? null,
+      notesTemplate,
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
   if (invoiceId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
-  await insertInvoiceLines(client, orgId, invoiceId, totals);
+  await insertInvoiceLines(client, orgId, invoiceId, totals, descriptionTemplates);
 
   return invoiceId;
 }
@@ -765,7 +828,8 @@ export async function updateInvoice(
               customer_name_snapshot = $5, customer_address_snapshot = $6,
               customer_tax_number_snapshot = $7, notes = $8, payment_terms = $9, payment_terms_code = $10,
               subtotal_cents = $11, tax_cents = $12, total_cents = $13,
-              fx_rate = $14, base_subtotal_cents = $15, base_tax_cents = $16, base_total_cents = $17
+              fx_rate = $14, base_subtotal_cents = $15, base_tax_cents = $16, base_total_cents = $17,
+              notes_template = NULL
         WHERE id = $18 AND org_id = $19`,
       [
         input.customerId,
@@ -877,12 +941,22 @@ export async function resolvePostingAccounts(
  * transaction client (e.g. `recurringService.runDueOccurrences`). Runs no
  * BEGIN/COMMIT/ROLLBACK and maps no errors (rule 5) — the caller owns both.
  */
+export interface IssueInvoiceOptions {
+  /**
+   * Phase 40 — fill the notes' and lines' placeholders as the invoice is
+   * issued (default). Imports pass false: their text is historical data,
+   * not placeholder-authored.
+   */
+  fillPlaceholders?: boolean;
+}
+
 export async function issueInvoiceOnClient(
   client: PoolClient,
   orgId: string,
   userId: string,
   id: string,
   entryDate: string | null,
+  options: IssueInvoiceOptions = {},
 ): Promise<void> {
     const { rows: invoiceRows } = await client.query<{
       id: string;
@@ -896,9 +970,10 @@ export async function issueInvoiceOnClient(
       total_cents: string;
       tax_cents: string;
       invoice_number: string | null;
+      notes: string | null;
     }>(
       `SELECT id, status, issue_date, due_date, customer_id, customer_name_snapshot,
-              currency_code, subtotal_cents, total_cents, tax_cents, invoice_number
+              currency_code, subtotal_cents, total_cents, tax_cents, invoice_number, notes
          FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -912,14 +987,16 @@ export async function issueInvoiceOnClient(
     }
 
     const { rows: lineRows } = await client.query<{
+      id: string;
       line_number: number;
+      description: string;
       quantity_milli: string;
       revenue_account_id: string;
       net_cents: string;
       item_id: string | null;
       stock_location_id: string | null;
     }>(
-      `SELECT line_number, quantity_milli, revenue_account_id, net_cents, item_id, stock_location_id
+      `SELECT id, line_number, description, quantity_milli, revenue_account_id, net_cents, item_id, stock_location_id
          FROM invoice_lines WHERE invoice_id = $1 AND org_id = $2 ORDER BY line_number`,
       [id, orgId],
     );
@@ -937,8 +1014,8 @@ export async function issueInvoiceOnClient(
     // rather than trusting whatever the draft last saved for issue_date —
     // entryDate can differ from issue_date. Once issued this never changes
     // again; every later settlement compares its own rate against this one.
-    const { rows: orgRows } = await client.query<{ base_currency: string }>(
-      'SELECT base_currency FROM organizations WHERE id = $1',
+    const { rows: orgRows } = await client.query<{ name: string; base_currency: string }>(
+      'SELECT name, base_currency FROM organizations WHERE id = $1',
       [orgId],
     );
     const baseCurrency = orgRows[0]?.base_currency.trim();
@@ -1045,6 +1122,46 @@ export async function issueInvoiceOnClient(
 
     const invoiceNumber = invoiceRow.invoice_number ?? await invoiceSettingsService.allocateInvoiceNumber(client, orgId);
 
+    // Phase 40 — no placeholder reaches an issued invoice. Filled after the
+    // number is allocated (so [Invoice Number] has its value) and in the same
+    // transaction, so an over-long result (422) also rolls the number back.
+    // ORDER MATTERS: lines are updated while the invoice is still DRAFT —
+    // trg_invoice_lines_draft_only reads the parent's status — while the
+    // notes ride on the status flip below, which trg_invoices_immutable
+    // allows because OLD.status is still DRAFT.
+    let notes = invoiceRow.notes;
+    let notesTemplate: string | null = null;
+    if (options.fillPlaceholders !== false) {
+      const filled = fillInvoiceText(
+        invoiceRow.notes,
+        lineRows.map((l) => l.description),
+        {
+          date: invoiceRow.issue_date,
+          dueDate: invoiceRow.due_date,
+          contactName: invoiceRow.customer_name_snapshot,
+          organisationName: orgRows[0]?.name ?? null,
+          invoiceNumber,
+        },
+        'final',
+      );
+      notes = filled.notes.text;
+      notesTemplate = filled.notes.template;
+      const changed = lineRows.flatMap((l, i) => {
+        const line = filled.lines[i];
+        return line === undefined || line.template === null ? [] : [{ id: l.id, text: line.text, template: line.template }];
+      });
+      if (changed.length > 0) {
+        await client.query(
+          `UPDATE invoice_lines l
+              SET description = v.description,
+                  description_template = COALESCE(l.description_template, v.description_template)
+             FROM unnest($3::uuid[], $4::text[], $5::text[]) AS v(id, description, description_template)
+            WHERE l.id = v.id AND l.org_id = $1 AND l.invoice_id = $2`,
+          [orgId, id, changed.map((c) => c.id), changed.map((c) => c.text), changed.map((c) => c.template)],
+        );
+      }
+    }
+
     const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
       entryDate: postingDate,
       description: `Invoice ${invoiceNumber} — ${invoiceRow.customer_name_snapshot}`,
@@ -1056,9 +1173,10 @@ export async function issueInvoiceOnClient(
     await client.query(
       `UPDATE invoices
           SET status = 'ISSUED', invoice_number = $1, journal_entry_id = $2, issued_at = now(),
-              fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6
+              fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6,
+              notes = $9, notes_template = COALESCE(notes_template, $10)
         WHERE id = $7 AND org_id = $8`,
-      [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId],
+      [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId, notes, notesTemplate],
     );
 
     await emitEvent(client, orgId, MODULE_TAGS.accounting, 'invoice.issued', {

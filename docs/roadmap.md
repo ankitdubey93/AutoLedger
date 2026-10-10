@@ -1489,6 +1489,48 @@ Shipped in three steps, each green on its own.
 - New: [payment-gateway-integration.md](../study/architecture/payment-gateway-integration.md) and [user-authored-templates-and-bearer-links.md](../study/security-auth/user-authored-templates-and-bearer-links.md).
 - Extended: [webhook-signing-and-ssrf.md](../study/security-auth/webhook-signing-and-ssrf.md) (receiving Stripe's webhook, raw bodies) and [subledger-reconciliation-and-aging.md](../study/postgresql/subledger-reconciliation-and-aging.md) (as-at reads).
 
+## Phase 40, as delivered
+
+A direct feature request (2026-10-10), numbered like 24/30/32/34/39: Xero-style **placeholders** — `[Month]`, `[Year+1]`, `[Contact Name]` — "in template settings, as well as bills and invoices". Decisions taken with the user:
+- Xero's bracket syntax with ± offsets, not Phase 39b's `{{snake_case}}`;
+- fill in **every** place text is authored: recurring generation, issue/approve of any draft, invoice and statement template settings, the bill vendor reference, statement email templates, and the rest (notes, bank rules);
+- dates with offsets, contact name, organisation name, due date, occurrence and invoice number;
+- a recurring template draft issued directly has its placeholders filled on issue.
+
+The user-facing rules are in [accounting.md § Phase 40](accounting.md#phase-40--placeholders--shipped).
+
+**Engine.**
+- `server/src/utils/placeholders.ts` rewritten in place: a `PLACEHOLDERS` registry (label, aliases, legacy name, offset allowed, surfaces), one alternation regex for `[Name±n]` and legacy `{{name}}` so a fill stays a single pass, `partial`/`final` modes, ISO-8601 weeks and a hand-rolled English month table (no `Intl`, whose output varies with each runtime's ICU data), abbreviating September as "Sept" like the Phase 39b emails. `[[Name]]` escapes a placeholder — unescaped only by a `final` fill, so a recurring draft's second fill cannot expand it.
+- `client/src/utils/placeholders.ts` mirrors it line for line, plus `nearMisses` (Levenshtein ≤ 2, off-surface and bad-offset hints) and `upgradeLegacy`. One fixture, `client/src/__tests__/fixtures/placeholderCases.json` (28 cases), runs in both suites — the client imports it `?raw`, the server reads it with `fs`, because Vite refuses files outside its root (found while building; the plan had it the other way round).
+- `utils/placeholderFields.ts` — `fillField`: re-checks the column limit on the filled text (code points, as `char_length`), refuses blank required fields, returns the `*_template` value.
+
+**Migration `088`** (a follow-up the same day, signed off by the user) — `ux_bills_vendor_reference` becomes a partial unique index of the same name that exempts only an editable bill whose reference still contains placeholder-shaped bracket text, so two `RENT-[Month]` drafts for one vendor can coexist; uniqueness applies as approval fills the reference.
+
+**Migration `087`** — nullable, CHECK-bounded `notes_template` / `description_template` / `vendor_reference_template` on `invoices`, `invoice_lines`, `bills`, `bill_lines` and `journal_entries`: the text as written, so an issued invoice, an approved bill or any (always-posted) journal can still regenerate. No backfill.
+
+**Server.**
+- `invoiceService.issueInvoiceOnClient` / `billService.approveBillOnClient` / `creditNoteService.issueCreditNote` / `debitNoteService.issueDebitNote` final-fill notes and lines. **Lines are updated before the status flip** (the line triggers read the parent's current status); header text rides on the flip. Invoice filling happens after the number is allocated, so a 422 rolls the number back. Bill filling happens first, because the reference feeds the stock receipt, the journal description and the event. `fillPlaceholders: false` options for imports (`invoiceImportService`, `billImportService`) and the Bill inbox auto-post (`capture/postingService`).
+- Bill vendor reference: `fillVendorReferenceOnClient` pre-checks `ux_bills_vendor_reference` (org-scoped) and returns a `409` ApiError — recorded as the schedule's `lastError` by the sweep instead of a retried 23505. Recurring runs fall back to `<filled>-<runDate>` first; a manual approval never does. `approveBill` now maps a racing 23505 to 409.
+- `createInvoiceOnClient` / `createBillOnClient` gain a recurring-only `placeholders: { occurrence }` option (partial fill). Hand-saved drafts store text as typed; `updateInvoice`/`updateBill` reset the templates.
+- `journalService.fillJournalDescriptionOnClient` — used by manual `createEntry`, recurring journals and `bankMatchService.postJournalForTransactionOnClient` (bank rules and manual bank posting, written description only). Deliberately **not** inside `createEntryOnClient`, which carries system text like `Invoice INV-1 — <customer>`.
+- `recurringService`: `occurrenceNumber` computed before generation and passed in; every copy reads `template ?? text`; a reference without placeholders keeps the Phase 34b suffix unchanged.
+- `statementEmailService`: bracket built-ins, `statementContext`, legacy `{{names}}` honoured at runtime (no data migration under rule 13), unknown `{{x}}` still 422. Email output is unchanged for existing templates (dates still "Sept").
+
+**Client.**
+- `components/placeholders/PlaceholderPicker` (a `Menu` of the surface's placeholders plus "Next month"/"Last month"/"Next year"), `PlaceholderHints` (preview + near-miss hints, never blocking), `utils/usePlaceholderTarget` (insert at the caret of the last-focused field, restore it in `requestAnimationFrame`), `useOrganizationName` (non-throwing, for previews).
+- Pickers on invoice, bill and credit/debit-note notes and lines, the bill reference, the journal description, bank rules, the invoice template (title, bank details, footer), invoice settings (footer), the statement template (title, footer) and the email templates (which lose their private engine and gain a "Convert to [Name] placeholders" banner).
+- `InvoiceDocument` and `StatementDocument` fill the template's settings text per document as they render; a DRAFT invoice's notes and lines are previewed filled; an issued invoice's own text is never re-filled.
+- Duplicating a journal or bill starts from the text as written; `MakeRecurringDialog` explains placeholders.
+
+**Tests.**
+- Server: `placeholders.test.ts` (33, pure, fixture), `accounting/documentPlaceholders.test.ts` (20 — escapes, shared draft references, issue/approve/post filling, 422 overflow rollback, recurring DRAFT/POST, issued templates, reference fallback and 409, capture opt-out, bank lines, credit notes, three cross-tenant cases), one new `statementEmail.test.ts` case (mixed legacy and bracket syntax), its engine unit test rewritten.
+- Client: `placeholders.test.ts` (31, fixture parity, hints, conversion), `placeholderUi.test.tsx` (7 — caret insertion, preview, surface filtering, document rendering), one new and one rewritten `statementEmail.test.tsx` case; fixtures gained the new fields.
+- **2044 server tests passing (2 skipped) + 607 client tests passing**, up from 1990/568 at Phase 39; typecheck and lint clean in both packages.
+
+**Deliberately not built:** localized month names (no organization locale setting exists to drive them); placeholders in the stored-but-never-rendered invoice-settings `paymentTerms`; editing a schedule's text in place; template columns on credit/debit notes (they never recur); a picker on the bank-transactions inline "post journal" field (the server fills it anyway).
+
+**Study notes:** extended [user-authored-templates-and-bearer-links.md](../study/security-auth/user-authored-templates-and-bearer-links.md) (registry, one-pass alternation, partial/final, runtime alias vs migration, ICU drift, ISO weeks, parity fixture), [document-lifecycle-fsm.md](../study/architecture/document-lifecycle-fsm.md) (child rows before the parent's flip; template columns) and [accessible-dialogs-and-focus.md](../study/react/accessible-dialogs-and-focus.md) (caret insertion through a menu).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

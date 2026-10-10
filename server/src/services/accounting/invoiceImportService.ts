@@ -104,7 +104,10 @@ export async function commitOnClient(
           ...(equityAccountId === undefined ? {} : { equityAccountId }),
         },
       );
-      if (mode === 'POST') await invoiceService.issueInvoiceOnClient(client, orgId, createdBy, id, postingDate);
+      if (mode === 'POST') {
+        // Imported text is historical data, not placeholder-authored (Phase 40).
+        await invoiceService.issueInvoiceOnClient(client, orgId, createdBy, id, postingDate, { fillPlaceholders: false });
+      }
     } catch (err) {
       if (err instanceof ApiError) throw new ApiError(err.status, `${capitalise(doc.label)} (${rowSpan}): ${err.message}`);
       const pg = err as { code?: string; constraint?: string };

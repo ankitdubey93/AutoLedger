@@ -20,6 +20,9 @@ import { sampleStatement } from '../statements/sampleStatement';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 
 /**
  * Statement template editor (Phase 39a): controls on the left, a live preview
@@ -82,6 +85,7 @@ export default function StatementTemplatePage() {
   const { organization } = useOrg();
   const [loaded, setLoaded] = useState<StatementSettings | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const placeholderTarget = usePlaceholderTarget('footerNotes');
   const [profile, setProfile] = useState<OrganizationProfile | null>(null);
   const [bankDetails, setBankDetails] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +209,7 @@ export default function StatementTemplatePage() {
               <span className="text-[var(--muted)]">Document title</span>
               <input
                 type="text"
+                {...placeholderTarget.bind('documentTitle', (documentTitle) => patchDraft({ documentTitle }))}
                 value={draft.documentTitle}
                 onChange={(e) => patchDraft({ documentTitle: e.target.value })}
                 maxLength={24}
@@ -253,9 +258,16 @@ export default function StatementTemplatePage() {
 
           <fieldset className="flex flex-col gap-3 border border-[var(--border)] rounded-lg p-4">
             <legend className="text-sm font-semibold px-1">Footer</legend>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-[var(--muted)]">
+                Placeholders here and in the title are filled in for each statement.
+              </span>
+              <PlaceholderPicker surface="STATEMENT" onInsert={placeholderTarget.insert} />
+            </div>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Footer notes</span>
               <textarea
+                {...placeholderTarget.bind('footerNotes', (footerNotes) => patchDraft({ footerNotes }))}
                 value={draft.footerNotes}
                 onChange={(e) => patchDraft({ footerNotes: e.target.value })}
                 rows={3}
@@ -263,6 +275,7 @@ export default function StatementTemplatePage() {
                 className={inputClass}
               />
             </label>
+            <PlaceholderHints text={[draft.documentTitle, draft.footerNotes]} surface="STATEMENT" />
           </fieldset>
 
           {titleBlank && <p className="status status--bad">Document title cannot be blank.</p>}

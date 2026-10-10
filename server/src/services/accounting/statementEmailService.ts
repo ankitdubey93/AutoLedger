@@ -7,8 +7,8 @@ import { ApiError } from '../../utils/apiError.js';
 import { randomUrlToken, sha256Hex } from '../../utils/pkce.js';
 import {
   fillPlaceholders,
-  unknownPlaceholders,
-  type PlaceholderValues,
+  unknownLegacyPlaceholders,
+  type PlaceholderContext,
 } from '../../utils/placeholders.js';
 import { enqueueEmailOnClient } from '../mail/emailOutboxService.js';
 import * as organizationService from '../organizationService.js';
@@ -53,13 +53,13 @@ export const BUILT_IN_TEMPLATES: Record<PartyKind, Omit<StatementEmailTemplate, 
   CUSTOMER: {
     id: null,
     name: 'Standard statement',
-    subject: 'Statement from {{organization_name}}',
+    subject: 'Statement from [Organisation Name]',
     body: [
-      'Hi {{contact_name}},',
-      'Here is your account statement from {{organization_name}} as at {{statement_date}}.',
-      'Balance due: {{balance_due}}\nOverdue: {{overdue_amount}}',
+      'Hi [Contact Name],',
+      'Here is your account statement from [Organisation Name] as at [Statement Date].',
+      'Balance due: [Balance Due]\nOverdue: [Overdue Amount]',
       'You can review your open invoices and pay online using the link below.',
-      'Thank you,\n{{organization_name}}',
+      'Thank you,\n[Organisation Name]',
     ].join('\n\n'),
     isDefault: true,
     builtIn: true,
@@ -68,13 +68,13 @@ export const BUILT_IN_TEMPLATES: Record<PartyKind, Omit<StatementEmailTemplate, 
   VENDOR: {
     id: null,
     name: 'Standard vendor statement',
-    subject: 'Account statement from {{organization_name}}',
+    subject: 'Account statement from [Organisation Name]',
     body: [
-      'Hi {{contact_name}},',
-      'Here is our statement of account with you as recorded by {{organization_name}} on {{statement_date}}.',
-      'Balance we owe: {{balance_due}}',
+      'Hi [Contact Name],',
+      'Here is our statement of account with you as recorded by [Organisation Name] on [Statement Date].',
+      'Balance we owe: [Balance Due]',
       'Please let us know if anything differs from your records.',
-      'Thank you,\n{{organization_name}}',
+      'Thank you,\n[Organisation Name]',
     ].join('\n\n'),
     isDefault: true,
     builtIn: true,
@@ -111,9 +111,12 @@ function builtIn(kind: PartyKind): StatementEmailTemplate {
   return { ...BUILT_IN_TEMPLATES[kind], partyKind: kind };
 }
 
-/** 422 when a subject or body names a placeholder that does not exist. */
+/**
+ * 422 when a subject or body names a `{{legacy}}` placeholder that does not
+ * exist. Bracket text is never refused — "[draft]" is ordinary prose.
+ */
 function assertKnownPlaceholders(subject: string | undefined, body: string | undefined): void {
-  const unknown = [...unknownPlaceholders(subject ?? ''), ...unknownPlaceholders(body ?? '')];
+  const unknown = [...unknownLegacyPlaceholders(subject ?? ''), ...unknownLegacyPlaceholders(body ?? '')];
   if (unknown.length > 0) {
     throw new ApiError(422, `Unknown placeholder${unknown.length > 1 ? 's' : ''}: ${unknown.map((n) => `{{${n}}}`).join(', ')}`);
   }
@@ -299,13 +302,6 @@ async function resolveTemplate(
 
 // ------------------------------------------------------------------ rendering
 
-const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
-
-function formatDay(iso: string | null): string {
-  if (iso === null) return '';
-  return DATE_FORMAT.format(new Date(`${iso}T00:00:00Z`));
-}
-
 /** 1234567 → "USD 12,345.67" — integer arithmetic only (rule 3). */
 export function formatMoney(cents: number, currency: string): string {
   const magnitude = Math.abs(cents);
@@ -314,22 +310,22 @@ export function formatMoney(cents: number, currency: string): string {
   return `${currency} ${cents < 0 ? '-' : ''}${major}.${minor}`;
 }
 
-export function placeholderValues(
+export function statementContext(
   organizationName: string,
   currency: string,
   statement: PartyStatement,
-): PlaceholderValues {
+): PlaceholderContext {
   return {
-    contact_name: statement.party.name,
-    organization_name: organizationName,
-    balance_due: formatMoney(statement.closingBalanceCents, currency),
-    overdue_amount: formatMoney(statement.overdueCents, currency),
-    statement_date: formatDay(statement.statementDate),
-    period_from: formatDay(statement.from),
-    period_to: formatDay(statement.statementDate),
-    open_invoice_count: String(
-      statement.openItems.filter((i) => i.documentKind === 'INVOICE' || i.documentKind === 'BILL').length,
-    ),
+    date: statement.statementDate,
+    contactName: statement.party.name,
+    organisationName: organizationName,
+    balanceDue: formatMoney(statement.closingBalanceCents, currency),
+    overdueAmount: formatMoney(statement.overdueCents, currency),
+    statementDate: statement.statementDate,
+    periodFrom: statement.from,
+    periodTo: statement.statementDate,
+    openInvoiceCount: statement.openItems.filter((i) => i.documentKind === 'INVOICE' || i.documentKind === 'BILL')
+      .length,
   };
 }
 
@@ -355,11 +351,11 @@ export async function previewStatementEmail(
     resolveTemplate(orgId, kind, templateId),
     statementService.getStatement(orgId, kind, partyId, request),
   ]);
-  const values = placeholderValues(organization.name, organization.baseCurrency, statement);
+  const ctx = statementContext(organization.name, organization.baseCurrency, statement);
   return {
     toEmail: statement.party.email,
-    subject: fillPlaceholders(template.subject, values),
-    body: fillPlaceholders(template.body, values),
+    subject: fillPlaceholders(template.subject, 'STATEMENT', ctx),
+    body: fillPlaceholders(template.body, 'STATEMENT', ctx),
   };
 }
 
@@ -439,7 +435,7 @@ export async function sendStatements(
       const sendId = rows[0]?.id;
       if (sendId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
-      const values = placeholderValues(organization.name, organization.baseCurrency, statement);
+      const ctx = statementContext(organization.name, organization.baseCurrency, statement);
       await enqueueEmailOnClient(client, {
         orgId,
         to: toEmail,
@@ -447,8 +443,8 @@ export async function sendStatements(
         template: 'party_statement',
         data: {
           organizationName: organization.name,
-          subject: fillPlaceholders(template.subject, values),
-          body: fillPlaceholders(template.body, values),
+          subject: fillPlaceholders(template.subject, 'STATEMENT', ctx),
+          body: fillPlaceholders(template.body, 'STATEMENT', ctx),
           actionLabel: kind === 'CUSTOMER' ? 'pay' : 'view',
         },
         link: linkFor(token),

@@ -4,6 +4,8 @@ import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
 import { convertToBase, isCurrencyCode, ONE_RATE } from '../../utils/fxRate.js';
+import { containsPlaceholders } from '../../utils/placeholders.js';
+import { fillOptionalField, JOURNAL_DESCRIPTION_MAX } from '../../utils/placeholderFields.js';
 import { assertPeriodOpenOnClient } from './fiscalPeriodService.js';
 import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import type { JournalEntry, LedgerLine } from '../../types/accounting.js';
@@ -48,6 +50,11 @@ export interface JournalLineInput {
 export interface CreateEntryInput {
   entryDate: string;
   description: string | null;
+  /**
+   * Phase 40 — the description as written, when filling its placeholders
+   * changed it (`fillJournalDescriptionOnClient`). Never sent by a client.
+   */
+  descriptionTemplate?: string | null;
   /** Other apps pass their own slug; a client-posted entry is always 'manual'. */
   sourceType?: string;
   sourceId?: string | null;
@@ -61,6 +68,7 @@ interface EntryRow {
   /** A string, not a Date — see the DATE type parser in db/connect.ts. */
   entry_date: string;
   description: string | null;
+  description_template: string | null;
   source_type: string;
   source_id: string | null;
   reverses_entry_id: string | null;
@@ -101,7 +109,7 @@ interface LineRow {
  * not another app's table, and `created_by` stays an audit field only — never
  * an access check (guardrails rules 1 and 16).
  */
-const ENTRY_SELECT = `SELECT e.id, e.entry_date, e.description, e.source_type, e.source_id,
+const ENTRY_SELECT = `SELECT e.id, e.entry_date, e.description, e.description_template, e.source_type, e.source_id,
                              e.reverses_entry_id, e.created_by, e.created_at,
                              u.name  AS created_by_name,
                              u.email AS created_by_email,
@@ -142,6 +150,7 @@ function toEntry(row: EntryRow, lines: LedgerLine[]): JournalEntry {
     // routing it through a JS Date would shift it by a day (db/connect.ts).
     entryDate: row.entry_date,
     description: row.description,
+    descriptionTemplate: row.description_template,
     sourceType: row.source_type,
     sourceId: row.source_id,
     reversesEntryId: row.reverses_entry_id,
@@ -528,8 +537,9 @@ export async function createEntryOnClient(
   }
 
   const { rows: entryRows } = await client.query<{ id: string }>(
-    `INSERT INTO journal_entries (org_id, created_by, entry_date, description, source_type, source_id)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO journal_entries
+       (org_id, created_by, entry_date, description, source_type, source_id, description_template)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING id`,
     [
       orgId,
@@ -538,6 +548,7 @@ export async function createEntryOnClient(
       input.description,
       input.sourceType ?? 'manual',
       input.sourceId ?? null,
+      input.descriptionTemplate ?? null,
     ],
   );
   const entryId = entryRows[0]?.id;
@@ -569,6 +580,40 @@ export async function createEntryOnClient(
 }
 
 /**
+ * Phase 40 — fills a user-authored journal description's placeholders
+ * (`AWS [Month]` → `AWS October`) against the entry date. A journal is posted
+ * the moment it is created, so this is always a final fill; the text as
+ * written is returned as `descriptionTemplate` for a recurring schedule to
+ * fill afresh next time.
+ *
+ * Only for text a person wrote — a manual entry, a recurring journal, a
+ * bank-line posting. Never called from `createEntryOnClient`, because every
+ * document service passes system text through it (`Invoice INV-1 — <customer
+ * name>`), and a customer named "[Month]" must not expand.
+ */
+export async function fillJournalDescriptionOnClient(
+  client: PoolClient,
+  orgId: string,
+  description: string | null,
+  entryDate: string,
+  surface: 'JOURNAL' | 'BANK_LINE' = 'JOURNAL',
+  occurrence: number | null = null,
+): Promise<{ description: string | null; descriptionTemplate: string | null }> {
+  if (description === null || !containsPlaceholders(description, surface)) {
+    return { description, descriptionTemplate: null };
+  }
+  const { rows } = await client.query<{ name: string }>('SELECT name FROM organizations WHERE id = $1', [orgId]);
+  const filled = fillOptionalField(
+    description,
+    surface,
+    { date: entryDate, organisationName: rows[0]?.name ?? null, occurrence },
+    'final',
+    { label: 'Description', max: JOURNAL_DESCRIPTION_MAX },
+  );
+  return { description: filled.text, descriptionTemplate: filled.template };
+}
+
+/**
  * Posts one balanced entry and its lines, atomically.
  *
  * Everything runs on the checked-out `client` (guardrails rule 5) — a stray
@@ -593,7 +638,8 @@ export async function createEntry(
       input.lines.map((line) => line.accountId),
     );
 
-    const entryId = await createEntryOnClient(client, orgId, createdBy, input);
+    const filled = await fillJournalDescriptionOnClient(client, orgId, input.description, input.entryDate);
+    const entryId = await createEntryOnClient(client, orgId, createdBy, { ...input, ...filled });
 
     // COMMIT is where the deferred balance trigger runs, so a failure here is
     // still inside the try and still rolls back cleanly.

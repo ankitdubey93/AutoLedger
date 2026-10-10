@@ -882,6 +882,34 @@ Row-level `errors: string[]` accumulate rather than abort; an import's `status` 
 
 Failure paths: `400` from the schema · `403` for a write below its role tier · `404` for another org's import or row, or an unknown `id`/`rowId` · `409 Fix N invalid row(s) before committing` (commit attempted before `VALIDATED`) · `409 This import has already been committed` (any write to a `COMMITTED` import) · `409 A committed import cannot be deleted` · `409 This organization already has a committed opening-balance import` · (Phase 36d) `409 Another user was posting at the same time — nothing was imported. Commit again.` (a posting import of inventory documents can deadlock with a concurrent issue — Postgres `40P01`, or `40001` — and rolls back whole; commit again) · `422 Could not find a(n) <field> column in the file` (a required column unresolved after mapping — the one whole-file failure; the text is the kind's own `missingMessages`: `CUSTOMERS`/`VENDORS` `Could not find a name column in the file`, `CHART_OF_ACCOUNTS` `… an account code / account name / account type column …`, `OPENING_BALANCES` `… an amount column, or a debit/credit pair, in the file`. **Phase 36a behaviour change:** a chart file with no name column is now this `422`; previously every row staged `INVALID`) · `422 This file has N data rows; one import takes at most 5000 — split it into smaller files` (`MAX_IMPORT_ROWS`; also on `/inspect`) · `422 This file has N journals; one import takes at most 1000 — split it into smaller files` (Phase 36c, `MAX_IMPORT_DOCUMENTS`) (Phase 36d: the same with `invoices` or `expenses`) · `400` on a bad `columnMap`: `Unknown column "<key>" for a <Kind label> import` · `The file has no column named "<header>"` · `Column "<header>" is mapped to more than one field` · `400 status must be DRAFT, VALIDATED or COMMITTED` (list filter) · `422 Complete setup before importing opening balances` · `422 Account 3400 Opening Balance Equity is missing — run migrations` · `422` from the period-lock guard if `books_start_date` falls inside a closed/locked period · (Phase 24, staged-row errors, never a whole-file failure) `name is required` · `duplicate name "<name>" in this file` · `"<email>" is not a valid email address` · `duplicate email "<email>" in this file`.
 
+#### Placeholders — Phase 40
+
+No new route. Xero-style placeholders (`[Month]`, `[Year+1]`, `[Contact Name]`, `[Invoice Number]` …; the full list and rules are in [accounting.md § Phase 40](accounting.md#phase-40--placeholders--shipped)) are filled by the existing write routes:
+
+| Route | Fills |
+|---|---|
+| `POST /invoices/:id/issue` | `notes` and each line's `description`, against `issueDate`, the customer, `dueDate`, the organization and the allocated number |
+| `POST /bills/:id/approve` | `vendorReference`, `notes` and each line's `description`, against `billDate` |
+| `POST /credit-notes/:id/issue` · `POST /debit-notes/:id/issue` | `notes` and each line's `description` (`[Invoice Number]` on a credit note is the original invoice's) |
+| `POST /journals` | `description`, against `entryDate` |
+| `POST /bank-transactions/:id/post-journal` and bank rules | the written `description` only, against the line's date — never the bank's own text |
+| `POST /recurring-schedules/:id/run` and the sweep | every generated document, against `runDate` and the occurrence number |
+
+`POST /invoices` / `PATCH /invoices/:id` and their bill equivalents store text **as typed**; a draft's placeholders are filled only at issue/approve.
+
+**New response fields** (read-only, never accepted in a body): `Invoice.notesTemplate`, `InvoiceLine.descriptionTemplate`, `Bill.notesTemplate`, `Bill.vendorReferenceTemplate`, `BillLine.descriptionTemplate`, `JournalEntry.descriptionTemplate` — the text as written, before its placeholders were filled, or `null` when it had none. Editing a draft resets them to `null`.
+
+**New failures:**
+- `422 <Field> is longer than <n> characters once placeholders are filled` — e.g. `Line 2's description …` (500), `Notes …` (1000), `Vendor reference …` (100), `Description …` (500). The whole issue/approve rolls back, the invoice number included.
+- `422 <Field> is empty once placeholders are filled` — a line description or vendor reference consisting only of a placeholder with no value.
+- `409 Vendor reference "<filled>" has already been entered for this vendor` — on `POST /bills/:id/approve` when the filled reference is taken (a manual approval never changes it silently).
+
+**Duplicate references.** `POST /bills` / `PATCH /bills/:id` no longer refuse a second draft (or in-review) bill whose reference still contains placeholders — two `RENT-[Month]` drafts for one vendor are fine. Every other reference is unique per vendor exactly as before, and every bill is checked once approval fills its reference.
+
+`[[Name]]` escapes a placeholder: it is written out as a literal `[Name]` at issue/approve/post (a recurring DRAFT keeps it escaped until then).
+
+Text from an import's POST mode and from the Bill inbox's auto-post is never filled.
+
 #### Recurring schedules — `/api/v1/recurring-schedules` — Phase 34b
 
 | Method | Path | Auth | Description |
@@ -902,7 +930,7 @@ An invoice, bill or manual journal entry acts as a template; a background sweep 
 
 A `JOURNAL` template must be `sourceType: 'manual'` (not itself generated by capture, a bank rule, or another recurring schedule), must not itself be a reversing entry (`reversesEntryId IS NOT NULL`), and every line's `currencyCode` must be the org's base currency — a recurring journal never carries FX. Every recurring schedule is also checked against the Phase 25 control-account guard on every account it would post to, both at creation and again at each generation.
 
-**`POST /:id/run`** returns `{ success: true, generated, lastError, schedule }` — `generated` is how many occurrences this call produced (`0`/`1` outside a catch-up scenario; up to `RECURRING_MAX_CATCHUP_PER_RUN`, 12, if the schedule fell behind). `lastError` is the message from the most recent failed occurrence (e.g. a closed fiscal period) — that occurrence is **not** retried automatically; fix the underlying blocker and call `run` again. A generated `INVOICE`/`BILL` copies the template's lines, party, currency and payment-terms code field-for-field, dated to the occurrence's `runDate`; a generated `BILL`'s `vendorReference` gets `-<runDate>` appended (capped at 100 characters) so the duplicate-reference control (`/bills` above) never collides across occurrences. A `POST`-mode occurrence issues the invoice / approves the bill in the same transaction as creating it, so a generated document is never left half-drafted.
+**`POST /:id/run`** returns `{ success: true, generated, lastError, schedule }` — `generated` is how many occurrences this call produced (`0`/`1` outside a catch-up scenario; up to `RECURRING_MAX_CATCHUP_PER_RUN`, 12, if the schedule fell behind). `lastError` is the message from the most recent failed occurrence (e.g. a closed fiscal period) — that occurrence is **not** retried automatically; fix the underlying blocker and call `run` again. A generated `INVOICE`/`BILL` copies the template's lines, party, currency and payment-terms code field-for-field, dated to the occurrence's `runDate`; a generated `BILL`'s `vendorReference` gets `-<runDate>` appended (capped at 100 characters) so the duplicate-reference control (`/bills` above) never collides across occurrences — **unless it contains placeholders** (Phase 40, `RENT-[Month]`): then it is filled instead, falling back to `<filled>-<runDate>` only if the filled text is already taken for that vendor, and recording `lastError: 'Vendor reference "…" has already been entered for this vendor'` if that is taken too. Every occurrence copies the template's text **as written** (`notesTemplate ?? notes`, `descriptionTemplate ?? description`) and fills its placeholders against `runDate` and `occurrenceNumber` — see [Placeholders](#placeholders--phase-40) below. A `POST`-mode occurrence issues the invoice / approves the bill in the same transaction as creating it, so a generated document is never left half-drafted.
 
 Each `RecurringRun` in `schedule.runs` carries `runDate`, `occurrenceNumber`, and exactly one of `invoiceId`/`billId`/`journalEntryId` plus, for an auto-reversing journal, `reversalEntryId`. Runs are append-only — a database trigger rejects any `UPDATE`.
 
@@ -935,10 +963,11 @@ Customer and vendor statements are a **read** over the Phase 25 subledger, with 
 - The total equals `/customers/:id/ledger?to=<date>`'s `closingBalanceCents`.
 - **`/customers/:id/open-items` and `/reports/ar-aging` are unchanged**: they still use current settlement.
 
-**Placeholders** in `subject`/`body`:
-- The whole list: `{{contact_name}}`, `{{organization_name}}`, `{{balance_due}}`, `{{overdue_amount}}`, `{{statement_date}}`, `{{period_from}}`, `{{period_to}}`, `{{open_invoice_count}}`.
-- Anything else returns `422 Unknown placeholder: {{x}}` on save.
-- Substitution is a single pass, so a value containing `{{…}}` is inserted literally. The HTML part escapes everything.
+**Placeholders** in `subject`/`body` (Phase 40 syntax; [accounting.md § Phase 40](accounting.md#phase-40--placeholders--shipped)):
+- `[Contact Name]`, `[Organisation Name]`, `[Balance Due]`, `[Overdue Amount]`, `[Statement Date]`, `[Period From]`, `[Period To]`, `[Open Invoice Count]`, plus the date family (`[Date]`, `[Month]`, `[Year]` … anchored on the statement date). The built-in templates use these.
+- The Phase 39b names still work in a saved template: `{{contact_name}}`, `{{organization_name}}`, `{{balance_due}}`, `{{overdue_amount}}`, `{{statement_date}}`, `{{period_from}}`, `{{period_to}}`, `{{open_invoice_count}}`. Any other `{{x}}` returns `422 Unknown placeholder: {{x}}` on save; unknown bracket text is never refused (it is prose).
+- Dates read `30 Sept 2026`, as before. `[[Name]]` is an escape, sent as a literal `[Name]`.
+- Substitution is a single pass, so a value containing `{{…}}` or `[…]` is inserted literally. The HTML part escapes everything.
 
 **The emailed link** is `FRONTEND_URL/statement/<token>`. The token is 32 random bytes; only its SHA-256 is stored. It expires after 60 days and can be revoked.
 

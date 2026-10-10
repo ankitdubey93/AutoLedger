@@ -4,7 +4,7 @@ import { closePool, pool } from '../../db/connect.js';
 import { drainEmailOutbox } from '../../services/mail/emailOutboxService.js';
 import type { MailTransport } from '../../services/mail/transports.js';
 import type { OutgoingEmail } from '../../types/email.js';
-import { fillPlaceholders, unknownPlaceholders } from '../../utils/placeholders.js';
+import { fillPlaceholders, unknownLegacyPlaceholders } from '../../utils/placeholders.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
 import { latestEmailLink, outboxFor } from '../helpers/email.js';
@@ -64,21 +64,12 @@ async function linkToken(): Promise<string> {
 }
 
 describe('placeholders', () => {
-  it('fills only whitelisted names, once, and reports unknown ones', () => {
-    const values = {
-      contact_name: '{{balance_due}}',
-      organization_name: 'Org',
-      balance_due: 'USD 1.00',
-      overdue_amount: 'USD 0.00',
-      statement_date: '1 Jul 2026',
-      period_from: '',
-      period_to: '1 Jul 2026',
-      open_invoice_count: '1',
-    };
-    expect(fillPlaceholders('Hi {{ contact_name }}, you owe {{balance_due}} {{nope}}', values)).toBe(
-      'Hi {{balance_due}}, you owe USD 1.00 {{nope}}',
+  it('fills bracket and legacy names, once, and reports unknown legacy ones', () => {
+    const ctx = { date: '2026-07-01', contactName: '{{balance_due}}', balanceDue: 'USD 1.00' };
+    expect(fillPlaceholders('Hi {{ contact_name }}, you owe [Balance Due] {{nope}} [draft]', 'STATEMENT', ctx)).toBe(
+      'Hi {{balance_due}}, you owe USD 1.00 {{nope}} [draft]',
     );
-    expect(unknownPlaceholders('{{nope}} {{balance_due}} {{nope}} {{x_y}}')).toEqual(['nope', 'x_y']);
+    expect(unknownLegacyPlaceholders('{{nope}} {{balance_due}} {{nope}} {{x_y}}')).toEqual(['nope', 'x_y']);
   });
 });
 
@@ -192,6 +183,20 @@ describe('POST /statements/customers/send', () => {
       .post(`${STATEMENTS}/customers/send`)
       .send({ partyIds: [customerId, noEmail], toEmail: 'x@y.test' });
     expect(twoWithOverride.status).toBe(422);
+  });
+
+  it('fills a saved legacy {{name}} template and bracket placeholders alike (Phase 40)', async () => {
+    const mixed = await agentA.post(TEMPLATES).send({
+      partyKind: 'CUSTOMER',
+      name: 'Mixed',
+      subject: '{{organization_name}} [Statement Date] [draft]',
+      body: 'Hi [Contact Name], you owe {{balance_due}} as at [Date].',
+    });
+    expect(mixed.status).toBe(201);
+    await sendOne({ templateId: mixed.body.template.id });
+    const [row] = await outboxFor('ap@northwind.test', 'party_statement');
+    expect(row?.template_data.subject).toBe('Harbor Point 10 Jul 2026 [draft]');
+    expect(row?.template_data.body).toBe('Hi Northwind Traders, you owe USD 1,250.00 as at 10 Jul 2026.');
   });
 
   it('uses the chosen template, and refuses a vendor template for a customer', async () => {

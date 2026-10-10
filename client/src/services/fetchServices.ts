@@ -521,6 +521,8 @@ export interface JournalEntry {
   id: string;
   entryDate: string;
   description: string | null;
+  /** Phase 40 — the description as written, before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   sourceType: string;
   sourceId: string | null;
   reversesEntryId: string | null;
@@ -1290,6 +1292,8 @@ export interface InvoiceLine {
   id: string;
   lineNumber: number;
   description: string;
+  /** Phase 40 — the description as written, before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   quantityMilli: number;
   unitPriceCents: number;
   revenueAccountId: string;
@@ -1323,6 +1327,8 @@ export interface Invoice {
   customerAddressSnapshot: string | null;
   customerTaxNumberSnapshot: string | null;
   notes: string | null;
+  /** Phase 40 — the notes as written, before their placeholders were filled; null if they had none. */
+  notesTemplate: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   subtotalCents: number;
@@ -1857,18 +1863,6 @@ export async function updateStatementSettings(
 
 /* ------------------------------------- statements: email & public link (Phase 39b) */
 
-export const STATEMENT_PLACEHOLDERS = [
-  'contact_name',
-  'organization_name',
-  'balance_due',
-  'overdue_amount',
-  'statement_date',
-  'period_from',
-  'period_to',
-  'open_invoice_count',
-] as const;
-export type StatementPlaceholder = (typeof STATEMENT_PLACEHOLDERS)[number];
-
 /** Mirrors server/src/types/accounting.ts's StatementEmailTemplate. */
 export interface StatementEmailTemplate {
   id: string | null;
@@ -2149,6 +2143,8 @@ export interface BillLine {
   id: string;
   lineNumber: number;
   description: string;
+  /** Phase 40 — the description as written, before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   quantityMilli: number;
   unitPriceCents: number;
   expenseAccountId: string;
@@ -2179,6 +2175,10 @@ export interface Bill {
   vendorAddressSnapshot: string | null;
   vendorTaxNumberSnapshot: string | null;
   notes: string | null;
+  /** Phase 40 — the notes as written, before their placeholders were filled; null if they had none. */
+  notesTemplate: string | null;
+  /** Phase 40 — the vendor reference as written (`RENT-[Month]`); null if it had no placeholders. */
+  vendorReferenceTemplate: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   subtotalCents: number;

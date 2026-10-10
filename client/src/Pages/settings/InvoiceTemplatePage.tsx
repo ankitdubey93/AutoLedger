@@ -20,6 +20,9 @@ import { SAMPLE_INVOICE } from '../sales/sampleInvoice';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 
 /**
  * Invoice template editor: controls on the left, a live preview on the right.
@@ -125,6 +128,7 @@ export default function InvoiceTemplatePage() {
   const [loaded, setLoaded] = useState<InvoiceSettings | null>(null);
   const [profile, setProfile] = useState<OrganizationProfile | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
+  const placeholderTarget = usePlaceholderTarget('footerNotes');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -262,6 +266,7 @@ export default function InvoiceTemplatePage() {
               <span className="text-[var(--muted)]">Document title</span>
               <input
                 type="text"
+                {...placeholderTarget.bind('documentTitle', (documentTitle) => patchDraft({ documentTitle }))}
                 value={draft.documentTitle}
                 onChange={(e) => patchDraft({ documentTitle: e.target.value })}
                 maxLength={24}
@@ -334,9 +339,17 @@ export default function InvoiceTemplatePage() {
           <fieldset className="flex flex-col gap-3 border border-[var(--border)] rounded-lg p-4">
             <legend className="text-sm font-semibold px-1">Footer</legend>
 
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-[var(--muted)]">
+                Placeholders here and in the title are filled in for each invoice.
+              </span>
+              <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+            </div>
+
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Bank details</span>
               <textarea
+                {...placeholderTarget.bind('bankDetails', (bankDetails) => patchDraft({ bankDetails }))}
                 value={draft.bankDetails}
                 onChange={(e) => patchDraft({ bankDetails: e.target.value })}
                 rows={3}
@@ -347,12 +360,14 @@ export default function InvoiceTemplatePage() {
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Footer notes</span>
               <textarea
+                {...placeholderTarget.bind('footerNotes', (footerNotes) => patchDraft({ footerNotes }))}
                 value={draft.footerNotes}
                 onChange={(e) => patchDraft({ footerNotes: e.target.value })}
                 rows={2}
                 className={inputClass}
               />
             </label>
+            <PlaceholderHints text={[draft.documentTitle, draft.bankDetails, draft.footerNotes]} surface="INVOICE" />
           </fieldset>
 
           {titleBlank && <p className="status status--bad">Document title cannot be blank.</p>}

@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { addDays, firstDayOfNextMonth, occurrenceDate } from '../../utils/recurrence.js';
+import { containsPlaceholders } from '../../utils/placeholders.js';
 import { RECURRING_MAX_CATCHUP_PER_RUN } from '../../config/constants.js';
 import * as invoiceService from './invoiceService.js';
 import * as billService from './billService.js';
@@ -494,13 +495,22 @@ interface OccurrenceResult {
   reversalEntryId: string | null;
 }
 
-/** Runs entirely on `client` (rule 5) — the caller owns BEGIN/COMMIT/ROLLBACK. */
+/**
+ * Runs entirely on `client` (rule 5) — the caller owns BEGIN/COMMIT/ROLLBACK.
+ *
+ * Phase 40: each copy starts from the template's text AS WRITTEN — its
+ * `*Template` field when the source's own placeholders were already filled
+ * (an issued invoice, an approved bill, any posted journal), otherwise the
+ * text itself — and the document services fill its placeholders against
+ * this run's date and `occurrence` number.
+ */
 async function generateOccurrence(
   client: PoolClient,
   orgId: string,
   userId: string,
   template: Template,
   runDate: string,
+  occurrence: number,
   mode: RecurringMode,
   autoReverse: boolean,
   scheduleId: string,
@@ -510,24 +520,30 @@ async function generateOccurrence(
     const dueDate =
       inv.paymentTermsCode !== null ? undefined : addDays(runDate, dayDiff(inv.issueDate, inv.dueDate));
 
-    const invoiceId = await invoiceService.createInvoiceOnClient(client, orgId, userId, {
-      customerId: inv.customerId,
-      issueDate: runDate,
-      ...(dueDate !== undefined ? { dueDate } : {}),
-      currencyCode: inv.currencyCode,
-      notes: inv.notes,
-      paymentTerms: inv.paymentTerms,
-      paymentTermsCode: inv.paymentTermsCode,
-      lines: inv.lines.map((l) => ({
-        description: l.description,
-        quantityMilli: l.quantityMilli,
-        unitPriceCents: l.unitPriceCents,
-        revenueAccountId: l.revenueAccountId,
-        taxRateBp: l.taxRateBp,
-        itemId: l.itemId,
-        stockLocationId: l.stockLocationId,
-      })),
-    });
+    const invoiceId = await invoiceService.createInvoiceOnClient(
+      client,
+      orgId,
+      userId,
+      {
+        customerId: inv.customerId,
+        issueDate: runDate,
+        ...(dueDate !== undefined ? { dueDate } : {}),
+        currencyCode: inv.currencyCode,
+        notes: inv.notesTemplate ?? inv.notes,
+        paymentTerms: inv.paymentTerms,
+        paymentTermsCode: inv.paymentTermsCode,
+        lines: inv.lines.map((l) => ({
+          description: l.descriptionTemplate ?? l.description,
+          quantityMilli: l.quantityMilli,
+          unitPriceCents: l.unitPriceCents,
+          revenueAccountId: l.revenueAccountId,
+          taxRateBp: l.taxRateBp,
+          itemId: l.itemId,
+          stockLocationId: l.stockLocationId,
+        })),
+      },
+      { placeholders: { occurrence } },
+    );
 
     if (mode === 'POST') {
       await invoiceService.issueInvoiceOnClient(client, orgId, userId, invoiceId, null);
@@ -541,26 +557,40 @@ async function generateOccurrence(
     const dueDate =
       bill.paymentTermsCode !== null ? undefined : addDays(runDate, dayDiff(bill.billDate, bill.dueDate));
 
-    const billId = await billService.createBillOnClient(client, orgId, userId, {
-      vendorId: bill.vendorId,
-      // At most 89 + 1 + 10 = 100 characters, the column's limit.
-      vendorReference: `${bill.vendorReference.slice(0, 89)}-${runDate}`,
-      billDate: runDate,
-      ...(dueDate !== undefined ? { dueDate } : {}),
-      currencyCode: bill.currencyCode,
-      notes: bill.notes,
-      paymentTerms: bill.paymentTerms,
-      paymentTermsCode: bill.paymentTermsCode,
-      lines: bill.lines.map((l) => ({
-        description: l.description,
-        quantityMilli: l.quantityMilli,
-        unitPriceCents: l.unitPriceCents,
-        expenseAccountId: l.expenseAccountId,
-        taxRateBp: l.taxRateBp,
-        itemId: l.itemId,
-        stockLocationId: l.stockLocationId,
-      })),
-    });
+    // A reference with placeholders (`RENT-[Month]`) is filled, and only
+    // falls back to the date suffix when the filled text is already taken
+    // (billService.fillVendorReferenceOnClient). One without keeps the
+    // Phase 34b suffix: at most 89 + 1 + 10 = 100 characters, the column's limit.
+    const rawReference = bill.vendorReferenceTemplate ?? bill.vendorReference;
+    const vendorReference = containsPlaceholders(rawReference, 'BILL')
+      ? rawReference
+      : `${rawReference.slice(0, 89)}-${runDate}`;
+
+    const billId = await billService.createBillOnClient(
+      client,
+      orgId,
+      userId,
+      {
+        vendorId: bill.vendorId,
+        vendorReference,
+        billDate: runDate,
+        ...(dueDate !== undefined ? { dueDate } : {}),
+        currencyCode: bill.currencyCode,
+        notes: bill.notesTemplate ?? bill.notes,
+        paymentTerms: bill.paymentTerms,
+        paymentTermsCode: bill.paymentTermsCode,
+        lines: bill.lines.map((l) => ({
+          description: l.descriptionTemplate ?? l.description,
+          quantityMilli: l.quantityMilli,
+          unitPriceCents: l.unitPriceCents,
+          expenseAccountId: l.expenseAccountId,
+          taxRateBp: l.taxRateBp,
+          itemId: l.itemId,
+          stockLocationId: l.stockLocationId,
+        })),
+      },
+      { placeholders: { occurrence, referenceFallbackSuffix: runDate } },
+    );
 
     if (mode === 'POST') {
       await billService.approveBillOnClient(client, orgId, userId, billId, null);
@@ -570,9 +600,17 @@ async function generateOccurrence(
   }
 
   const entry = template.entry;
+  const filled = await journalService.fillJournalDescriptionOnClient(
+    client,
+    orgId,
+    entry.descriptionTemplate ?? entry.description,
+    runDate,
+    'JOURNAL',
+    occurrence,
+  );
   const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
     entryDate: runDate,
-    description: entry.description,
+    ...filled,
     sourceType: 'recurring',
     sourceId: scheduleId,
     lines: entry.lines.map((l) => ({ accountId: l.accountId, debitCents: l.debitCents, creditCents: l.creditCents })),
@@ -659,6 +697,7 @@ export async function runDueOccurrences(
       const runDate = locked.next_run_date;
       const userId = locked.created_by;
       const mode = toMode(locked.mode, scheduleId);
+      const occurrenceNumber = locked.next_occurrence_index + 1;
 
       const result = await generateOccurrence(
         client,
@@ -666,12 +705,12 @@ export async function runDueOccurrences(
         userId,
         template,
         runDate,
+        occurrenceNumber,
         mode,
         locked.auto_reverse,
         scheduleId,
       );
 
-      const occurrenceNumber = locked.next_occurrence_index + 1;
       await client.query(
         `INSERT INTO recurring_runs
            (org_id, schedule_id, run_date, occurrence_number, invoice_id, bill_id, journal_entry_id, reversal_entry_id)

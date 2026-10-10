@@ -9,6 +9,7 @@ import type {
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
+import { fillPlaceholders } from '../../utils/placeholders';
 
 /**
  * The printable customer/vendor statement (Phase 39a) — ONE component, rendered
@@ -22,6 +23,11 @@ import { formatDate } from '../../utils/date';
  *
  * Templates are the same closed set as invoices, selected by id; every string
  * is a React text child and the accent colour is applied by inline style only.
+ *
+ * Phase 40 — the template's title, footer and the remittance bank details
+ * are organization settings shared by every statement, so their placeholders
+ * (`[Contact Name]`, `[Balance Due]`, `[Statement Date]`) are filled here, per
+ * statement, as it renders — the same values a statement email uses.
  */
 
 export interface StatementDocumentProps {
@@ -402,8 +408,36 @@ function renderLayout(props: StatementDocumentProps): ReactElement {
   }
 }
 
+function withPlaceholdersFilled(props: StatementDocumentProps): StatementDocumentProps {
+  const { statement, settings } = props;
+  const fill = (text: string) =>
+    fillPlaceholders(text, 'STATEMENT', {
+      date: statement.statementDate,
+      contactName: statement.party.name,
+      organisationName: props.organizationName,
+      balanceDue: `${props.baseCurrency} ${formatCents(statement.closingBalanceCents)}`,
+      overdueAmount: `${props.baseCurrency} ${formatCents(statement.overdueCents)}`,
+      statementDate: statement.statementDate,
+      periodFrom: statement.from,
+      periodTo: statement.statementDate,
+      openInvoiceCount: statement.openItems.filter((i) => i.documentKind === 'INVOICE' || i.documentKind === 'BILL').length,
+    });
+  return {
+    ...props,
+    bankDetails: props.bankDetails === null ? null : fill(props.bankDetails),
+    settings:
+      settings === null
+        ? null
+        : {
+            ...settings,
+            documentTitle: fill(settings.documentTitle),
+            footerNotes: settings.footerNotes === null ? null : fill(settings.footerNotes),
+          },
+  };
+}
+
 export default function StatementDocument(props: StatementDocumentProps): ReactElement {
-  const document = renderLayout(props);
+  const document = renderLayout(withPlaceholdersFilled(props));
   if (props.preview !== true) return <Fragment>{document}</Fragment>;
   return (
     <div className="mx-auto w-full max-w-[210mm] border border-[var(--border)] shadow-lg bg-[var(--panel)]">

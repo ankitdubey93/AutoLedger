@@ -45,6 +45,7 @@ function baseEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
     id: 'entry-11111111-2222-3333-4444-555555555555',
     entryDate: '2026-08-15',
     description: 'AWS August',
+    descriptionTemplate: null,
     sourceType: 'manual',
     sourceId: null,
     reversesEntryId: null,

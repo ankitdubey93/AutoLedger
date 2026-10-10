@@ -112,3 +112,13 @@ export function useOrg(): OrgContextValue {
   if (value === null) throw new Error('useOrg must be used inside <OrgProvider>');
   return value;
 }
+
+/**
+ * Phase 40 — the active organization's name, or null outside an
+ * OrgProvider. For placeholder previews on document forms, which also render
+ * in tests and pages that have no provider; a missing name only leaves
+ * `[Organisation Name]` unfilled in the preview.
+ */
+export function useOrganizationName(): string | null {
+  return useContext(OrgContext)?.organization?.name ?? null;
+}

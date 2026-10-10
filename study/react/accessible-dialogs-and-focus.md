@@ -100,6 +100,16 @@ Three mechanical pieces make this behave like a native menu instead of a styled 
 
 Opening, closing, and outside-click reuse the exact same primitives `ConfirmDialog` established above — a `pointerdown` listener on `document` compared against a `containerRef`, and a `keydown` listener checking `Escape` — but Escape's job is different here: a dialog's Escape cancels an *action*; a menu's Escape closes the menu **and explicitly returns focus to the trigger button** (`triggerRef.current?.focus()`), because unlike a dialog (which was opened from, and dismisses back to, a stable point in the page) a menu trigger is often one of several equally-styled buttons in a row, and losing track of which one opened the menu would strand keyboard focus at the top of the document.
 
+### Inserting at the caret through a menu (Phase 40)
+
+The "Insert placeholder" picker is a `Menu` whose items splice `[Month]` into whichever text field was focused last, at the caret, then put the caret just after the token. Three mechanisms make that work with controlled inputs:
+
+- **The selection survives blur.** Opening the menu moves focus to its first item, so the field blurs. An `<input>`/`<textarea>` keeps `selectionStart`/`selectionEnd` on the element after it loses focus, so the hook (`usePlaceholderTarget`) reads them at insert time from the element ref captured when the field was focused. Phase 39b's chip buttons used `onMouseDown={e => e.preventDefault()}` to stop the blur instead; that can't work for a menu, which has to take focus for keyboard navigation.
+- **Write through the field's own setter.** The field stays controlled: the hook computes `value.slice(0, start) + token + value.slice(end)` and calls the setter that `bind(key, set)` registered. Mutating `element.value` directly would be overwritten by React's next render.
+- **Restore the caret after React commits.** `setSelectionRange` called synchronously would apply to the *old* DOM value, which React is about to replace (and replacing a controlled value moves the caret to the end). The hook defers `focus()` + `setSelectionRange(start + token.length)` to `requestAnimationFrame`, by which point the new value is in the DOM. The `Menu` closing returns focus to its trigger synchronously; the deferred `focus()` then wins, landing focus back in the field.
+
+One hook instance serves every field on a form: notes plus a variable number of line descriptions, each registered under its own key (`line-0`, `line-1` …), with a fallback key for "nothing focused yet".
+
 ### Why this beats the native `<dialog>` element
 
 HTML has a native `<dialog>` element with a `showModal()` method that provides a real top-layer (rendered above everything, including `position: fixed` siblings, without `z-index` tricks), automatic Escape-to-close, and a backdrop pseudo-element — solving several of the problems above for free. It was not used here for two reasons specific to this codebase: it needs imperative `ref.current.showModal()` / `.close()` calls rather than fitting the app's fully-declarative `{condition && <Dialog />}` conditional-render idiom used everywhere else (`ConfirmDialog` unmounts entirely when not needed, which `<dialog>`'s imperative API works against), and its default focus-trap and Escape behavior differ slightly across browsers in ways that would need testing regardless — at which point the hand-rolled version, already fully controlled by React state, was less total work than reconciling `<dialog>`'s imperative lifecycle with the rest of the app.
@@ -172,6 +182,9 @@ A: Don't filter in the render layer — derive a second array up front that's ju
 
 **Q: A menu opens and you want the first item focused automatically. Where does that focus call go, and why not just call `.focus()` right in the button's `onClick`?**
 A: It has to be a `useEffect` that runs when the open state becomes true, not code inside the click handler that flips that state. At the moment `onClick` runs, React has only scheduled the re-render — the menu's DOM nodes, including the first item you want to focus, don't exist yet. A `useEffect` runs after React commits the DOM for that render, which is the first point the node is guaranteed to exist, so it's the correct place for any "the DOM must already reflect this state change" logic, focus included.
+
+**Q: How do you insert text at the cursor of a controlled input from a dropdown menu?**
+A: Remember which field was focused last (an `onFocus` per field) and keep a ref to its element. When a menu item is chosen, read that element's `selectionStart`/`selectionEnd`; they survive the blur that opening the menu caused. Compute the new string and call the field's own state setter, so React stays the source of truth. Then, in `requestAnimationFrame`, focus the field and `setSelectionRange` just past the inserted token. Doing that synchronously would set the selection on the old value, and React replacing a controlled value moves the caret to the end.
 
 ## Follow-ups they'll dig into
 

@@ -1,0 +1,33 @@
+{
+  "$comment": "Phase 40 — the one set of cases both placeholder engines run: server/src/utils/placeholders.ts (read via fs) and client/src/utils/placeholders.ts (?raw import). Change a case here and both suites must agree.",
+  "cases": [
+    { "name": "month and year", "surface": "INVOICE", "text": "Rent [Month] [Year]", "ctx": { "date": "2026-10-10" }, "expected": "Rent October 2026" },
+    { "name": "month offset rolls the month, not the year", "surface": "INVOICE", "text": "[Month+1] [Year]", "ctx": { "date": "2026-12-15" }, "expected": "January 2026" },
+    { "name": "negative month offset", "surface": "BILL", "text": "[Month-1]", "ctx": { "date": "2026-01-05" }, "expected": "December" },
+    { "name": "offset past a year", "surface": "BILL", "text": "[Month-13]", "ctx": { "date": "2026-03-01" }, "expected": "February" },
+    { "name": "year offsets", "surface": "JOURNAL", "text": "[Year+1] [Year-1]", "ctx": { "date": "2026-10-10" }, "expected": "2027 2025" },
+    { "name": "day offset across a leap day", "surface": "JOURNAL", "text": "[Day] [Day+1] [Day+2]", "ctx": { "date": "2028-02-28" }, "expected": "28 29 1" },
+    { "name": "date offset", "surface": "INVOICE", "text": "[Date+1]", "ctx": { "date": "2028-02-28" }, "expected": "29 Feb 2028" },
+    { "name": "September abbreviates as Sept, as statement emails always did", "surface": "INVOICE", "text": "[Date]", "ctx": { "date": "2026-09-03" }, "expected": "3 Sept 2026" },
+    { "name": "an escape is written out literally on a final fill", "surface": "INVOICE", "text": "Use [[Month]] for the month: [Month]", "ctx": { "date": "2026-10-10" }, "mode": "final", "expected": "Use [Month] for the month: October" },
+    { "name": "a partial fill keeps an escape escaped, so the final fill cannot expand it", "surface": "INVOICE", "text": "[[Month]] [Month]", "ctx": { "date": "2026-10-10" }, "mode": "partial", "expected": "[[Month]] October" },
+    { "name": "escapes work for any bracket text and legacy names", "surface": "STATEMENT", "text": "[[draft]] [[Contact Name]] {{contact_name}}", "ctx": { "date": "2026-10-10", "contactName": "Acme" }, "expected": "[draft] [Contact Name] Acme" },
+    { "name": "ISO week mid-year", "surface": "INVOICE", "text": "[Week]", "ctx": { "date": "2026-10-10" }, "expected": "41" },
+    { "name": "ISO week 53", "surface": "INVOICE", "text": "[Week]", "ctx": { "date": "2026-12-31" }, "expected": "53" },
+    { "name": "ISO week 53 in the next calendar year", "surface": "INVOICE", "text": "[Week] [Year]", "ctx": { "date": "2027-01-01" }, "expected": "53 2027" },
+    { "name": "ISO week 1", "surface": "INVOICE", "text": "[Week]", "ctx": { "date": "2027-01-04" }, "expected": "1" },
+    { "name": "week offset", "surface": "INVOICE", "text": "[Week+1] [Week-1]", "ctx": { "date": "2026-12-31" }, "expected": "1 52" },
+    { "name": "case and spacing", "surface": "INVOICE", "text": "[ contact name ] / [MONTH] / [ContactName] / [Month + 2]", "ctx": { "date": "2026-10-10", "contactName": "Acme" }, "expected": "Acme / October / Acme / December" },
+    { "name": "unknown, off-surface and bad offsets stay literal", "surface": "JOURNAL", "text": "[draft] [Contact Name] [Occurrence+1] [Due Date] [Month+1000]", "ctx": { "date": "2026-10-10", "contactName": "Acme", "occurrence": 2 }, "expected": "[draft] [Contact Name] [Occurrence+1] [Due Date] [Month+1000]" },
+    { "name": "partial keeps missing values", "surface": "INVOICE", "text": "Inv [Invoice Number] run [Occurrence] [Month]", "ctx": { "date": "2026-10-10" }, "mode": "partial", "expected": "Inv [Invoice Number] run [Occurrence] October" },
+    { "name": "final empties missing values", "surface": "INVOICE", "text": "Inv [Invoice Number] run [Occurrence] [Month]", "ctx": { "date": "2026-10-10" }, "mode": "final", "expected": "Inv  run  October" },
+    { "name": "values are never re-expanded", "surface": "INVOICE", "text": "[Contact Name] [Month]", "ctx": { "date": "2026-10-10", "contactName": "[Month] {{balance_due}}" }, "expected": "[Month] {{balance_due}} October" },
+    { "name": "legacy names on statements", "surface": "STATEMENT", "text": "Hi {{contact_name}}, {{ balance_due }} {{nope}} [Balance Due]", "ctx": { "date": "2026-07-01", "contactName": "Acme", "balanceDue": "USD 1.00" }, "expected": "Hi Acme, USD 1.00 {{nope}} USD 1.00" },
+    { "name": "legacy syntax only on statements", "surface": "INVOICE", "text": "{{contact_name}}", "ctx": { "date": "2026-07-01", "contactName": "Acme" }, "expected": "{{contact_name}}" },
+    { "name": "statement dates and counts", "surface": "STATEMENT", "text": "[Statement Date]|[Period From]|[Open Invoice Count]", "ctx": { "date": "2026-07-01", "statementDate": "2026-07-01", "periodFrom": null, "openInvoiceCount": 0 }, "expected": "1 Jul 2026||0" },
+    { "name": "organization spelling alias", "surface": "BANK_LINE", "text": "[Organization Name] [Organisation Name]", "ctx": { "date": "2026-07-01", "organisationName": "Harbor" }, "expected": "Harbor Harbor" },
+    { "name": "due date", "surface": "BILL", "text": "due [Due Date]", "ctx": { "date": "2026-10-10", "dueDate": "2026-11-09" }, "expected": "due 9 Nov 2026" },
+    { "name": "credit note names its invoice", "surface": "CREDIT_NOTE", "text": "Credit for [Invoice Number]", "ctx": { "date": "2026-10-10", "invoiceNumber": "INV-0001" }, "expected": "Credit for INV-0001" },
+    { "name": "no contact on bank lines", "surface": "BANK_LINE", "text": "[Contact Name] fee [Month]", "ctx": { "date": "2026-10-10" }, "expected": "[Contact Name] fee October" }
+  ]
+}

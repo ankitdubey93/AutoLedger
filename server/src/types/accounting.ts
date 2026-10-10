@@ -99,6 +99,8 @@ export interface JournalEntry {
   id: string;
   entryDate: string;
   description: string | null;
+  /** Phase 40 — the description as written (`AWS [Month]`), before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   /** `'manual'` for a client-posted entry; another app's slug when it posts into the GL. */
   sourceType: string;
   sourceId: string | null;
@@ -307,6 +309,8 @@ export interface InvoiceLine {
   id: string;
   lineNumber: number;
   description: string;
+  /** Phase 40 — the description as written, before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   /** Thousandths of a unit — 2500 means 2.5. Never a float. */
   quantityMilli: number;
   unitPriceCents: number;
@@ -337,6 +341,8 @@ export interface Invoice {
   customerAddressSnapshot: string | null;
   customerTaxNumberSnapshot: string | null;
   notes: string | null;
+  /** Phase 40 — the notes as written, before their placeholders were filled; null if they had none. */
+  notesTemplate: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   subtotalCents: number;
@@ -471,6 +477,8 @@ export interface BillLine {
   id: string;
   lineNumber: number;
   description: string;
+  /** Phase 40 — the description as written, before its placeholders were filled; null if it had none. */
+  descriptionTemplate: string | null;
   /** Thousandths of a unit — 2500 means 2.5. Never a float. */
   quantityMilli: number;
   unitPriceCents: number;
@@ -501,6 +509,10 @@ export interface Bill {
   vendorAddressSnapshot: string | null;
   vendorTaxNumberSnapshot: string | null;
   notes: string | null;
+  /** Phase 40 — the notes as written, before their placeholders were filled; null if they had none. */
+  notesTemplate: string | null;
+  /** Phase 40 — the vendor reference as written (`RENT-[Month]`); null if it had no placeholders. */
+  vendorReferenceTemplate: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   subtotalCents: number;

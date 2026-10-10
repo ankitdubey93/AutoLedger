@@ -175,6 +175,10 @@ export default function MakeRecurringDialog({
             )}
           </div>
 
+          <p className="m-0 text-xs text-[var(--muted)]">
+            Placeholders such as [Month], [Year] or [Occurrence] in the text are filled in afresh for each run.
+          </p>
+
           {error !== null && <p className="status status--bad m-0">{error}</p>}
 
           <div className="flex items-center gap-3 mt-2">

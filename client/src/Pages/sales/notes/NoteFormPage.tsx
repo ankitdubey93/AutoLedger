@@ -13,6 +13,10 @@ import {
 import BackLink from '../../../components/BackLink';
 import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } from './noteKinds';
 import LoadingState from '../../../components/ui/LoadingState';
+import PlaceholderPicker from '../../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../../context/OrgContext';
 
 /**
  * Draft a credit or debit note, or edit a draft one (Phase 26). A new note is
@@ -71,6 +75,8 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const organisationName = useOrganizationName();
+  const placeholderTarget = usePlaceholderTarget('notes');
 
   useEffect(() => {
     let ignore = false;
@@ -316,6 +322,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
                 <td className="p-2">
                   <input
                     aria-label={`Line ${String(index + 1)} description`}
+                    {...placeholderTarget.bind(`line-${String(index)}`, (description) => updateLine(index, { description }))}
                     value={p.line.description}
                     onChange={(e) => updateLine(index, { description: e.target.value })}
                     className={inputClass}
@@ -407,10 +414,28 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
         </div>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-[var(--muted)]">Notes (optional)</span>
-        <textarea value={notes} maxLength={1000} onChange={(e) => setNotes(e.target.value)} className={inputClass} rows={2} />
-      </label>
+      <div className="flex flex-col gap-1 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="note-notes" className="text-[var(--muted)]">
+            Notes (optional)
+          </label>
+          <PlaceholderPicker surface={config.kind} onInsert={placeholderTarget.insert} />
+        </div>
+        <textarea
+          id="note-notes"
+          {...placeholderTarget.bind('notes', setNotes)}
+          value={notes}
+          maxLength={1000}
+          onChange={(e) => setNotes(e.target.value)}
+          className={inputClass}
+          rows={2}
+        />
+        <PlaceholderHints
+          text={[notes, ...lines.map((line) => line.description)]}
+          surface={config.kind}
+          preview={{ date: issueDate, contactName: original?.partyName ?? null, organisationName }}
+        />
+      </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
 

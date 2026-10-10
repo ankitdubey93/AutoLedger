@@ -4,6 +4,14 @@ import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { allocateCents, cents, parseCents, scaleCents, sumCents } from '../../utils/money.js';
 import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
+import type { FillMode, PlaceholderContext } from '../../utils/placeholders.js';
+import {
+  fillField,
+  fillOptionalField,
+  LINE_DESCRIPTION_MAX,
+  NOTES_MAX,
+  VENDOR_REFERENCE_MAX,
+} from '../../utils/placeholderFields.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
@@ -148,6 +156,8 @@ interface BillRow {
   vendor_address_snapshot: string | null;
   vendor_tax_number_snapshot: string | null;
   notes: string | null;
+  notes_template: string | null;
+  vendor_reference_template: string | null;
   payment_terms: string | null;
   payment_terms_code: string | null;
   subtotal_cents: string;
@@ -177,6 +187,7 @@ interface BillLineRow {
   bill_id: string;
   line_number: number;
   description: string;
+  description_template: string | null;
   quantity_milli: string;
   unit_price_cents: string;
   expense_account_id: string;
@@ -192,7 +203,8 @@ interface BillLineRow {
 const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.name AS vendor_name,
                              b.bill_date, b.due_date, b.currency_code,
                              b.vendor_name_snapshot, b.vendor_address_snapshot,
-                             b.vendor_tax_number_snapshot, b.notes, b.payment_terms, b.payment_terms_code,
+                             b.vendor_tax_number_snapshot, b.notes, b.notes_template, b.vendor_reference_template,
+                             b.payment_terms, b.payment_terms_code,
                              b.subtotal_cents, b.tax_cents, b.total_cents,
                              b.fx_rate::text AS fx_rate, b.base_subtotal_cents,
                              b.base_tax_cents, b.base_total_cents,
@@ -212,6 +224,7 @@ function toLine(row: BillLineRow): BillLine {
     id: row.id,
     lineNumber: row.line_number,
     description: row.description,
+    descriptionTemplate: row.description_template,
     quantityMilli: Number(row.quantity_milli),
     unitPriceCents: parseCents(row.unit_price_cents),
     expenseAccountId: row.expense_account_id,
@@ -258,6 +271,8 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     vendorAddressSnapshot: row.vendor_address_snapshot,
     vendorTaxNumberSnapshot: row.vendor_tax_number_snapshot,
     notes: row.notes,
+    notesTemplate: row.notes_template,
+    vendorReferenceTemplate: row.vendor_reference_template,
     paymentTerms: row.payment_terms,
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
@@ -292,7 +307,8 @@ async function loadLines(orgId: string, billIds: string[]): Promise<Map<string, 
   if (billIds.length === 0) return byBill;
 
   const { rows } = await pool.query<BillLineRow>(
-    `SELECT l.id, l.bill_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
+    `SELECT l.id, l.bill_id, l.line_number, l.description, l.description_template,
+            l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
             l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
        FROM bill_lines l
@@ -526,6 +542,8 @@ async function insertBillLines(
   orgId: string,
   billId: string,
   totals: LineTotal[],
+  /** Phase 40 — per line, the description as written when filling changed it. */
+  descriptionTemplates: (string | null)[] = [],
 ): Promise<void> {
   // Phase 32: an INVENTORY line always posts to its item's inventory account, whatever
   // account the client sent — stamped here so the stored line shows where it lands.
@@ -543,14 +561,17 @@ async function insertBillLines(
   await client.query(
     `INSERT INTO bill_lines
        (org_id, bill_id, line_number, description, quantity_milli, unit_price_cents,
-        expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)
+        expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
+        description_template)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id
+            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
+            v.description_template
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id)`,
+                    expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
+                    description_template)`,
     [
       orgId,
       billId,
@@ -564,8 +585,80 @@ async function insertBillLines(
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
       totals.map((t) => t.input.stockLocationId ?? null),
+      totals.map((_, i) => descriptionTemplates[i] ?? null),
     ],
   );
+}
+
+/**
+ * Phase 40 — fills a bill's user-authored text: its notes and each line's
+ * description. The vendor reference is filled separately
+ * (`fillVendorReferenceOnClient`) because it must also stay unique.
+ */
+function fillBillText(
+  notes: string | null,
+  descriptions: string[],
+  ctx: PlaceholderContext,
+  mode: FillMode,
+): { notes: { text: string | null; template: string | null }; lines: { text: string; template: string | null }[] } {
+  return {
+    notes: fillOptionalField(notes, 'BILL', ctx, mode, { label: 'Notes', max: NOTES_MAX }),
+    lines: descriptions.map((description, i) =>
+      fillField(description, 'BILL', ctx, mode, {
+        label: `Line ${String(i + 1)}'s description`,
+        max: LINE_DESCRIPTION_MAX,
+        required: true,
+      }),
+    ),
+  };
+}
+
+/**
+ * Phase 40 — fills a vendor reference's placeholders and makes sure the
+ * result is still free for this vendor (`ux_bills_vendor_reference`), checked
+ * up front so the caller gets a clear 409 instead of a constraint violation —
+ * which matters to the recurring sweep: it records an ApiError on the
+ * schedule as `last_error`, where a raw 23505 would only be retried.
+ *
+ * `fallbackSuffix` (recurring generation only) is tried when the filled
+ * reference is taken — the same `-YYYY-MM-DD` suffix a reference without
+ * placeholders always gets — so a second run in the same month still
+ * generates. A manual approval passes null: a reference is never silently
+ * changed under the person approving it.
+ */
+async function fillVendorReferenceOnClient(
+  client: PoolClient,
+  orgId: string,
+  vendorId: string,
+  raw: string,
+  ctx: PlaceholderContext,
+  mode: FillMode,
+  excludeBillId: string | null,
+  fallbackSuffix: string | null,
+): Promise<{ text: string; template: string | null }> {
+  const filled = fillField(raw, 'BILL', ctx, mode, {
+    label: 'Vendor reference',
+    max: VENDOR_REFERENCE_MAX,
+    required: true,
+  });
+  if (filled.template === null) return filled;
+
+  async function taken(reference: string): Promise<boolean> {
+    const { rows } = await client.query(
+      `SELECT 1 FROM bills
+        WHERE org_id = $1 AND vendor_id = $2 AND vendor_reference = $3
+          AND ($4::uuid IS NULL OR id <> $4::uuid)`,
+      [orgId, vendorId, reference, excludeBillId],
+    );
+    return rows.length > 0;
+  }
+
+  if (!(await taken(filled.text))) return filled;
+  if (fallbackSuffix !== null) {
+    const alternative = `${filled.text.slice(0, VENDOR_REFERENCE_MAX - fallbackSuffix.length - 1)}-${fallbackSuffix}`;
+    if (!(await taken(alternative))) return { text: alternative, template: filled.template };
+  }
+  throw new ApiError(409, `Vendor reference "${filled.text}" has already been entered for this vendor`);
 }
 
 /**
@@ -582,6 +675,8 @@ interface InsertBillHeader {
   notes: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  /** Phase 40 — recurring generation only; see `CreateBillOptions.placeholders`. */
+  placeholders?: { occurrence: number; referenceFallbackSuffix: string } | undefined;
 }
 
 /**
@@ -595,15 +690,16 @@ async function insertBillOnClient(
   orgId: string,
   createdBy: string,
   header: InsertBillHeader,
-  totals: LineTotal[],
+  lineTotals: LineTotal[],
   allowAccountId: string | null = null,
 ): Promise<string> {
+  let totals = lineTotals;
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
 
-  const { rows: orgRows } = await client.query<{ base_currency: string }>(
-    'SELECT base_currency FROM organizations WHERE id = $1',
+  const { rows: orgRows } = await client.query<{ name: string; base_currency: string }>(
+    'SELECT name, base_currency FROM organizations WHERE id = $1',
     [orgId],
   );
   const baseCurrency = orgRows[0]?.base_currency.trim();
@@ -620,6 +716,37 @@ async function insertBillOnClient(
   );
   const vendor = vendorRows[0];
   if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
+
+  let { vendorReference, notes } = header;
+  let vendorReferenceTemplate: string | null = null;
+  let notesTemplate: string | null = null;
+  let descriptionTemplates: (string | null)[] = [];
+  if (header.placeholders !== undefined) {
+    const ctx: PlaceholderContext = {
+      date: header.billDate,
+      dueDate: header.dueDate,
+      contactName: vendor.name,
+      organisationName: orgRows[0]?.name ?? null,
+      occurrence: header.placeholders.occurrence,
+    };
+    const reference = await fillVendorReferenceOnClient(
+      client,
+      orgId,
+      header.vendorId,
+      header.vendorReference,
+      ctx,
+      'partial',
+      null,
+      header.placeholders.referenceFallbackSuffix,
+    );
+    vendorReference = reference.text;
+    vendorReferenceTemplate = reference.template;
+    const filled = fillBillText(header.notes, totals.map((t) => t.input.description), ctx, 'partial');
+    notes = filled.notes.text;
+    notesTemplate = filled.notes.template;
+    descriptionTemplates = filled.lines.map((l) => l.template);
+    totals = totals.map((t, i) => ({ ...t, input: { ...t.input, description: filled.lines[i]?.text ?? t.input.description } }));
+  }
 
   await assertExpenseAccounts(
     client,
@@ -640,20 +767,21 @@ async function insertBillOnClient(
        (org_id, vendor_id, vendor_reference, bill_date, due_date, currency_code,
         vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
-        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+        fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by,
+        notes_template, vendor_reference_template)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
      RETURNING id`,
     [
       orgId,
       header.vendorId,
-      header.vendorReference,
+      vendorReference,
       header.billDate,
       header.dueDate,
       currencyCode,
       vendor.name,
       vendor.billing_address,
       vendor.tax_number,
-      header.notes,
+      notes,
       header.paymentTerms,
       header.paymentTermsCode,
       subtotalCents,
@@ -664,12 +792,14 @@ async function insertBillOnClient(
       baseTaxCents,
       baseTotalCents,
       createdBy,
+      notesTemplate,
+      vendorReferenceTemplate,
     ],
   );
   const billId = billRows[0]?.id;
   if (billId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
-  await insertBillLines(client, orgId, billId, totals);
+  await insertBillLines(client, orgId, billId, totals, descriptionTemplates);
 
   return billId;
 }
@@ -677,6 +807,14 @@ async function insertBillOnClient(
 export interface CreateBillOptions {
   /** Import conversion mode only: this one account id (3400) is accepted by assertExpenseAccounts. */
   equityAccountId?: string;
+  /**
+   * Phase 40 — recurring generation only: fill the reference's, notes' and
+   * lines' placeholders now, against the bill date and this run's number. A
+   * filled reference already taken for the vendor falls back to
+   * `<reference>-<referenceFallbackSuffix>`. A hand-saved draft is stored as
+   * typed instead, so editing it never loses a placeholder.
+   */
+  placeholders?: { occurrence: number; referenceFallbackSuffix: string };
 }
 
 /**
@@ -710,6 +848,7 @@ export async function createBillOnClient(
       notes: input.notes,
       paymentTerms: resolvedDue.paymentTerms,
       paymentTermsCode: resolvedDue.paymentTermsCode,
+      placeholders: options.placeholders,
     },
     totals,
     options.equityAccountId ?? null,
@@ -905,7 +1044,8 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
               vendor_name_snapshot = $6, vendor_address_snapshot = $7,
               vendor_tax_number_snapshot = $8, notes = $9, payment_terms = $10, payment_terms_code = $11,
               subtotal_cents = $12, tax_cents = $13, total_cents = $14,
-              fx_rate = $15, base_subtotal_cents = $16, base_tax_cents = $17, base_total_cents = $18
+              fx_rate = $15, base_subtotal_cents = $16, base_tax_cents = $17, base_total_cents = $18,
+              notes_template = NULL, vendor_reference_template = NULL
         WHERE id = $19 AND org_id = $20`,
       [
         input.vendorId,
@@ -1024,12 +1164,22 @@ export async function submitBill(orgId: string, id: string, submittedBy: string 
  * Every statement runs on `client` (rule 5) — no BEGIN/COMMIT/ROLLBACK/
  * release here, and no error mapping either; the caller owns both.
  */
+export interface ApproveBillOptions {
+  /**
+   * Phase 40 — fill the reference's, notes' and lines' placeholders as the
+   * bill is approved (default). Captured (OCR) and imported bills pass
+   * false: their text came from outside, not from a placeholder author.
+   */
+  fillPlaceholders?: boolean;
+}
+
 export async function approveBillOnClient(
   client: PoolClient,
   orgId: string,
   userId: string,
   id: string,
   entryDate: string | null,
+  options: ApproveBillOptions = {},
 ): Promise<{ journalEntryId: string }> {
   const { rows: billRows } = await client.query<{
     id: string;
@@ -1039,12 +1189,13 @@ export async function approveBillOnClient(
     vendor_id: string;
     vendor_name_snapshot: string;
     vendor_reference: string;
+    notes: string | null;
     currency_code: string;
     subtotal_cents: string;
     total_cents: string;
     tax_cents: string;
   }>(
-    `SELECT id, status, bill_date, due_date, vendor_id, vendor_name_snapshot, vendor_reference,
+    `SELECT id, status, bill_date, due_date, vendor_id, vendor_name_snapshot, vendor_reference, notes,
             currency_code, subtotal_cents, total_cents, tax_cents
        FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE`,
     [id, orgId],
@@ -1059,14 +1210,16 @@ export async function approveBillOnClient(
   }
 
   const { rows: lineRows } = await client.query<{
+    id: string;
     line_number: number;
+    description: string;
     quantity_milli: string;
     expense_account_id: string;
     net_cents: string;
     item_id: string | null;
     stock_location_id: string | null;
   }>(
-    `SELECT line_number, quantity_milli, expense_account_id, net_cents, item_id, stock_location_id
+    `SELECT id, line_number, description, quantity_milli, expense_account_id, net_cents, item_id, stock_location_id
        FROM bill_lines WHERE bill_id = $1 AND org_id = $2 ORDER BY line_number`,
     [id, orgId],
   );
@@ -1084,8 +1237,8 @@ export async function approveBillOnClient(
   // rather than trusting whatever the draft last saved for bill_date —
   // entryDate can differ from bill_date. Once approved this never changes
   // again; every later settlement compares its own rate against this one.
-  const { rows: orgRows } = await client.query<{ base_currency: string }>(
-    'SELECT base_currency FROM organizations WHERE id = $1',
+  const { rows: orgRows } = await client.query<{ name: string; base_currency: string }>(
+    'SELECT name, base_currency FROM organizations WHERE id = $1',
     [orgId],
   );
   const baseCurrency = orgRows[0]?.base_currency.trim();
@@ -1094,6 +1247,54 @@ export async function approveBillOnClient(
   const baseSubtotalCents = convertToBase(subtotalCents, fxRate);
   const baseTaxCents = convertToBase(taxTotalCents, fxRate);
   const baseTotalCents = baseSubtotalCents + baseTaxCents;
+
+  // Phase 40 — no placeholder reaches a posted bill. Filled first, because
+  // the reference feeds the stock receipt, the journal description and the
+  // event below. ORDER MATTERS: lines are updated now, while the bill is
+  // still editable (trg_bill_lines_editable_only reads the parent's status);
+  // the reference and notes ride on the status flip, which
+  // trg_bills_immutable allows because OLD.status is still DRAFT/AWAITING_APPROVAL.
+  let vendorReference = billRow.vendor_reference;
+  let vendorReferenceTemplate: string | null = null;
+  let notes = billRow.notes;
+  let notesTemplate: string | null = null;
+  if (options.fillPlaceholders !== false) {
+    const ctx: PlaceholderContext = {
+      date: billRow.bill_date,
+      dueDate: billRow.due_date,
+      contactName: billRow.vendor_name_snapshot,
+      organisationName: orgRows[0]?.name ?? null,
+    };
+    const reference = await fillVendorReferenceOnClient(
+      client,
+      orgId,
+      billRow.vendor_id,
+      billRow.vendor_reference,
+      ctx,
+      'final',
+      id,
+      null,
+    );
+    vendorReference = reference.text;
+    vendorReferenceTemplate = reference.template;
+    const filled = fillBillText(billRow.notes, lineRows.map((l) => l.description), ctx, 'final');
+    notes = filled.notes.text;
+    notesTemplate = filled.notes.template;
+    const changed = lineRows.flatMap((l, i) => {
+      const line = filled.lines[i];
+      return line === undefined || line.template === null ? [] : [{ id: l.id, text: line.text, template: line.template }];
+    });
+    if (changed.length > 0) {
+      await client.query(
+        `UPDATE bill_lines l
+            SET description = v.description,
+                description_template = COALESCE(l.description_template, v.description_template)
+           FROM unnest($3::uuid[], $4::text[], $5::text[]) AS v(id, description, description_template)
+          WHERE l.id = v.id AND l.org_id = $1 AND l.bill_id = $2`,
+        [orgId, id, changed.map((c) => c.id), changed.map((c) => c.text), changed.map((c) => c.template)],
+      );
+    }
+  }
 
   const { payableAccountId, taxAccountId } = await resolveApPostingAccountsOnClient(
     client,
@@ -1157,7 +1358,7 @@ export async function approveBillOnClient(
       sourceType: 'bill',
       sourceId: id,
       occurredOn: postingDate,
-      reference: billRow.vendor_reference,
+      reference: vendorReference,
       lines: [...stockLines.values()].map((l) => ({
         lineNumber: l.lineNumber,
         ledgerItemId: l.itemId,
@@ -1209,7 +1410,7 @@ export async function approveBillOnClient(
 
   const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
     entryDate: postingDate,
-    description: `Bill ${billRow.vendor_reference} — ${billRow.vendor_name_snapshot}`,
+    description: `Bill ${vendorReference} — ${billRow.vendor_name_snapshot}`,
     sourceType: 'bill',
     sourceId: id,
     lines: glLines,
@@ -1218,16 +1419,31 @@ export async function approveBillOnClient(
   await client.query(
     `UPDATE bills
         SET status = 'POSTED', journal_entry_id = $1, posted_at = now(), approved_by = $2,
-            fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6
+            fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6,
+            vendor_reference = $9, vendor_reference_template = COALESCE(vendor_reference_template, $10),
+            notes = $11, notes_template = COALESCE(notes_template, $12)
       WHERE id = $7 AND org_id = $8`,
-    [journalEntryId, userId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId],
+    [
+      journalEntryId,
+      userId,
+      fxRate,
+      baseSubtotalCents,
+      baseTaxCents,
+      baseTotalCents,
+      id,
+      orgId,
+      vendorReference,
+      vendorReferenceTemplate,
+      notes,
+      notesTemplate,
+    ],
   );
 
   await emitEvent(client, orgId, MODULE_TAGS.accounting, 'bill.approved', {
     billId: billRow.id,
     vendorId: billRow.vendor_id,
     vendorName: billRow.vendor_name_snapshot,
-    vendorReference: billRow.vendor_reference,
+    vendorReference,
     billDate: billRow.bill_date,
     dueDate: billRow.due_date,
     currencyCode: billRow.currency_code,
@@ -1257,6 +1473,10 @@ export async function approveBill(
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
+    // Phase 40 — a filled reference raced another bill to the same text.
+    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_bills_vendor_reference') {
+      throw new ApiError(409, 'This vendor reference has already been entered for this vendor');
+    }
     if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
       throw new ApiError(422, pgErrorMessage(err));
     }

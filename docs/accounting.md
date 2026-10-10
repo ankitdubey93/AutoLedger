@@ -491,6 +491,46 @@ A direct feature request, numbered like 24/30/32/34/35a. Phase 36 is four steps 
 - Acceptance ✅ — `journalImport.test.ts` (16 cases: grouping both ways, signed amount, unbalanced/single-line/mismatched-date, control-account refusal, closed period, commit posts entries with `sourceType 'migration_import'` and the trial balance still balances, regrouping on edit, bulk exclude, bulk-status 404/409, the 1000-journal cap, revalidate-at-commit, cross-tenant); the existing journal, control-account and period tests pass unedited. **1834 server tests (2 skipped) + 520 client tests** at landing, up from 1816/515.
 - **Not built / known gaps:** imported journals cannot be made recurring templates (`recurringService` accepts `'manual'` only); no auto-reversing flag and no per-line description, tax or tracking columns; two different entries sharing a date and narration with no `JournalNumber` are merged into one (use a number); the group key truncates a narration at 200 characters; a 1000-entry commit is unmeasured (200 two-line entries commit well within the test timeout); open invoices and bills are 36d.
 
+### Phase 40 — placeholders ✅ shipped
+
+Xero-style placeholders: write `Rent for [Month] [Year]` once and every document made from that text says "Rent for October 2026". Full detail: [roadmap.md § Phase 40, as delivered](roadmap.md#phase-40-as-delivered).
+
+**The placeholders.** Names are case- and space-insensitive (`[contact name]`, `[ContactName]`). Unknown bracket text (`[draft]`) is ordinary prose and is left as typed — never an error.
+
+| Placeholder | Becomes | Offset | Where |
+|---|---|---|---|
+| `[Day]` | day of month, `10` | ±n days | everywhere |
+| `[Week]` | ISO-8601 week number, `41` | ±n weeks | everywhere |
+| `[Month]` | `October` | ±n months | everywhere |
+| `[Year]` | `2026` | ±n years | everywhere |
+| `[Date]` | `10 Oct 2026` | ±n days | everywhere |
+| `[Contact Name]` | the customer or vendor | — | invoices, bills, credit/debit notes, statements |
+| `[Organisation Name]` (also `Organization`) | your organization | — | everywhere |
+| `[Due Date]` | `9 Nov 2026` | — | invoices, bills |
+| `[Occurrence]` | the recurring run's number | — | invoices, bills, journals |
+| `[Invoice Number]` | the invoice number (on a credit note, the original invoice's) | — | invoices, credit notes |
+| `[Balance Due]`, `[Overdue Amount]`, `[Statement Date]`, `[Period From]`, `[Period To]`, `[Open Invoice Count]` | statement values | — | statements and statement emails |
+
+- **The date is the document's own date** — issue date, bill date, entry date, statement date, or a recurring run's date — never "today", so neither the server's nor a browser's timezone can move `[Month]`.
+- **Month and year offsets are independent**, as in Xero: in December, `[Month+1] [Year]` is "January 2026". Write `[Year+1]` yourself. Likewise `[Week]` can be 53 or 1 while `[Year]` still shows the calendar year.
+- Month names are **English only**. Short dates abbreviate September as `Sept` (`3 Sept 2026`), as statement emails always have.
+- **Escape:** `[[Month]]` is written out as a literal `[Month]` when the document is issued — never filled. (A recurring DRAFT keeps the double brackets until issue, so the second fill cannot expand it.) It works for any bracket text: `[[draft]]` → `[draft]`.
+
+**When they are filled.**
+
+- [x] **On issue / approve / post** — an invoice when issued, a bill when approved, a credit or debit note when issued, a manual journal entry when posted (it posts at creation). No placeholder ever reaches a posted document. A draft keeps what was typed, so editing it never loses a placeholder.
+- [x] **Recurring generation** — each occurrence is filled against its run date and number. It starts from the template's text *as written*: issuing or posting a document keeps that text in `*_template` columns (migration `087`), so a schedule built from an issued invoice — or any journal — still says `[Month]` next time. A generated DRAFT is filled except `[Invoice Number]`, which waits for issue.
+- [x] **Bill vendor reference** — `RENT-[Month]` is filled instead of getting the Phase 34b `-YYYY-MM-DD` suffix. If the filled reference is already taken for that vendor, a recurring run falls back to `<reference>-<run date>`; if that is taken too it records a 409 on the schedule (`lastError`). A manual approval never changes a reference silently: a taken one is a 409. A reference without placeholders keeps the Phase 34b suffix exactly as before. Several drafts for one vendor may share a reference that still has placeholders (`RENT-[Month]`, typed ahead for later months); uniqueness applies once approval fills it (migration `088`).
+- [x] **Bank lines** — a description written on a bank rule or the "post journal" form (`Bank fee [Month]`) is filled against the line's date. The bank's own statement text never is.
+- [x] **Template settings text** — the invoice template's title, bank details and footer notes, and the statement template's title and footer, are filled per document as it renders (they are shared settings, not stored per document). A draft invoice's notes and lines are previewed filled too.
+- [x] **Statement emails** — the built-in templates now use `[Contact Name]`, `[Balance Due]` and so on. Saved templates in the Phase 39b `{{contact_name}}` syntax keep working (on statements only), the editor offers a one-click conversion, and an unknown `{{name}}` is still refused (422).
+- [x] **Over-long results are refused, not truncated** — a filled line description over 500 characters, notes over 1000, a reference over 100, or a journal description over 500 is a 422 naming the field, and the whole issue/approve rolls back (an invoice number included).
+- [x] **Not filled, on purpose:** imported invoices and bills posted by an import, bills posted by the Bill inbox (OCR text), bank statement text, payment-term labels, and every system-written journal description (`Invoice INV-1 — <customer>`).
+- [x] An "Insert placeholder" picker on every field that takes them — invoice, bill and note notes and lines, the bill reference, the journal description, bank rules, the invoice and statement templates and the email templates — with a live preview and non-blocking "did you mean [Month]?" hints.
+- [x] Cross-tenant isolation: names come only from the issuing organization; another organization's bills never count as a reference collision; another organization cannot issue or approve a draft (404).
+
+**Not built:** localized month names (there is no organization locale setting to choose them by); placeholders in the invoice-settings `paymentTerms` field (stored but never rendered); editing a schedule's text without editing its source document. A Bill-inbox bill approved later by hand is filled like a typed one — only the inbox's own auto-post skips filling.
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

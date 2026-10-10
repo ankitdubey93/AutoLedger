@@ -206,7 +206,7 @@ Constraint: `ux_vendors_org_id_id` — `UNIQUE (org_id, id)`, so `bills` can car
 **`bills`** — purchase (accounts-payable) documents
 `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` **ON DELETE RESTRICT** · `vendor_id` UUID NOT NULL · `vendor_reference` TEXT NOT NULL CHECK non-blank (the **vendor's own** invoice number — the duplicate-payment control) · `status` TEXT NOT NULL DEFAULT `'DRAFT'` CHECK IN (`DRAFT`,`AWAITING_APPROVAL`,`POSTED`,`VOID`) · `bill_date` / `due_date` DATE NOT NULL · `currency_code` CHAR(3) NOT NULL · `vendor_name_snapshot` TEXT NOT NULL, `vendor_address_snapshot` / `vendor_tax_number_snapshot` TEXT (nullable, frozen at write time) · `notes` / `payment_terms` TEXT (nullable) · `subtotal_cents` / `tax_cents` / `total_cents` BIGINT NOT NULL DEFAULT 0 · `journal_entry_id` / `void_journal_entry_id` UUID (nullable) · `submitted_at` / `posted_at` / `voided_at` TIMESTAMPTZ (nullable) · `approved_by` FK → `users` ON DELETE RESTRICT (nullable) · `created_by` FK → `users` ON DELETE RESTRICT · `created_at` · `updated_at`
 
-Constraints: `ux_bills_org_id_id` — `UNIQUE (org_id, id)` · `ux_bills_vendor_reference` — `UNIQUE (org_id, vendor_id, vendor_reference)` · `chk_bills_total` · `chk_bills_due_not_before_bill_date` · `chk_bills_posted_complete` — a `POSTED` row must carry a `journal_entry_id`, `posted_at`, and `approved_by`. Composite FKs `fk_bills_vendor` → `vendors (org_id, id)`, `fk_bills_journal_entry` / `fk_bills_void_journal_entry` → `journal_entries (org_id, id)`, all `ON DELETE RESTRICT`.
+Constraints: `ux_bills_org_id_id` — `UNIQUE (org_id, id)` · `ux_bills_vendor_reference` — `UNIQUE (org_id, vendor_id, vendor_reference)` (a partial unique index since `088` — see Phase 40) · `chk_bills_total` · `chk_bills_due_not_before_bill_date` · `chk_bills_posted_complete` — a `POSTED` row must carry a `journal_entry_id`, `posted_at`, and `approved_by`. Composite FKs `fk_bills_vendor` → `vendors (org_id, id)`, `fk_bills_journal_entry` / `fk_bills_void_journal_entry` → `journal_entries (org_id, id)`, all `ON DELETE RESTRICT`.
 
 **`bill_lines`**
 `id` UUID PK · `org_id` UUID NOT NULL FK → `organizations` ON DELETE RESTRICT · `bill_id` UUID NOT NULL · `line_number` SMALLINT NOT NULL CHECK `> 0` · `description` TEXT NOT NULL CHECK non-blank · `quantity_milli` BIGINT NOT NULL CHECK `> 0` · `unit_price_cents` BIGINT NOT NULL · `expense_account_id` UUID NOT NULL (an `Expense` **or** `Asset` account — a bill may buy a fixed asset or a prepaid, unlike an invoice's revenue-only line) · `tax_rate_bp` INTEGER NOT NULL DEFAULT 0 CHECK BETWEEN 0 AND 10000 · `net_cents` / `tax_cents` BIGINT NOT NULL · `created_at`
@@ -838,6 +838,27 @@ Three migrations, all additive and idempotent.
   - `ck_online_payments_recorded`: `(status = 'RECORDED') = (payment_id IS NOT NULL)`.
   - Audited. This table posts nothing to the GL; the receipt is an ordinary `payments` row.
 - **`online_payment_invoices`** — `(online_payment_id, invoice_id)` unique · `amount_cents` > 0 (the outstanding amount the server computed at pricing time) · composite FKs (CASCADE from the online payment, RESTRICT to the invoice).
+
+## Phase 40 — placeholders (accounting) — applied
+
+**`087_ledger-core_placeholder_templates.sql`** — one migration, additive and idempotent. Metadata-only: every column is nullable, with no `DEFAULT` and no backfill.
+
+- Six columns hold a field's text **as written**, before its placeholders (`[Month]`, `[Contact Name]`) were filled:
+  - `invoices.notes_template` (≤ 1000);
+  - `invoice_lines.description_template` (≤ 500);
+  - `bills.notes_template` (≤ 1000) and `bills.vendor_reference_template` (≤ 100);
+  - `bill_lines.description_template` (≤ 500);
+  - `journal_entries.description_template` (≤ 500).
+- `NULL` means the text had no placeholders, or a draft edit made the edited text the new source. Readers use `COALESCE(*_template, text)`; recurring generation and Duplicate do exactly that.
+- Written with `COALESCE(existing, raw)` when filling first changes a field, so a recurring DRAFT filled once at generation and again at issue keeps the original. `updateInvoice`/`updateBill` reset the header columns to `NULL`; lines are replaced on edit, which resets theirs.
+- Each bound is a named `ck_*_template_length` CHECK in a `pg_constraint`-guarded block, matching the column it shadows (the notes bound matches the API, since `notes` has none in the database).
+- The 009/013 void triggers compare whole rows minus the void columns; these columns never change on void, so voiding is unaffected. `journal_entries` stays insert-only: its template is written with the row.
+**`088_ledger-core_bill_reference_placeholders.sql`** — `ux_bills_vendor_reference` (013's `UNIQUE (org_id, vendor_id, vendor_reference)` constraint) is dropped and recreated as a **partial unique index of the same name**:
+`WHERE NOT (status IN ('DRAFT','AWAITING_APPROVAL') AND vendor_reference ~ '\[\s*[A-Za-z][A-Za-z ]*\s*([+-]\s*[0-9]{1,3}\s*)?\]')`.
+- Only an editable bill whose reference still holds placeholder-shaped bracket text is exempt, so two `RENT-[Month]` drafts for one vendor can coexist. Everything else is unique exactly as before, and approval fills the reference in the same UPDATE that sets `POSTED`, so the index checks it then.
+- Same name on purpose: a unique-index violation reports the index name, so every `ux_bills_vendor_reference` → 409 mapping is unchanged. No row is touched. Signed off by the user (rule 13).
+
+- No change to `statement_email_templates` (085): its `body`/`subject` now take `[Bracket]` placeholders as well as the original `{{snake_case}}` names, which are honoured at runtime instead of being rewritten by a data migration.
 
 ## Phase 17 — target tables
 

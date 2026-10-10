@@ -1,65 +1,50 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Mail, Plus, Star } from 'lucide-react';
 import {
   createStatementEmailTemplate,
   deleteStatementEmailTemplate,
   listStatementEmailTemplates,
   updateStatementEmailTemplate,
-  STATEMENT_PLACEHOLDERS,
   type PartyKind,
   type StatementEmailTemplate,
-  type StatementPlaceholder,
 } from '../../services/fetchServices';
 import { useOrg } from '../../context/OrgContext';
 import PageHeader from '../../components/ui/PageHeader';
 import TabBar from '../../components/ui/TabBar';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import { inputClass, primaryButtonClass, secondaryButtonClass } from '../../components/ui/formClasses';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import {
+  fillPlaceholders,
+  hasLegacySyntax,
+  unknownLegacyPlaceholders,
+  upgradeLegacy,
+  type PlaceholderContext,
+} from '../../utils/placeholders';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 
 /**
  * Statement email templates (Phase 39b): the subject and body a statement
- * email carries, per party kind, with `{{placeholders}}` from a closed list.
- * Chips insert a placeholder at the cursor; the preview fills them with
- * sample values locally. The server refuses any placeholder not on the list.
+ * email carries, per party kind. Phase 40 moved them onto the shared
+ * placeholder registry — `[Contact Name]`, `[Balance Due]`, `[Date]` — with
+ * the original `{{snake_case}}` names still filled (a saved template keeps
+ * working) and a one-click conversion. The preview fills placeholders with
+ * sample values locally; the server refuses unknown `{{names}}`.
  */
 
-const PLACEHOLDER_LABELS: Record<StatementPlaceholder, string> = {
-  contact_name: 'Contact name',
-  organization_name: 'Your organization',
-  balance_due: 'Balance due',
-  overdue_amount: 'Overdue amount',
-  statement_date: 'Statement date',
-  period_from: 'Period from',
-  period_to: 'Period to',
-  open_invoice_count: 'Open invoices',
-};
-
-function sampleValues(organizationName: string, currency: string): Record<StatementPlaceholder, string> {
+function sampleContext(organizationName: string, currency: string): PlaceholderContext {
   return {
-    contact_name: 'Northwind Traders',
-    organization_name: organizationName === '' ? 'Your organization' : organizationName,
-    balance_due: `${currency} 3,300.00`,
-    overdue_amount: `${currency} 1,450.00`,
-    statement_date: '30 Sept 2026',
-    period_from: '1 Sept 2026',
-    period_to: '30 Sept 2026',
-    open_invoice_count: '2',
+    date: '2026-09-30',
+    contactName: 'Northwind Traders',
+    organisationName: organizationName === '' ? 'Your organization' : organizationName,
+    balanceDue: `${currency} 3,300.00`,
+    overdueAmount: `${currency} 1,450.00`,
+    statementDate: '2026-09-30',
+    periodFrom: '2026-09-01',
+    periodTo: '2026-09-30',
+    openInvoiceCount: 2,
   };
-}
-
-const TOKEN = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
-
-/** Client mirror of server/src/utils/placeholders.ts, for the preview only. */
-export function fillSample(text: string, values: Record<StatementPlaceholder, string>): string {
-  return text.replace(TOKEN, (whole, name: string) =>
-    (STATEMENT_PLACEHOLDERS as readonly string[]).includes(name) ? values[name as StatementPlaceholder] : whole,
-  );
-}
-
-function unknownNames(text: string): string[] {
-  return [...text.matchAll(TOKEN)]
-    .map((m) => m[1] ?? '')
-    .filter((n) => !(STATEMENT_PLACEHOLDERS as readonly string[]).includes(n));
 }
 
 interface Draft {
@@ -84,9 +69,7 @@ export default function EmailTemplatesPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const focused = useRef<'subject' | 'body'>('body');
-  const subjectRef = useRef<HTMLInputElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
+  const target = usePlaceholderTarget('body');
 
   const load = useCallback(
     async (selectId?: string | null) => {
@@ -108,14 +91,18 @@ export default function EmailTemplatesPage() {
     void load();
   }, [load]);
 
-  const values = useMemo(
-    () => sampleValues(organization?.name ?? '', organization?.baseCurrency ?? 'USD'),
+  const sample = useMemo(
+    () => sampleContext(organization?.name ?? '', organization?.baseCurrency ?? 'USD'),
     [organization?.name, organization?.baseCurrency],
   );
 
   const selectedTemplate = templates?.find((t) => t.id === draft?.id && draft.id !== null) ?? null;
   const isBuiltIn = draft?.builtIn === true;
-  const unknown = draft === null ? [] : [...new Set([...unknownNames(draft.subject), ...unknownNames(draft.body)])];
+  const unknown =
+    draft === null
+      ? []
+      : [...new Set([...unknownLegacyPlaceholders(draft.subject), ...unknownLegacyPlaceholders(draft.body)])];
+  const legacy = draft !== null && (hasLegacySyntax(draft.subject) || hasLegacySyntax(draft.body));
   const dirty =
     draft !== null &&
     (selectedTemplate === null
@@ -126,28 +113,13 @@ export default function EmailTemplatesPage() {
     setDraft((current) => (current === null ? current : { ...current, ...change }));
   }
 
-  function insertPlaceholder(name: StatementPlaceholder) {
-    if (draft === null) return;
-    const token = `{{${name}}}`;
-    const field = focused.current;
-    const element = field === 'subject' ? subjectRef.current : bodyRef.current;
-    const text = draft[field];
-    const start = element?.selectionStart ?? text.length;
-    const end = element?.selectionEnd ?? text.length;
-    patch({ [field]: `${text.slice(0, start)}${token}${text.slice(end)}` });
-    requestAnimationFrame(() => {
-      element?.focus();
-      element?.setSelectionRange(start + token.length, start + token.length);
-    });
-  }
-
   function startNew(from?: Draft) {
     setDraft({
       id: null,
       builtIn: false,
       name: from === undefined ? 'New template' : `${from.name} (copy)`,
-      subject: from?.subject ?? 'Statement from {{organization_name}}',
-      body: from?.body ?? 'Hi {{contact_name}},\n\nBalance due: {{balance_due}}',
+      subject: from?.subject ?? 'Statement from [Organisation Name]',
+      body: from?.body ?? 'Hi [Contact Name],\n\nBalance due: [Balance Due]',
       isDefault: false,
     });
   }
@@ -268,12 +240,11 @@ export default function EmailTemplatesPage() {
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Subject</span>
               <input
-                ref={subjectRef}
+                {...target.bind('subject', (subject) => patch({ subject }))}
                 type="text"
                 value={draft.subject}
                 maxLength={200}
                 disabled={readOnly}
-                onFocus={() => (focused.current = 'subject')}
                 onChange={(e) => patch({ subject: e.target.value })}
                 className={inputClass}
               />
@@ -281,32 +252,33 @@ export default function EmailTemplatesPage() {
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Message</span>
               <textarea
-                ref={bodyRef}
+                {...target.bind('body', (body) => patch({ body }))}
                 value={draft.body}
                 rows={12}
                 maxLength={5000}
                 disabled={readOnly}
-                onFocus={() => (focused.current = 'body')}
                 onChange={(e) => patch({ body: e.target.value })}
                 className={inputClass}
               />
             </label>
             {!readOnly && (
-              <div className="flex flex-col gap-1">
-                <span className="text-xs text-[var(--muted)]">Insert a placeholder</span>
-                <div className="flex flex-wrap gap-1.5">
-                  {STATEMENT_PLACEHOLDERS.map((name) => (
-                    <button
-                      key={name}
-                      type="button"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => insertPlaceholder(name)}
-                      className="rounded-full border border-[var(--border)] bg-[var(--panel-2)] px-2.5 py-0.5 text-xs cursor-pointer text-[var(--text)]"
-                    >
-                      {PLACEHOLDER_LABELS[name]}
-                    </button>
-                  ))}
+              <div className="flex flex-col gap-1.5">
+                <div>
+                  <PlaceholderPicker surface="STATEMENT" onInsert={target.insert} />
                 </div>
+                <PlaceholderHints text={[draft.subject, draft.body]} surface="STATEMENT" />
+                {legacy && (
+                  <p className="status m-0">
+                    This template uses the older {'{{name}}'} placeholders. They still work.{' '}
+                    <button
+                      type="button"
+                      className="btn btn--ghost"
+                      onClick={() => patch({ subject: upgradeLegacy(draft.subject), body: upgradeLegacy(draft.body) })}
+                    >
+                      Convert to [Name] placeholders
+                    </button>
+                  </p>
+                )}
               </div>
             )}
             {!readOnly && (
@@ -348,10 +320,10 @@ export default function EmailTemplatesPage() {
             <span className="text-xs uppercase tracking-wide text-[var(--muted)]">Preview</span>
             <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3 text-sm">
               <p className="m-0 font-semibold" data-testid="preview-subject">
-                {fillSample(draft.subject, values)}
+                {fillPlaceholders(draft.subject, 'STATEMENT', sample)}
               </p>
               <p className="m-0 whitespace-pre-line" data-testid="preview-body">
-                {fillSample(draft.body, values)}
+                {fillPlaceholders(draft.body, 'STATEMENT', sample)}
               </p>
               <span className="self-start rounded-md bg-[var(--accent)] text-[var(--accent-fg)] px-3 py-1.5 text-xs font-semibold">
                 {kind === 'CUSTOMER' ? 'Review and pay' : 'View statement'}

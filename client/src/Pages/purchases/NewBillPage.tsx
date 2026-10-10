@@ -30,6 +30,10 @@ import BackLink from '../../components/BackLink';
 import { isInventoryItem, LineLocationSelect, ProductPicker } from '../products/ProductPicker';
 import QuickAddProductDialog from '../products/QuickAddProductDialog';
 import { useStockLineData } from '../products/useStockLineData';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
@@ -94,6 +98,8 @@ const inputClass =
 
 export default function NewBillPage() {
   const navigate = useNavigate();
+  const organisationName = useOrganizationName();
+  const placeholderTarget = usePlaceholderTarget('notes');
   const { billId } = useParams<{ billId?: string }>();
   const [params] = useSearchParams();
   const copyFrom = params.get('copyFrom');
@@ -187,10 +193,12 @@ export default function NewBillPage() {
         setDueDateTouched(true);
         setPaymentTermsCode(bill.paymentTermsCode ?? '');
         setCurrencyCode(bill.currencyCode);
-        setNotes(bill.notes ?? '');
+        // A duplicate starts from the text as written (Phase 40), so its
+        // placeholders are filled afresh when it is approved.
+        setNotes((billId !== undefined ? bill.notes : (bill.notesTemplate ?? bill.notes)) ?? '');
         setLines(
           bill.lines.map((line) => ({
-            description: line.description,
+            description: billId !== undefined ? line.description : (line.descriptionTemplate ?? line.description),
             quantity: formatQuantity(line.quantityMilli),
             unitPrice: formatCents(line.unitPriceCents),
             expenseAccountId: line.expenseAccountId,
@@ -415,6 +423,7 @@ export default function NewBillPage() {
             <span className="text-[var(--muted)]">Vendor reference</span>
             <input
               type="text"
+              {...placeholderTarget.bind('reference', setVendorReference)}
               value={vendorReference}
               onChange={(e) => setVendorReference(e.target.value)}
               maxLength={100}
@@ -493,10 +502,39 @@ export default function NewBillPage() {
           </div>
         )}
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Notes</span>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} />
-        </label>
+        <div className="flex flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="bill-notes" className="text-[var(--muted)]">
+              Notes
+            </label>
+            <PlaceholderPicker surface="BILL" onInsert={placeholderTarget.insert} />
+          </div>
+          <textarea
+            id="bill-notes"
+            {...placeholderTarget.bind('notes', setNotes)}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            className={inputClass}
+          />
+          <PlaceholderHints
+            text={[vendorReference, notes, ...lines.map((line) => line.description)]}
+            surface="BILL"
+            {...(billDate === ''
+              ? {}
+              : {
+                  preview: {
+                    date: billDate,
+                    dueDate: dueDate === '' ? null : dueDate,
+                    contactName: vendors.find((v) => v.id === vendorId)?.name ?? null,
+                    organisationName,
+                  },
+                })}
+          />
+          <p className="m-0 text-xs text-[var(--muted)]">
+            Placeholders such as [Month] in the reference, notes or a line are filled in when the expense is approved.
+          </p>
+        </div>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
           <table className="w-full border-collapse text-sm min-w-[56rem]">
@@ -548,6 +586,7 @@ export default function NewBillPage() {
                     <td className="p-2">
                       <input
                         type="text"
+                        {...placeholderTarget.bind(`line-${String(index)}`, (description) => updateLine(index, { description }))}
                         value={line.description}
                         onChange={(e) => updateLine(index, { description: e.target.value })}
                         aria-label={`Description for line ${String(index + 1)}`}

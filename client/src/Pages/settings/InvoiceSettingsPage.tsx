@@ -10,6 +10,9 @@ import { formatRate, parseRateInput } from '../../utils/money';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 
 /**
  * Invoice numbering, defaults, and branding — read with sensible defaults
@@ -40,6 +43,7 @@ export default function InvoiceSettingsPage() {
   const [billingAddress, setBillingAddress] = useState('');
   const [paymentTerms, setPaymentTerms] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
+  const placeholderTarget = usePlaceholderTarget('footerNotes');
   const [accentColor, setAccentColor] = useState('#2563eb');
 
   const [seeded, setSeeded] = useState(false);
@@ -295,15 +299,23 @@ export default function InvoiceSettingsPage() {
           />
         </label>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Footer notes</span>
+        <div className="flex flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="invoice-footer-notes" className="text-[var(--muted)]">
+              Footer notes
+            </label>
+            <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+          </div>
           <textarea
+            id="invoice-footer-notes"
+            {...placeholderTarget.bind('footerNotes', setFooterNotes)}
             value={footerNotes}
             onChange={(e) => setFooterNotes(e.target.value)}
             rows={2}
             className={inputClass}
           />
-        </label>
+          <PlaceholderHints text={footerNotes} surface="INVOICE" />
+        </div>
 
         <label className="flex items-center gap-3 text-sm">
           <span className="text-[var(--muted)]">Accent colour</span>

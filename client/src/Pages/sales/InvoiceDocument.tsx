@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Invoice, InvoiceSettings, OrganizationProfile } from '../../services/fetchServices';
 import { formatCents, formatQuantity, formatRate } from '../../utils/money';
 import { formatDate } from '../../utils/date';
+import { fillPlaceholders } from '../../utils/placeholders';
 
 /**
  * The printable invoice document — ONE component, rendered by both the real
@@ -20,6 +21,13 @@ import { formatDate } from '../../utils/date';
  *
  * This component renders; it never mutates (guardrails rule 6). No
  * issue/void/edit control belongs here.
+ *
+ * Phase 40 — placeholders. The template's own text (title, bank details,
+ * footer) is organization settings, shared by every invoice, so it is filled
+ * here, per invoice, as it renders. A DRAFT's notes and lines are previewed
+ * filled too (the server fills them for real at issue); an issued invoice's
+ * are never touched again — already filled, and a customer named "[Month]"
+ * must stay literal.
  */
 
 export interface InvoiceDocumentProps {
@@ -468,8 +476,46 @@ function renderLayout(props: InvoiceDocumentProps): ReactElement {
   }
 }
 
+function withPlaceholdersFilled(props: InvoiceDocumentProps): InvoiceDocumentProps {
+  const { invoice, settings } = props;
+  const isDraft = invoice.status === 'DRAFT';
+  const fill = (text: string) =>
+    fillPlaceholders(
+      text,
+      'INVOICE',
+      {
+        date: invoice.issueDate,
+        dueDate: invoice.dueDate,
+        contactName: invoice.customerNameSnapshot,
+        organisationName: props.organizationName,
+        invoiceNumber: invoice.invoiceNumber,
+      },
+      // A draft has no number yet: keep [Invoice Number] visible until issue.
+      isDraft ? 'partial' : 'final',
+    );
+  return {
+    ...props,
+    settings:
+      settings === null
+        ? null
+        : {
+            ...settings,
+            documentTitle: fill(settings.documentTitle),
+            bankDetails: settings.bankDetails === null ? null : fill(settings.bankDetails),
+            footerNotes: settings.footerNotes === null ? null : fill(settings.footerNotes),
+          },
+    invoice: isDraft
+      ? {
+          ...invoice,
+          notes: invoice.notes === null ? null : fill(invoice.notes),
+          lines: invoice.lines.map((line) => ({ ...line, description: fill(line.description) })),
+        }
+      : invoice,
+  };
+}
+
 export default function InvoiceDocument(props: InvoiceDocumentProps): ReactElement {
-  const document = renderLayout(props);
+  const document = renderLayout(withPlaceholdersFilled(props));
   if (props.preview !== true) return document;
   return (
     <div className="mx-auto w-full max-w-[210mm] border border-[var(--border)] shadow-lg bg-[var(--panel)]">

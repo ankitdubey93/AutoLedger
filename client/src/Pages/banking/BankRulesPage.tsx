@@ -12,6 +12,9 @@ import {
 import { listAccounts, type Account } from '../../services/fetchServices';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import { useTableSort } from '../../utils/useTableSort';
 import { useClientPage } from '../../utils/useClientPage';
@@ -40,6 +43,7 @@ function BankRuleForm({
   const [bankAccountId, setBankAccountId] = useState('');
   const [targetAccountId, setTargetAccountId] = useState(prefill?.account || '');
   const [description, setDescription] = useState('');
+  const placeholderTarget = usePlaceholderTarget('description');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -197,17 +201,25 @@ function BankRuleForm({
         </label>
       </div>
 
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-[var(--muted)]">Description (optional)</span>
+      <div className="flex flex-col gap-1 text-sm">
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="bank-rule-description" className="text-[var(--muted)]">
+            Description (optional)
+          </label>
+          <PlaceholderPicker surface="BANK_LINE" onInsert={placeholderTarget.insert} />
+        </div>
         <input
+          id="bank-rule-description"
           type="text"
           maxLength={200}
+          {...placeholderTarget.bind('description', setDescription)}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Journal entry description"
+          placeholder="Bank fee [Month]"
           className={inputClass}
         />
-      </label>
+        <PlaceholderHints text={description} surface="BANK_LINE" />
+      </div>
 
       <div className="flex items-center gap-3">
         <button

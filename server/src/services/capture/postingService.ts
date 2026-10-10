@@ -207,7 +207,10 @@ export async function postCaptureDocument(
       throw err;
     }
 
-    const { journalEntryId } = await billService.approveBillOnClient(client, orgId, userId, billId, null);
+    const { journalEntryId } = await billService.approveBillOnClient(client, orgId, userId, billId, null, {
+      // A captured bill's text is OCR output, not placeholder-authored (Phase 40).
+      fillPlaceholders: false,
+    });
 
     await client.query(
       `INSERT INTO document_links (org_id, document_id, app_slug, entity_type, entity_id, created_by)

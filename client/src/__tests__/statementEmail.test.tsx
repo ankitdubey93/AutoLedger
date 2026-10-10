@@ -79,13 +79,36 @@ describe('EmailTemplatesPage', () => {
     expect(subject).toBeEnabled();
     await user.clear(subject);
     await user.type(subject, 'Overdue: ');
-    await user.click(screen.getByRole('button', { name: 'Overdue amount' }));
-    expect(subject).toHaveValue('Overdue: {{overdue_amount}}');
+    await user.click(screen.getByRole('button', { name: 'Insert placeholder' }));
+    await user.click(screen.getByRole('menuitem', { name: /^Overdue Amount/ }));
+    expect(subject).toHaveValue('Overdue: [Overdue Amount]');
     expect(screen.getByTestId('preview-subject')).toHaveTextContent('Overdue: USD 1,450.00');
 
     await user.type(subject, ' {{{{nope}}');
     expect(screen.getByText('Unknown placeholder: {{nope}}')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save template' })).toBeDisabled();
+  });
+
+  it('offers to convert a legacy {{name}} template, and hints at mistyped brackets without blocking', async () => {
+    const user = userEvent.setup();
+    mockRoutes({
+      '/settings/statement-email-templates?kind=CUSTOMER': { status: 200, body: { success: true, templates: [BUILT_IN] } },
+    });
+    render(
+      <MemoryRouter>
+        <EmailTemplatesPage />
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Customize a copy' }));
+    await user.click(screen.getByRole('button', { name: 'Convert to [Name] placeholders' }));
+    expect(screen.getByLabelText('Subject')).toHaveValue('Statement from [Organisation Name]');
+    expect(screen.getByLabelText('Message')).toHaveValue('Hi [Contact Name],\n\nBalance due: [Balance Due]');
+    expect(screen.queryByRole('button', { name: 'Convert to [Name] placeholders' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Subject'), ' [[Balanse Due]');
+    expect(screen.getByText('[Balanse Due] — did you mean [Balance Due]?')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save template' })).toBeEnabled();
   });
 });
 

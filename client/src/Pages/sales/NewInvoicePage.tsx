@@ -32,6 +32,10 @@ import BackLink from '../../components/BackLink';
 import { isInventoryItem, LineLocationSelect, ProductPicker } from '../products/ProductPicker';
 import QuickAddProductDialog from '../products/QuickAddProductDialog';
 import { useStockLineData } from '../products/useStockLineData';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
@@ -104,6 +108,8 @@ const inputClass =
 
 export default function NewInvoicePage() {
   const navigate = useNavigate();
+  const organisationName = useOrganizationName();
+  const placeholderTarget = usePlaceholderTarget('notes');
   const { invoiceId } = useParams<{ invoiceId?: string }>();
   const ledgerSettings = useLedgerSettings();
   const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : 'USD';
@@ -495,10 +501,39 @@ export default function NewInvoicePage() {
           </div>
         )}
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">Notes</span>
-          <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputClass} />
-        </label>
+        <div className="flex flex-col gap-1 text-sm">
+          <div className="flex items-center justify-between gap-2">
+            <label htmlFor="invoice-notes" className="text-[var(--muted)]">
+              Notes
+            </label>
+            <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+          </div>
+          <textarea
+            id="invoice-notes"
+            {...placeholderTarget.bind('notes', setNotes)}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            rows={2}
+            className={inputClass}
+          />
+          <PlaceholderHints
+            text={[notes, ...lines.map((line) => line.description)]}
+            surface="INVOICE"
+            {...(issueDate === ''
+              ? {}
+              : {
+                  preview: {
+                    date: issueDate,
+                    dueDate: dueDate === '' ? null : dueDate,
+                    contactName: customers.find((c) => c.id === customerId)?.name ?? null,
+                    organisationName,
+                  },
+                })}
+          />
+          <p className="m-0 text-xs text-[var(--muted)]">
+            Placeholders such as [Month] in the notes or a line are filled in when the invoice is issued.
+          </p>
+        </div>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
           <table className="w-full border-collapse text-sm min-w-[56rem]">
@@ -550,6 +585,7 @@ export default function NewInvoicePage() {
                     <td className="p-2">
                       <input
                         type="text"
+                        {...placeholderTarget.bind(`line-${String(index)}`, (description) => updateLine(index, { description }))}
                         value={line.description}
                         onChange={(e) => updateLine(index, { description: e.target.value })}
                         aria-label={`Description for line ${String(index + 1)}`}

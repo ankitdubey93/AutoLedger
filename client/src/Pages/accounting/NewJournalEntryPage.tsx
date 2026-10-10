@@ -4,6 +4,10 @@ import { Plus, Trash2 } from 'lucide-react';
 import { createJournal, getJournal, listAccounts, type Account } from '../../services/fetchServices';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
 
 /**
  * Post a journal entry.
@@ -53,6 +57,8 @@ export default function NewJournalEntryPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entryDate, setEntryDate] = useState(today);
   const [description, setDescription] = useState('');
+  const organisationName = useOrganizationName();
+  const placeholderTarget = usePlaceholderTarget('description');
   const [lines, setLines] = useState<DraftLine[]>([{ ...EMPTY_LINE }, { ...EMPTY_LINE }]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -86,7 +92,8 @@ export default function NewJournalEntryPage() {
         if (ignore) return;
         const source = res.entry;
         setEntryDate(source.entryDate);
-        setDescription(source.description ?? '');
+        // The text as written (Phase 40): `AWS [Month]`, not last month's `AWS August`.
+        setDescription(source.descriptionTemplate ?? source.description ?? '');
         setLines(
           source.lines.map((line) => ({
             accountId: line.accountId,
@@ -194,17 +201,29 @@ export default function NewJournalEntryPage() {
               className={inputClass}
             />
           </label>
-          <label className="flex flex-col gap-1 text-sm flex-1 min-w-56">
-            <span className="text-[var(--muted)]">Description</span>
+          <div className="flex flex-col gap-1 text-sm flex-1 min-w-56">
+            <div className="flex items-center justify-between gap-2">
+              <label htmlFor="journal-description" className="text-[var(--muted)]">
+                Description
+              </label>
+              <PlaceholderPicker surface="JOURNAL" onInsert={placeholderTarget.insert} />
+            </div>
             <input
+              id="journal-description"
               type="text"
+              {...placeholderTarget.bind('description', setDescription)}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="AWS August"
+              placeholder="AWS [Month]"
               maxLength={500}
               className={inputClass}
             />
-          </label>
+            <PlaceholderHints
+              text={description}
+              surface="JOURNAL"
+              {...(entryDate === '' ? {} : { preview: { date: entryDate, organisationName } })}
+            />
+          </div>
         </div>
 
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">

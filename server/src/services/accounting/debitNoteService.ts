@@ -10,6 +10,7 @@ import { resolveApPostingAccountsOnClient } from './settingsService.js';
 import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { settledCentsOnClient } from './settlementSql.js';
+import { fillNoteTextOnClient } from './notePlaceholders.js';
 import {
   canTransitionNote,
   isNoteReasonCode,
@@ -829,6 +830,13 @@ export async function issueDebitNote(
 
     const number = await invoiceSettingsService.allocateNoteNumber(client, orgId, 'DEBIT_NOTE');
 
+    // Phase 40 — fill the note's placeholders before it is issued: lines now,
+    // while it is still DRAFT; the notes on the status flip below.
+    const notes = await fillNoteTextOnClient(client, orgId, 'DEBIT_NOTE', id, {
+      date: note.issue_date,
+      contactName: note.vendor_name_snapshot,
+    });
+
     const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
       entryDate: entryDate ?? note.issue_date,
       description: `Debit note ${number} — ${note.vendor_name_snapshot} (against ${bill.vendor_reference})`,
@@ -839,9 +847,9 @@ export async function issueDebitNote(
 
     await client.query(
       `UPDATE debit_notes
-          SET status = 'ISSUED', debit_note_number = $1, journal_entry_id = $2, issued_at = now()
+          SET status = 'ISSUED', debit_note_number = $1, journal_entry_id = $2, issued_at = now(), notes = $5
         WHERE id = $3 AND org_id = $4`,
-      [number, journalEntryId, id, orgId],
+      [number, journalEntryId, id, orgId, notes],
     );
 
     // Auto-apply to the original bill, up to what it still owes. A fully
