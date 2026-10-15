@@ -4,3 +4,7 @@ coverage
 .env
 .env.*
 !.env.example
+# Tests never ship, and some import server/src (the permission catalogue),
+# which is outside this build context. `npm run typecheck` and CI's client
+# job still check them.
+src/__tests__
