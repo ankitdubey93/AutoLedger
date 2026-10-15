@@ -7,17 +7,32 @@ import { accountId, createCustomer, type Agent } from '../helpers/accountingFixt
 
 /**
  * Phase 42 slice B — quote dates follow the organization's timezone
- * (`ledger_settings.timezone`). Integration tier, real PostgreSQL, fixed clock.
+ * (`ledger_settings.timezone`). Integration tier, real PostgreSQL, fixed JS clock.
  *
- * At 2026-10-10T12:00Z it is already 2026-10-11 02:00 in Pacific/Kiritimati
- * (UTC+14) and still 2026-10-10 01:00 in Pacific/Pago_Pago (UTC-11).
+ * With D = today's real UTC date: at D 12:00Z it is already D+1 02:00 in
+ * Pacific/Kiritimati (UTC+14) and still D 01:00 in Pacific/Pago_Pago (UTC-11).
+ *
+ * The dates are anchored on the real date, not hard-coded: only JS `Date` is
+ * faked, PostgreSQL's `now()` is not. Rows whose expiry is computed in JS but
+ * whose `created_at` is the database clock (email tokens, refresh tokens) fail
+ * their CHECK once the fake clock drifts further behind than their lifetime.
+ * Users are therefore registered on the real clock, and the faked instants stay
+ * within a day of it.
  */
 
 const app = createApp();
 const QUOTES = '/api/v1/quotes';
 const SETTINGS = '/api/v1/settings';
-const SEND_TIME = '2026-10-10T00:30:00Z'; // Oct 10 in Kiritimati, Oct 9 in Pago Pago: sending is legal in both
-const CHECK_TIME = '2026-10-10T12:00:00Z';
+/** The real UTC date shifted by `days`, as `YYYY-MM-DD`. */
+function utcDay(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+const TODAY = utcDay(0);
+const QUOTE_DATE = utcDay(-1);
+const SEND_TIME = `${TODAY}T00:30:00Z`; // D in Kiritimati, D-1 in Pago Pago: sending is legal in both
+const CHECK_TIME = `${TODAY}T12:00:00Z`;
 
 let userA: SeededUser;
 let userB: SeededUser;
@@ -41,8 +56,8 @@ async function onboard(agent: Agent, timezone: string): Promise<void> {
 async function sentQuote(agent: Agent, user: SeededUser, partyId: string): Promise<string> {
   const create = await agent.post(QUOTES).send({
     partyId,
-    quoteDate: '2026-10-09',
-    validUntil: '2026-10-10',
+    quoteDate: QUOTE_DATE,
+    validUntil: TODAY,
     lines: [
       {
         description: 'Work',
@@ -62,10 +77,11 @@ async function sentQuote(agent: Agent, user: SeededUser, partyId: string): Promi
 
 beforeEach(async () => {
   await resetTables();
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(new Date(SEND_TIME));
+  // Registered on the real clock: the verification token's expiry is JS time, its created_at is now().
   userA = await createUserWithOrg({ label: 'alice', orgName: 'Org Alpha' });
   userB = await createUserWithOrg({ label: 'bob', orgName: 'Org Bravo' });
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(SEND_TIME));
   agentA = await loginAgent(app, userA);
   agentB = await loginAgent(app, userB);
   const customerA = await createCustomer(agentA, 'Acme Fitouts', 'buyer@acme.test');
@@ -87,7 +103,7 @@ afterEach(() => {
 afterAll(closePool);
 
 describe('quote dates in the organization timezone', () => {
-  it('a quote valid until 2026-10-10 reads EXPIRED in Kiritimati and SENT in Pago Pago', async () => {
+  it('a quote valid until today (UTC) reads EXPIRED in Kiritimati and SENT in Pago Pago', async () => {
     const a = (await agentA.get(`${QUOTES}/${quoteA}`)).body.quote;
     const b = (await agentB.get(`${QUOTES}/${quoteB}`)).body.quote;
     expect(a).toMatchObject({ status: 'SENT', effectiveStatus: 'EXPIRED' });
