@@ -59,6 +59,8 @@ The suite runs against **`autodb_test_<n>` on the `postgres-test` cluster, never
 
 `globalSetup` migrates **`autodb_test`** and then treats it purely as a TEMPLATE: it `DROP`s and `CREATE ... TEMPLATE`s one clone per worker every run. Cloning is a file-level copy, far cheaper than re-running 56 migrations three times, and drop-then-create means a new migration can never leave a stale clone behind.
 
+`globalSetup` first takes the session-level advisory lock `7243001` on the test cluster, before any cloning. A second concurrent `npm test` therefore fails at once with "Another server test run is already using the test databases (autodb_test_N). Wait for it to finish — two runs cannot overlap." instead of dropping the first run's databases. A killed run releases the lock when its connection closes, so there is no stale lock to clear; to find a competing run use `pgrep -af vitest`.
+
 If `CREATE DATABASE ... TEMPLATE` ever fails with **"template database has a collation version mismatch"**, the container's glibc/ICU version moved under an existing volume. Fix with `ALTER DATABASE autodb_test REFRESH COLLATION VERSION` — it updates recorded metadata only and rebuilds nothing.
 
 `globalSetup` creates the database if absent and applies migrations, so `npm test` works on a fresh checkout with no manual step.

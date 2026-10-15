@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import { runWithRequestContext, type RequestContext } from '../utils/requestContext.js';
 import { logger } from '../utils/logger.js';
+import { API_BASE_PATH } from '../config/constants.js';
 
 /**
  * An incoming `X-Request-Id` (set by a proxy or a calling service) is kept so
@@ -12,27 +13,30 @@ import { logger } from '../utils/logger.js';
 const INCOMING_REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 /**
- * Route params whose value is a credential carried in the URL path — an
- * invitation/quote/statement link token, or the inbound-mail webhook secret.
- * Their value is replaced in the logged path (rule 11).
+ * Mount prefixes of routes whose next path segment is a credential —
+ * invitation, quote and statement link tokens, and the inbound-mail
+ * webhook secret. That one segment is logged as `[redacted]` (rule 11).
+ * A new `:token`/`:secret` route must add its mount here; the guard test in
+ * logRedaction.test.ts counts those routes and fails until it does.
  */
-const SECRET_PARAMS = ['token', 'secret'] as const;
+export const SECRET_PATH_PREFIXES: readonly string[] = Object.freeze([
+  `${API_BASE_PATH}/auth/invitations/`,
+  `${API_BASE_PATH}/public/quotes/`,
+  `${API_BASE_PATH}/public/statements/`,
+  `${API_BASE_PATH}/public/inbound-mail/brevo/`,
+]);
 
-function redactPath(path: string, params: Record<string, unknown> | undefined): string {
-  if (params === undefined) return path;
-  let result = path;
-  for (const name of SECRET_PARAMS) {
-    const value = params[name];
-    if (typeof value !== 'string' || value === '') continue;
-    // Params are URL-decoded; the logged path is still encoded. Match both.
-    for (const form of new Set([value, encodeURIComponent(value)])) {
-      result = result
-        .split('/')
-        .map((segment) => (segment === form ? '[redacted]' : segment))
-        .join('/');
-    }
+/** `path` has no query string. Case-insensitive prefix match — Express routing is case-insensitive. */
+export function redactPath(path: string): string {
+  const lower = path.toLowerCase();
+  for (const prefix of SECRET_PATH_PREFIXES) {
+    if (!lower.startsWith(prefix.toLowerCase())) continue;
+    const rest = path.slice(prefix.length);
+    if (rest === '' || rest.startsWith('/')) return path;
+    const i = rest.indexOf('/');
+    return path.slice(0, prefix.length) + '[redacted]' + (i === -1 ? '' : rest.slice(i));
   }
-  return result;
+  return path;
 }
 
 /**
@@ -70,25 +74,6 @@ export const attachRequestContext: RequestHandler = (req, res, next) => {
   // `originalUrl` without the query string — a query can carry search terms
   // or a reset token, neither of which belongs in a log.
   const startedAt = process.hrtime.bigint();
-  // Express reassigns `req.params` for every matched layer and restores the
-  // outer value as it unwinds, so neither a handler's nor the error
-  // middleware's view survives to 'finish'. An accessor on `req` sees each
-  // assignment and keeps the credential params.
-  const routeParams: Record<string, unknown> = {};
-  let currentParams: unknown = req.params;
-  Object.defineProperty(req, 'params', {
-    configurable: true,
-    enumerable: true,
-    get: () => currentParams,
-    set: (value: unknown) => {
-      currentParams = value;
-      if (typeof value !== 'object' || value === null) return;
-      for (const name of SECRET_PARAMS) {
-        const v = (value as Record<string, unknown>)[name];
-        if (typeof v === 'string' && v !== '') routeParams[name] = v;
-      }
-    },
-  });
   res.on('finish', () => {
     logger.info(
       {
@@ -96,7 +81,7 @@ export const attachRequestContext: RequestHandler = (req, res, next) => {
         userId: context.userId ?? undefined,
         orgId: context.orgId ?? undefined,
         method: req.method,
-        path: redactPath(req.originalUrl.split('?')[0] ?? '', routeParams),
+        path: redactPath(req.originalUrl.split('?')[0] ?? ''),
         status: res.statusCode,
         durationMs: Number((process.hrtime.bigint() - startedAt) / 1_000_000n),
       },

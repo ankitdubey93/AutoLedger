@@ -345,6 +345,31 @@ Only 4 tests exist today, because only a health endpoint exists. The examples ab
 - **Integration tests are order-dependent if they share a database.** Vitest runs files in parallel by default — two files writing the same table will flake. Isolate per test, or set `fileParallelism: false` for DB-backed suites.
 - **Testing implementation details makes refactoring expensive.** Asserting a private helper was called means a behaviour-preserving rewrite fails the suite. Test through the public surface.
 
+## Serialising whole test runs with a PostgreSQL advisory lock
+
+Verified against PostgreSQL 16.15 (the `pgvector/pgvector:pg16` test container) and Vitest 4.1.10.
+
+**The problem.** `globalSetup` migrates the template database, then `DROP DATABASE IF EXISTS autodb_test_N WITH (FORCE)` and re-clones one database per worker. Start a second `npm test` while the first is running and the second drops and recreates databases the first's workers are using: both runs fail with false errors.
+
+**The mechanism.** An advisory lock is a lock on an application-chosen 64-bit integer key; Postgres stores it in shared memory and attaches no meaning to it. `pg_advisory_lock(key)` is **session-level**: held until `pg_advisory_unlock` or until the connection ends, and it ignores transaction boundaries. `pg_advisory_xact_lock` is transaction-level and released at COMMIT/ROLLBACK, useless here because the run holds no transaction. `globalSetup` opens one dedicated `Client` on the `postgres` maintenance database, calls `pg_try_advisory_lock(7243001)` and keeps that connection open for the whole run; the function `setup()` returns (Vitest calls it as teardown) unlocks and closes it.
+
+**`try` vs blocking.** `pg_try_advisory_lock` returns `false` immediately; `pg_advisory_lock` would wait. A waiting second run would, once the first finished, proceed to re-clone, which is fine in isolation, but it would have sat waiting for an unbounded time with no message. Failing fast with "Another server test run is already using the test databases" is unambiguous.
+
+**Release on disconnect.** If the run is killed, the server notices the dead socket and drops the session's locks. There is no stale-lock cleanup, unlike a lock file (PID checks, races between check and delete, a file left after a power cut).
+
+**Why before the drop.** The lock must be taken before `DROP DATABASE ... WITH (FORCE)`, which terminates other sessions connected to that database; taking it afterwards would let the second run kill the first run's connections before discovering it could not proceed. If any later step throws, the lock is released in a `catch` so a failed setup does not hold it.
+
+**Rejected alternative.** Unique database names per run (`autodb_test_<runid>_N`): removes the conflict, but each run pays a clone per worker and a crashed run orphans databases that need a janitor. It also does not bound concurrent load on the single test Redis (db index per worker, flushed at setup), which two runs would still share.
+
+**Q: Session-level versus transaction-level advisory locks: which did you use and why?**
+A: Session-level. The guard has to span the whole run, across hundreds of transactions in worker processes, so it lives on one long-lived connection owned by `globalSetup`. A transaction-level lock would vanish at the end of the transaction that took it.
+
+**Q: Why `pg_try_advisory_lock` and not `pg_advisory_lock`?**
+A: The blocking form would queue the second run behind the first with no output, and on release it would clone over state it had not planned for. The try form returns false at once and we throw a message naming the cause. The rule: use the blocking form when waiting is the correct behaviour (a singleton job), the try form when a second concurrent actor is an error.
+
+**Q: How does the lock get released if the test process is killed?**
+A: The lock belongs to the database session. When the process dies the TCP connection closes and Postgres releases the session's advisory locks. That is the reason for choosing it over a lock file. Caveat: if the connection is half-open (a paused VM), release waits for the server to detect the dead peer via TCP keepalive; not separately tested here.
+
 ## Interview Q&A
 
 **Q: You used Vitest. Why not Jest?**

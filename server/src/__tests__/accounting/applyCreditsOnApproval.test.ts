@@ -332,6 +332,7 @@ describe('applying open credit when a bill is approved or an invoice is issued',
     const ledger = await agentA.get(`${CUSTOMERS}/${customerA}/ledger?to=2026-12-31`);
     const open = await agentA.get(`${CUSTOMERS}/${customerA}/open-items?asOf=2026-12-31`);
     expect(ledger.body.closingBalanceCents).toBe(open.body.outstandingCents);
+    await expectIntegrity();
   });
 
   it('8. applying a note needs debit_notes.issue on top of bills.approve; an empty list does not', async () => {
@@ -375,7 +376,7 @@ describe('applying open credit when a bill is approved or an invoice is issued',
     expect((await getBill(b2)).status).toBe('AWAITING_APPROVAL');
   });
 
-  it('10. the integrity verifier passes after a note, a prepayment and a credit note have been applied on posting', async () => {
+  it('10. the integrity verifier passes after a debit note and a prepayment have been applied on posting', async () => {
     const dn = await unappliedDebitNote(agentA, userA.orgId, vendorA, 3000);
     const b2 = await bill(agentA, userA.orgId, vendorA, 15000, 'submitted');
     expect((await applyCreditsOnPostedBill(agentA, b2, [{ kind: 'NOTE', id: dn, amountCents: 3000 }])).status).toBe(200);

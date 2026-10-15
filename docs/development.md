@@ -127,7 +127,7 @@ No application secrets live here.
 | `PG_DATABASE` | **yes** | |
 | `ACCESS_TOKEN_SECRET` | **yes** | Access JWTs (15m). ≥32 chars |
 | `REFRESH_TOKEN_SECRET` | **yes** | Refresh JWTs (7d). ≥32 chars, and **must differ** from the access secret |
-| `LOG_LEVEL` | no — defaults `info` (`silent` under test) | 2026-09-29 — pino's minimum level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Logs are newline-delimited JSON on stdout; pipe through `npx pino-pretty` to read them locally. In development the password-reset link is logged at `info` | The `request completed` line's `path` has the value of any route param named `token` or `secret` replaced by `[redacted]` (invitation, quote and statement links, the inbound-mail webhook), and the query string is dropped (rule 11).
+| `LOG_LEVEL` | no — defaults `info` (`silent` under test) | 2026-09-29 — pino's minimum level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Logs are newline-delimited JSON on stdout; pipe through `npx pino-pretty` to read them locally. In development the password-reset link is logged at `info`. The `request completed` line's `path` has the path segment after each prefix in `SECRET_PATH_PREFIXES` (`middleware/requestContext.ts` — invitation, quote and statement links, the inbound-mail webhook) replaced by `[redacted]`, and the query string is dropped (rule 11).
 | `REDIS_HOST` | no — defaults `localhost` | Phase 7 — background jobs and the webhook dispatcher |
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. Each test worker pins itself to its own index (1..3, never 0) so `npm test` never touches your dev queues |
@@ -192,6 +192,19 @@ Optional; needs a Brevo account and a domain you control. A real end-to-end run 
 4. Open Settings → Bill inbox → "Email bills in" for the organization's address and send it a PDF. A message appears in the list; the file appears in the bill inbox.
 
 Attachments are downloaded with the `api-key` header only. Brevo's reference also lists an OAuth bearer; if downloads return `401` the integration needs a plan update.
+
+#### Verifying email-in end to end
+
+The automated tests fake Brevo (`server/src/__tests__/integrations/inboundMail.test.ts`); nothing has yet been verified against the real service. After the setup above:
+
+1. `dig MX <INBOUND_MAIL_DOMAIN> +short` lists `10 inbound1.sendinblue.com.` and `20 inbound2.sendinblue.com.`.
+2. Sign in, open **Settings → Bill inbox** and copy the address from **Email bills in**.
+3. From any mailbox, send one email to that address with a one-page PDF invoice attached, and a second with only a `.docx` attached.
+4. Within a minute, the **Email bills in** table shows the first message `IMPORTED` (1/1) and the second `REJECTED`. The bill inbox lists the PDF as a new document.
+5. The server log has a `request completed` line for `POST /api/v1/public/inbound-mail/brevo/[redacted]` with status `200` — and the secret itself appears nowhere in the log.
+6. Click **Generate new address**, send to the old address again: no new message appears.
+
+If step 4 shows `FAILED` with an HTTP 401 from the attachment download, Brevo is rejecting the `api-key` header for inbound attachments. Do not change the code; record it — an OAuth-bearer download path is a separate, unplanned change.
 
 ### `client/.env`
 
