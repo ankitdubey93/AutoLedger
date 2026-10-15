@@ -491,13 +491,17 @@ function validateInvoiceInput(input: CreateInvoiceInput): void {
 async function resolveInvoiceDueDate(
   client: PoolClient,
   orgId: string,
-  input: Pick<CreateInvoiceInput, 'issueDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
+  input: Pick<CreateInvoiceInput, 'customerId' | 'issueDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
 ): Promise<{ dueDate: string; paymentTerms: string | null; paymentTermsCode: string | null }> {
+  let termCode = input.paymentTermsCode;
+  if (input.dueDate === undefined && termCode === null) {
+    termCode = await paymentTermService.resolveDefaultTermCodeOnClient(client, orgId, 'SALES', input.customerId);
+  }
   const resolved = await paymentTermService.resolveDueDate(
     client,
     orgId,
     input.issueDate,
-    input.paymentTermsCode,
+    termCode,
     input.dueDate,
   );
   if (resolved.dueDate < input.issueDate) {

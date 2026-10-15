@@ -1,0 +1,14 @@
+[
+  { "rule": "DAYS_AFTER_DATE", "n": 30, "date": "2026-01-15", "expected": "2026-02-14" },
+  { "rule": "DAYS_AFTER_DATE", "n": 0, "date": "2026-03-01", "expected": "2026-03-01" },
+  { "rule": "DAYS_AFTER_MONTH_END", "n": 0, "date": "2026-02-10", "expected": "2026-02-28" },
+  { "rule": "DAYS_AFTER_MONTH_END", "n": 20, "date": "2026-01-31", "expected": "2026-02-20" },
+  { "rule": "DAYS_AFTER_MONTH_END", "n": 0, "date": "2028-02-03", "expected": "2028-02-29" },
+  { "rule": "DAY_OF_NEXT_MONTH", "n": 20, "date": "2026-10-15", "expected": "2026-11-20" },
+  { "rule": "DAY_OF_NEXT_MONTH", "n": 31, "date": "2026-01-10", "expected": "2026-02-28" },
+  { "rule": "DAY_OF_NEXT_MONTH", "n": 5, "date": "2026-12-31", "expected": "2027-01-05" },
+  { "rule": "DAY_OF_CURRENT_MONTH", "n": 25, "date": "2026-10-15", "expected": "2026-10-25" },
+  { "rule": "DAY_OF_CURRENT_MONTH", "n": 10, "date": "2026-10-15", "expected": "2026-11-10" },
+  { "rule": "DAY_OF_CURRENT_MONTH", "n": 31, "date": "2026-04-02", "expected": "2026-04-30" },
+  { "rule": "DAY_OF_CURRENT_MONTH", "n": 15, "date": "2026-10-15", "expected": "2026-10-15" }
+]

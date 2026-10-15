@@ -37,7 +37,8 @@ export const createInvoiceSchema = z
   .object({
     customerId: z.uuid(),
     issueDate: z.iso.date(),
-    // Phase 24 — either an explicit dueDate or a paymentTermsCode is required;
+    // Phase 24/43a — a dueDate or paymentTermsCode, else the party/org default term;
+    // the service answers 422 when none resolves.
     // an explicit date always wins (invoiceService.resolveInvoiceDueDate).
     dueDate: z.iso.date().optional(),
     currencyCode: z.enum(SUPPORTED_CURRENCIES).optional(),
@@ -45,9 +46,6 @@ export const createInvoiceSchema = z
     paymentTerms: z.string().trim().max(500).nullable().default(null),
     paymentTermsCode: z.string().trim().max(30).nullable().default(null),
     lines: z.array(invoiceLineSchema).min(1, 'An invoice needs at least one line'),
-  })
-  .refine((v) => v.dueDate !== undefined || v.paymentTermsCode !== null, {
-    message: 'Provide a due date or a payment term',
   });
 
 export const updateInvoiceSchema = createInvoiceSchema;

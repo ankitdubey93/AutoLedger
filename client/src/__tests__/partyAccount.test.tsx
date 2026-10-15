@@ -223,6 +223,7 @@ const customer1: Customer = {
   billingAddress: null,
   taxNumber: null,
   notes: null,
+  defaultPaymentTermId: null,
   isActive: true,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

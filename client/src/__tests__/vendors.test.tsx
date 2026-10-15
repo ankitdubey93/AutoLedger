@@ -23,6 +23,7 @@ const vendor1: Vendor = {
   taxNumber: null,
   paymentTerms: null,
   notes: null,
+  defaultPaymentTermId: null,
   isActive: true,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

@@ -554,6 +554,14 @@ An offer before the document that bills it: a **sales quote** to a customer beco
 
 Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-41--quotes-sales-and-purchase-accounting--applied).
 
+### Phase 43a — payment-term rules and default terms ✅ shipped
+
+- [x] `payment_terms.rule`: `DAYS_AFTER_DATE`, `DAYS_AFTER_MONTH_END`, `DAY_OF_NEXT_MONTH`, `DAY_OF_CURRENT_MONTH` ("20th of next month"), computed by one pure UTC-only function (`utils/dueDate.ts`, mirrored on the client and kept in parity by `dueDateCases.json`)
+- [x] Resolution when a document carries neither `dueDate` nor `paymentTermsCode`: customer/vendor default term, else the organization's sales/purchase default, else `422`. An inactive default is skipped; an explicit `dueDate` or code always wins. Recurring documents follow the same path
+- [x] Defaults are FK-referenced (composite, RESTRICT); the document still **snapshots** the resolved code/label, so a later rename cannot reach a posted row
+- [x] Onboarding sets both organization defaults to `NET_30`; the new-invoice/expense forms pre-fill them and stop the moment the user picks a term or types a due date
+- Not built: discount terms ("2/10 Net 30"), per-customer day overrides
+
 ### Phase 42 — quote follow-ups: orders, partial billing, deposits ✅ shipped
 
 Closes the Phase 41 "not built" list, except a qualified e-signature. The accounting-relevant parts are orders and deposits; the rest is workflow.

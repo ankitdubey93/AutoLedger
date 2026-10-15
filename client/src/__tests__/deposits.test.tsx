@@ -97,6 +97,7 @@ const customer1: Customer = {
   billingAddress: null,
   taxNumber: null,
   notes: null,
+  defaultPaymentTermId: null,
   isActive: true,
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',

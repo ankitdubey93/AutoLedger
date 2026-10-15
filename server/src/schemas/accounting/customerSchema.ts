@@ -9,6 +9,7 @@ export const createCustomerSchema = z.object({
   billingAddress: z.string().trim().max(500).nullable().default(null),
   taxNumber: z.string().trim().max(64).nullable().default(null),
   notes: z.string().trim().max(1000).nullable().default(null),
+  defaultPaymentTermId: z.uuid().nullable().default(null),
 });
 
 export const updateCustomerSchema = z
@@ -19,6 +20,7 @@ export const updateCustomerSchema = z
     billingAddress: z.string().trim().max(500).nullable().optional(),
     taxNumber: z.string().trim().max(64).nullable().optional(),
     notes: z.string().trim().max(1000).nullable().optional(),
+    defaultPaymentTermId: z.uuid().nullable().optional(),
     isActive: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });

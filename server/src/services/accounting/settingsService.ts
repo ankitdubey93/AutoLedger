@@ -8,6 +8,7 @@ import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import * as onboardingService from '../onboardingService.js';
 import * as organizationProfileService from '../organizationProfileService.js';
+import * as paymentTermService from './paymentTermService.js';
 import * as itemService from './itemService.js';
 import * as inventoryAccountingService from './inventoryAccountingService.js';
 import type { LedgerSettings } from '../../types/accounting.js';
@@ -86,6 +87,8 @@ export interface UpdateSettingsInput {
   cogsAccountId?: string | null | undefined;
   inventoryAdjustmentAccountId?: string | null | undefined;
   stockOpeningAccountId?: string | null | undefined;
+  defaultSalesPaymentTermId?: string | null | undefined;
+  defaultPurchasePaymentTermId?: string | null | undefined;
 }
 
 interface SettingsRow {
@@ -109,6 +112,8 @@ interface SettingsRow {
   cogs_account_id: string | null;
   inventory_adjustment_account_id: string | null;
   stock_opening_account_id: string | null;
+  default_sales_payment_term_id: string | null;
+  default_purchase_payment_term_id: string | null;
 }
 
 function toLedgerSettings(row: SettingsRow): LedgerSettings {
@@ -137,6 +142,8 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     cogsAccountId: row.cogs_account_id,
     inventoryAdjustmentAccountId: row.inventory_adjustment_account_id,
     stockOpeningAccountId: row.stock_opening_account_id,
+    defaultSalesPaymentTermId: row.default_sales_payment_term_id,
+    defaultPurchasePaymentTermId: row.default_purchase_payment_term_id,
   };
 }
 
@@ -147,6 +154,7 @@ const SETTINGS_SELECT = `
          s.unmatched_alert_threshold_cents,
          s.realized_fx_gain_account_id, s.realized_fx_loss_account_id, s.unrealized_fx_account_id,
          s.inventory_account_id, s.cogs_account_id, s.inventory_adjustment_account_id, s.stock_opening_account_id,
+         s.default_sales_payment_term_id, s.default_purchase_payment_term_id,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
@@ -212,8 +220,11 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
     await client.query(
       `INSERT INTO ledger_settings
          (org_id, fiscal_year_start_month, fiscal_year_start_day,
-          books_start_date, timezone, cash_account_id)
-       VALUES ($1, $2, $3, $4, $5, $6)
+          books_start_date, timezone, cash_account_id,
+          default_sales_payment_term_id, default_purchase_payment_term_id)
+       VALUES ($1, $2, $3, $4, $5, $6,
+               (SELECT id FROM payment_terms WHERE org_id = $1 AND code = 'NET_30' AND is_active),
+               (SELECT id FROM payment_terms WHERE org_id = $1 AND code = 'NET_30' AND is_active))
        ON CONFLICT (org_id) DO UPDATE SET
          fiscal_year_start_month = EXCLUDED.fiscal_year_start_month,
          fiscal_year_start_day = EXCLUDED.fiscal_year_start_day,
@@ -309,6 +320,8 @@ export async function updateSettings(
     cogsAccountId: 'cogs_account_id',
     inventoryAdjustmentAccountId: 'inventory_adjustment_account_id',
     stockOpeningAccountId: 'stock_opening_account_id',
+    defaultSalesPaymentTermId: 'default_sales_payment_term_id',
+    defaultPurchasePaymentTermId: 'default_purchase_payment_term_id',
   } as const;
 
   const assignments: string[] = [];
@@ -341,6 +354,13 @@ export async function updateSettings(
         const value = input[field.key];
         if (value !== undefined && value !== null) {
           await assertInventoryAccount(client, orgId, value, field.label, field.type);
+        }
+      }
+
+      // Phase 43a — default payment terms must be active terms of this org.
+      for (const termId of [input.defaultSalesPaymentTermId, input.defaultPurchasePaymentTermId]) {
+        if (termId !== undefined && termId !== null) {
+          await paymentTermService.assertActiveTermOnClient(client, orgId, termId);
         }
       }
 
@@ -401,6 +421,13 @@ export async function updateSettings(
     if (err instanceof ApiError) throw err;
     if (pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION && pgConstraint(err) === 'fk_ledger_settings_cash_account') {
       throw new ApiError(422, 'Cash account does not exist in this organization');
+    }
+    if (
+      pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION &&
+      (pgConstraint(err) === 'fk_ledger_settings_default_sales_term' ||
+        pgConstraint(err) === 'fk_ledger_settings_default_purchase_term')
+    ) {
+      throw new ApiError(422, 'Payment term not found or inactive');
     }
     if (pgErrorCode(err) === PG_CHECK_VIOLATION) {
       throw new ApiError(422, pgErrorMessage(err));

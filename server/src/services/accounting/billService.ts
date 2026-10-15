@@ -514,13 +514,17 @@ function validateBillInput(input: CreateBillInput): void {
 async function resolveBillDueDate(
   client: PoolClient,
   orgId: string,
-  input: Pick<CreateBillInput, 'billDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
+  input: Pick<CreateBillInput, 'vendorId' | 'billDate' | 'dueDate' | 'paymentTermsCode' | 'paymentTerms'>,
 ): Promise<{ dueDate: string; paymentTerms: string | null; paymentTermsCode: string | null }> {
+  let termCode = input.paymentTermsCode;
+  if (input.dueDate === undefined && termCode === null) {
+    termCode = await paymentTermService.resolveDefaultTermCodeOnClient(client, orgId, 'PURCHASE', input.vendorId);
+  }
   const resolved = await paymentTermService.resolveDueDate(
     client,
     orgId,
     input.billDate,
-    input.paymentTermsCode,
+    termCode,
     input.dueDate,
   );
   if (resolved.dueDate < input.billDate) {

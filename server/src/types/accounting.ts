@@ -215,6 +215,9 @@ export interface LedgerSettings {
   industry: string | null;
   timezone: string;
   cashAccountId: string | null;
+  /** Phase 43a. `null` = no organization default for that side. */
+  defaultSalesPaymentTermId: string | null;
+  defaultPurchasePaymentTermId: string | null;
   /** `null` when the wizard has never been completed for this organization. */
   onboardedAt: string | null;
   currentFiscalYear: FiscalYearWindow;
@@ -254,6 +257,8 @@ export interface Customer {
   billingAddress: string | null;
   taxNumber: string | null;
   notes: string | null;
+  /** Phase 43a. `null` = use the organization's sales default. */
+  defaultPaymentTermId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -261,11 +266,20 @@ export interface Customer {
 
 /* --------------------------------------------------- Phase 24 — payment terms */
 
+export const PAYMENT_TERM_RULES = [
+  'DAYS_AFTER_DATE',
+  'DAYS_AFTER_MONTH_END',
+  'DAY_OF_NEXT_MONTH',
+  'DAY_OF_CURRENT_MONTH',
+] as const;
+export type PaymentTermRule = (typeof PAYMENT_TERM_RULES)[number];
+
 export interface PaymentTerm {
   id: string;
   code: string;
   name: string;
   netDays: number;
+  rule: PaymentTermRule;
   isSystem: boolean;
   isActive: boolean;
   createdAt: string;
@@ -464,6 +478,8 @@ export interface Vendor {
   billingAddress: string | null;
   taxNumber: string | null;
   paymentTerms: string | null;
+  /** Phase 43a. `null` = use the organization's purchase default. */
+  defaultPaymentTermId: string | null;
   notes: string | null;
   isActive: boolean;
   createdAt: string;

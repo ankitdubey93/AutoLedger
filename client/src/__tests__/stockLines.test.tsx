@@ -76,9 +76,9 @@ const balances = [balance('widget', 'QUANTITY', 12_000), balance('lot', 'LOT', 3
 const mainLocation: StockLocation = { id: 'loc-main', code: 'MAIN', name: 'Main warehouse', kind: 'WAREHOUSE', parentId: null, path: 'MAIN', depth: 1, isActive: true, createdAt: now, updatedAt: now };
 const backroom: StockLocation = { ...mainLocation, id: 'loc-back', code: 'BACK', name: 'Back room', path: 'BACK' };
 
-const customer: Customer = { id: 'cust-1', name: 'Northwind', email: null, phone: null, billingAddress: null, taxNumber: null, notes: null, isActive: true, createdAt: now, updatedAt: now };
-const vendor = { id: 'vend-1', name: 'Acme Supplies', email: null, phone: null, billingAddress: null, taxNumber: null, paymentTerms: null, notes: null, isActive: true, createdAt: now, updatedAt: now } as Vendor;
-const netTerm: PaymentTerm = { id: 'term', code: 'NET_30', name: 'Net 30', netDays: 30, isSystem: true, isActive: true, createdAt: now, updatedAt: now };
+const customer: Customer = { id: 'cust-1', name: 'Northwind', email: null, phone: null, billingAddress: null, taxNumber: null, notes: null, defaultPaymentTermId: null, isActive: true, createdAt: now, updatedAt: now };
+const vendor = { id: 'vend-1', name: 'Acme Supplies', email: null, phone: null, billingAddress: null, taxNumber: null, paymentTerms: null, notes: null, defaultPaymentTermId: null, isActive: true, createdAt: now, updatedAt: now } as Vendor;
+const netTerm: PaymentTerm = { id: 'term', code: 'NET_30', name: 'Net 30', netDays: 30, rule: 'DAYS_AFTER_DATE', isSystem: true, isActive: true, createdAt: now, updatedAt: now };
 const invoiceSettings = {
   numberPrefix: 'INV-', numberPadding: 6, nextNumber: 1, defaultDueDays: 30, defaultTaxRateBp: 0, taxLabel: 'Tax',
   receivableAccountId: null, defaultRevenueAccountId: null, taxPayableAccountId: null, showTaxNumber: true,

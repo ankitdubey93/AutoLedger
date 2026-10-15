@@ -41,6 +41,9 @@ export const updateSettingsSchema = z
     cogsAccountId: z.uuid().nullable().optional(),
     inventoryAdjustmentAccountId: z.uuid().nullable().optional(),
     stockOpeningAccountId: z.uuid().nullable().optional(),
+    // Phase 43a — default payment terms.
+    defaultSalesPaymentTermId: z.uuid().nullable().optional(),
+    defaultPurchasePaymentTermId: z.uuid().nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'No fields to update',

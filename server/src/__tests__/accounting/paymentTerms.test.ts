@@ -196,7 +196,8 @@ describe('derived due dates on invoices and bills', () => {
       lines: [{ description: 'Consulting', quantityMilli: 1000, unitPriceCents: 10000, revenueAccountId: accountId }],
     });
 
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Provide a due date or a payment term');
   });
 
   it('an unknown paymentTermsCode is rejected', async () => {

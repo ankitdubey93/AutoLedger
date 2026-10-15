@@ -4,6 +4,7 @@ import {
   refreshSession,
   type AutoRefreshOptions,
 } from '../utils/fetchWithAutoRefresh';
+import type { PaymentTermRule } from '../utils/dueDate';
 
 /**
  * The single place the client talks to the API. Every page goes through here so
@@ -794,6 +795,9 @@ export interface LedgerSettings {
   cogsAccountId: string | null;
   inventoryAdjustmentAccountId: string | null;
   stockOpeningAccountId: string | null;
+  /** Phase 43a. `null` means no organization default term for that side. */
+  defaultSalesPaymentTermId: string | null;
+  defaultPurchasePaymentTermId: string | null;
 }
 
 /** Mirrors server/src/services/accounting/settingsService.ts's OnboardingInput. */
@@ -822,6 +826,8 @@ export type LedgerSettingsPatch = Partial<OnboardingInput> & {
   cogsAccountId?: string | null;
   inventoryAdjustmentAccountId?: string | null;
   stockOpeningAccountId?: string | null;
+  defaultSalesPaymentTermId?: string | null;
+  defaultPurchasePaymentTermId?: string | null;
 };
 
 /** GET /settings — a missing settings row means "not yet onboarded", not a 404. */
@@ -991,6 +997,8 @@ export interface Customer {
   billingAddress: string | null;
   taxNumber: string | null;
   notes: string | null;
+  /** Phase 43a. `null` means "use the organization default". */
+  defaultPaymentTermId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1016,6 +1024,7 @@ export function createCustomer(body: {
   billingAddress: string | null;
   taxNumber: string | null;
   notes: string | null;
+  defaultPaymentTermId?: string | null;
 }): Promise<{ success: boolean; customer: Customer }> {
   return apiFetch('/customers', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -1031,6 +1040,7 @@ export function updateCustomer(
     taxNumber: string | null;
     notes: string | null;
     isActive: boolean;
+    defaultPaymentTermId: string | null;
   }>,
 ): Promise<{ success: boolean; customer: Customer }> {
   return apiFetch(`/customers/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -1042,6 +1052,8 @@ export interface PaymentTerm {
   code: string;
   name: string;
   netDays: number;
+  /** Phase 43a. How `netDays` is applied to a document date. */
+  rule: PaymentTermRule;
   isSystem: boolean;
   isActive: boolean;
   createdAt: string;
@@ -1064,6 +1076,7 @@ export function createPaymentTerm(body: {
   code: string;
   name: string;
   netDays: number;
+  rule?: PaymentTermRule;
 }): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
   return apiFetch('/payment-terms', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -1071,7 +1084,7 @@ export function createPaymentTerm(body: {
 /** PATCH /payment-terms/:id */
 export function updatePaymentTerm(
   id: string,
-  body: Partial<{ name: string; netDays: number; isActive: boolean }>,
+  body: Partial<{ name: string; netDays: number; isActive: boolean; rule: PaymentTermRule }>,
 ): Promise<{ success: boolean; paymentTerm: PaymentTerm }> {
   return apiFetch(`/payment-terms/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
 }
@@ -1589,6 +1602,8 @@ export interface Vendor {
   taxNumber: string | null;
   paymentTerms: string | null;
   notes: string | null;
+  /** Phase 43a. `null` means "use the organization default". */
+  defaultPaymentTermId: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1615,6 +1630,7 @@ export function createVendor(body: {
   taxNumber: string | null;
   paymentTerms: string | null;
   notes: string | null;
+  defaultPaymentTermId?: string | null;
 }): Promise<{ success: boolean; vendor: Vendor }> {
   return apiFetch('/vendors', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -1631,6 +1647,7 @@ export function updateVendor(
     paymentTerms: string | null;
     notes: string | null;
     isActive: boolean;
+    defaultPaymentTermId: string | null;
   }>,
 ): Promise<{ success: boolean; vendor: Vendor }> {
   return apiFetch(`/vendors/${id}`, { method: 'PATCH', body: JSON.stringify(body) });

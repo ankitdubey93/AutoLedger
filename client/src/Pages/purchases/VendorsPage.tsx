@@ -4,8 +4,10 @@ import { Plus } from 'lucide-react';
 import {
   createVendor,
   getAgingReport,
+  listPaymentTerms,
   listVendors,
   updateVendor,
+  type PaymentTerm,
   type Vendor,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
@@ -37,6 +39,22 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [terms, setTerms] = useState<PaymentTerm[]>([]);
+  const [defaultTermId, setDefaultTermId] = useState('');
+
+  useEffect(() => {
+    let ignore = false;
+    listPaymentTerms()
+      .then((res) => {
+        if (!ignore) setTerms(res.paymentTerms);
+      })
+      .catch(() => {
+        // The select keeps only "Organization default"; the form still saves.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -50,6 +68,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
         billingAddress: billingAddress.trim() === '' ? null : billingAddress.trim(),
         taxNumber: taxNumber.trim() === '' ? null : taxNumber.trim(),
         paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
+        defaultPaymentTermId: defaultTermId === '' ? null : defaultTermId,
         notes: notes.trim() === '' ? null : notes.trim(),
       });
       onCreated();
@@ -114,7 +133,19 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
       </div>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-[var(--muted)]">Payment terms</span>
+        <span className="text-[var(--muted)]">Default payment terms</span>
+        <select value={defaultTermId} onChange={(e) => setDefaultTermId(e.target.value)} className={inputClass}>
+          <option value="">Organization default</option>
+          {terms.map((term) => (
+            <option key={term.id} value={term.id}>
+              {term.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <label className="flex flex-col gap-1 text-sm">
+        <span className="text-[var(--muted)]">Payment notes</span>
         <input
           type="text"
           maxLength={500}

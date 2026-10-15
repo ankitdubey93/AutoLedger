@@ -21,6 +21,7 @@ const standardTerm: PaymentTerm = {
   code: 'NET_30',
   name: 'Net 30',
   netDays: 30,
+  rule: 'DAYS_AFTER_DATE',
   isSystem: true,
   isActive: true,
   createdAt: new Date().toISOString(),
@@ -32,6 +33,7 @@ const customTerm: PaymentTerm = {
   code: 'NET_21',
   name: 'Net 21',
   netDays: 21,
+  rule: 'DAYS_AFTER_DATE',
   isSystem: false,
   isActive: true,
   createdAt: new Date().toISOString(),
@@ -134,7 +136,7 @@ describe('PaymentTermsSettingsPage', () => {
       name: string;
       netDays: number;
     };
-    expect(body).toEqual({ code: 'net_21', name: 'Net 21', netDays: 21 });
+    expect(body).toEqual({ code: 'net_21', name: 'Net 21', netDays: 21, rule: 'DAYS_AFTER_DATE' });
   });
 
   it('deactivating a term patches isActive false', async () => {
@@ -189,6 +191,7 @@ const customer1: Customer = {
   billingAddress: null,
   taxNumber: null,
   notes: null,
+  defaultPaymentTermId: null,
   isActive: true,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

@@ -1,6 +1,7 @@
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
+import * as paymentTermService from './paymentTermService.js';
 import type { Customer } from '../../types/accounting.js';
 
 /**
@@ -15,6 +16,18 @@ import type { Customer } from '../../types/accounting.js';
  * out from under a posted document is not an option.
  */
 
+const PG_FOREIGN_KEY_VIOLATION = '23503';
+
+function mapTermFkViolation(err: unknown): never {
+  if (
+    typeof err === 'object' && err !== null && 'code' in err && err.code === PG_FOREIGN_KEY_VIOLATION &&
+    'constraint' in err && err.constraint === 'fk_customers_default_payment_term'
+  ) {
+    throw new ApiError(422, 'Payment term not found or inactive');
+  }
+  throw err;
+}
+
 interface CustomerRow {
   id: string;
   name: string;
@@ -23,13 +36,14 @@ interface CustomerRow {
   billing_address: string | null;
   tax_number: string | null;
   notes: string | null;
+  default_payment_term_id: string | null;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
 }
 
 const CUSTOMER_COLUMNS = `id, name, email, phone, billing_address, tax_number, notes,
-                           is_active, created_at, updated_at`;
+                           default_payment_term_id, is_active, created_at, updated_at`;
 
 function toCustomer(row: CustomerRow): Customer {
   return {
@@ -40,6 +54,7 @@ function toCustomer(row: CustomerRow): Customer {
     billingAddress: row.billing_address,
     taxNumber: row.tax_number,
     notes: row.notes,
+    defaultPaymentTermId: row.default_payment_term_id,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -53,6 +68,7 @@ export interface CreateCustomerInput {
   billingAddress: string | null;
   taxNumber: string | null;
   notes: string | null;
+  defaultPaymentTermId?: string | null | undefined;
 }
 
 export interface UpdateCustomerInput {
@@ -62,6 +78,7 @@ export interface UpdateCustomerInput {
   billingAddress?: string | null | undefined;
   taxNumber?: string | null | undefined;
   notes?: string | null | undefined;
+  defaultPaymentTermId?: string | null | undefined;
   isActive?: boolean | undefined;
 }
 
@@ -104,10 +121,12 @@ export async function createCustomer(
   createdBy: string,
   input: CreateCustomerInput,
 ): Promise<Customer> {
-  const { rows } = await withTransaction((client) =>
-    client.query<CustomerRow>(
-      `INSERT INTO customers (org_id, created_by, name, email, phone, billing_address, tax_number, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+  const defaultTermId = input.defaultPaymentTermId ?? null;
+  const rows = await withTransaction(async (client) => {
+    if (defaultTermId !== null) await paymentTermService.assertActiveTermOnClient(client, orgId, defaultTermId);
+    const result = await client.query<CustomerRow>(
+      `INSERT INTO customers (org_id, created_by, name, email, phone, billing_address, tax_number, notes, default_payment_term_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${CUSTOMER_COLUMNS}`,
       [
         orgId,
@@ -118,9 +137,11 @@ export async function createCustomer(
         input.billingAddress,
         input.taxNumber,
         input.notes,
+        defaultTermId,
       ],
-    ),
-  );
+    );
+    return result.rows;
+  }).catch(mapTermFkViolation);
 
   const row = rows[0];
   if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
@@ -141,6 +162,7 @@ export async function updateCustomer(
     billingAddress: 'billing_address',
     taxNumber: 'tax_number',
     notes: 'notes',
+    defaultPaymentTermId: 'default_payment_term_id',
     isActive: 'is_active',
   } as const;
 
@@ -157,14 +179,18 @@ export async function updateCustomer(
 
   if (assignments.length === 0) throw new ApiError(400, 'No fields to update');
 
-  const { rows } = await withTransaction((client) =>
-    client.query<CustomerRow>(
+  const rows = await withTransaction(async (client) => {
+    if (input.defaultPaymentTermId !== undefined && input.defaultPaymentTermId !== null) {
+      await paymentTermService.assertActiveTermOnClient(client, orgId, input.defaultPaymentTermId);
+    }
+    const result = await client.query<CustomerRow>(
       `UPDATE customers SET ${assignments.join(', ')}
         WHERE id = $1 AND org_id = $2
         RETURNING ${CUSTOMER_COLUMNS}`,
       values,
-    ),
-  );
+    );
+    return result.rows;
+  }).catch(mapTermFkViolation);
 
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Customer not found');

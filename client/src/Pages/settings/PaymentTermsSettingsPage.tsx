@@ -6,6 +6,7 @@ import {
   updatePaymentTerm,
   type PaymentTerm,
 } from '../../services/fetchServices';
+import { computeDueDate, type PaymentTermRule } from '../../utils/dueDate';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
@@ -18,12 +19,32 @@ import LoadingState from '../../components/ui/LoadingState';
  * renamed or re-dated, so a custom one is added here instead.
  */
 
+const RULE_LABELS: Record<PaymentTermRule, string> = {
+  DAYS_AFTER_DATE: 'days after the date',
+  DAYS_AFTER_MONTH_END: 'days after the end of the month',
+  DAY_OF_NEXT_MONTH: 'of the following month',
+  DAY_OF_CURRENT_MONTH: 'of the current month',
+};
+
+const RULES = Object.keys(RULE_LABELS) as PaymentTermRule[];
+
+function isDayOfMonthRule(rule: PaymentTermRule): boolean {
+  return rule === 'DAY_OF_NEXT_MONTH' || rule === 'DAY_OF_CURRENT_MONTH';
+}
+
 function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: () => void }) {
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
   const [netDays, setNetDays] = useState('');
+  const [rule, setRule] = useState<PaymentTermRule>('DAYS_AFTER_DATE');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const dayRule = isDayOfMonthRule(rule);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const parsedDays = Number(netDays);
+  const exampleValid =
+    netDays.trim() !== '' && Number.isInteger(parsedDays) && (dayRule ? parsedDays >= 1 && parsedDays <= 31 : parsedDays >= 0);
 
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
@@ -34,6 +55,7 @@ function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCan
         code: code.trim(),
         name: name.trim(),
         netDays: Number(netDays),
+        rule,
       });
       onCreated();
     } catch (err: unknown) {
@@ -74,19 +96,35 @@ function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCan
             className={inputClass}
           />
         </label>
+        <label className="flex flex-col gap-1 text-sm w-56">
+          <span className="text-[var(--muted)]">Rule</span>
+          <select value={rule} onChange={(e) => setRule(e.target.value as PaymentTermRule)} className={inputClass}>
+            {RULES.map((r) => (
+              <option key={r} value={r}>
+                {RULE_LABELS[r]}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="flex flex-col gap-1 text-sm w-28">
-          <span className="text-[var(--muted)]">Net days</span>
+          <span className="text-[var(--muted)]">{dayRule ? 'Day of month' : 'Net days'}</span>
           <input
             type="number"
             required
-            min={0}
-            max={365}
+            min={dayRule ? 1 : 0}
+            max={dayRule ? 31 : 365}
             value={netDays}
             onChange={(e) => setNetDays(e.target.value)}
             className={inputClass}
           />
         </label>
       </div>
+
+      {exampleValid && (
+        <p className="text-sm text-[var(--muted)] m-0">
+          Example: a document dated {todayIso} is due {computeDueDate(rule, parsedDays, todayIso)}.
+        </p>
+      )}
 
       <div className="flex items-center gap-3">
         <button
@@ -137,6 +175,15 @@ export default function PaymentTermsSettingsPage() {
     }
   }
 
+  async function changeRule(term: PaymentTerm, rule: PaymentTermRule) {
+    try {
+      await updatePaymentTerm(term.id, { rule });
+      setReloadToken((t) => t + 1);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not update the payment term');
+    }
+  }
+
   return (
     <section className="flex flex-col gap-4">
       <PageHeader as="h2" icon={FileStack} title="Settings" />
@@ -177,7 +224,8 @@ export default function PaymentTermsSettingsPage() {
               <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
                 <th className="p-3 font-medium">Code</th>
                 <th className="p-3 font-medium">Name</th>
-                <th className="p-3 font-medium text-right">Net days</th>
+                <th className="p-3 font-medium">Rule</th>
+                <th className="p-3 font-medium text-right">Days / day</th>
                 <th className="p-3 font-medium">Source</th>
                 <th className="p-3 font-medium">Status</th>
                 <th className="p-3 font-medium text-right">Actions</th>
@@ -188,6 +236,21 @@ export default function PaymentTermsSettingsPage() {
                 <tr key={term.id} className="border-t border-[var(--border)]">
                   <td className="p-3">{term.code}</td>
                   <td className="p-3">{term.name}</td>
+                  <td className="p-3">
+                    <select
+                      aria-label={`Rule for ${term.name}`}
+                      value={term.rule}
+                      disabled={term.isSystem}
+                      onChange={(e) => void changeRule(term, e.target.value as PaymentTermRule)}
+                      className={inputClass}
+                    >
+                      {RULES.map((r) => (
+                        <option key={r} value={r}>
+                          {RULE_LABELS[r]}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
                   <td className="p-3 text-right tabular-nums">{term.netDays}</td>
                   <td className="p-3">{term.isSystem ? 'Standard' : 'Custom'}</td>
                   <td className="p-3">

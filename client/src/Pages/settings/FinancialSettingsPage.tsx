@@ -5,8 +5,10 @@ import {
   ApiRequestError,
   getFiscalPeriods,
   listAccounts,
+  listPaymentTerms,
   updateLedgerSettings,
   type Account,
+  type PaymentTerm,
   type AccountType,
   type FiscalPeriodStatus,
 } from '../../services/fetchServices';
@@ -92,6 +94,33 @@ function AccountSelect({ label, value, onChange, accounts, type, hint }: Account
   );
 }
 
+function TermSelect({
+  label,
+  value,
+  onChange,
+  terms,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  terms: PaymentTerm[];
+}) {
+  const options = terms.filter((term) => term.id === value || term.isActive);
+  return (
+    <label className="flex flex-col gap-1 text-sm">
+      <span className="text-[var(--muted)]">{label}</span>
+      <select value={value} onChange={(e) => onChange(e.target.value)} className={inputClass}>
+        <option value="">None</option>
+        {options.map((term) => (
+          <option key={term.id} value={term.id}>
+            {term.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 export default function FinancialSettingsPage() {
   const ledgerSettings = useLedgerSettings();
 
@@ -106,6 +135,9 @@ export default function FinancialSettingsPage() {
   const [cogsId, setCogsId] = useState('');
   const [inventoryAdjustmentId, setInventoryAdjustmentId] = useState('');
   const [stockOpeningId, setStockOpeningId] = useState('');
+  const [salesTermId, setSalesTermId] = useState('');
+  const [purchaseTermId, setPurchaseTermId] = useState('');
+  const [paymentTerms, setPaymentTerms] = useState<PaymentTerm[]>([]);
   const [seeded, setSeeded] = useState(false);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -132,6 +164,8 @@ export default function FinancialSettingsPage() {
       setCogsId(settings.cogsAccountId ?? '');
       setInventoryAdjustmentId(settings.inventoryAdjustmentAccountId ?? '');
       setStockOpeningId(settings.stockOpeningAccountId ?? '');
+      setSalesTermId(settings.defaultSalesPaymentTermId ?? '');
+      setPurchaseTermId(settings.defaultPurchasePaymentTermId ?? '');
       setSeeded(true);
     }
   }, [ledgerSettings, seeded]);
@@ -144,6 +178,20 @@ export default function FinancialSettingsPage() {
       })
       .catch(() => {
         // Selects simply stay empty; the page is still usable for the fiscal year.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    listPaymentTerms()
+      .then((response) => {
+        if (!ignore) setPaymentTerms(response.paymentTerms);
+      })
+      .catch(() => {
+        // The selects simply stay empty; the rest of the tab is unaffected.
       });
     return () => {
       ignore = true;
@@ -202,6 +250,8 @@ export default function FinancialSettingsPage() {
         cogsAccountId: cogsId === '' ? null : cogsId,
         inventoryAdjustmentAccountId: inventoryAdjustmentId === '' ? null : inventoryAdjustmentId,
         stockOpeningAccountId: stockOpeningId === '' ? null : stockOpeningId,
+        defaultSalesPaymentTermId: salesTermId === '' ? null : salesTermId,
+        defaultPurchasePaymentTermId: purchaseTermId === '' ? null : purchaseTermId,
       });
       applySettings(next);
       setSaved(true);
@@ -339,6 +389,15 @@ export default function FinancialSettingsPage() {
           type="Equity"
           hint="Default: 3400 Opening Balance Equity"
         />
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <h3 className="text-base font-semibold m-0">Payment terms</h3>
+        <p className="text-sm text-[var(--muted)] m-0">
+          Used for a new invoice or bill when the customer or vendor has no default of their own.
+        </p>
+        <TermSelect label="Default terms — sales" value={salesTermId} onChange={setSalesTermId} terms={paymentTerms} />
+        <TermSelect label="Default terms — bills" value={purchaseTermId} onChange={setPurchaseTermId} terms={paymentTerms} />
       </div>
 
       <div className="flex flex-col gap-2">

@@ -36,6 +36,7 @@ import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
 import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
 import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 import { useOrganizationName } from '../../context/OrgContext';
+import { computeDueDate } from '../../utils/dueDate';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
@@ -130,6 +131,7 @@ export default function NewInvoicePage() {
   const [issueDate, setIssueDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
   const [dueDateTouched, setDueDateTouched] = useState(false);
+  const [termTouched, setTermTouched] = useState(false);
   const [paymentTermsCode, setPaymentTermsCode] = useState('');
   const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [notes, setNotes] = useState('');
@@ -241,8 +243,23 @@ export default function NewInvoicePage() {
     if (paymentTermsCode === '' || dueDateTouched || issueDate === '') return;
     const term = paymentTerms.find((t) => t.code === paymentTermsCode);
     if (term === undefined) return;
-    setDueDate(addDays(issueDate, term.netDays));
+    setDueDate(computeDueDate(term.rule, term.netDays, issueDate));
   }, [paymentTermsCode, issueDate, dueDateTouched, paymentTerms]);
+
+  // Phase 43a — a NEW invoice starts on the customer's default terms, else the
+  // organization's sales default (the legacy `defaultDueDays` match above is
+  // the fallback when neither is set). Never fires for an edit, and stops the
+  // moment the user picks a term or types a due date themselves.
+  const orgDefaultTermId =
+    ledgerSettings.status === 'ready' ? ledgerSettings.settings.defaultSalesPaymentTermId : null;
+  useEffect(() => {
+    if (invoiceId !== undefined || termTouched || dueDateTouched) return;
+    const customer = customers.find((c) => c.id === customerId);
+    const defaultTermId = customer?.defaultPaymentTermId ?? orgDefaultTermId;
+    if (defaultTermId === null) return;
+    const term = paymentTerms.find((t) => t.id === defaultTermId && t.isActive);
+    if (term !== undefined) setPaymentTermsCode(term.code);
+  }, [invoiceId, termTouched, dueDateTouched, customers, customerId, orgDefaultTermId, paymentTerms]);
 
   const totals = useMemo(() => {
     let subtotal = 0;
@@ -451,6 +468,7 @@ export default function NewInvoicePage() {
               value={paymentTermsCode}
               onChange={(e) => {
                 setPaymentTermsCode(e.target.value);
+                setTermTouched(true);
                 setDueDateTouched(false);
               }}
               className={inputClass}

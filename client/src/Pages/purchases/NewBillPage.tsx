@@ -34,6 +34,7 @@ import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
 import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
 import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
 import { useOrganizationName } from '../../context/OrgContext';
+import { computeDueDate } from '../../utils/dueDate';
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'INR', 'CAD', 'AUD', 'JPY', 'SGD', 'AED', 'CHF', 'NZD', 'ZAR'] as const;
 
@@ -75,13 +76,6 @@ function today(): string {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${String(now.getFullYear())}-${month}-${day}`;
-}
-
-function addDays(isoDate: string, days: number): string {
-  const [year, month, day] = isoDate.split('-').map(Number);
-  const date = new Date(Date.UTC(year ?? 2026, (month ?? 1) - 1, day ?? 1));
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
 }
 
 /** unitPriceCents * quantityMilli / 1000, rounded half up — a preview, never what is saved. */
@@ -127,6 +121,7 @@ export default function NewBillPage() {
   const [billDate, setBillDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
   const [dueDateTouched, setDueDateTouched] = useState(false);
+  const [termTouched, setTermTouched] = useState(false);
   const [paymentTermsCode, setPaymentTermsCode] = useState('');
   const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [notes, setNotes] = useState('');
@@ -229,8 +224,22 @@ export default function NewBillPage() {
     if (paymentTermsCode === '' || dueDateTouched || billDate === '') return;
     const term = paymentTerms.find((t) => t.code === paymentTermsCode);
     if (term === undefined) return;
-    setDueDate(addDays(billDate, term.netDays));
+    setDueDate(computeDueDate(term.rule, term.netDays, billDate));
   }, [paymentTermsCode, billDate, dueDateTouched, paymentTerms]);
+
+  // Phase 43a — a NEW expense starts on the vendor's default terms, else the
+  // organization's purchase default. Never fires for an edit or a duplicate,
+  // and stops the moment the user picks a term or types a due date themselves.
+  const orgDefaultTermId =
+    ledgerSettings.status === 'ready' ? ledgerSettings.settings.defaultPurchasePaymentTermId : null;
+  useEffect(() => {
+    if (billId !== undefined || copyFrom !== null || termTouched || dueDateTouched) return;
+    const vendor = vendors.find((v) => v.id === vendorId);
+    const defaultTermId = vendor?.defaultPaymentTermId ?? orgDefaultTermId;
+    if (defaultTermId === null) return;
+    const term = paymentTerms.find((t) => t.id === defaultTermId && t.isActive);
+    if (term !== undefined) setPaymentTermsCode(term.code);
+  }, [billId, copyFrom, termTouched, dueDateTouched, vendors, vendorId, orgDefaultTermId, paymentTerms]);
 
   const totals = useMemo(() => {
     let subtotal = 0;
@@ -452,6 +461,7 @@ export default function NewBillPage() {
               value={paymentTermsCode}
               onChange={(e) => {
                 setPaymentTermsCode(e.target.value);
+                setTermTouched(true);
                 setDueDateTouched(false);
               }}
               className={inputClass}

@@ -81,6 +81,8 @@ function baseLedgerSettings(overrides: Partial<LedgerSettings> = {}): LedgerSett
     cogsAccountId: null,
     inventoryAdjustmentAccountId: null,
     stockOpeningAccountId: null,
+    defaultSalesPaymentTermId: null,
+    defaultPurchasePaymentTermId: null,
     ...overrides,
   };
 }
