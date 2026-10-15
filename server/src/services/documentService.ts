@@ -1,4 +1,5 @@
 import type { Readable } from 'node:stream';
+import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
 import { withTransaction } from '../db/transaction.js';
 import { ApiError } from '../utils/apiError.js';
@@ -185,7 +186,22 @@ function buildFilters(
     clauses.push(`EXISTS (SELECT 1 FROM document_links l WHERE ${linkClauses.join(' AND ')})`);
   }
 
+  if (filters.q !== null) {
+    values.push('%' + escapeLike(filters.q) + '%');
+    clauses.push(`d.original_filename ILIKE $${String(values.length)}`);
+  }
+  if (filters.unattached) {
+    clauses.push(
+      'NOT EXISTS (SELECT 1 FROM document_links l WHERE l.org_id = d.org_id AND l.document_id = d.id)',
+    );
+  }
+
   return { where: clauses.join(' AND '), values };
+}
+
+/** Escapes LIKE metacharacters so a search for "100%" matches the literal text. */
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, (ch) => '\\' + ch);
 }
 
 export async function listDocuments(
@@ -286,28 +302,41 @@ export async function attachDocument(
 
   return withTransaction(async (client) => {
     try {
-      // The tenancy check — it must run before the insert. The composite FK
-      // (org_id, document_id) -> documents (org_id, id) backs this up at the
-      // schema level, so a cross-tenant link is unrepresentable even if this
-      // check were somehow bypassed.
-      const existing = await client.query<{ id: string }>(
+      // The tenancy check — attachDocumentsOnClient runs it before the insert.
+      // The composite FK (org_id, document_id) -> documents (org_id, id) backs
+      // it up at the schema level, so a cross-tenant link is unrepresentable
+      // even if the check were somehow bypassed.
+      const { rows: owned } = await client.query<{ id: string }>(
         'SELECT id FROM documents WHERE org_id = $1 AND id = $2',
         [orgId, documentId],
       );
-      if (existing.rows[0] === undefined) throw new ApiError(404, 'Document not found');
+      if (owned[0] === undefined) throw new ApiError(404, 'Document not found');
 
-      // Deliberately no query against invoices/bills/journal_entries or any
-      // other app's tables here — a dangling link outliving its entity is
-      // tolerated, because checking would mean the platform reading an
-      // app's tables, which rule 16 forbids.
+      // The bulk path is idempotent (DO NOTHING); this single-link route keeps
+      // its 409, so existence is checked first.
+      const { rows: existing } = await client.query<{ id: string }>(
+        `SELECT id FROM document_links
+          WHERE org_id = $1 AND document_id = $2 AND app_slug = $3 AND entity_type = $4 AND entity_id = $5`,
+        [orgId, documentId, input.module, input.entityType, input.entityId],
+      );
+      if (existing[0] !== undefined) {
+        throw new ApiError(409, 'This document is already attached to that record');
+      }
+
+      await attachDocumentsOnClient(client, orgId, createdBy, [documentId], {
+        module: input.module,
+        entityType: input.entityType,
+        entityId: input.entityId,
+      });
+
       const { rows } = await client.query<LinkRow>(
-        `INSERT INTO document_links (org_id, document_id, app_slug, entity_type, entity_id, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6)
-         RETURNING id, document_id, app_slug, entity_type, entity_id, created_by, created_at`,
-        [orgId, documentId, input.module, input.entityType, input.entityId, createdBy],
+        `SELECT id, document_id, app_slug, entity_type, entity_id, created_by, created_at
+           FROM document_links
+          WHERE org_id = $1 AND document_id = $2 AND app_slug = $3 AND entity_type = $4 AND entity_id = $5`,
+        [orgId, documentId, input.module, input.entityType, input.entityId],
       );
       const row = rows[0];
-      if (row === undefined) throw new Error('INSERT ... RETURNING produced no row');
+      if (row === undefined) throw new Error('Link vanished mid-transaction');
       return toLink(row);
     } catch (err) {
       if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
@@ -319,6 +348,53 @@ export async function attachDocument(
       throw err;
     }
   });
+}
+
+/**
+ * Links several vault documents to one entity on the CALLER's transaction
+ * client (Phase 43b) — so a bill and its attachments commit or roll back
+ * together. Validates module/entityType like `attachDocument`, dedupes the ids,
+ * refuses (404) if any is not in this organization, and ignores links that
+ * already exist. No transaction of its own (rule 5); no query against the
+ * entity's table (rule 16 — a dangling link is tolerated, as in attachDocument).
+ */
+export async function attachDocumentsOnClient(
+  client: PoolClient,
+  orgId: string,
+  createdBy: string,
+  documentIds: string[],
+  link: { module: string; entityType: string; entityId: string },
+): Promise<void> {
+  if (!isModuleTag(link.module)) {
+    throw new ApiError(422, `Unknown app slug: ${link.module}`);
+  }
+  if (!isDocumentEntityType(link.module, link.entityType)) {
+    throw new ApiError(422, `${link.module} documents cannot be attached to "${link.entityType}"`);
+  }
+
+  const ids = [...new Set(documentIds)];
+  if (ids.length === 0) return;
+
+  let found: { id: string }[];
+  try {
+    ({ rows: found } = await client.query<{ id: string }>(
+      'SELECT id FROM documents WHERE org_id = $1 AND id = ANY($2::uuid[])',
+      [orgId, ids],
+    ));
+  } catch (err) {
+    if (pgErrorCode(err) === PG_INVALID_TEXT_REPRESENTATION) {
+      throw new ApiError(404, 'Document not found');
+    }
+    throw err;
+  }
+  if (found.length !== ids.length) throw new ApiError(404, 'Document not found');
+
+  await client.query(
+    `INSERT INTO document_links (org_id, document_id, app_slug, entity_type, entity_id, created_by)
+     SELECT $1, d, $3, $4, $5, $6 FROM unnest($2::uuid[]) AS d
+     ON CONFLICT ON CONSTRAINT ux_document_links_target DO NOTHING`,
+    [orgId, ids, link.module, link.entityType, link.entityId, createdBy],
+  );
 }
 
 export async function detachDocument(orgId: string, documentId: string, linkId: string): Promise<void> {

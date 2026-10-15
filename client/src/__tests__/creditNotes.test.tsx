@@ -94,6 +94,8 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
     depositForOrderId: null,
     depositAppliedCents: 0,
     depositApplications: [],
+    salesOrderId: null,
+    salesOrderNumber: null,
     ...overrides,
   };
 }

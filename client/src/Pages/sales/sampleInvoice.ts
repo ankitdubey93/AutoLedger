@@ -117,4 +117,6 @@ export const SAMPLE_INVOICE: Invoice = Object.freeze({
   depositForOrderId: null,
   depositAppliedCents: 0,
   depositApplications: [],
+  salesOrderId: null,
+  salesOrderNumber: null,
 });

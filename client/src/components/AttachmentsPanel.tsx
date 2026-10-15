@@ -9,6 +9,7 @@ import {
   type VaultDocument,
 } from '../services/fetchServices';
 import ConfirmDialog from './ConfirmDialog';
+import DocumentPickerDialog from './DocumentPickerDialog';
 import LoadingState from './ui/LoadingState';
 
 /**
@@ -58,6 +59,7 @@ export default function AttachmentsPanel({
   const [busy, setBusy] = useState(false);
   const [pendingDetach, setPendingDetach] = useState<AttachedDocument | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   useEffect(() => {
     let ignore = false;
@@ -107,6 +109,26 @@ export default function AttachmentsPanel({
     }
   }
 
+  async function handlePicked(ids: string[]) {
+    setError(null);
+    setBusy(true);
+    try {
+      for (const id of ids) {
+        try {
+          await attachDocument(id, { module, entityType, entityId });
+        } catch (err: unknown) {
+          // Already linked here is not a failure of the batch.
+          if (!(err instanceof Error && err.message.includes('already attached'))) throw err;
+        }
+      }
+      setReloadToken((t) => t + 1);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not attach those files');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDownload(document: VaultDocument) {
     setError(null);
     try {
@@ -140,7 +162,18 @@ export default function AttachmentsPanel({
   }
 
   return (
-    <section className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4">
+    <section
+      className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
+      onDragOver={(e) => {
+        if (!readOnly) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        if (readOnly) return;
+        e.preventDefault();
+        const file = e.dataTransfer.files[0];
+        if (file !== undefined && !busy) void handleAttach(file);
+      }}
+    >
       <h3 className="text-sm font-semibold m-0">Attachments</h3>
 
       {error !== null && <p className="status status--bad">{error}</p>}
@@ -202,7 +235,19 @@ export default function AttachmentsPanel({
             }}
             className="text-sm"
           />
+          <button type="button" onClick={() => setPickerOpen(true)} disabled={busy} className="btn btn--ghost">
+            Choose from Documents
+          </button>
         </div>
+      )}
+
+      {!readOnly && (
+        <DocumentPickerDialog
+          open={pickerOpen}
+          onClose={() => setPickerOpen(false)}
+          onPick={(ids) => void handlePicked(ids)}
+          excludeIds={attachments?.map((a) => a.document.id) ?? []}
+        />
       )}
 
       {pendingDetach !== null && (

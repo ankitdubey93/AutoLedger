@@ -21,6 +21,7 @@ import { useOrg } from '../../../context/OrgContext';
 import BackLink from '../../../components/BackLink';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import LoadingState from '../../../components/ui/LoadingState';
+import AttachmentsPanel from '../../../components/AttachmentsPanel';
 import { OrderStatusPill, orderBillingLabel, orderLabel } from './OrderListPage';
 import type { OrderKindConfig } from './orderKinds';
 
@@ -543,6 +544,8 @@ export default function OrderDetailPage({ config }: { config: OrderKindConfig })
           </div>
         </Modal>
       )}
+
+      <AttachmentsPanel module="ledger-core" entityType="order" entityId={order.id} />
     </section>
   );
 }

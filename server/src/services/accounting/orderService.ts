@@ -1045,6 +1045,7 @@ export async function convertOrder(
         notes: order.notes,
         paymentTerms: order.paymentTerms,
         paymentTermsCode: order.paymentTermsCode,
+        salesOrderId: id,
         lines: billLines.map(({ line, quantityMilli }) => ({
           description: line.description,
           quantityMilli,
@@ -1080,6 +1081,7 @@ export async function convertOrder(
       notes: order.notes,
       paymentTerms: order.paymentTerms,
       paymentTermsCode: order.paymentTermsCode,
+      purchaseOrderId: id,
       lines: billLines.map(({ line, quantityMilli }) => ({
         description: line.description,
         quantityMilli,

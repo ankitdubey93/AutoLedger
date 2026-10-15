@@ -1394,6 +1394,10 @@ export interface Invoice {
   depositForOrderId: string | null;
   /** Phase 42 — applications where this document is the deposit or the target. [] in lists. */
   depositApplications: DepositApplication[];
+  /** Phase 43b — the sales order this invoice references; null if none. */
+  salesOrderId: string | null;
+  /** Phase 43b — the referenced sales order's number; null if none. */
+  salesOrderNumber: string | null;
 }
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
@@ -1475,6 +1479,10 @@ export interface InvoiceInput {
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   lines: InvoiceLineInput[];
+  /** Phase 43b — vault documents to link to the invoice in the same transaction. */
+  attachmentDocumentIds?: string[];
+  /** Phase 43b — a confirmed or closed sales order for the same customer; null clears it. */
+  salesOrderId?: string | null;
 }
 
 /** POST /invoices — always drafted, never posted directly. */
@@ -2278,6 +2286,10 @@ export interface Bill {
   depositForOrderId: string | null;
   /** Phase 42 — applications where this document is the deposit or the target. [] in lists. */
   depositApplications: DepositApplication[];
+  /** Phase 43b — the purchase order this bill references; null if none. */
+  purchaseOrderId: string | null;
+  /** Phase 43b — the referenced purchase order's number; null if none. */
+  purchaseOrderNumber: string | null;
 }
 
 export type BillSortKey = 'billDate' | 'dueDate' | 'reference' | 'vendor' | 'total' | 'status';
@@ -2355,6 +2367,10 @@ export interface BillInput {
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   lines: BillLineInput[];
+  /** Phase 43b — vault documents to link to the bill in the same transaction. */
+  attachmentDocumentIds?: string[];
+  /** Phase 43b — a confirmed or closed purchase order for the same vendor; null clears it. */
+  purchaseOrderId?: string | null;
 }
 
 /** POST /bills — always drafted, never posted directly. */
@@ -3828,6 +3844,10 @@ export interface DocumentFilters {
   module?: string;
   entityType?: string;
   entityId?: string;
+  /** Phase 43b — case-insensitive filename search. */
+  q?: string;
+  /** Phase 43b — only documents with no links (sent as `unattached=true` only when true). */
+  unattached?: boolean;
 }
 
 /** GET /documents — platform-level, not part of the accounting module (guardrails rule 16). */
@@ -3848,6 +3868,8 @@ export function listDocuments(
   if (params.module !== undefined && params.module !== '') query.set('module', params.module);
   if (params.entityType !== undefined && params.entityType !== '') query.set('entityType', params.entityType);
   if (params.entityId !== undefined && params.entityId !== '') query.set('entityId', params.entityId);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.unattached === true) query.set('unattached', 'true');
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/documents${suffix}`, { signal: signal ?? null });

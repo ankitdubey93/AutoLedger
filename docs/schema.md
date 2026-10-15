@@ -917,6 +917,11 @@ Four additive, idempotent migrations in the order below. Money is `BIGINT` cents
 - Nullable `default_payment_term_id` on `customers` and `vendors`, `default_sales_payment_term_id` / `default_purchase_payment_term_id` on `ledger_settings`. Composite FKs `fk_customers_default_payment_term`, `fk_vendors_default_payment_term`, `fk_ledger_settings_default_sales_term`, `fk_ledger_settings_default_purchase_term` — `(org_id, col) → payment_terms (org_id, id) ON DELETE RESTRICT` (terms are only ever deactivated); indexes `idx_customers_default_payment_term`, `idx_vendors_default_payment_term`, `idx_ledger_settings_default_sales_term`, `idx_ledger_settings_default_purchase_term`.
 - Backfills: the sales default from `ledger_invoice_settings.default_due_days` (matching an active standard `DAYS_AFTER_DATE` term); a vendor default from the free-text `vendors.payment_terms` (exact case-insensitive match on term code or name). The purchase default is not backfilled. `default_due_days` and `vendors.payment_terms` stay on disk (rule 13).
 
+**`095_ledger-core_document_order_links.sql`** (Phase 43b)
+- `bills.purchase_order_id` and `invoices.sales_order_id` (nullable UUID). Composite FKs **`fk_bills_purchase_order`** / **`fk_invoices_sales_order`** — `(org_id, col) → orders (org_id, id) ON DELETE RESTRICT` (`MATCH SIMPLE`, so NULL is valid); partial indexes `idx_bills_purchase_order`, `idx_invoices_sales_order` (`WHERE col IS NOT NULL`).
+- Backfill: the single order reachable through the document's lines (`order_line_id → order_lines.order_id`), **only for editable documents** (bills `DRAFT`/`AWAITING_APPROVAL`, invoices `DRAFT`) — the immutability triggers reject any column change on a posted row and are never disabled. Posted documents keep a NULL header link; their line-level `order_line_id` remains the record.
+- `document_links.entity_type` is only length-checked, so the new attachable types (`credit_note`, `debit_note`, `order`) need no schema change.
+
 Chart note: rows `1150` and `2130` are additions to the default-chart table below (that table predates several later additions and is a representative listing).
 
 ## Phase 17 — target tables

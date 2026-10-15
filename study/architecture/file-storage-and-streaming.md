@@ -73,6 +73,10 @@ The `'error'` listener is not optional. A read stream can fail mid-read — the 
 
 ---
 
+### Linking inside the owning document's transaction; unlinked uploads as a staging area (Phase 43b)
+
+A bill that does not exist yet cannot be linked to, so the new-bill form uploads each file to the vault straight away (unlinked) and keeps only the document ids. On save, `attachmentDocumentIds` rides in the create body and `documentService.attachDocumentsOnClient(client, ...)` links them on the **same transaction client** that inserts the bill. Mechanism: it first runs `SELECT id FROM documents WHERE org_id = $1 AND id = ANY($2::uuid[])` and compares the row count with the de-duplicated input (a foreign-org or unknown id gives a count mismatch, hence 404 and a rollback of the whole bill), then one `INSERT ... SELECT unnest($2::uuid[]) ... ON CONFLICT ON CONSTRAINT ux_document_links_target DO NOTHING`. The unlinked blob is therefore a staging area: an upload that is never saved leaves an inert, listable document (`?unattached=true`) rather than a dangling link. Alternative rejected: create the bill first, then link in a second request, which leaves a window where the bill exists without the files the user attached and needs its own failure handling. The single-link route keeps its 409 by checking existence first, because the bulk path is deliberately idempotent. No query touches the entity's table (rule 16), so a link to a not-yet-visible entity id is tolerated exactly as before.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -125,6 +129,9 @@ A: A stream's `Error` event is one of the cases Node.js treats as fatal by defau
 
 **Q: Why does `document_links.entity_id` have no foreign key, and doesn't that risk dangling references?**
 A: Adding a foreign key would require the platform's `documentService` to know the schema of — and directly query — every app's own tables (`invoices`, `bills`, whatever entity type an app declares), which is exactly the cross-app table access guardrails rule 16 exists to prevent. The tolerated cost is a link that can outlive the entity it points at — an invoice hard-deleted while an attachment link still references its id — accepted as a known, tested limitation rather than solved by breaking the app-boundary rule the entire link-table design exists to preserve.
+
+**Q: Why attach files to a new bill inside the bill's own transaction instead of after it is created?**
+A: Atomicity. If linking runs in a second request, a failure leaves a saved bill missing the evidence the user attached, and the client must reconcile. Running `attachDocumentsOnClient` on the same client means a bad document id (404) rolls back the bill too, so the pair commits or fails together. The uploads themselves happen earlier and are harmless if abandoned, because an unlinked vault document is inert.
 
 ---
 

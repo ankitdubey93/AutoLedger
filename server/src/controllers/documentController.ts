@@ -39,6 +39,8 @@ export const list: RequestHandler = async (req, res) => {
       module: optionalText(req, 'module', 40),
       entityType: optionalText(req, 'entityType', 40),
       entityId: optionalUuid(req, 'entityId'),
+      q: optionalText(req, 'q', 100),
+      unattached: req.query['unattached'] === 'true',
       page,
       limit,
     },

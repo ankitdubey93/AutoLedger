@@ -94,6 +94,8 @@ function bill(overrides: Partial<Bill> = {}): Bill {
     depositForOrderId: null,
     depositAppliedCents: 0,
     depositApplications: [],
+    purchaseOrderId: null,
+    purchaseOrderNumber: null,
     ...overrides,
   };
 }

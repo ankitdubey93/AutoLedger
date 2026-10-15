@@ -93,7 +93,7 @@ export const create: RequestHandler = async (req, res) => {
 export const update: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateBillSchema, req.body);
-  const bill = await billService.updateBill(user.orgId, requireParam(req, 'id'), input);
+  const bill = await billService.updateBill(user.orgId, requireParam(req, 'id'), input, user.id);
   res.json({ success: true, bill });
 };
 

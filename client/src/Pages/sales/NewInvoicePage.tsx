@@ -10,14 +10,17 @@ import {
   listAccounts,
   listCustomers,
   listItems,
+  listOrders,
   listPaymentTerms,
   updateInvoice,
   type Account,
   type Customer,
   type Item,
   type InvoiceSettings,
+  type OrderSummary,
   type PaymentTerm,
   type ResolvedRate,
+  type VaultDocument,
 } from '../../services/fetchServices';
 import {
   formatCents,
@@ -29,6 +32,7 @@ import {
 } from '../../utils/money';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
+import PendingAttachments from '../../components/PendingAttachments';
 import { isInventoryItem, LineLocationSelect, ProductPicker } from '../products/ProductPicker';
 import QuickAddProductDialog from '../products/QuickAddProductDialog';
 import { useStockLineData } from '../products/useStockLineData';
@@ -136,6 +140,11 @@ export default function NewInvoicePage() {
   const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([]);
+  // Phase 43b — files uploaded or picked while drafting, linked on save; the referenced sales order.
+  const [pending, setPending] = useState<VaultDocument[]>([]);
+  const [salesOrderId, setSalesOrderId] = useState('');
+  const [salesOrders, setSalesOrders] = useState<OrderSummary[]>([]);
+  const [linkedOrder, setLinkedOrder] = useState<{ id: string; number: string | null } | null>(null);
 
   const [resolvedRate, setResolvedRate] = useState<ResolvedRate | null>(null);
   const [rateError, setRateError] = useState<string | null>(null);
@@ -209,6 +218,10 @@ export default function NewInvoicePage() {
         setDueDate(invoice.dueDate);
         setDueDateTouched(true);
         setPaymentTermsCode(invoice.paymentTermsCode ?? '');
+        if (invoice.salesOrderId !== null) {
+          setSalesOrderId(invoice.salesOrderId);
+          setLinkedOrder({ id: invoice.salesOrderId, number: invoice.salesOrderNumber });
+        }
         setCurrencyCode(invoice.currencyCode);
         setNotes(invoice.notes ?? '');
         setLines(
@@ -235,6 +248,25 @@ export default function NewInvoicePage() {
       ignore = true;
     };
   }, [invoiceId, seeded]);
+
+  // Phase 43b — confirmed sales orders of the chosen customer, for the optional reference.
+  useEffect(() => {
+    if (customerId === '') {
+      setSalesOrders([]);
+      return;
+    }
+    const controller = new AbortController();
+    listOrders('SALES', { partyId: customerId, status: 'CONFIRMED', limit: 100 }, controller.signal)
+      .then((res) => {
+        if (!controller.signal.aborted) setSalesOrders(res.orders);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setSalesOrders([]);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [customerId]);
 
   // Recomputes the due date whenever the term or the issue date changes,
   // unless the user has edited the due date directly — an explicit edit
@@ -384,6 +416,8 @@ export default function NewInvoicePage() {
         notes: notes.trim() === '' ? null : notes.trim(),
         paymentTerms: null,
         paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
+        salesOrderId: salesOrderId === '' ? null : salesOrderId,
+        ...(pending.length > 0 ? { attachmentDocumentIds: pending.map((d) => d.id) } : {}),
         lines: lines.map((line) => ({
           description: line.description.trim(),
           quantityMilli: parseQuantityInput(line.quantity) ?? 0,
@@ -452,6 +486,20 @@ export default function NewInvoicePage() {
             <Link to="/customers?new=1" className="text-xs">
               + New customer
             </Link>
+          </label>
+          <label className="flex flex-col gap-1 text-sm min-w-48">
+            <span className="text-[var(--muted)]">Sales order</span>
+            <select value={salesOrderId} onChange={(e) => setSalesOrderId(e.target.value)} className={inputClass}>
+              <option value="">None</option>
+              {linkedOrder !== null && !salesOrders.some((o) => o.id === linkedOrder.id) && (
+                <option value={linkedOrder.id}>{linkedOrder.number ?? 'Sales order'}</option>
+              )}
+              {salesOrders.map((order) => (
+                <option key={order.id} value={order.id}>
+                  {order.orderNumber ?? 'Sales order'}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Issue date</span>
@@ -725,6 +773,8 @@ export default function NewInvoicePage() {
             </div>
           )}
         </div>
+
+        <PendingAttachments value={pending} onChange={setPending} />
 
         {totals.malformed && (
           <p className="text-sm text-[var(--bad)]">One or more lines have an invalid amount.</p>

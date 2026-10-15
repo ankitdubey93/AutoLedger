@@ -60,6 +60,10 @@ A service check (`SELECT 1 FROM accounts WHERE id = $1 AND org_id = $2`) followe
 
 ---
 
+### A nullable composite FK to a shared document table: bills to orders (Phase 43b)
+
+`bills.purchase_order_id` and `invoices.sales_order_id` reference `orders (org_id, id)` through `FOREIGN KEY (org_id, purchase_order_id) ... ON DELETE RESTRICT`, resting on the existing `ux_orders_org_id_id`. Under `MATCH SIMPLE` a NULL link skips the check, so a bill with no order is valid, while a non-null link must exist **in the same organization**, so another tenant's order id cannot be stored even if the service check were skipped. The orders table holds both directions in one table, so the FK cannot say "a purchase order": that part (direction, same vendor, status CONFIRMED or CLOSED) stays a service check in `assertOrderReferenceOnClient`, the same split as the same-type parent rule. A partial index (`WHERE purchase_order_id IS NOT NULL`) keeps the index small, since most bills have no order. The backfill had to stay inside what the immutability trigger allows: it only updates DRAFT/AWAITING_APPROVAL bills and DRAFT invoices, because the trigger rejects any column change on a posted row and is never disabled.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -108,6 +112,9 @@ A: A service check works until a second code path exists — a batch script, a d
 
 **Q: Tell me about a time you had to choose between a database constraint and an application-level check for the same rule.**
 A: LedgerCore's `cash_account_id` setting. The account-service pattern elsewhere in the codebase — checking that a re-parented account has the same organization *and* the same type as its new parent — is a service-level check, because "same type" genuinely can't be expressed as a foreign key; there's no constraint mechanism for "these two rows must agree on an arbitrary column." But "same organization" for `cash_account_id` *is* just an equality across two columns, which a composite FK expresses natively. I chose the constraint there and left the type check as a service check elsewhere, because the rule was: push an invariant into the schema whenever the schema can actually express it, and keep it in the service only when the schema genuinely can't.
+
+**Q: A bill can reference a purchase order. What does the database enforce and what does the service enforce?**
+A: The composite FK `(org_id, purchase_order_id) -> orders (org_id, id)` enforces that the order exists in the same organization (NULL allowed via `MATCH SIMPLE`) and, with RESTRICT, that a referenced order is never deleted. It cannot express "direction is PURCHASE", "same vendor as the bill" or "status is confirmed or closed", because those compare columns of a different kind of row; the service checks them in the bill's transaction and answers 422.
 
 ---
 

@@ -17,7 +17,8 @@ import * as documentStockService from '../inventory/documentStockService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { assertOrderLineLinksOnClient } from './orderLineLinks.js';
+import { assertOrderLineLinksOnClient, assertOrderReferenceOnClient } from './orderLineLinks.js';
+import * as documentService from '../documentService.js';
 import { hasPostedDepositApplicationsOnClient, listDepositApplicationsForDocument } from './depositApplicationQueries.js';
 import { allocatedCentsSubquery, depositAppliedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import {
@@ -99,6 +100,10 @@ export interface CreateInvoiceInput {
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   lines: InvoiceLineInput[];
+  /** Phase 43b — vault documents to link to the invoice in the same transaction. */
+  attachmentDocumentIds?: string[] | undefined;
+  /** Phase 43b — the sales order this invoice references. On an edit, `undefined` leaves the link alone and `null` clears it. */
+  salesOrderId?: string | null | undefined;
 }
 
 export type UpdateInvoiceInput = CreateInvoiceInput;
@@ -174,6 +179,8 @@ interface InvoiceRow {
   source_quote_revision: number | null;
   kind: 'STANDARD' | 'DEPOSIT';
   deposit_for_order_id: string | null;
+  sales_order_id: string | null;
+  sales_order_number: string | null;
 }
 
 interface InvoiceLineRow {
@@ -209,7 +216,9 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 ${depositAppliedCentsSubquery('i', 'invoice_id')} AS deposit_applied_cents,
                                 q.id AS source_quote_id, q.quote_number AS source_quote_number,
                                 q.revision AS source_quote_revision,
-                                i.kind, i.deposit_for_order_id
+                                i.kind, i.deposit_for_order_id, i.sales_order_id,
+                                (SELECT o.order_number FROM orders o
+                                  WHERE o.org_id = i.org_id AND o.id = i.sales_order_id) AS sales_order_number
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
                            LEFT JOIN users u ON u.id = i.created_by
@@ -299,6 +308,8 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
         : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
     kind: row.kind,
     depositForOrderId: row.deposit_for_order_id,
+    salesOrderId: row.sales_order_id,
+    salesOrderNumber: row.sales_order_number,
     depositApplications: [],
   };
 }
@@ -656,6 +667,10 @@ export async function createInvoiceOnClient(
 
   const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
 
+  if (input.salesOrderId !== undefined && input.salesOrderId !== null) {
+    await assertOrderReferenceOnClient(client, orgId, 'SALES', input.customerId, input.salesOrderId);
+  }
+
   let notes = input.notes;
   let notesTemplate: string | null = null;
   let descriptionTemplates: (string | null)[] = [];
@@ -695,9 +710,9 @@ export async function createInvoiceOnClient(
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number,
-        notes_template, source_quote_id, source_quote_direction, kind, deposit_for_order_id)
+        notes_template, source_quote_id, source_quote_direction, kind, deposit_for_order_id, sales_order_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-             $22, $23, $24, $25)
+             $22, $23, $24, $25, $26)
      RETURNING id`,
     [
       orgId,
@@ -725,6 +740,7 @@ export async function createInvoiceOnClient(
       options.sourceQuoteId === undefined ? null : 'SALES',
       options.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
       options.depositForOrderId ?? null,
+      input.salesOrderId ?? null,
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
@@ -739,6 +755,14 @@ export async function createInvoiceOnClient(
     totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
   );
   await insertInvoiceLines(client, orgId, invoiceId, totals, descriptionTemplates);
+
+  if (input.attachmentDocumentIds !== undefined && input.attachmentDocumentIds.length > 0) {
+    await documentService.attachDocumentsOnClient(client, orgId, createdBy, input.attachmentDocumentIds, {
+      module: MODULE_TAGS.accounting,
+      entityType: 'invoice',
+      entityId: invoiceId,
+    });
+  }
 
   return invoiceId;
 }
@@ -790,6 +814,7 @@ export async function updateInvoice(
   orgId: string,
   id: string,
   input: UpdateInvoiceInput,
+  userId: string,
 ): Promise<Invoice> {
   validateInvoiceInput(input);
   const totals = computeLineTotals(input.lines);
@@ -834,6 +859,10 @@ export async function updateInvoice(
     if (customer === undefined) throw new ApiError(422, 'Customer not found');
 
     const resolvedDue = await resolveInvoiceDueDate(client, orgId, input);
+
+    if (input.salesOrderId !== undefined && input.salesOrderId !== null) {
+      await assertOrderReferenceOnClient(client, orgId, 'SALES', input.customerId, input.salesOrderId);
+    }
 
     await assertRevenueAccounts(
       client,
@@ -892,6 +921,22 @@ export async function updateInvoice(
       totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
     );
     await insertInvoiceLines(client, orgId, id, totals);
+
+    // Phase 43b — undefined leaves the order link alone, null clears it.
+    if (input.salesOrderId !== undefined) {
+      await client.query('UPDATE invoices SET sales_order_id = $1 WHERE id = $2 AND org_id = $3', [
+        input.salesOrderId,
+        id,
+        orgId,
+      ]);
+    }
+    if (input.attachmentDocumentIds !== undefined && input.attachmentDocumentIds.length > 0) {
+      await documentService.attachDocumentsOnClient(client, orgId, userId, input.attachmentDocumentIds, {
+        module: MODULE_TAGS.accounting,
+        entityType: 'invoice',
+        entityId: id,
+      });
+    }
 
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);

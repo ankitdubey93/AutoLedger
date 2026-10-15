@@ -17,7 +17,8 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { assertOrderLineLinksOnClient } from './orderLineLinks.js';
+import { assertOrderLineLinksOnClient, assertOrderReferenceOnClient } from './orderLineLinks.js';
+import * as documentService from '../documentService.js';
 import { hasPostedDepositApplicationsOnClient, listDepositApplicationsForDocument } from './depositApplicationQueries.js';
 import { allocatedCentsSubquery, depositAppliedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { resolveApPostingAccountsOnClient, resolveInventoryPostingAccountsOnClient } from './settingsService.js';
@@ -113,6 +114,10 @@ export interface CreateBillInput {
   paymentTerms: string | null;
   paymentTermsCode: string | null;
   lines: BillLineInput[];
+  /** Phase 43b — vault documents to link to the bill in the same transaction. */
+  attachmentDocumentIds?: string[] | undefined;
+  /** Phase 43b — the purchase order this bill references. On an edit, `undefined` leaves the link alone and `null` clears it. */
+  purchaseOrderId?: string | null | undefined;
 }
 
 export type UpdateBillInput = CreateBillInput;
@@ -192,6 +197,8 @@ interface BillRow {
   source_quote_revision: number | null;
   kind: 'STANDARD' | 'DEPOSIT';
   deposit_for_order_id: string | null;
+  purchase_order_id: string | null;
+  purchase_order_number: string | null;
 }
 
 interface BillLineRow {
@@ -230,7 +237,9 @@ const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.n
                              ${depositAppliedCentsSubquery('b', 'bill_id')} AS deposit_applied_cents,
                              q.id AS source_quote_id, q.quote_number AS source_quote_number,
                              q.revision AS source_quote_revision,
-                             b.kind, b.deposit_for_order_id
+                             b.kind, b.deposit_for_order_id, b.purchase_order_id,
+                             (SELECT o.order_number FROM orders o
+                               WHERE o.org_id = b.org_id AND o.id = b.purchase_order_id) AS purchase_order_number
                         FROM bills b
                         JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
                         LEFT JOIN users u  ON u.id = b.created_by
@@ -325,6 +334,8 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
         : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
     kind: row.kind,
     depositForOrderId: row.deposit_for_order_id,
+    purchaseOrderId: row.purchase_order_id,
+    purchaseOrderNumber: row.purchase_order_number,
     depositApplications: [],
   };
 }
@@ -683,6 +694,8 @@ interface InsertBillHeader {
   sourceQuoteId?: string | undefined;
   /** Phase 42 — deposit bills only; see `CreateBillOptions.depositForOrderId`. */
   depositForOrderId?: string | undefined;
+  /** Phase 43b — already validated by `assertOrderReferenceOnClient`. */
+  purchaseOrderId?: string | null | undefined;
 }
 
 /**
@@ -775,9 +788,9 @@ async function insertBillOnClient(
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by,
         notes_template, vendor_reference_template, source_quote_id, source_quote_direction,
-        kind, deposit_for_order_id)
+        kind, deposit_for_order_id, purchase_order_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, $26)
+             $23, $24, $25, $26, $27)
      RETURNING id`,
     [
       orgId,
@@ -806,6 +819,7 @@ async function insertBillOnClient(
       header.sourceQuoteId === undefined ? null : 'PURCHASE',
       header.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
       header.depositForOrderId ?? null,
+      header.purchaseOrderId ?? null,
     ],
   );
   const billId = billRows[0]?.id;
@@ -864,6 +878,9 @@ export async function createBillOnClient(
   const totals = computeLineTotals(input.lines);
 
   const resolvedDue = await resolveBillDueDate(client, orgId, input);
+  if (input.purchaseOrderId !== undefined && input.purchaseOrderId !== null) {
+    await assertOrderReferenceOnClient(client, orgId, 'PURCHASE', input.vendorId, input.purchaseOrderId);
+  }
   const billId = await insertBillOnClient(
     client,
     orgId,
@@ -880,10 +897,19 @@ export async function createBillOnClient(
       placeholders: options.placeholders,
       sourceQuoteId: options.sourceQuoteId,
       depositForOrderId: options.depositForOrderId,
+      purchaseOrderId: input.purchaseOrderId,
     },
     totals,
     options.equityAccountId ?? null,
   );
+
+  if (input.attachmentDocumentIds !== undefined && input.attachmentDocumentIds.length > 0) {
+    await documentService.attachDocumentsOnClient(client, orgId, createdBy, input.attachmentDocumentIds, {
+      module: MODULE_TAGS.accounting,
+      entityType: 'bill',
+      entityId: billId,
+    });
+  }
 
   return billId;
 }
@@ -1014,7 +1040,7 @@ export async function createCapturedBillOnClient(
 }
 
 /** A draft/in-review edit replaces the whole document — the document is small and the client carries no line identity to diff against. */
-export async function updateBill(orgId: string, id: string, input: UpdateBillInput): Promise<Bill> {
+export async function updateBill(orgId: string, id: string, input: UpdateBillInput, userId: string): Promise<Bill> {
   validateBillInput(input);
   const totals = computeLineTotals(input.lines);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
@@ -1058,6 +1084,10 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
     if (vendor === undefined) throw new ApiError(422, 'Vendor not found');
 
     const resolvedDue = await resolveBillDueDate(client, orgId, input);
+
+    if (input.purchaseOrderId !== undefined && input.purchaseOrderId !== null) {
+      await assertOrderReferenceOnClient(client, orgId, 'PURCHASE', input.vendorId, input.purchaseOrderId);
+    }
 
     await assertExpenseAccounts(
       client,
@@ -1114,6 +1144,22 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
       totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
     );
     await insertBillLines(client, orgId, id, totals);
+
+    // Phase 43b — undefined leaves the order link alone, null clears it.
+    if (input.purchaseOrderId !== undefined) {
+      await client.query('UPDATE bills SET purchase_order_id = $1 WHERE id = $2 AND org_id = $3', [
+        input.purchaseOrderId,
+        id,
+        orgId,
+      ]);
+    }
+    if (input.attachmentDocumentIds !== undefined && input.attachmentDocumentIds.length > 0) {
+      await documentService.attachDocumentsOnClient(client, orgId, userId, input.attachmentDocumentIds, {
+        module: MODULE_TAGS.accounting,
+        entityType: 'bill',
+        entityId: id,
+      });
+    }
 
     await client.query('COMMIT');
     return await getBillById(orgId, id);

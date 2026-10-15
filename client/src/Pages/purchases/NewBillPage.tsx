@@ -8,13 +8,16 @@ import {
   getLatestFxRate,
   listAccounts,
   listItems,
+  listOrders,
   listPaymentTerms,
   listVendors,
   updateBill,
   type Account,
   type Item,
+  type OrderSummary,
   type PaymentTerm,
   type ResolvedRate,
+  type VaultDocument,
   type Vendor,
 } from '../../services/fetchServices';
 import {
@@ -27,6 +30,7 @@ import {
 } from '../../utils/money';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
+import PendingAttachments from '../../components/PendingAttachments';
 import { isInventoryItem, LineLocationSelect, ProductPicker } from '../products/ProductPicker';
 import QuickAddProductDialog from '../products/QuickAddProductDialog';
 import { useStockLineData } from '../products/useStockLineData';
@@ -126,6 +130,11 @@ export default function NewBillPage() {
   const [currencyCode, setCurrencyCode] = useState(baseCurrency);
   const [notes, setNotes] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  // Phase 43b — files uploaded or picked while drafting, linked on save; the referenced purchase order.
+  const [pending, setPending] = useState<VaultDocument[]>([]);
+  const [purchaseOrderId, setPurchaseOrderId] = useState('');
+  const [purchaseOrders, setPurchaseOrders] = useState<OrderSummary[]>([]);
+  const [linkedOrder, setLinkedOrder] = useState<{ id: string; number: string | null } | null>(null);
 
   const [seeded, setSeeded] = useState(false);
   const [notEditable, setNotEditable] = useState(false);
@@ -188,6 +197,10 @@ export default function NewBillPage() {
         setDueDate(bill.dueDate);
         setDueDateTouched(true);
         setPaymentTermsCode(bill.paymentTermsCode ?? '');
+        if (billId !== undefined && bill.purchaseOrderId !== null) {
+          setPurchaseOrderId(bill.purchaseOrderId);
+          setLinkedOrder({ id: bill.purchaseOrderId, number: bill.purchaseOrderNumber });
+        }
         setCurrencyCode(bill.currencyCode);
         // A duplicate starts from the text as written (Phase 40), so its
         // placeholders are filled afresh when it is approved.
@@ -216,6 +229,25 @@ export default function NewBillPage() {
       ignore = true;
     };
   }, [billId, copyFrom, seeded]);
+
+  // Phase 43b — confirmed purchase orders of the chosen vendor, for the optional reference.
+  useEffect(() => {
+    if (vendorId === '') {
+      setPurchaseOrders([]);
+      return;
+    }
+    const controller = new AbortController();
+    listOrders('PURCHASE', { partyId: vendorId, status: 'CONFIRMED', limit: 100 }, controller.signal)
+      .then((res) => {
+        if (!controller.signal.aborted) setPurchaseOrders(res.orders);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setPurchaseOrders([]);
+      });
+    return () => {
+      controller.abort();
+    };
+  }, [vendorId]);
 
   // Recomputes the due date whenever the term or the bill date changes,
   // unless the user has edited the due date directly — an explicit edit
@@ -367,6 +399,8 @@ export default function NewBillPage() {
         notes: notes.trim() === '' ? null : notes.trim(),
         paymentTerms: null,
         paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
+        purchaseOrderId: purchaseOrderId === '' ? null : purchaseOrderId,
+        ...(pending.length > 0 ? { attachmentDocumentIds: pending.map((d) => d.id) } : {}),
         lines: lines.map((line) => ({
           description: line.description.trim(),
           quantityMilli: parseQuantityInput(line.quantity) ?? 0,
@@ -430,6 +464,24 @@ export default function NewBillPage() {
             <Link to="/vendors?new=1" className="text-xs">
               + New vendor
             </Link>
+          </label>
+          <label className="flex flex-col gap-1 text-sm min-w-48">
+            <span className="text-[var(--muted)]">Purchase order</span>
+            <select
+              value={purchaseOrderId}
+              onChange={(e) => setPurchaseOrderId(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">None</option>
+              {linkedOrder !== null && !purchaseOrders.some((o) => o.id === linkedOrder.id) && (
+                <option value={linkedOrder.id}>{linkedOrder.number ?? 'Purchase order'}</option>
+              )}
+              {purchaseOrders.map((order) => (
+                <option key={order.id} value={order.id}>
+                  {order.orderNumber ?? 'Purchase order'}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Vendor reference</span>
@@ -710,6 +762,8 @@ export default function NewBillPage() {
             </div>
           )}
         </div>
+
+        <PendingAttachments value={pending} onChange={setPending} />
 
         {totals.malformed && (
           <p className="text-sm text-[var(--bad)]">One or more lines have an invalid amount.</p>

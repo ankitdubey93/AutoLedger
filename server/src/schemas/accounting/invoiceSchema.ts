@@ -45,6 +45,10 @@ export const createInvoiceSchema = z
     notes: z.string().trim().max(1000).nullable().default(null),
     paymentTerms: z.string().trim().max(500).nullable().default(null),
     paymentTermsCode: z.string().trim().max(30).nullable().default(null),
+    // Phase 43b — vault documents linked in the document's own transaction, and the order it references
+    // (omitted on an edit = leave the link alone; null = clear it).
+    attachmentDocumentIds: z.array(z.uuid()).max(20).optional(),
+    salesOrderId: z.uuid().nullable().optional(),
     lines: z.array(invoiceLineSchema).min(1, 'An invoice needs at least one line'),
   });
 

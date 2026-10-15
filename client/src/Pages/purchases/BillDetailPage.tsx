@@ -316,6 +316,12 @@ export default function BillDetailPage() {
             <p className="text-lg font-semibold m-0">{bill.vendorReference}</p>
             <p className="text-sm text-[var(--muted)] m-0">Expense date {formatDate(bill.billDate)}</p>
             <p className="text-sm text-[var(--muted)] m-0">Due {formatDate(bill.dueDate)}</p>
+            {bill.purchaseOrderId !== null && (
+              <p className="text-sm text-[var(--muted)] m-0">
+                Purchase order{' '}
+                <Link to={`/purchase-orders/${bill.purchaseOrderId}`}>{bill.purchaseOrderNumber ?? 'Purchase order'}</Link>
+              </p>
+            )}
           </div>
         </div>
 

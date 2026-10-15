@@ -92,7 +92,7 @@ export const create: RequestHandler = async (req, res) => {
 export const update: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateInvoiceSchema, req.body);
-  const invoice = await invoiceService.updateInvoice(user.orgId, requireParam(req, 'id'), input);
+  const invoice = await invoiceService.updateInvoice(user.orgId, requireParam(req, 'id'), input, user.id);
   res.json({ success: true, invoice });
 };
 

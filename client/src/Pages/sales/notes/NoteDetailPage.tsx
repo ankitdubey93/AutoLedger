@@ -8,6 +8,7 @@ import { noteStatusPill } from './NoteListPage';
 import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } from './noteKinds';
 import { formatDate } from '../../../utils/date';
 import LoadingState from '../../../components/ui/LoadingState';
+import AttachmentsPanel from '../../../components/AttachmentsPanel';
 
 /**
  * One credit or debit note (Phase 26). A DRAFT can be edited, deleted or
@@ -397,6 +398,12 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
           onCancel={() => setConfirmAction(null)}
         />
       )}
+      <AttachmentsPanel
+        module="ledger-core"
+        entityType={config.kind === 'DEBIT_NOTE' ? 'debit_note' : 'credit_note'}
+        entityId={note.id}
+      />
+
       {confirmAction === 'void' && (
         <ConfirmDialog
           title={`Void this ${config.title.toLowerCase()}?`}

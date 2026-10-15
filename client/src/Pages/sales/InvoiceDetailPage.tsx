@@ -314,6 +314,14 @@ export default function InvoiceDetailPage() {
       />
 
       <dl className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4 m-0">
+        {invoice.salesOrderId !== null && (
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Sales order</dt>
+            <dd className="m-0">
+              <Link to={`/sales-orders/${invoice.salesOrderId}`}>{invoice.salesOrderNumber ?? 'Sales order'}</Link>
+            </dd>
+          </div>
+        )}
         {invoice.journalEntryId !== null && (
           <div>
             <dt className="text-xs uppercase tracking-wide text-[var(--muted)]">Journal entry</dt>

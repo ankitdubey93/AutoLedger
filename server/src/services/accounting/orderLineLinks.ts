@@ -61,3 +61,37 @@ export async function assertOrderLineLinksOnClient(
     }
   }
 }
+
+const ORDER_LINK_WORDS = {
+  PURCHASE: { noun: 'purchase order', Noun: 'Purchase order', party: 'vendor' },
+  SALES: { noun: 'sales order', Noun: 'Sales order', party: 'customer' },
+} as const;
+
+/**
+ * Phase 43b — validates the document-level order reference a bill
+ * (`purchase_order_id`) or invoice (`sales_order_id`) carries: the order exists
+ * in this organization on the right side, belongs to the same party, and is
+ * CONFIRMED or CLOSED. Runs on the caller's transaction client (rule 5).
+ */
+export async function assertOrderReferenceOnClient(
+  client: Queryable,
+  orgId: string,
+  direction: QuoteDirection,
+  partyId: string,
+  orderId: string,
+): Promise<void> {
+  const words = ORDER_LINK_WORDS[direction];
+  const { rows } = await client.query<{ status: string; customer_id: string | null; vendor_id: string | null }>(
+    'SELECT status, customer_id, vendor_id FROM orders WHERE org_id = $1 AND id = $2 AND direction = $3',
+    [orgId, orderId, direction],
+  );
+  const order = rows[0];
+  if (order === undefined) throw new ApiError(422, `${words.Noun} not found`);
+  const orderPartyId = direction === 'PURCHASE' ? order.vendor_id : order.customer_id;
+  if (orderPartyId !== partyId) {
+    throw new ApiError(422, `That ${words.noun} belongs to a different ${words.party}`);
+  }
+  if (order.status !== 'CONFIRMED' && order.status !== 'CLOSED') {
+    throw new ApiError(422, `Only a confirmed or closed ${words.noun} can be referenced`);
+  }
+}

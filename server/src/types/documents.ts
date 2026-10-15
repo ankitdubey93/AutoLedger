@@ -16,7 +16,7 @@ import type { AllowedUploadMimeType } from '../config/constants.js';
  * adding an attachable entity adds a string here.
  */
 export const DOCUMENT_ENTITY_TYPES_BY_MODULE = {
-  [MODULE_TAGS.accounting]: ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor', 'quote'],
+  [MODULE_TAGS.accounting]: ['invoice', 'bill', 'journal_entry', 'payment', 'customer', 'vendor', 'quote', 'credit_note', 'debit_note', 'order'],
   [MODULE_TAGS.capture]: ['ap_flow_document'],
 } as const satisfies Record<string, readonly string[]>;
 
@@ -77,6 +77,10 @@ export interface DocumentListFilters {
   module: string | null;
   entityType: string | null;
   entityId: string | null;
+  /** Phase 43b — case-insensitive substring of the original filename. */
+  q: string | null;
+  /** Phase 43b — only documents with no link at all. */
+  unattached: boolean;
   page: number;
   limit: number;
 }

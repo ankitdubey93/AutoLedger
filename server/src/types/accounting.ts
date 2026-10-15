@@ -392,6 +392,9 @@ export interface Invoice {
   kind: 'STANDARD' | 'DEPOSIT';
   /** Phase 42 — the order a DEPOSIT invoice was raised for; null for STANDARD. */
   depositForOrderId: string | null;
+  /** Phase 43b — the sales order this invoice references (`null` when none). */
+  salesOrderId: string | null;
+  salesOrderNumber: string | null;
   /** Phase 42 — applications where this document is the deposit or the target. Loaded by the one-document read only; `[]` in lists. */
   depositApplications: DepositApplication[];
 }
@@ -590,6 +593,9 @@ export interface Bill {
   kind: 'STANDARD' | 'DEPOSIT';
   /** Phase 42 — the purchase order a DEPOSIT bill was raised for; null for STANDARD. */
   depositForOrderId: string | null;
+  /** Phase 43b — the purchase order this bill references (`null` when none). */
+  purchaseOrderId: string | null;
+  purchaseOrderNumber: string | null;
   /** Phase 42 — applications where this document is the deposit or the target. Loaded by the one-document read only; `[]` in lists. */
   depositApplications: DepositApplication[];
 }

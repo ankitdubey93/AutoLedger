@@ -562,6 +562,13 @@ Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-deliv
 - [x] Onboarding sets both organization defaults to `NET_30`; the new-invoice/expense forms pre-fill them and stop the moment the user picks a term or types a due date
 - Not built: discount terms ("2/10 Net 30"), per-customer day overrides
 
+### Phase 43b — attachments and linked orders ✅ shipped
+
+- [x] Files are uploaded to the Document Vault while drafting (unlinked) or chosen from it (`DocumentPickerDialog`, "Not yet attached" by default); on save they are linked inside the bill's/invoice's own transaction, so a bad document id rolls the whole save back
+- [x] A bill references a purchase order and an invoice a sales order (`bills.purchase_order_id`, `invoices.sales_order_id`): same party, order `CONFIRMED` or `CLOSED`, settable while the document is a draft; omitted on update = unchanged, `null` = clear; set automatically when raised from an order. Posted documents are never changed
+- [x] Attachments panels on credit notes, debit notes and orders (new attachable entity types)
+- Not built: reading attachments of an order from its bill, backfilling the link on already-posted documents
+
 ### Phase 42 — quote follow-ups: orders, partial billing, deposits ✅ shipped
 
 Closes the Phase 41 "not built" list, except a qualified e-signature. The accounting-relevant parts are orders and deposits; the rest is workflow.
