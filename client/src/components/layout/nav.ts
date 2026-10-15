@@ -5,6 +5,7 @@ import {
   Boxes,
   Building2,
   CalendarCheck,
+  ClipboardList,
   Coins,
   FileBarChart,
   FileMinus,
@@ -55,6 +56,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     heading: 'Sales',
     items: [
       { to: '/quotes', label: 'Quotes', icon: FileSignature, end: false, permission: 'quotes.view' },
+      { to: '/sales-orders', label: 'Sales orders', icon: ClipboardList, end: false, permission: 'sales_orders.view' },
       { to: '/invoices', label: 'Invoices', icon: FileText, end: false, permission: 'invoices.view' },
       { to: '/credit-notes', label: 'Credit notes', icon: FileMinus, end: false, permission: 'credit_notes.view' },
       { to: '/customers', label: 'Customers', icon: Users, end: false, permission: 'customers.view' },
@@ -66,6 +68,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     heading: 'Purchases',
     items: [
       { to: '/purchase-quotes', label: 'Purchase quotes', icon: FileSignature, end: false, permission: 'purchase_quotes.view' },
+      { to: '/purchase-orders', label: 'Purchase orders', icon: ClipboardList, end: false, permission: 'purchase_orders.view' },
       { to: '/expenses', label: 'Expenses', icon: ReceiptText, end: false, permission: 'bills.view' },
       { to: '/inbox', label: 'Bill inbox', icon: Inbox, end: true, permission: 'capture.view' },
       { to: '/inbox/review', label: 'Review queue', icon: ListChecks, end: false, permission: 'capture.view' },

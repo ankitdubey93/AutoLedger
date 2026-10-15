@@ -65,6 +65,7 @@ interface DraftLine {
   taxRate: string;
   itemId: string;
   stockLocationId: string;
+  orderLineId: string;
 }
 
 function emptyLine(defaults: { revenueAccountId: string; taxRate: string }): DraftLine {
@@ -76,6 +77,7 @@ function emptyLine(defaults: { revenueAccountId: string; taxRate: string }): Dra
     taxRate: defaults.taxRate,
     itemId: '',
     stockLocationId: '',
+    orderLineId: '',
   };
 }
 
@@ -216,6 +218,7 @@ export default function NewInvoicePage() {
             taxRate: line.taxRateBp === 0 ? '' : formatRate(line.taxRateBp),
             itemId: line.itemId ?? '',
             stockLocationId: line.stockLocationId ?? '',
+            orderLineId: line.orderLineId ?? '',
           })),
         );
         setSeeded(true);
@@ -376,6 +379,7 @@ export default function NewInvoicePage() {
             line.itemId !== '' && items.find((i) => i.id === line.itemId)?.itemType === 'INVENTORY' && line.stockLocationId !== ''
               ? line.stockLocationId
               : null,
+          orderLineId: line.orderLineId === '' ? null : line.orderLineId,
         })),
       };
 

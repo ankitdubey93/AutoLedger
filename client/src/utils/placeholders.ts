@@ -18,7 +18,8 @@ export type PlaceholderSurface =
   | 'CREDIT_NOTE'
   | 'DEBIT_NOTE'
   | 'STATEMENT'
-  | 'BANK_LINE';
+  | 'BANK_LINE'
+  | 'QUOTE';
 
 export type PlaceholderKey =
   | 'day'
@@ -36,7 +37,11 @@ export type PlaceholderKey =
   | 'statementDate'
   | 'periodFrom'
   | 'periodTo'
-  | 'openInvoiceCount';
+  | 'openInvoiceCount'
+  | 'quoteNumber'
+  | 'quoteTotal'
+  | 'validUntil'
+  | 'quoteTitle';
 
 export interface PlaceholderDef {
   key: PlaceholderKey;
@@ -60,8 +65,9 @@ const ALL: readonly PlaceholderSurface[] = [
   'DEBIT_NOTE',
   'STATEMENT',
   'BANK_LINE',
+  'QUOTE',
 ];
-const CONTACT: readonly PlaceholderSurface[] = ['INVOICE', 'BILL', 'CREDIT_NOTE', 'DEBIT_NOTE', 'STATEMENT'];
+const CONTACT: readonly PlaceholderSurface[] = ['INVOICE', 'BILL', 'CREDIT_NOTE', 'DEBIT_NOTE', 'STATEMENT', 'QUOTE'];
 
 export const PLACEHOLDERS: readonly PlaceholderDef[] = [
   { key: 'day', label: 'Day', aliases: [], legacy: null, offset: true, surfaces: ALL, description: 'Day of the month, e.g. 10' },
@@ -128,6 +134,10 @@ export const PLACEHOLDERS: readonly PlaceholderDef[] = [
     surfaces: ['STATEMENT'],
     description: 'Number of open invoices or bills',
   },
+  { key: 'quoteNumber', label: 'Quote Number', aliases: [], legacy: null, offset: false, surfaces: ['QUOTE'], description: 'The quote number, e.g. QU-000012' },
+  { key: 'quoteTotal', label: 'Quote Total', aliases: [], legacy: null, offset: false, surfaces: ['QUOTE'], description: 'The quote total, e.g. USD 1,250.00' },
+  { key: 'validUntil', label: 'Valid Until', aliases: [], legacy: null, offset: false, surfaces: ['QUOTE'], description: 'The validity date, e.g. 9 Nov 2026' },
+  { key: 'quoteTitle', label: 'Quote Title', aliases: [], legacy: null, offset: false, surfaces: ['QUOTE'], description: 'The quote title' },
 ];
 
 /**
@@ -151,6 +161,12 @@ export interface PlaceholderContext {
   periodFrom?: string | null;
   periodTo?: string | null;
   openInvoiceCount?: number | null;
+  quoteNumber?: string | null;
+  /** Pre-formatted money, e.g. "USD 1,250.00". */
+  quoteTotal?: string | null;
+  /** YYYY-MM-DD */
+  validUntil?: string | null;
+  quoteTitle?: string | null;
 }
 
 /**
@@ -296,6 +312,14 @@ function valueOf(key: PlaceholderKey, ctx: PlaceholderContext, offset: number): 
       return optionalDate(ctx.periodTo);
     case 'openInvoiceCount':
       return optionalText(ctx.openInvoiceCount);
+    case 'quoteNumber':
+      return optionalText(ctx.quoteNumber);
+    case 'quoteTotal':
+      return optionalText(ctx.quoteTotal);
+    case 'validUntil':
+      return optionalDate(ctx.validUntil);
+    case 'quoteTitle':
+      return optionalText(ctx.quoteTitle);
   }
 }
 

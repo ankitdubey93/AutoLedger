@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as publicQuoteService from '../../services/accounting/publicQuoteService.js';
-import { publicAcceptQuoteSchema, publicDeclineQuoteSchema } from '../../schemas/accounting/quoteSchema.js';
+import { publicAcceptQuoteSchema, publicDeclineQuoteSchema, publicVerifyEmailSchema } from '../../schemas/accounting/quoteSchema.js';
 import { getRequestContext } from '../../utils/requestContext.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -36,12 +36,31 @@ export const logo: RequestHandler = async (req, res) => {
   stream.pipe(res);
 };
 
+/** GET /public/quotes/:token/pdf */
+export const pdf: RequestHandler = async (req, res) => {
+  const file = await publicQuoteService.getPublicQuotePdf(requireParam(req, 'token'));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.setHeader('Content-Length', String(file.pdf.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.end(file.pdf);
+};
+
 /** POST /public/quotes/:token/accept */
 export const accept: RequestHandler = async (req, res) => {
   const input = parseBody(publicAcceptQuoteSchema, req.body);
   const quote = await publicQuoteService.acceptPublicQuote(requireParam(req, 'token'), input, responder());
   res.setHeader('Cache-Control', 'no-store');
   res.json({ success: true, quote });
+};
+
+/** POST /public/quotes/:token/verify-email */
+export const verifyEmail: RequestHandler = async (req, res) => {
+  const { signerEmail } = parseBody(publicVerifyEmailSchema, req.body);
+  const result = await publicQuoteService.requestAcceptanceCode(requireParam(req, 'token'), signerEmail);
+  res.setHeader('Cache-Control', 'no-store');
+  res.status(202).json({ success: true, expiresAt: result.expiresAt });
 };
 
 /** POST /public/quotes/:token/decline */

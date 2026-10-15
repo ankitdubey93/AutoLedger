@@ -1,5 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import * as quoteService from '../../services/accounting/quoteService.js';
+import { previewQuoteEmailSchema } from '../../schemas/accounting/quoteEmailTemplateSchema.js';
 import {
   convertQuoteSchema,
   createQuoteSchema,
@@ -43,6 +44,8 @@ export interface QuoteController {
   void_: RequestHandler;
   revokeLink: RequestHandler;
   convert: RequestHandler;
+  emailPreview: RequestHandler;
+  pdf: RequestHandler;
 }
 
 export function makeQuoteController(direction: QuoteDirection): QuoteController {
@@ -166,6 +169,31 @@ export function makeQuoteController(direction: QuoteDirection): QuoteController 
       const input = parseBody(convertQuoteSchema, req.body ?? {});
       const document = await quoteService.convertQuote(user.orgId, user.id, direction, requireParam(req, 'id'), input);
       res.status(201).json({ success: true, document });
+    },
+
+    /** GET /:id/pdf — the quote as a PDF download. */
+    pdf: async (req, res) => {
+      const user = requireUser(req);
+      const file = await quoteService.getQuotePdf(user.orgId, direction, requireParam(req, 'id'));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+      res.setHeader('Content-Length', String(file.pdf.length));
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.end(file.pdf);
+    },
+
+    /** POST /:id/email-preview — the subject and body a send would use, nothing sent. */
+    emailPreview: async (req, res) => {
+      const user = requireUser(req);
+      const { templateId } = parseBody(previewQuoteEmailSchema, req.body ?? {});
+      const preview = await quoteService.previewQuoteEmail(
+        user.orgId,
+        direction,
+        requireParam(req, 'id'),
+        templateId,
+      );
+      res.json({ success: true, subject: preview.subject, body: preview.body });
     },
   };
 }

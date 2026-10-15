@@ -1,5 +1,7 @@
 import type { RequestHandler } from 'express';
 import * as invoiceService from '../../services/accounting/invoiceService.js';
+import * as depositService from '../../services/accounting/depositService.js';
+import { applyDepositSchema } from '../../schemas/accounting/depositSchema.js';
 import {
   createInvoiceSchema,
   issueInvoiceSchema,
@@ -117,4 +119,13 @@ export const void_: RequestHandler = async (req, res) => {
   const { entryDate } = parseBody(voidInvoiceSchema, req.body ?? {});
   const invoice = await invoiceService.voidInvoice(user.orgId, user.id, id, entryDate);
   res.json({ success: true, invoice });
+};
+
+/** POST /invoices/:id/apply-deposit — apply a paid DEPOSIT invoice to this STANDARD invoice (Phase 42). */
+export const applyDeposit: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const id = requireParam(req, 'id');
+  const input = parseBody(applyDepositSchema, req.body);
+  const application = await depositService.applyDeposit(user.orgId, user.id, 'SALES', id, input);
+  res.status(201).json({ success: true, application });
 };

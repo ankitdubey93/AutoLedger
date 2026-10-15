@@ -2,7 +2,7 @@
  * Phase 38b — outbound email types. Platform-scoped: any module may send.
  */
 
-/** Mirrors the CHECK on `email_outbox.template` (migrations 082, 085, 089). */
+/** Mirrors the CHECK on `email_outbox.template` (migrations 082, 085, 089, 091). */
 export const EMAIL_TEMPLATES = [
   'password_reset',
   'invitation',
@@ -14,6 +14,7 @@ export const EMAIL_TEMPLATES = [
   'party_statement',
   'quote_sent',
   'quote_responded',
+  'quote_acceptance_code',
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
 

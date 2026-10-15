@@ -15,7 +15,9 @@ const router = Router();
 
 router.get('/:token', publicLinkLimiter, publicQuoteController.view);
 router.get('/:token/logo', publicLinkLimiter, publicQuoteController.logo);
+router.get('/:token/pdf', publicLinkLimiter, publicQuoteController.pdf);
 router.post('/:token/accept', publicLinkLimiter, publicQuoteController.accept);
+router.post('/:token/verify-email', publicLinkLimiter, publicQuoteController.verifyEmail);
 router.post('/:token/decline', publicLinkLimiter, publicQuoteController.decline);
 
 export default router;

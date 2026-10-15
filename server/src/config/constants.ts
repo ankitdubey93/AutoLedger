@@ -392,3 +392,8 @@ export const QUOTE_EXPIRY_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 /** Most lines one quote may carry — a bound on an unpaginated document (Phase 41). */
 export const QUOTE_MAX_LINES = 200;
+
+/** Phase 42 slice D — verified-email acceptance of a quote. */
+export const QUOTE_ACCEPTANCE_CODE_TTL_MS = 10 * 60 * 1000;
+export const QUOTE_ACCEPTANCE_CODE_MAX_ATTEMPTS = 5;
+export const QUOTE_ACCEPTANCE_CODES_PER_HOUR = 5;

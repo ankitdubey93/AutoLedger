@@ -66,9 +66,36 @@ Sending the revision inherits the number (`QU-000012 rev 2`), moves a SENT prede
 - **`to_jsonb` diffs are deny-by-default.** Adding a column later that *should* change after send (say, `last_reminded_at`) needs the trigger's exclusion list updated in a new migration — otherwise every reminder 0A000s.
 - **Order inside the send transaction matters.** Supersede the old SENT row before setting the new one, or the partial unique index fires.
 - **Lock order.** Send and revise both lock the whole chain `ORDER BY id FOR UPDATE` before anything else, so two transactions on one chain cannot deadlock.
-- **"Valid until" is a date, compared against UTC today** — like every document in this codebase. A customer in UTC+10 sees it expire mid-morning their time. Org-timezone dates are a known gap.
+- **"Valid until" is a date compared against the organization's "today"** (Phase 42; see below). Every other document in the codebase still uses UTC "today", so a quote and an invoice can disagree about what day it is near midnight. A product-wide move is its own phase.
 - **Testing time-dependent rules in-process.** `vi.useFakeTimers({ toFake: ['Date'] })` moves the server's `new Date()` because supertest runs the app in the same process — but it also outdates the 15-minute access token, so the test must sign in again after the jump.
 - **The public view must not leak.** It is a separate projection (`PublicQuoteView`) with no ids, accounts, IPs or user agents — not the internal object with fields deleted.
+
+## Phase 42 additions
+
+### Verified-email acceptance (not a qualified e-signature)
+
+A bearer link proves possession of the link, not identity. When the org turns on `quote_acceptance_requires_code`, the signer types an email, the server emails a 6-digit code, and acceptance needs the code; the evidence row records `signer_email_verified`. This is *email-possession evidence*. It is **not** a qualified electronic signature (eIDAS QES), which needs a qualified trust-service provider, and the UI/docs must not call it one.
+
+- **Generation:** `crypto.randomInt(0, 1_000_000)` padded to 6 digits — a CSPRNG with uniform output (never `Math.random`, never `% 1e6` over random bytes, which biases).
+- **Storage:** only `sha256Hex(`${linkId}:${code}`)`. The link id acts as a per-link salt, so one precomputed table of the million possible codes does not serve all links. Honest caveat: with only 10^6 possibilities, a stolen hash can be brute-forced in milliseconds whatever the hash is, so the protection comes from the 10-minute expiry, the attempt cap and the fact that the code table is not exposed — a slow hash (bcrypt/argon2) would add little. The code travels in the outbox row's `data` and is never logged.
+- **Comparison:** `timingSafeEqual` on equal-length buffers. A timing leak is nearly irrelevant for a 5-attempt code, but the rule costs nothing.
+- **Attempt counters must survive a failed request.** If the wrong-guess increment ran inside the accept transaction, the 422 would roll it back and an attacker would get unlimited guesses. So the accept is two transactions: transaction 1 locks the newest live code `FOR UPDATE`, increments `attempts`, compares, and commits whether or not it matched; transaction 2 (the accept itself) re-locks, re-compares and sets `consumed_at`, so a code is single-use even under a concurrent double-submit.
+- **Limits:** 5 attempts per code (also a CHECK `attempts BETWEEN 0 AND 5`), 10-minute TTL judged by the database's `now()` (so tests age the row with SQL; faking JS time does not move it), at most 5 codes per link per hour, counted under a `FOR UPDATE` lock on the `quote_links` row so concurrent requests cannot both read "4".
+- A code issued to jane@x is not valid for bob@x: the lookup is keyed on `(link, signer_email)`.
+
+### The organization's "today" with `Intl.DateTimeFormat`
+
+`todayInZone(zone, now)` builds `new Intl.DateTimeFormat('en-US', { timeZone, year, month: '2-digit', day: '2-digit' })` and reads `formatToParts(now)` for year/month/day. Using `formatToParts` rather than parsing `format()` output avoids depending on locale-specific ordering and separators. The IANA zone database (via ICU, bundled in Node) handles DST and historical changes; a hand-rolled offset table would not. An unknown zone makes the constructor throw `RangeError`, which we catch and fall back to the UTC date; `PATCH /settings` rejects a new invalid zone with 400 using the same constructor as a validity probe. Test across extremes at one fixed instant: at 12:00Z it is already the 11th in `Pacific/Kiritimati` (UTC+14) and still the 10th in `Pacific/Pago_Pago` (UTC-11). The hourly expiry sweep selects a superset (`valid_until < utcToday + 1`) because no zone is more than 14 hours ahead, then each org applies its own date. Verified on Node 22.
+
+### Server-side PDF with `pdfkit`
+
+PDFKit is a pure-JavaScript library that streams a document: you create a `PDFDocument`, call drawing methods, `doc.on('data')` collects chunks, `end` fires when `doc.end()` completes; we wrap that in a Promise returning one `Buffer`. Layout is manual: A4, margin 50, a new page when `doc.y` passes a threshold before each line. Built-in Helvetica is one of the 14 standard PDF fonts, so nothing is embedded — but it uses WinAnsi encoding, so non-Latin text (Devanagari, CJK) does not render. That is a known, documented limit; fixing it means shipping and embedding a Unicode font file. Money is printed from integer cents with the currency **code** (not a symbol that Helvetica may lack). Text in the uncompressed stream is stored in kerned hex `TJ` arrays, so a unit test must decode those (a `visibleText()` helper) rather than grepping raw bytes; with `compress: true` (the default) the streams are Flate-compressed and not greppable at all.
+
+Why not headless Chromium (Puppeteer) rendering the React page: it would reproduce the on-screen layout exactly and handle Unicode, but adds a ~150–400 MB browser binary, a process to manage per request, a cold-start cost, and a sandboxing surface (the browser would load our own HTML, but still). For a fixed-layout document of text and a table, a pure-JS writer is a smaller, faster, more auditable dependency — at the price of maintaining a second layout implementation next to `QuoteDocument.tsx`. Rule 14 applies: this is the phase that needs the dependency (`pdfkit@0.20.2`, `@types/pdfkit@0.17.6`). The PDF is not attached to emails (the outbox has no attachments); it is served with `Content-Disposition: attachment`, `no-store` and `nosniff`.
+
+### Templates and the QUOTE placeholder surface
+
+Quote email templates reuse the Phase 39b/40 machinery with a new surface `QUOTE` and four new keys. See [user-authored-templates-and-bearer-links.md](../security-auth/user-authored-templates-and-bearer-links.md).
 
 ## Interview Q&A
 
@@ -90,6 +117,18 @@ A: Today `ux_invoices_source_quote` enforces one invoice per quote. Partial conv
 **Q: Tell me about a time you avoided an import cycle in a service layer.**
 A: Deleting a draft invoice that came from a quote has to put the quote back to ACCEPTED in the same transaction, so `invoiceService` needs quote logic — but `quoteService` already imports `invoiceService` to convert. I moved the one operation both need, the status writer, into a tiny `quoteStatusService` that imports only types. It also became the single place a post-send status is written, which is what rule 10 asks for anyway.
 
+**Q: Why does verifying a 6-digit code need two transactions?**
+A: Because the failed-guess counter has to outlive a failed request. If the increment were inside the accept transaction, the 422 for a wrong code would roll it back and an attacker could guess indefinitely. Transaction 1 increments `attempts` under `FOR UPDATE` and commits regardless of the outcome; transaction 2 is the real accept, which re-checks and consumes the code so it is single-use. The general lesson: anything whose purpose is to record a failure cannot live in the transaction that the failure aborts.
+
+**Q: How do you compute "today" in an organization's timezone in Node?**
+A: `Intl.DateTimeFormat` with the `timeZone` option and `formatToParts`, picking year, month and day parts. It uses the ICU/IANA database so DST is right; an invalid zone throws `RangeError`, which I catch to fall back to UTC and use as the validation probe on save. I test it at a fixed instant across UTC+14 and UTC−11, where the calendar date differs by a full day.
+
+**Q: Why is a hashed 6-digit code still weakly protected, and why is that acceptable?**
+A: There are only 10^6 codes, so if the hash leaked, any hash function falls to brute force in well under a second; salting by link id only defeats a shared precomputed table. The real defences are not storing anything exploitable in logs, a 10-minute life, 5 attempts per code, an hourly cap on codes per link, and one-time consumption. I would not claim bcrypt helps here.
+
+**Q: Is that a qualified electronic signature?**
+A: No. It evidences control of an inbox at a point in time, plus the typed name, consent, IP, user agent and content hash. A QES under eIDAS requires a qualified trust-service provider and certificate-based identification, which is a contract and legal decision, not code. It is explicitly unbuilt.
+
 ## Follow-ups they'll dig into
 
 - What if the email with the link is forwarded? (Bearer token: anyone holding it can answer. Mitigations: expiry, revoke, one live link, evidence records who typed what; a stronger flow would require email verification of the signer.)
@@ -103,4 +142,5 @@ A: Deleting a draft invoice that came from a quote has to put the quote back to 
 - [gapless-numbering-and-counters.md](../postgresql/gapless-numbering-and-counters.md)
 - [partial-unique-indexes.md](../postgresql/partial-unique-indexes.md)
 - [composite-foreign-keys-for-tenancy.md](../postgresql/composite-foreign-keys-for-tenancy.md)
+- [orders-partial-billing-and-deposits.md](orders-partial-billing-and-deposits.md)
 - [user-authored-templates-and-bearer-links.md](../security-auth/user-authored-templates-and-bearer-links.md)

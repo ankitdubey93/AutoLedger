@@ -1,11 +1,14 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Printer } from 'lucide-react';
+import { Download, Printer } from 'lucide-react';
 import {
   ApiRequestError,
   convertQuote,
   deleteQuote,
+  downloadQuotePdf,
   getQuote,
+  listQuoteEmailTemplates,
+  previewQuoteEmail,
   recordQuoteAcceptance,
   recordQuoteDecline,
   reviseQuote,
@@ -13,6 +16,7 @@ import {
   sendQuote,
   voidQuote,
   type Quote,
+  type QuoteEmailTemplate,
 } from '../../../services/fetchServices';
 import { formatCents } from '../../../utils/money';
 import { formatDate } from '../../../utils/date';
@@ -49,6 +53,18 @@ function messageOf(err: unknown, fallback: string): string {
   return err instanceof ApiRequestError || err instanceof Error ? err.message : fallback;
 }
 
+/** Hands a Blob to the browser as a file download (Phase 42, Slice E). */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function toDocumentData(quote: Quote): QuoteDocumentData {
   return {
     direction: quote.direction,
@@ -69,6 +85,7 @@ export function toDocumentData(quote: Quote): QuoteDocumentData {
     subtotalCents: quote.subtotalCents,
     taxCents: quote.taxCents,
     totalCents: quote.totalCents,
+    depositPercentBp: quote.depositPercentBp,
   };
 }
 
@@ -113,6 +130,12 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
   const [documentDate, setDocumentDate] = useState(today);
   const [dueDate, setDueDate] = useState('');
   const [vendorReference, setVendorReference] = useState('');
+  // Convert dialog (Phase 42): a draft invoice/bill, or a confirmed order.
+  const [convertTarget, setConvertTarget] = useState<'INVOICE' | 'ORDER'>('INVOICE');
+  // Send dialog: the email template picked (null = built-in), its choices, and the preview.
+  const [emailTemplates, setEmailTemplates] = useState<QuoteEmailTemplate[]>([]);
+  const [templateId, setTemplateId] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ subject: string; body: string } | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -137,14 +160,36 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
       setDelivery(quote.status === 'DRAFT' && quote.partyEmailSnapshot === null ? 'MANUAL' : 'EMAIL');
       setToEmail(quote.partyEmailSnapshot ?? '');
       setMessage('');
+      setPreview(null);
+      setEmailTemplates([]);
+      setTemplateId(null);
+      listQuoteEmailTemplates(config.direction)
+        .then((list) => {
+          setEmailTemplates(list);
+          // The stored default is selected first; with none, the built-in (null id) is.
+          setTemplateId(list.find((t) => t.isDefault && t.id !== null)?.id ?? null);
+        })
+        .catch(() => setEmailTemplates([]));
     }
     if (kind === 'accept') setSignerName('');
     if (kind === 'convert') {
       setDocumentDate(today());
       setDueDate('');
       setVendorReference(quote.partyReference ?? quote.quoteNumber ?? '');
+      setConvertTarget('INVOICE');
     }
     setDialog(kind);
+  }
+
+  async function downloadPdf() {
+    if (quote === null) return;
+    setDialogError(null);
+    try {
+      const blob = await downloadQuotePdf(config.direction, quote.id);
+      saveBlob(blob, `${quote.quoteNumber ?? 'quote-draft'}.pdf`);
+    } catch (err: unknown) {
+      setDialogError(messageOf(err, 'Could not download the PDF'));
+    }
   }
 
   async function run(action: () => Promise<Quote | null>, fallback: string) {
@@ -262,6 +307,13 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
           )}
           <button
             type="button"
+            onClick={() => void downloadPdf()}
+            className={`${secondaryClass} flex items-center gap-1.5`}
+          >
+            <Download size={14} aria-hidden="true" /> Download PDF
+          </button>
+          <button
+            type="button"
             onClick={() => window.print()}
             className={`${secondaryClass} flex items-center gap-1.5`}
           >
@@ -290,8 +342,19 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
         )}
         {quote.convertedDocument !== null && (
           <p className="status status--good m-0">
-            Converted to {quote.convertedDocument.kind === 'INVOICE' ? 'invoice' : 'expense'}{' '}
-            <Link to={`/${config.convertPath}/${quote.convertedDocument.id}`}>
+            Converted to{' '}
+            {quote.convertedDocument.kind === 'ORDER'
+              ? purchase
+                ? 'purchase order'
+                : 'sales order'
+              : config.convertNoun}{' '}
+            <Link
+              to={
+                quote.convertedDocument.kind === 'ORDER'
+                  ? `/${purchase ? 'purchase-orders' : 'sales-orders'}/${quote.convertedDocument.id}`
+                  : `/${config.convertPath}/${quote.convertedDocument.id}`
+              }
+            >
               {quote.convertedDocument.number ?? 'draft'}
             </Link>{' '}
             ({quote.convertedDocument.status.toLowerCase()}).
@@ -327,6 +390,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
                 <dd className="m-0">
                   {quote.response.signerName}
                   {quote.response.signerEmail !== null ? ` (${quote.response.signerEmail})` : ''}
+                  {quote.response.signerEmailVerified ? ' — email verified' : ''}
                   {quote.response.termsAccepted ? ' — accepted the terms' : ''}
                 </dd>
               </>
@@ -455,6 +519,28 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
           )}
           {delivery === 'EMAIL' && (
             <>
+              {emailTemplates.length > 0 && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Email template</span>
+                  <select
+                    aria-label="Email template"
+                    value={templateId ?? ''}
+                    onChange={(e) => {
+                      setTemplateId(e.target.value === '' ? null : e.target.value);
+                      setPreview(null);
+                    }}
+                    className={inputClass}
+                  >
+                    {emailTemplates.map((t) => (
+                      <option key={t.id ?? 'built-in'} value={t.id ?? ''}>
+                        {t.name}
+                        {t.builtIn ? ' (built-in)' : ''}
+                        {t.isDefault ? ' — default' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[var(--muted)]">Email to</span>
                 <input type="email" value={toEmail} onChange={(e) => setToEmail(e.target.value)} className={inputClass} />
@@ -463,6 +549,26 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
                 <span className="text-[var(--muted)]">Message (optional)</span>
                 <textarea value={message} maxLength={2000} rows={3} onChange={(e) => setMessage(e.target.value)} className={inputClass} />
               </label>
+              <div>
+                <button
+                  type="button"
+                  className={secondaryClass}
+                  disabled={busy}
+                  onClick={() =>
+                    void previewQuoteEmail(config.direction, quote.id, templateId)
+                      .then((res) => setPreview({ subject: res.subject, body: res.body }))
+                      .catch((err: unknown) => setDialogError(messageOf(err, 'Could not preview the email')))
+                  }
+                >
+                  Preview
+                </button>
+              </div>
+              {preview !== null && (
+                <div aria-label="Email preview" className="rounded-md border border-[var(--border)] p-3 flex flex-col gap-1 text-sm">
+                  <p className="m-0 font-semibold">{preview.subject}</p>
+                  <p className="m-0 whitespace-pre-line">{preview.body}</p>
+                </div>
+              )}
             </>
           )}
           {dialogError !== null && <p className="status status--bad m-0">{dialogError}</p>}
@@ -482,6 +588,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
                         delivery: quote.status === 'DRAFT' ? delivery : 'EMAIL',
                         toEmail: delivery === 'EMAIL' || quote.status !== 'DRAFT' ? toEmail.trim() : null,
                         message: message.trim() === '' ? null : message.trim(),
+                        templateId,
                       })
                     ).quote,
                   'Could not send the quote',
@@ -599,29 +706,60 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
       )}
 
       {dialog === 'convert' && (
-        <Modal title={`Convert to ${config.convertNoun}`}>
-          <p className="text-sm text-[var(--muted)] m-0">
-            Creates a draft {config.convertNoun} with these lines. Nothing is posted until you{' '}
-            {purchase ? 'approve the expense' : 'issue the invoice'}, at the exchange rate on its own date.
-          </p>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-[var(--muted)]">{purchase ? 'Expense date' : 'Invoice date'}</span>
-            <input type="date" value={documentDate} onChange={(e) => setDocumentDate(e.target.value)} className={inputClass} />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-[var(--muted)]">Due date (blank uses the payment terms)</span>
-            <input type="date" value={dueDate} min={documentDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
-          </label>
-          {purchase && (
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-[var(--muted)]">Vendor’s invoice no.</span>
+        <Modal title={convertTarget === 'ORDER' ? 'Create an order' : `Convert to ${config.convertNoun}`}>
+          <fieldset className="flex flex-col gap-1 text-sm border-0 p-0 m-0">
+            <label className="flex items-center gap-2">
               <input
-                value={vendorReference}
-                maxLength={100}
-                onChange={(e) => setVendorReference(e.target.value)}
-                className={inputClass}
+                type="radio"
+                name="convert-target"
+                checked={convertTarget === 'INVOICE'}
+                onChange={() => setConvertTarget('INVOICE')}
               />
+              {purchase ? 'Create a draft expense' : 'Create a draft invoice'}
             </label>
+            <label className="flex items-center gap-2">
+              <input
+                type="radio"
+                name="convert-target"
+                checked={convertTarget === 'ORDER'}
+                onChange={() => setConvertTarget('ORDER')}
+              />
+              {purchase ? 'Create a purchase order' : 'Create a sales order'}
+            </label>
+          </fieldset>
+          {convertTarget === 'ORDER' ? (
+            <p className="text-sm text-[var(--muted)] m-0">
+              Creates a confirmed order with this quote’s lines. An order posts nothing to the ledger; invoice or bill it in
+              part or in full from the order.
+            </p>
+          ) : (
+            <p className="text-sm text-[var(--muted)] m-0">
+              Creates a draft {config.convertNoun} with these lines. Nothing is posted until you{' '}
+              {purchase ? 'approve the expense' : 'issue the invoice'}, at the exchange rate on its own date.
+            </p>
+          )}
+          {convertTarget === 'INVOICE' && (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-[var(--muted)]">{purchase ? 'Expense date' : 'Invoice date'}</span>
+                <input type="date" value={documentDate} onChange={(e) => setDocumentDate(e.target.value)} className={inputClass} />
+              </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="text-[var(--muted)]">Due date (blank uses the payment terms)</span>
+                <input type="date" value={dueDate} min={documentDate} onChange={(e) => setDueDate(e.target.value)} className={inputClass} />
+              </label>
+              {purchase && (
+                <label className="flex flex-col gap-1 text-sm">
+                  <span className="text-[var(--muted)]">Vendor’s invoice no.</span>
+                  <input
+                    value={vendorReference}
+                    maxLength={100}
+                    onChange={(e) => setVendorReference(e.target.value)}
+                    className={inputClass}
+                  />
+                </label>
+              )}
+            </>
           )}
           {dialogError !== null && <p className="status status--bad m-0">{dialogError}</p>}
           <div className="flex justify-end gap-2">
@@ -631,20 +769,32 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
             <button
               type="button"
               className={primaryClass}
-              disabled={busy || documentDate === '' || (purchase && vendorReference.trim() === '')}
+              disabled={
+                busy ||
+                (convertTarget === 'INVOICE' && (documentDate === '' || (purchase && vendorReference.trim() === '')))
+              }
               onClick={() =>
                 void run(async () => {
                   const { document } = await convertQuote(config.direction, quote.id, {
                     documentDate,
                     dueDate: dueDate === '' ? null : dueDate,
                     vendorReference: purchase ? vendorReference.trim() : null,
+                    target: convertTarget,
                   });
-                  void navigate(`/${config.convertPath}/${document.id}`);
+                  void navigate(
+                    document.kind === 'ORDER'
+                      ? `/${purchase ? 'purchase-orders' : 'sales-orders'}/${document.id}`
+                      : `/${config.convertPath}/${document.id}`,
+                  );
                   return null;
                 }, 'Could not convert the quote')
               }
             >
-              Create draft {config.convertNoun}
+              {convertTarget === 'ORDER'
+                ? purchase
+                  ? 'Create purchase order'
+                  : 'Create sales order'
+                : `Create draft ${config.convertNoun}`}
             </button>
           </div>
         </Modal>

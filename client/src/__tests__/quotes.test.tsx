@@ -73,6 +73,7 @@ function publicView(overrides: Partial<PublicQuoteView> = {}): PublicQuoteView {
     revision: 1,
     effectiveStatus: 'SENT',
     canRespond: true,
+    requiresEmailCode: false,
     partyName: 'Northwind',
     partyAddress: null,
     partyTaxNumber: null,
@@ -90,6 +91,7 @@ function publicView(overrides: Partial<PublicQuoteView> = {}): PublicQuoteView {
     totalCents: 23000,
     contentSha256: HASH,
     response: null,
+    depositPercentBp: null,
     ...overrides,
   };
 }
@@ -146,6 +148,7 @@ function quote(overrides: Partial<Quote> = {}): Quote {
       channel: 'PUBLIC_LINK',
       signerName: 'Jane Doe',
       signerEmail: null,
+      signerEmailVerified: false,
       termsAccepted: true,
       declineReason: null,
       clientIp: '203.0.113.9',
@@ -157,6 +160,7 @@ function quote(overrides: Partial<Quote> = {}): Quote {
       respondedAt: '2026-10-02T00:00:00.000Z',
     },
     convertedDocument: null,
+    depositPercentBp: null,
     ...overrides,
   };
 }
@@ -206,7 +210,7 @@ describe('PublicQuotePage', () => {
 
     await user.click(accept);
     expect(await screen.findByText('Accepted')).toBeInTheDocument();
-    expect(posted).toEqual({ signerName: 'Jane Doe', signerEmail: null, acceptTerms: true, contentSha256: HASH });
+    expect(posted).toEqual({ signerName: 'Jane Doe', signerEmail: null, acceptTerms: true, contentSha256: HASH, code: null });
   });
 
   it('can decline with a reason', async () => {
@@ -249,6 +253,53 @@ describe('PublicQuotePage', () => {
     expect(await screen.findByText('This quote has expired')).toBeInTheDocument();
     expect(screen.getByTestId('quote-total')).toHaveTextContent('230.00 USD');
     expect(screen.queryByLabelText('Your full name')).not.toBeInTheDocument();
+  });
+
+  it('requires an emailed code when the organization asks for one', async () => {
+    const user = userEvent.setup();
+    let posted: Record<string, unknown> | null = null;
+    mockRoutes({
+      'POST /public/quotes/tok-abcdefghijklmnopqrstuvwxyz/verify-email': () => ({
+        status: 202,
+        body: { success: true, expiresAt: '2026-10-10T12:10:00.000Z' },
+      }),
+      'POST /public/quotes/tok-abcdefghijklmnopqrstuvwxyz/accept': (init) => {
+        posted = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return {
+          status: 200,
+          body: {
+            success: true,
+            quote: publicView({
+              effectiveStatus: 'ACCEPTED',
+              canRespond: false,
+              response: { response: 'ACCEPTED', signerName: 'Jane Doe', respondedAt: '2026-10-02T10:00:00.000Z' },
+            }),
+          },
+        };
+      },
+      '/public/quotes/tok-abcdefghijklmnopqrstuvwxyz': {
+        status: 200,
+        body: { success: true, quote: publicView({ requiresEmailCode: true }) },
+      },
+    });
+    renderPublic();
+
+    expect(await screen.findByText('Hi Northwind')).toBeInTheDocument();
+    const accept = screen.getByRole('button', { name: /Accept 230\.00 USD/ });
+    await user.type(screen.getByLabelText('Your full name'), 'Jane Doe');
+    await user.click(screen.getByRole('checkbox'));
+    expect(accept).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Your email'), 'jane@northwind.test');
+    await user.click(screen.getByRole('button', { name: 'Send code' }));
+    expect(await screen.findByText('We emailed a 6-digit code to jane@northwind.test.')).toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('Verification code'), '123456');
+    expect(accept).toBeEnabled();
+
+    await user.click(accept);
+    expect(await screen.findByText('Accepted')).toBeInTheDocument();
+    expect(posted).toMatchObject({ code: '123456', signerEmail: 'jane@northwind.test' });
   });
 
   it('an invalid link says so', async () => {
@@ -398,7 +449,7 @@ describe('QuoteDetailPage', () => {
     expect(screen.getByLabelText('Email to')).toHaveValue('buyer@northwind.test');
     await user.click(screen.getByRole('button', { name: 'Send email' }));
     await waitFor(() =>
-      expect(sendBody).toEqual({ delivery: 'EMAIL', toEmail: 'buyer@northwind.test', message: null }),
+      expect(sendBody).toEqual({ delivery: 'EMAIL', toEmail: 'buyer@northwind.test', message: null, templateId: null }),
     );
   });
 });

@@ -33,5 +33,14 @@ export const updateInvoiceSettingsSchema = z
     showPaymentTerms: z.boolean().optional(),
     showDueDate: z.boolean().optional(),
     bankDetails: z.string().trim().max(500).nullable().optional(),
+    quotePrefix: z.string().trim().max(12).optional(),
+    quoteNextNumber: z.int().min(1).max(9_999_999).optional(),
+    purchaseQuotePrefix: z.string().trim().max(12).optional(),
+    purchaseQuoteNextNumber: z.int().min(1).max(9_999_999).optional(),
+    defaultQuoteValidityDays: z.int().min(1).max(365).optional(),
+    defaultQuoteTerms: z.string().trim().max(5000).nullable().optional(),
+    quoteAcceptanceRequiresCode: z.boolean().optional(),
+    customerDepositAccountId: z.uuid().nullable().optional(),
+    supplierPrepaymentAccountId: z.uuid().nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });

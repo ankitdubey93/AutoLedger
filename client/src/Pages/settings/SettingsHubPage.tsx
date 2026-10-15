@@ -54,6 +54,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
       { to: '/settings/invoice-template', label: 'Invoice template' },
       { to: '/settings/statement-template', label: 'Statement template' },
       { to: '/settings/email-templates', label: 'Statement emails' },
+      { to: '/settings/quote-email-templates', label: 'Quote emails' },
       { to: '/settings/online-payments', label: 'Online payments' },
       { to: '/settings/payment-terms', label: 'Payment terms' },
     ],

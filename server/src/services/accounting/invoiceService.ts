@@ -17,7 +17,9 @@ import * as documentStockService from '../inventory/documentStockService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
+import { assertOrderLineLinksOnClient } from './orderLineLinks.js';
+import { hasPostedDepositApplicationsOnClient, listDepositApplicationsForDocument } from './depositApplicationQueries.js';
+import { allocatedCentsSubquery, depositAppliedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import {
   canTransitionInvoice,
   isInvoiceStatus,
@@ -82,6 +84,8 @@ export interface InvoiceLineInput {
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line issues stock from; null = the default location. */
   stockLocationId?: string | null | undefined;
+  /** Phase 42 — the order line this line bills (partial invoicing). Validated by assertOrderLineLinksOnClient. */
+  orderLineId?: string | null | undefined;
 }
 
 export interface CreateInvoiceInput {
@@ -164,9 +168,12 @@ interface InvoiceRow {
   updated_at: Date;
   allocated_cents: string;
   credited_cents: string;
+  deposit_applied_cents: string;
   source_quote_id: string | null;
   source_quote_number: string | null;
   source_quote_revision: number | null;
+  kind: 'STANDARD' | 'DEPOSIT';
+  deposit_for_order_id: string | null;
 }
 
 interface InvoiceLineRow {
@@ -185,6 +192,7 @@ interface InvoiceLineRow {
   tax_cents: string;
   item_id: string | null;
   stock_location_id: string | null;
+  order_line_id: string | null;
 }
 
 const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, c.name AS customer_name,
@@ -198,8 +206,10 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.created_by, u.name AS created_by_name, i.created_at, i.updated_at,
                                 ${allocatedCentsSubquery('i', 'invoice_id')} AS allocated_cents,
                                 ${noteAppliedCentsSubquery('i', 'invoice_id')} AS credited_cents,
+                                ${depositAppliedCentsSubquery('i', 'invoice_id')} AS deposit_applied_cents,
                                 q.id AS source_quote_id, q.quote_number AS source_quote_number,
-                                q.revision AS source_quote_revision
+                                q.revision AS source_quote_revision,
+                                i.kind, i.deposit_for_order_id
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
                            LEFT JOIN users u ON u.id = i.created_by
@@ -221,6 +231,7 @@ function toLine(row: InvoiceLineRow): InvoiceLine {
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
     stockLocationId: row.stock_location_id,
+    orderLineId: row.order_line_id,
   };
 }
 
@@ -233,13 +244,14 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
   const totalCents = parseCents(row.total_cents);
   const allocatedCents = isOpen ? parseCents(row.allocated_cents) : 0;
   const creditedCents = isOpen ? parseCents(row.credited_cents) : 0;
-  const amountDueCents = isOpen ? totalCents - allocatedCents - creditedCents : 0;
+  const depositAppliedCents = isOpen ? parseCents(row.deposit_applied_cents) : 0;
+  const amountDueCents = isOpen ? totalCents - allocatedCents - creditedCents - depositAppliedCents : 0;
   // A credit note settles an invoice exactly as a payment does, so a fully
   // credited invoice reads PAID (Phase 26).
   const settlementStatus = settlementStatusOf({
     isOpen,
     totalCents,
-    allocatedCents: allocatedCents + creditedCents,
+    allocatedCents: allocatedCents + creditedCents + depositAppliedCents,
     dueDate: row.due_date,
     asOf: today(),
   });
@@ -278,12 +290,16 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     lines,
     allocatedCents,
     creditedCents,
+    depositAppliedCents,
     amountDueCents,
     settlementStatus,
     sourceQuote:
       row.source_quote_id === null || row.source_quote_number === null || row.source_quote_revision === null
         ? null
         : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
+    kind: row.kind,
+    depositForOrderId: row.deposit_for_order_id,
+    depositApplications: [],
   };
 }
 
@@ -299,7 +315,8 @@ async function loadLines(
     `SELECT l.id, l.invoice_id, l.line_number, l.description, l.description_template,
             l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
+            l.order_line_id
        FROM invoice_lines l
        JOIN accounts a ON a.id = l.revenue_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -329,7 +346,10 @@ export async function getInvoiceById(orgId: string, id: string): Promise<Invoice
   if (row === undefined) throw new ApiError(404, 'Invoice not found');
 
   const lines = await loadLines(orgId, [row.id]);
-  return toInvoice(row, lines.get(row.id) ?? []);
+  const invoice = toInvoice(row, lines.get(row.id) ?? []);
+  // Phase 42 — only the one-document read carries its applications.
+  invoice.depositApplications = await listDepositApplicationsForDocument(pool, orgId, 'SALES', row.id);
+  return invoice;
 }
 
 /**
@@ -514,16 +534,17 @@ async function insertInvoiceLines(
     `INSERT INTO invoice_lines
        (org_id, invoice_id, line_number, description, quantity_milli, unit_price_cents,
         revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-        description_template)
+        description_template, order_line_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
             v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
-            v.description_template
+            v.description_template, v.order_line_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[],
+              $14::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
                     revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-                    description_template)`,
+                    description_template, order_line_id)`,
     [
       orgId,
       invoiceId,
@@ -538,6 +559,7 @@ async function insertInvoiceLines(
       totals.map((t) => t.input.itemId),
       totals.map((t) => t.input.stockLocationId ?? null),
       totals.map((_, i) => descriptionTemplates[i] ?? null),
+      totals.map((t) => t.input.orderLineId ?? null),
     ],
   );
 }
@@ -579,6 +601,14 @@ export interface CreateInvoiceOptions {
   placeholders?: { occurrence: number };
   /** Phase 41 — quote conversion only: the accepted SALES quote this draft comes from. Never exposed in invoiceSchema. */
   sourceQuoteId?: string;
+  /**
+   * Phase 42 — `depositService.createDepositDocument` only: makes this a
+   * `kind = 'DEPOSIT'` invoice for that order. Its single line is on the
+   * customer-deposit (Liability) account, which assertRevenueAccounts accepts
+   * as if it were Revenue; depositService has already validated that account.
+   * Never exposed in invoiceSchema.
+   */
+  depositForOrderId?: string;
 }
 
 /**
@@ -644,7 +674,8 @@ export async function createInvoiceOnClient(
     client,
     orgId,
     totals.map((t) => t.input.revenueAccountId),
-    options.equityAccountId ?? null,
+    options.equityAccountId ??
+      (options.depositForOrderId === undefined ? null : (totals[0]?.input.revenueAccountId ?? null)),
   );
 
   // Resolved on every draft save so the draft always displays an honest
@@ -660,9 +691,9 @@ export async function createInvoiceOnClient(
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number,
-        notes_template, source_quote_id, source_quote_direction)
+        notes_template, source_quote_id, source_quote_direction, kind, deposit_for_order_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-             $22, $23)
+             $22, $23, $24, $25)
      RETURNING id`,
     [
       orgId,
@@ -688,11 +719,21 @@ export async function createInvoiceOnClient(
       notesTemplate,
       options.sourceQuoteId ?? null,
       options.sourceQuoteId === undefined ? null : 'SALES',
+      options.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
+      options.depositForOrderId ?? null,
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
   if (invoiceId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
+  await assertOrderLineLinksOnClient(
+    client,
+    orgId,
+    'SALES',
+    input.customerId,
+    currencyCode,
+    totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
+  );
   await insertInvoiceLines(client, orgId, invoiceId, totals, descriptionTemplates);
 
   return invoiceId;
@@ -756,14 +797,17 @@ export async function updateInvoice(
   try {
     await beginTransaction(client);
 
-    const { rows: statusRows } = await client.query<{ status: string }>(
-      'SELECT status FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE',
+    const { rows: statusRows } = await client.query<{ status: string; kind: string }>(
+      'SELECT status, kind FROM invoices WHERE id = $1 AND org_id = $2 FOR UPDATE',
       [id, orgId],
     );
     const statusRow = statusRows[0];
     if (statusRow === undefined) throw new ApiError(404, 'Invoice not found');
     if (statusRow.status !== 'DRAFT') {
       throw new ApiError(409, 'Only a draft invoice can be edited');
+    }
+    if (statusRow.kind === 'DEPOSIT') {
+      throw new ApiError(409, 'A deposit invoice cannot be edited. Delete it and request a new deposit from the order.');
     }
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
@@ -835,6 +879,14 @@ export async function updateInvoice(
       ],
     );
 
+    await assertOrderLineLinksOnClient(
+      client,
+      orgId,
+      'SALES',
+      input.customerId,
+      currencyCode,
+      totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
+    );
     await insertInvoiceLines(client, orgId, id, totals);
 
     await client.query('COMMIT');
@@ -1253,6 +1305,12 @@ export async function voidInvoice(
       );
       if (noteRows[0]?.has_notes === true) {
         throw new ApiError(409, 'This invoice has credit notes. Void the credit notes first.');
+      }
+
+      // Phase 42 — an invoice that took a deposit, or that is the deposit,
+      // cannot disappear from under a POSTED application.
+      if (await hasPostedDepositApplicationsOnClient(client, orgId, 'invoice', id)) {
+        throw new ApiError(409, 'Void the deposit applications on this invoice first');
       }
     }
 

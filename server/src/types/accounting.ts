@@ -325,6 +325,8 @@ export interface InvoiceLine {
   itemId: string | null;
   /** Phase 32 — the Inventory location an INVENTORY line moves stock at; null = the default location. */
   stockLocationId: string | null;
+  /** Phase 42 — the order line this line bills (partial invoicing), if any. */
+  orderLineId: string | null;
 }
 
 export interface Invoice {
@@ -366,10 +368,18 @@ export interface Invoice {
   allocatedCents: number;
   /** Phase 26 — applied ISSUED credit notes. `0` unless status is ISSUED. amountDueCents = total − allocated − credited. */
   creditedCents: number;
+  /** Phase 42 — POSTED deposit applications against this invoice. `0` unless status is ISSUED. Subtracted in amountDueCents. */
+  depositAppliedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
   /** Phase 41 — the accepted quote this invoice was converted from, if any. */
   sourceQuote: SourceQuoteRef | null;
+  /** Phase 42 — STANDARD, or DEPOSIT for a deposit invoice raised on a confirmed order. */
+  kind: 'STANDARD' | 'DEPOSIT';
+  /** Phase 42 — the order a DEPOSIT invoice was raised for; null for STANDARD. */
+  depositForOrderId: string | null;
+  /** Phase 42 — applications where this document is the deposit or the target. Loaded by the one-document read only; `[]` in lists. */
+  depositApplications: DepositApplication[];
 }
 
 export interface InvoiceSettings {
@@ -398,6 +408,17 @@ export interface InvoiceSettings {
   showPaymentTerms: boolean;
   showDueDate: boolean;
   bankDetails: string | null;
+  quotePrefix: string;
+  quoteNextNumber: number;
+  purchaseQuotePrefix: string;
+  purchaseQuoteNextNumber: number;
+  defaultQuoteValidityDays: number;
+  defaultQuoteTerms: string | null;
+  quoteAcceptanceRequiresCode: boolean;
+  /** Phase 42 — Liability account for deposit invoices; null falls back to code 2130. */
+  customerDepositAccountId: string | null;
+  /** Phase 42 — Asset account for deposit bills; null falls back to code 1150. */
+  supplierPrepaymentAccountId: string | null;
   /** `false` until the organization has saved invoice settings at least once. */
   configured: boolean;
 }
@@ -495,6 +516,8 @@ export interface BillLine {
   itemId: string | null;
   /** Phase 32 — the Inventory location an INVENTORY line moves stock at; null = the default location. */
   stockLocationId: string | null;
+  /** Phase 42 — the order line this line bills (partial billing), if any. */
+  orderLineId: string | null;
 }
 
 export interface Bill {
@@ -541,10 +564,18 @@ export interface Bill {
   allocatedCents: number;
   /** Phase 26 — applied ISSUED debit notes. `0` unless status is POSTED. amountDueCents = total − allocated − debited. */
   debitedCents: number;
+  /** Phase 42 — POSTED deposit applications against this bill. `0` unless status is POSTED. Subtracted in amountDueCents. */
+  depositAppliedCents: number;
   amountDueCents: number;
   settlementStatus: SettlementStatus;
   /** Phase 41 — the accepted purchase quote this bill was converted from, if any. */
   sourceQuote: SourceQuoteRef | null;
+  /** Phase 42 — STANDARD, or DEPOSIT for a prepayment bill raised on a confirmed purchase order. */
+  kind: 'STANDARD' | 'DEPOSIT';
+  /** Phase 42 — the purchase order a DEPOSIT bill was raised for; null for STANDARD. */
+  depositForOrderId: string | null;
+  /** Phase 42 — applications where this document is the deposit or the target. Loaded by the one-document read only; `[]` in lists. */
+  depositApplications: DepositApplication[];
 }
 
 export const PAYMENT_DIRECTIONS = ['RECEIVE', 'PAY'] as const;
@@ -1505,7 +1536,10 @@ export type PartyLedgerEntryKind =
   | 'CREDIT_NOTE'
   | 'CREDIT_NOTE_VOID'
   | 'DEBIT_NOTE'
-  | 'DEBIT_NOTE_VOID';
+  | 'DEBIT_NOTE_VOID'
+  /** Phase 42 — a deposit/prepayment applied to this party's final invoice/bill, and its reversal. */
+  | 'DEPOSIT_APPLICATION'
+  | 'DEPOSIT_APPLICATION_VOID';
 
 export interface PartyLedgerAllocation {
   documentId: string;
@@ -1692,6 +1726,18 @@ export interface StatementEmailTemplate {
   updatedAt: string | null;
 }
 
+/** Phase 42 — a quote email template; `builtIn` ones are code defaults, never stored. */
+export interface QuoteEmailTemplate {
+  id: string | null;
+  direction: QuoteDirection;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+  builtIn: boolean;
+  updatedAt: string | null;
+}
+
 /** Phase 39b — one emailed statement (its link token is never returned). */
 export interface StatementSend {
   id: string;
@@ -1860,6 +1906,7 @@ export interface QuoteResponse {
   channel: QuoteResponseChannel;
   signerName: string | null;
   signerEmail: string | null;
+  signerEmailVerified: boolean;
   termsAccepted: boolean;
   declineReason: string | null;
   clientIp: string | null;
@@ -1891,7 +1938,7 @@ export interface QuoteRevisionSummary {
 }
 
 export interface QuoteConvertedDocument {
-  kind: 'INVOICE' | 'BILL';
+  kind: 'INVOICE' | 'BILL' | 'ORDER';
   id: string;
   /** null while the invoice is a draft (bills always carry the vendor reference). */
   number: string | null;
@@ -1950,6 +1997,8 @@ export interface Quote extends QuoteSummary {
   links: QuoteLinkSummary[];
   response: QuoteResponse | null;
   convertedDocument: QuoteConvertedDocument | null;
+  /** Phase 42 — the deposit requested on acceptance, as basis points (1–10000); null when none. */
+  depositPercentBp: number | null;
 }
 
 /** What the public `/quote/:token` page receives — the frozen document and what the viewer may do. */
@@ -1961,6 +2010,8 @@ export interface PublicQuoteView {
   effectiveStatus: QuoteStatus;
   /** True only while SENT and within validity — the accept/decline form shows. */
   canRespond: boolean;
+  /** The organization requires a verified email code to accept. */
+  requiresEmailCode: boolean;
   partyName: string;
   partyAddress: string | null;
   partyTaxNumber: string | null;
@@ -1987,4 +2038,121 @@ export interface PublicQuoteView {
   /** Echoed back on accept so the signer can only accept exactly this content. */
   contentSha256: string;
   response: { response: QuoteResponseKind; signerName: string | null; respondedAt: string } | null;
+  /** Phase 42 — the deposit requested on acceptance, in basis points; null when none. */
+  depositPercentBp: number | null;
+}
+
+// ------------------------------------------------------------ Phase 42 orders
+
+export const ORDER_STATUSES = ['DRAFT', 'CONFIRMED', 'CLOSED', 'CANCELLED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+/**
+ * The one lifecycle transition table for an order (guardrails rule 10). The
+ * status CHECK and `reject_confirmed_order_mutation()` in migration 092 list
+ * the same statuses and pairs.
+ *
+ * - DRAFT → CONFIRMED: numbered, frozen content from here on.
+ * - CONFIRMED → CLOSED: no further billing intended.
+ * - CONFIRMED → CANCELLED: withdrawn, with a reason.
+ * - CLOSED → CONFIRMED: reopened.
+ */
+export const ORDER_TRANSITIONS = {
+  DRAFT: ['CONFIRMED'],
+  CONFIRMED: ['CLOSED', 'CANCELLED'],
+  CLOSED: ['CONFIRMED'],
+  CANCELLED: [],
+} as const satisfies Record<OrderStatus, readonly OrderStatus[]>;
+
+export function canTransitionOrder(from: OrderStatus, to: OrderStatus): boolean {
+  return (ORDER_TRANSITIONS[from] as readonly OrderStatus[]).includes(to);
+}
+
+/** Derived from the order's lines: none billed, all billed, or some billed. */
+export type OrderBillingStatus = 'NOT_BILLED' | 'PARTIALLY_BILLED' | 'FULLY_BILLED';
+
+export interface OrderLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+  itemId: string | null;
+  billedQuantityMilli: number;
+  remainingQuantityMilli: number;
+}
+
+export interface OrderSummary {
+  id: string;
+  direction: QuoteDirection;
+  orderNumber: string | null;
+  status: OrderStatus;
+  billingStatus: OrderBillingStatus;
+  partyId: string;
+  partyName: string;
+  orderDate: string;
+  expectedDate: string | null;
+  currencyCode: string;
+  totalCents: number;
+  createdAt: string;
+}
+
+export interface Order extends OrderSummary {
+  partyNameSnapshot: string;
+  partyAddressSnapshot: string | null;
+  partyTaxNumberSnapshot: string | null;
+  partyReference: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  sourceQuote: SourceQuoteRef | null;
+  confirmedAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  updatedAt: string;
+  lines: OrderLine[];
+  documents: { kind: 'INVOICE' | 'BILL'; id: string; number: string | null; status: string; totalCents: number }[];
+}
+
+// ------------------------------------------------------------ Phase 42 deposits
+
+export const DEPOSIT_APPLICATION_STATUSES = ['POSTED', 'VOID'] as const;
+export type DepositApplicationStatus = (typeof DEPOSIT_APPLICATION_STATUSES)[number];
+
+/**
+ * The one lifecycle transition table for a deposit application (guardrails
+ * rule 10). The status CHECK in migration 093 and the immutability trigger
+ * list the same pair: a POSTED application may only become VOID.
+ */
+export const DEPOSIT_APPLICATION_TRANSITIONS = {
+  POSTED: ['VOID'],
+  VOID: [],
+} as const satisfies Record<DepositApplicationStatus, readonly DepositApplicationStatus[]>;
+
+/** A deposit invoice/bill's amount moved onto the order's final invoice/bill. Base currency only. */
+export interface DepositApplication {
+  id: string;
+  direction: QuoteDirection;
+  depositDocumentId: string;
+  depositDocumentNumber: string | null;
+  targetDocumentId: string;
+  targetDocumentNumber: string | null;
+  amountCents: number;
+  applicationDate: string;
+  status: 'POSTED' | 'VOID';
+  journalEntryId: string;
+  voidJournalEntryId: string | null;
+  createdAt: string;
 }

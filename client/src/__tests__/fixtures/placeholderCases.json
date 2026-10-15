@@ -28,6 +28,10 @@
     { "name": "organization spelling alias", "surface": "BANK_LINE", "text": "[Organization Name] [Organisation Name]", "ctx": { "date": "2026-07-01", "organisationName": "Harbor" }, "expected": "Harbor Harbor" },
     { "name": "due date", "surface": "BILL", "text": "due [Due Date]", "ctx": { "date": "2026-10-10", "dueDate": "2026-11-09" }, "expected": "due 9 Nov 2026" },
     { "name": "credit note names its invoice", "surface": "CREDIT_NOTE", "text": "Credit for [Invoice Number]", "ctx": { "date": "2026-10-10", "invoiceNumber": "INV-0001" }, "expected": "Credit for INV-0001" },
-    { "name": "no contact on bank lines", "surface": "BANK_LINE", "text": "[Contact Name] fee [Month]", "ctx": { "date": "2026-10-10" }, "expected": "[Contact Name] fee October" }
+    { "name": "no contact on bank lines", "surface": "BANK_LINE", "text": "[Contact Name] fee [Month]", "ctx": { "date": "2026-10-10" }, "expected": "[Contact Name] fee October" },
+    { "name": "quote number and contact", "surface": "QUOTE", "text": "Quote [Quote Number] for [Contact Name]", "ctx": { "date": "2026-10-10", "quoteNumber": "QU-000012", "contactName": "Acme" }, "mode": "final", "expected": "Quote QU-000012 for Acme" },
+    { "name": "quote total", "surface": "QUOTE", "text": "Total [Quote Total]", "ctx": { "date": "2026-10-10", "quoteTotal": "USD 1,250.00" }, "mode": "final", "expected": "Total USD 1,250.00" },
+    { "name": "quote valid until", "surface": "QUOTE", "text": "Valid until [Valid Until]", "ctx": { "date": "2026-10-10", "validUntil": "2026-11-09" }, "mode": "final", "expected": "Valid until 9 Nov 2026" },
+    { "name": "invoice number is not on the quote surface", "surface": "QUOTE", "text": "[Invoice Number]", "ctx": { "date": "2026-10-10", "invoiceNumber": "INV-0001" }, "mode": "final", "expected": "[Invoice Number]" }
   ]
 }

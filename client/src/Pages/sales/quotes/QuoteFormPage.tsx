@@ -99,6 +99,8 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
   const [partyReference, setPartyReference] = useState('');
   const [title, setTitle] = useState('');
   const [paymentTermsCode, setPaymentTermsCode] = useState('');
+  /** Phase 42 — typed as a percentage; blank = no deposit. */
+  const [depositPercent, setDepositPercent] = useState('');
   const [notes, setNotes] = useState('');
   const [terms, setTerms] = useState('');
   const [lines, setLines] = useState<DraftLine[]>([]);
@@ -146,6 +148,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
         setPartyReference(quote.partyReference ?? '');
         setTitle(quote.title ?? '');
         setPaymentTermsCode(quote.paymentTermsCode ?? '');
+        setDepositPercent(quote.depositPercentBp === null ? '' : formatRate(quote.depositPercentBp));
         setNotes(quote.notes ?? '');
         setTerms(quote.terms ?? '');
         setLines(
@@ -223,6 +226,11 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
       setError(`Line ${String(invalid + 1)} needs a description, a quantity above zero, a price and an account`);
       return;
     }
+    const depositPercentBp = depositPercent.trim() === '' ? null : parseRateInput(depositPercent);
+    if (depositPercent.trim() !== '' && (depositPercentBp === null || depositPercentBp < 1 || depositPercentBp > 10000)) {
+      setError('The deposit must be a percentage between 0.01 and 100');
+      return;
+    }
     if (validUntil !== '' && validUntil < quoteDate) {
       setError('Valid until cannot be before the quote date');
       return;
@@ -240,6 +248,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
       ...(existing === null && terms.trim() === '' ? {} : { terms: textOrNull(terms) }),
       paymentTerms: null,
       paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
+      depositPercentBp,
       lines: parsed.map((p) => ({
         description: p.line.description.trim(),
         quantityMilli: p.quantityMilli ?? 0,
@@ -376,6 +385,15 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
               </option>
             ))}
           </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Deposit on acceptance (%)</span>
+          <input
+            inputMode="decimal"
+            value={depositPercent}
+            onChange={(e) => setDepositPercent(e.target.value)}
+            className={`${inputClass} text-right tabular-nums`}
+          />
         </label>
       </div>
 

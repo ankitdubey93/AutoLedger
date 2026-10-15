@@ -3,6 +3,7 @@ import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
+import { todayInZone } from '../../utils/orgDate.js';
 import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import * as onboardingService from '../onboardingService.js';
@@ -527,4 +528,16 @@ export async function resolveInventoryPostingAccountsOnClient(
     adjustmentAccountId: adjustment ?? null,
     openingAccountId: opening ?? null,
   };
+}
+
+/**
+ * The organization's calendar date (`ledger_settings.timezone`; UTC when no
+ * row exists or the stored zone is invalid). Quote dates only (Phase 42).
+ */
+export async function orgTodayOnClient(q: Pick<PoolClient, 'query'>, orgId: string): Promise<string> {
+  const { rows } = await q.query<{ timezone: string }>(
+    'SELECT timezone FROM ledger_settings WHERE org_id = $1',
+    [orgId],
+  );
+  return todayInZone(rows[0]?.timezone ?? 'UTC');
 }

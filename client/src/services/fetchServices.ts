@@ -1306,6 +1306,8 @@ export interface InvoiceLine {
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
   stockLocationId?: string | null;
+  /** Phase 42 — the order line this invoice line bills, if any. */
+  orderLineId: string | null;
 }
 
 export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
@@ -1314,6 +1316,22 @@ export type InvoiceStatus = 'DRAFT' | 'ISSUED' | 'VOID';
 export type SettlementStatus = 'NOT_APPLICABLE' | 'UNPAID' | 'PARTIALLY_PAID' | 'PAID' | 'OVERDUE';
 
 /** Mirrors server/src/types/accounting.ts's Invoice. */
+/** Phase 42 — mirrors server DepositApplication (base currency only). */
+export interface DepositApplication {
+  id: string;
+  direction: QuoteDirection;
+  depositDocumentId: string;
+  depositDocumentNumber: string | null;
+  targetDocumentId: string;
+  targetDocumentNumber: string | null;
+  amountCents: number;
+  applicationDate: string;
+  status: 'POSTED' | 'VOID';
+  journalEntryId: string;
+  voidJournalEntryId: string | null;
+  createdAt: string;
+}
+
 export interface Invoice {
   id: string;
   invoiceNumber: string | null;
@@ -1355,6 +1373,14 @@ export interface Invoice {
   settlementStatus: SettlementStatus;
   /** Phase 41 — the accepted quote this invoice was converted from, if any. */
   sourceQuote: SourceQuoteRef | null;
+  /** Phase 42 — POSTED deposit applications against this invoice. `0` unless status is ISSUED. */
+  depositAppliedCents: number;
+  /** Phase 42 — STANDARD, or DEPOSIT for a deposit invoice raised on a confirmed order. */
+  kind: 'STANDARD' | 'DEPOSIT';
+  /** Phase 42 — the order a DEPOSIT invoice was raised for; null for STANDARD. */
+  depositForOrderId: string | null;
+  /** Phase 42 — applications where this document is the deposit or the target. [] in lists. */
+  depositApplications: DepositApplication[];
 }
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
@@ -1421,6 +1447,8 @@ export interface InvoiceLineInput {
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
   stockLocationId?: string | null;
+  /** Phase 42 — the order line this invoice line bills, if any. */
+  orderLineId?: string | null;
 }
 
 export interface InvoiceInput {
@@ -1515,6 +1543,17 @@ export interface InvoiceSettings {
   showPaymentTerms: boolean;
   showDueDate: boolean;
   bankDetails: string | null;
+  quotePrefix: string;
+  quoteNextNumber: number;
+  purchaseQuotePrefix: string;
+  purchaseQuoteNextNumber: number;
+  defaultQuoteValidityDays: number;
+  defaultQuoteTerms: string | null;
+  quoteAcceptanceRequiresCode: boolean;
+  /** Phase 42 — Liability account for deposit invoices; null falls back to code 2130. */
+  customerDepositAccountId: string | null;
+  /** Phase 42 — Asset account for deposit bills; null falls back to code 1150. */
+  supplierPrepaymentAccountId: string | null;
   configured: boolean;
 }
 
@@ -1613,7 +1652,9 @@ export type PartyLedgerEntryKind =
   | 'CREDIT_NOTE'
   | 'CREDIT_NOTE_VOID'
   | 'DEBIT_NOTE'
-  | 'DEBIT_NOTE_VOID';
+  | 'DEBIT_NOTE_VOID'
+  | 'DEPOSIT_APPLICATION'
+  | 'DEPOSIT_APPLICATION_VOID';
 
 /** Mirrors server/src/types/accounting.ts's PartyLedgerAllocation. */
 export interface PartyLedgerAllocation {
@@ -2159,6 +2200,8 @@ export interface BillLine {
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
   stockLocationId?: string | null;
+  /** Phase 42 — the order line this bill line bills, if any. */
+  orderLineId: string | null;
 }
 
 export type BillStatus = 'DRAFT' | 'AWAITING_APPROVAL' | 'POSTED' | 'VOID';
@@ -2210,6 +2253,14 @@ export interface Bill {
   settlementStatus: SettlementStatus;
   /** Phase 41 — the accepted purchase quote this bill was converted from, if any. */
   sourceQuote: SourceQuoteRef | null;
+  /** Phase 42 — POSTED deposit applications against this bill. `0` unless status is POSTED. */
+  depositAppliedCents: number;
+  /** Phase 42 — STANDARD, or DEPOSIT for a prepayment bill raised on a confirmed purchase order. */
+  kind: 'STANDARD' | 'DEPOSIT';
+  /** Phase 42 — the purchase order a DEPOSIT bill was raised for; null for STANDARD. */
+  depositForOrderId: string | null;
+  /** Phase 42 — applications where this document is the deposit or the target. [] in lists. */
+  depositApplications: DepositApplication[];
 }
 
 export type BillSortKey = 'billDate' | 'dueDate' | 'reference' | 'vendor' | 'total' | 'status';
@@ -2271,6 +2322,8 @@ export interface BillLineInput {
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
   stockLocationId?: string | null;
+  /** Phase 42 — the order line this bill line bills, if any. */
+  orderLineId?: string | null;
 }
 
 export interface BillInput {
@@ -5495,6 +5548,7 @@ export interface QuoteResponse {
   channel: 'PUBLIC_LINK' | 'INTERNAL';
   signerName: string | null;
   signerEmail: string | null;
+  signerEmailVerified: boolean;
   termsAccepted: boolean;
   declineReason: string | null;
   clientIp: string | null;
@@ -5570,7 +5624,9 @@ export interface Quote extends QuoteSummary {
   revisions: { id: string; revision: number; status: QuoteStatus }[];
   links: QuoteLinkSummary[];
   response: QuoteResponse | null;
-  convertedDocument: { kind: 'INVOICE' | 'BILL'; id: string; number: string | null; status: string } | null;
+  convertedDocument: { kind: 'INVOICE' | 'BILL' | 'ORDER'; id: string; number: string | null; status: string } | null;
+  /** Phase 42 — the deposit requested on acceptance, as basis points (1–10000); null when none. */
+  depositPercentBp: number | null;
 }
 
 export interface QuoteInput {
@@ -5584,6 +5640,8 @@ export interface QuoteInput {
   terms?: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  /** Phase 42 — basis points 1–10000; null or omitted = no deposit. */
+  depositPercentBp?: number | null;
   lines: {
     description: string;
     quantityMilli: number;
@@ -5609,6 +5667,18 @@ export interface QuoteFilters {
 /** `/quotes` for sales, `/purchase-quotes` for purchase — the same resource in two directions. */
 function quoteBase(direction: QuoteDirection): string {
   return direction === 'SALES' ? '/quotes' : '/purchase-quotes';
+}
+
+/** GET /quotes|purchase-quotes/:id/pdf as a blob (Phase 42, Slice E). */
+export async function downloadQuotePdf(direction: QuoteDirection, id: string): Promise<Blob> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}${quoteBase(direction)}/${id}/pdf`, {
+    credentials: 'include',
+  });
+  if (!response.ok) throw new ApiRequestError(response.status, 'Could not download the PDF');
+  return response.blob();
 }
 
 /** GET /quotes | /purchase-quotes */
@@ -5648,9 +5718,72 @@ export async function deleteQuote(direction: QuoteDirection, id: string): Promis
 export function sendQuote(
   direction: QuoteDirection,
   id: string,
-  body: { delivery: 'EMAIL' | 'MANUAL'; toEmail: string | null; message: string | null },
+  body: { delivery: 'EMAIL' | 'MANUAL'; toEmail: string | null; message: string | null; templateId: string | null },
 ): Promise<{ success: boolean; quote: Quote }> {
   return apiFetch(`${quoteBase(direction)}/${id}/send`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/* ------------------------------------- quote email templates (Phase 42, Slice C) */
+
+/** Mirrors server/src/types/accounting.ts's QuoteEmailTemplate. */
+export interface QuoteEmailTemplate {
+  id: string | null;
+  direction: QuoteDirection;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+  builtIn: boolean;
+  updatedAt: string | null;
+}
+
+/** GET /settings/quote-email-templates?direction= — the built-in template is included when none is saved. */
+export async function listQuoteEmailTemplates(direction: QuoteDirection): Promise<QuoteEmailTemplate[]> {
+  const body = await apiFetch<{ success: boolean; templates: QuoteEmailTemplate[] }>(
+    `/settings/quote-email-templates?direction=${direction}`,
+  );
+  return body.templates;
+}
+
+export async function createQuoteEmailTemplate(input: {
+  direction: QuoteDirection;
+  name: string;
+  subject: string;
+  body: string;
+  isDefault: boolean;
+}): Promise<QuoteEmailTemplate> {
+  const body = await apiFetch<{ success: boolean; template: QuoteEmailTemplate }>('/settings/quote-email-templates', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return body.template;
+}
+
+export async function updateQuoteEmailTemplate(
+  id: string,
+  input: Partial<{ name: string; subject: string; body: string; isDefault: boolean }>,
+): Promise<QuoteEmailTemplate> {
+  const body = await apiFetch<{ success: boolean; template: QuoteEmailTemplate }>(
+    `/settings/quote-email-templates/${id}`,
+    { method: 'PATCH', body: JSON.stringify(input) },
+  );
+  return body.template;
+}
+
+export async function deleteQuoteEmailTemplate(id: string): Promise<void> {
+  await apiFetch(`/settings/quote-email-templates/${id}`, { method: 'DELETE' });
+}
+
+/** POST /quotes|purchase-quotes/:id/email-preview — fills the template without sending. */
+export async function previewQuoteEmail(
+  direction: QuoteDirection,
+  id: string,
+  templateId: string | null,
+): Promise<{ success: boolean; subject: string; body: string }> {
+  return apiFetch(`${quoteBase(direction)}/${id}/email-preview`, {
+    method: 'POST',
+    body: JSON.stringify({ templateId }),
+  });
 }
 
 export function reviseQuote(direction: QuoteDirection, id: string): Promise<{ success: boolean; quote: Quote }> {
@@ -5684,8 +5817,8 @@ export function revokeQuoteLink(direction: QuoteDirection, id: string, linkId: s
 export function convertQuote(
   direction: QuoteDirection,
   id: string,
-  body: { documentDate: string | null; dueDate: string | null; vendorReference: string | null },
-): Promise<{ success: boolean; document: { kind: 'INVOICE' | 'BILL'; id: string } }> {
+  body: { documentDate: string | null; dueDate: string | null; vendorReference: string | null; target?: 'INVOICE' | 'ORDER' },
+): Promise<{ success: boolean; document: { kind: 'INVOICE' | 'BILL' | 'ORDER'; id: string } }> {
   return apiFetch(`${quoteBase(direction)}/${id}/convert`, { method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -5698,6 +5831,7 @@ export interface PublicQuoteView {
   revision: number;
   effectiveStatus: QuoteStatus;
   canRespond: boolean;
+  requiresEmailCode: boolean;
   partyName: string;
   partyAddress: string | null;
   partyTaxNumber: string | null;
@@ -5723,6 +5857,8 @@ export interface PublicQuoteView {
   totalCents: number;
   contentSha256: string;
   response: { response: 'ACCEPTED' | 'DECLINED'; signerName: string | null; respondedAt: string } | null;
+  /** Phase 42 — the deposit requested on acceptance, in basis points; null when none. */
+  depositPercentBp: number | null;
 }
 
 /** GET /public/quotes/:token — no cookies: the token is the credential. */
@@ -5740,13 +5876,37 @@ export async function getPublicQuoteLogo(token: string, signal?: AbortSignal): P
   return response.ok ? response.blob() : null;
 }
 
+/** GET /public/quotes/:token/pdf as a blob — no cookies: the token is the credential (Phase 42, Slice E). */
+export async function downloadPublicQuotePdf(token: string): Promise<Blob> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/public/quotes/${encodeURIComponent(token)}/pdf`, {
+    credentials: 'omit',
+  });
+  if (!response.ok) throw new ApiRequestError(response.status, 'Could not download the PDF');
+  return response.blob();
+}
+
 export function acceptPublicQuote(
   token: string,
-  body: { signerName: string; signerEmail: string | null; acceptTerms: true; contentSha256: string },
+  body: { signerName: string; signerEmail: string | null; acceptTerms: true; contentSha256: string; code: string | null },
 ): Promise<{ success: boolean; quote: PublicQuoteView }> {
   return apiFetch(
     `/public/quotes/${encodeURIComponent(token)}/accept`,
     { method: 'POST', body: JSON.stringify(body), credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
+/** POST /public/quotes/:token/verify-email — emails a 6-digit code to the signer's address (Phase 42, Slice D). */
+export function requestPublicQuoteCode(
+  token: string,
+  signerEmail: string,
+): Promise<{ success: boolean; expiresAt: string }> {
+  return apiFetch(
+    `/public/quotes/${encodeURIComponent(token)}/verify-email`,
+    { method: 'POST', body: JSON.stringify({ signerEmail }), credentials: 'omit' },
     NO_AUTO_REFRESH,
   );
 }
@@ -5757,4 +5917,228 @@ export function declinePublicQuote(token: string, reason: string | null): Promis
     { method: 'POST', body: JSON.stringify({ reason }), credentials: 'omit' },
     NO_AUTO_REFRESH,
   );
+}
+
+/* ------------------------------------------------------- orders (Phase 42) */
+
+export const ORDER_STATUSES = ['DRAFT', 'CONFIRMED', 'CLOSED', 'CANCELLED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+export type OrderBillingStatus = 'NOT_BILLED' | 'PARTIALLY_BILLED' | 'FULLY_BILLED';
+
+export interface OrderLine {
+  id: string;
+  lineNumber: number;
+  description: string;
+  quantityMilli: number;
+  unitPriceCents: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  taxRateBp: number;
+  netCents: number;
+  taxCents: number;
+  itemId: string | null;
+  billedQuantityMilli: number;
+  remainingQuantityMilli: number;
+}
+
+export interface OrderSummary {
+  id: string;
+  direction: QuoteDirection;
+  orderNumber: string | null;
+  status: OrderStatus;
+  billingStatus: OrderBillingStatus;
+  partyId: string;
+  partyName: string;
+  orderDate: string;
+  expectedDate: string | null;
+  currencyCode: string;
+  totalCents: number;
+  createdAt: string;
+}
+
+export interface Order extends OrderSummary {
+  partyNameSnapshot: string;
+  partyAddressSnapshot: string | null;
+  partyTaxNumberSnapshot: string | null;
+  partyReference: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  subtotalCents: number;
+  taxCents: number;
+  sourceQuote: SourceQuoteRef | null;
+  confirmedAt: string | null;
+  closedAt: string | null;
+  cancelledAt: string | null;
+  cancelReason: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  updatedAt: string;
+  lines: OrderLine[];
+  documents: { kind: 'INVOICE' | 'BILL'; id: string; number: string | null; status: string; totalCents: number }[];
+}
+
+export interface OrderInput {
+  partyId: string;
+  orderDate: string;
+  expectedDate: string | null;
+  currencyCode?: string;
+  partyReference: string | null;
+  notes: string | null;
+  terms: string | null;
+  paymentTerms: string | null;
+  paymentTermsCode: string | null;
+  lines: {
+    description: string;
+    quantityMilli: number;
+    unitPriceCents: number;
+    accountId: string;
+    taxRateBp: number;
+    itemId: string | null;
+  }[];
+}
+
+export type OrderSortKey = 'orderDate' | 'number' | 'party' | 'total' | 'status';
+
+export interface OrderFilters {
+  page?: number;
+  limit?: number;
+  status?: OrderStatus | '';
+  partyId?: string;
+  from?: string;
+  to?: string;
+  q?: string;
+  sort?: OrderSortKey;
+  dir?: 'asc' | 'desc';
+}
+
+export interface OrderConvertBody {
+  documentDate: string | null;
+  dueDate: string | null;
+  vendorReference: string | null;
+  /** Omitted/null = everything still unbilled. */
+  lines?: { orderLineId: string; quantityMilli: number }[] | null;
+}
+
+/** `/orders` for sales, `/purchase-orders` for purchase — the same resource in two directions. */
+function orderBase(direction: QuoteDirection): string {
+  return direction === 'SALES' ? '/orders' : '/purchase-orders';
+}
+
+/** GET /orders | /purchase-orders */
+export function listOrders(
+  direction: QuoteDirection,
+  params: OrderFilters = {},
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; totalCount: number; currentPage: number; totalPages: number; orders: OrderSummary[] }> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.limit !== undefined) query.set('limit', String(params.limit));
+  if (params.status !== undefined && params.status !== '') query.set('status', params.status);
+  if (params.partyId !== undefined && params.partyId !== '') query.set('partyId', params.partyId);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.sort !== undefined) query.set('sort', params.sort);
+  if (params.dir !== undefined) query.set('dir', params.dir);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+  return apiFetch(`${orderBase(direction)}${suffix}`, { signal: signal ?? null });
+}
+
+export function getOrder(direction: QuoteDirection, id: string, signal?: AbortSignal): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}`, { signal: signal ?? null });
+}
+
+export function createOrder(direction: QuoteDirection, body: OrderInput): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(orderBase(direction), { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function updateOrder(direction: QuoteDirection, id: string, body: OrderInput): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export async function deleteOrder(direction: QuoteDirection, id: string): Promise<void> {
+  await apiFetch(`${orderBase(direction)}/${id}`, { method: 'DELETE' });
+}
+
+export function confirmOrder(direction: QuoteDirection, id: string): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}/confirm`, { method: 'POST', body: '{}' });
+}
+
+export function closeOrder(direction: QuoteDirection, id: string): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}/close`, { method: 'POST', body: '{}' });
+}
+
+export function reopenOrder(direction: QuoteDirection, id: string): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}/reopen`, { method: 'POST', body: '{}' });
+}
+
+export function cancelOrder(direction: QuoteDirection, id: string, reason: string): Promise<{ success: boolean; order: Order }> {
+  return apiFetch(`${orderBase(direction)}/${id}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+
+export function convertOrder(
+  direction: QuoteDirection,
+  id: string,
+  body: OrderConvertBody,
+): Promise<{ success: boolean; document: { kind: 'INVOICE' | 'BILL'; id: string } }> {
+  return apiFetch(`${orderBase(direction)}/${id}/convert`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+// ------------------------------------------------------------ Phase 42 deposits
+
+/** Body of `POST /orders/:id/deposit` and `/purchase-orders/:id/deposit`: exactly one of percentBp or amountCents. */
+export interface DepositInput {
+  percentBp?: number | null;
+  amountCents?: number | null;
+  documentDate?: string | null;
+  dueDate?: string | null;
+  vendorReference?: string | null;
+}
+
+/** Body of `POST /invoices/:id/apply-deposit` and `/bills/:id/apply-prepayment`. */
+export interface ApplyDepositInput {
+  depositDocumentId: string;
+  amountCents: number;
+  applicationDate: string;
+}
+
+/** POST /orders|/purchase-orders/:id/deposit — a DRAFT deposit invoice (or prepayment bill). */
+export function createOrderDeposit(
+  direction: QuoteDirection,
+  orderId: string,
+  body: DepositInput,
+): Promise<{ success: boolean; document: { kind: 'INVOICE' | 'BILL'; id: string } }> {
+  return apiFetch(`${orderBase(direction)}/${orderId}/deposit`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /invoices/:id/apply-deposit */
+export function applyDeposit(
+  invoiceId: string,
+  body: ApplyDepositInput,
+): Promise<{ success: boolean; application: DepositApplication }> {
+  return apiFetch(`/invoices/${invoiceId}/apply-deposit`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /bills/:id/apply-prepayment */
+export function applyPrepayment(
+  billId: string,
+  body: ApplyDepositInput,
+): Promise<{ success: boolean; application: DepositApplication }> {
+  return apiFetch(`/bills/${billId}/apply-prepayment`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /deposit-applications/sales|purchase/:id/void — entryDate null = the server's default date. */
+export function voidDepositApplication(
+  direction: QuoteDirection,
+  id: string,
+): Promise<{ success: boolean; application: DepositApplication }> {
+  const side = direction === 'SALES' ? 'sales' : 'purchase';
+  return apiFetch(`/deposit-applications/${side}/${id}/void`, {
+    method: 'POST',
+    body: JSON.stringify({ entryDate: null }),
+  });
 }

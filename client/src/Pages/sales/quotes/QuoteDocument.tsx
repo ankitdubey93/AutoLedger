@@ -36,6 +36,16 @@ export interface QuoteDocumentData {
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 42 — the deposit requested on acceptance (basis points); absent or null = none. */
+  depositPercentBp?: number | null;
+}
+
+/**
+ * Phase 42 — the deposit amount for a quote total, rounded half-up exactly as
+ * the server's scaleCents does, so the sentence matches the deposit invoice.
+ */
+export function depositAmountCents(totalCents: number, depositPercentBp: number): number {
+  return Number((BigInt(totalCents) * BigInt(depositPercentBp) + BigInt(5000)) / BigInt(10000));
 }
 
 export interface QuoteDocumentProps {
@@ -177,6 +187,12 @@ export default function QuoteDocument({ quote, merchantName, merchantAddressLine
           </span>
         </div>
       </div>
+
+      {quote.depositPercentBp !== undefined && quote.depositPercentBp !== null && (
+        <p className="m-0 text-sm self-end">
+          {`A deposit of ${formatRate(quote.depositPercentBp)}% (${quote.currencyCode} ${formatCents(depositAmountCents(quote.totalCents, quote.depositPercentBp))}) is due on acceptance.`}
+        </p>
+      )}
 
       {quote.notes !== null && (
         <section>

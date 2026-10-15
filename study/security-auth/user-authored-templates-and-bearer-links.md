@@ -88,6 +88,12 @@ The emailed link `…/statement/<token>` opens a customer's statement and lets t
 - **`Intl` in code that two runtimes must agree on.** ICU data is versioned with the runtime; a server and a browser can format the same date differently. Use a table when output must match exactly.
 - **Filling system text.** Journal descriptions like `Invoice INV-1 — <customer name>` are built by code from data; filling them would let a customer named `[Month]` expand. Only text a person typed for the purpose goes through the engine.
 
+## Phase 42: a new surface, and a different strictness
+
+Quote emails (`quote_email_templates`, one default per direction, built-in fallbacks in code) are a new placeholder **surface**, `QUOTE`, with four keys: `[Quote Number]`, `[Quote Total]`, `[Valid Until]`, `[Quote Title]`. Adding a surface means adding it to the registry's per-key `surfaces` lists (here also the shared contact/date families), mirroring it byte-for-byte in `client/src/utils/placeholders.ts`, and appending cases to the parity fixture — the fixture is what fails if the two registries drift. A key not listed for a surface (e.g. `[Invoice Number]` on `QUOTE`) is left as literal text, not an error.
+
+Strictness differs from what one might assume. Statement templates refuse unknown `{{legacy}}` tokens; quote templates have no legacy syntax, so they refuse **any** `{{…}}` token (422) and treat `[Bracket text]` as ordinary prose, because a bracketed phrase like `[sic]` is legitimate writing and we only fill names we know. Quote emails are filled in `final` mode at send, inside the send transaction, and the result is stored in the outbox row's `template_data`; the mail renderer escapes it per paragraph, and falls back to the fixed wording for older outbox rows that have no subject/body. A preview endpoint renders the same context without sending. The same bearer-link rules apply to the public quote link; Phase 42 adds a second factor on acceptance (an emailed code — see [quotes-acceptance-evidence-and-revisions.md](../architecture/quotes-acceptance-evidence-and-revisions.md)).
+
 ## Interview Q&A
 
 **Q: Your users want to customise the emails your system sends. How do you avoid template injection?**
@@ -113,6 +119,9 @@ A: Because the same text is formatted on the server (stored on the document) and
 
 **Q: Week numbers — what does `[Week]` return on 1 January 2027, and why?**
 A: 53. ISO-8601 weeks start on Monday, and week 1 is the week containing the year's first Thursday. 1 January 2027 is a Friday, so its week's Thursday is 31 December 2026, which makes it week 53 of 2026. `[Year]` still says 2027 because it's the calendar year, not the ISO week-year. That's documented rather than "fixed", because Xero behaves the same way.
+
+**Q: You add a new document type that needs its own placeholders. What do you touch, and how do you know the client and server still agree?**
+A: Add the surface to the registry and give each new key its `surfaces`; extend the context type; mirror the changes in the client registry; append fixture cases (input, surface, mode, expected) that both test suites run. If the two registries differ, one side's fixture case fails. Keys not on a surface stay literal, so a template copied from another surface degrades visibly rather than leaking a wrong value.
 
 ## Follow-ups they'll dig into
 

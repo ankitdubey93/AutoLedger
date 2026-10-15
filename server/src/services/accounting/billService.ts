@@ -17,7 +17,9 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
-import { allocatedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
+import { assertOrderLineLinksOnClient } from './orderLineLinks.js';
+import { hasPostedDepositApplicationsOnClient, listDepositApplicationsForDocument } from './depositApplicationQueries.js';
+import { allocatedCentsSubquery, depositAppliedCentsSubquery, noteAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
 import { resolveApPostingAccountsOnClient, resolveInventoryPostingAccountsOnClient } from './settingsService.js';
 import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
 import { resolveInventoryControlAccountIdsOnClient, resolveStockAccountsOnClient } from './itemService.js';
@@ -95,6 +97,8 @@ export interface BillLineInput {
   /** Phase 32 — where an INVENTORY line receives stock; null = the default location. Optional so
    * Capture's captured-bill path (no items) never has to name it. */
   stockLocationId?: string | null | undefined;
+  /** Phase 42 — the order line this line bills (partial billing). Validated by assertOrderLineLinksOnClient. */
+  orderLineId?: string | null | undefined;
 }
 
 export interface CreateBillInput {
@@ -182,9 +186,12 @@ interface BillRow {
   updated_at: Date;
   allocated_cents: string;
   debited_cents: string;
+  deposit_applied_cents: string;
   source_quote_id: string | null;
   source_quote_number: string | null;
   source_quote_revision: number | null;
+  kind: 'STANDARD' | 'DEPOSIT';
+  deposit_for_order_id: string | null;
 }
 
 interface BillLineRow {
@@ -203,6 +210,7 @@ interface BillLineRow {
   tax_cents: string;
   item_id: string | null;
   stock_location_id: string | null;
+  order_line_id: string | null;
 }
 
 const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.name AS vendor_name,
@@ -219,8 +227,10 @@ const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.n
                              b.created_by, u.name AS created_by_name, b.created_at, b.updated_at,
                              ${allocatedCentsSubquery('b', 'bill_id')} AS allocated_cents,
                              ${noteAppliedCentsSubquery('b', 'bill_id')} AS debited_cents,
+                             ${depositAppliedCentsSubquery('b', 'bill_id')} AS deposit_applied_cents,
                              q.id AS source_quote_id, q.quote_number AS source_quote_number,
-                             q.revision AS source_quote_revision
+                             q.revision AS source_quote_revision,
+                             b.kind, b.deposit_for_order_id
                         FROM bills b
                         JOIN vendors v ON v.id = b.vendor_id AND v.org_id = b.org_id
                         LEFT JOIN users u  ON u.id = b.created_by
@@ -243,6 +253,7 @@ function toLine(row: BillLineRow): BillLine {
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
     stockLocationId: row.stock_location_id,
+    orderLineId: row.order_line_id,
   };
 }
 
@@ -255,13 +266,14 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
   const totalCents = parseCents(row.total_cents);
   const allocatedCents = isOpen ? parseCents(row.allocated_cents) : 0;
   const debitedCents = isOpen ? parseCents(row.debited_cents) : 0;
-  const amountDueCents = isOpen ? totalCents - allocatedCents - debitedCents : 0;
+  const depositAppliedCents = isOpen ? parseCents(row.deposit_applied_cents) : 0;
+  const amountDueCents = isOpen ? totalCents - allocatedCents - debitedCents - depositAppliedCents : 0;
   // A debit note settles a bill exactly as a payment does, so a fully
   // debited bill reads PAID (Phase 26).
   const settlementStatus = settlementStatusOf({
     isOpen,
     totalCents,
-    allocatedCents: allocatedCents + debitedCents,
+    allocatedCents: allocatedCents + debitedCents + depositAppliedCents,
     dueDate: row.due_date,
     asOf: today(),
   });
@@ -304,12 +316,16 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     lines,
     allocatedCents,
     debitedCents,
+    depositAppliedCents,
     amountDueCents,
     settlementStatus,
     sourceQuote:
       row.source_quote_id === null || row.source_quote_number === null || row.source_quote_revision === null
         ? null
         : { id: row.source_quote_id, quoteNumber: row.source_quote_number, revision: row.source_quote_revision },
+    kind: row.kind,
+    depositForOrderId: row.deposit_for_order_id,
+    depositApplications: [],
   };
 }
 
@@ -322,7 +338,8 @@ async function loadLines(orgId: string, billIds: string[]): Promise<Map<string, 
     `SELECT l.id, l.bill_id, l.line_number, l.description, l.description_template,
             l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id
+            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
+            l.order_line_id
        FROM bill_lines l
        JOIN accounts a ON a.id = l.expense_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -352,7 +369,10 @@ export async function getBillById(orgId: string, id: string): Promise<Bill> {
   if (row === undefined) throw new ApiError(404, 'Bill not found');
 
   const lines = await loadLines(orgId, [row.id]);
-  return toBill(row, lines.get(row.id) ?? []);
+  const bill = toBill(row, lines.get(row.id) ?? []);
+  // Phase 42 — only the one-document read carries its applications.
+  bill.depositApplications = await listDepositApplicationsForDocument(pool, orgId, 'PURCHASE', row.id);
+  return bill;
 }
 
 /**
@@ -538,16 +558,17 @@ async function insertBillLines(
     `INSERT INTO bill_lines
        (org_id, bill_id, line_number, description, quantity_milli, unit_price_cents,
         expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-        description_template)
+        description_template, order_line_id)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
             v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
-            v.description_template
+            v.description_template, v.order_line_id
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[],
+              $14::uuid[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
                     expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-                    description_template)`,
+                    description_template, order_line_id)`,
     [
       orgId,
       billId,
@@ -562,6 +583,7 @@ async function insertBillLines(
       totals.map((t) => t.input.itemId),
       totals.map((t) => t.input.stockLocationId ?? null),
       totals.map((_, i) => descriptionTemplates[i] ?? null),
+      totals.map((t) => t.input.orderLineId ?? null),
     ],
   );
 }
@@ -655,6 +677,8 @@ interface InsertBillHeader {
   placeholders?: { occurrence: number; referenceFallbackSuffix: string } | undefined;
   /** Phase 41 — quote conversion only; see `CreateBillOptions.sourceQuoteId`. */
   sourceQuoteId?: string | undefined;
+  /** Phase 42 — deposit bills only; see `CreateBillOptions.depositForOrderId`. */
+  depositForOrderId?: string | undefined;
 }
 
 /**
@@ -746,9 +770,10 @@ async function insertBillOnClient(
         vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by,
-        notes_template, vendor_reference_template, source_quote_id, source_quote_direction)
+        notes_template, vendor_reference_template, source_quote_id, source_quote_direction,
+        kind, deposit_for_order_id)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-             $23, $24)
+             $23, $24, $25, $26)
      RETURNING id`,
     [
       orgId,
@@ -775,11 +800,21 @@ async function insertBillOnClient(
       vendorReferenceTemplate,
       header.sourceQuoteId ?? null,
       header.sourceQuoteId === undefined ? null : 'PURCHASE',
+      header.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
+      header.depositForOrderId ?? null,
     ],
   );
   const billId = billRows[0]?.id;
   if (billId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
+  await assertOrderLineLinksOnClient(
+    client,
+    orgId,
+    'PURCHASE',
+    header.vendorId,
+    currencyCode,
+    totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
+  );
   await insertBillLines(client, orgId, billId, totals, descriptionTemplates);
 
   return billId;
@@ -798,6 +833,13 @@ export interface CreateBillOptions {
   placeholders?: { occurrence: number; referenceFallbackSuffix: string };
   /** Phase 41 — quote conversion only: the accepted PURCHASE quote this draft comes from. Never exposed in billSchema. */
   sourceQuoteId?: string;
+  /**
+   * Phase 42 — `depositService.createDepositDocument` only: makes this a
+   * `kind = 'DEPOSIT'` bill (a prepayment) for that order. Its single line is
+   * on the supplier-prepayment (Asset) account, already validated by
+   * depositService. Never exposed in billSchema.
+   */
+  depositForOrderId?: string;
 }
 
 /**
@@ -833,6 +875,7 @@ export async function createBillOnClient(
       paymentTermsCode: resolvedDue.paymentTermsCode,
       placeholders: options.placeholders,
       sourceQuoteId: options.sourceQuoteId,
+      depositForOrderId: options.depositForOrderId,
     },
     totals,
     options.equityAccountId ?? null,
@@ -978,14 +1021,17 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
   try {
     await beginTransaction(client);
 
-    const { rows: statusRows } = await client.query<{ status: string }>(
-      'SELECT status FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE',
+    const { rows: statusRows } = await client.query<{ status: string; kind: string }>(
+      'SELECT status, kind FROM bills WHERE id = $1 AND org_id = $2 FOR UPDATE',
       [id, orgId],
     );
     const statusRow = statusRows[0];
     if (statusRow === undefined) throw new ApiError(404, 'Bill not found');
     if (statusRow.status !== 'DRAFT' && statusRow.status !== 'AWAITING_APPROVAL') {
       throw new ApiError(409, 'Only a draft or in-review bill can be edited');
+    }
+    if (statusRow.kind === 'DEPOSIT') {
+      throw new ApiError(409, 'A prepayment bill cannot be edited. Delete it and record a new prepayment from the order.');
     }
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
@@ -1055,6 +1101,14 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
       ],
     );
 
+    await assertOrderLineLinksOnClient(
+      client,
+      orgId,
+      'PURCHASE',
+      input.vendorId,
+      currencyCode,
+      totals.flatMap((t) => (t.input.orderLineId ? [t.input.orderLineId] : [])),
+    );
     await insertBillLines(client, orgId, id, totals);
 
     await client.query('COMMIT');
@@ -1566,6 +1620,12 @@ export async function voidBill(
       );
       if (noteRows[0]?.has_notes === true) {
         throw new ApiError(409, 'This bill has debit notes. Void the debit notes first.');
+      }
+
+      // Phase 42 — a bill that took a prepayment, or that is the prepayment,
+      // cannot disappear from under a POSTED application.
+      if (await hasPostedDepositApplicationsOnClient(client, orgId, 'bill', id)) {
+        throw new ApiError(409, 'Void the deposit applications on this bill first');
       }
     }
 

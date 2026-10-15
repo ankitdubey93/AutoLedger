@@ -554,6 +554,33 @@ An offer before the document that bills it: a **sales quote** to a customer beco
 
 Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-41--quotes-sales-and-purchase-accounting--applied).
 
+### Phase 42 — quote follow-ups: orders, partial billing, deposits ✅ shipped
+
+Closes the Phase 41 "not built" list, except a qualified e-signature. The accounting-relevant parts are orders and deposits; the rest is workflow.
+
+**Settings, timezone, templates, verified email, PDF.** Quote prefixes, next numbers, default validity and default terms are editable in Settings → Invoices. Quote dates (validity, expiry, revision date, conversion default) use the organization's timezone (`ledger_settings.timezone`; an unknown zone is rejected on save); every other document keeps UTC "today". Quote emails use editable templates per direction with `[Quote Number]`, `[Quote Total]`, `[Valid Until]`, `[Quote Title]`. An org can require a signer to verify their email with a 6-digit code before accepting; the evidence records that the email was verified (email-possession evidence, **not** a qualified e-signature). A quote downloads as an A4 PDF (staff and recipient).
+
+**Sales and purchase orders.** A quote (or a hand-made order) becomes an order `SO-`/`PO-`: `DRAFT → CONFIRMED → CLOSED | CANCELLED`, `CLOSED → CONFIRMED`. An order **posts nothing** and moves no stock. Invoices and bills are raised against it for part of each line's quantity (partial conversion): their lines carry `order_line_id`, billed quantity is derived from non-void linked lines, and it can never exceed the ordered quantity (service check under lock plus a deferred database trigger). Voiding an invoice or deleting a draft frees the quantity. An order with a live invoice cannot be cancelled. Cancelling an order does not revert the quote it came from.
+
+**Deposits and prepayments (IFRS 15 contract liability).** On a CONFIRMED, base-currency order a **deposit invoice** (`kind = 'DEPOSIT'`) or **deposit bill** is raised, 0% tax, one line:
+
+| Event | Sales | Purchase |
+|---|---|---|
+| Deposit invoice issued / bill approved | DR 1120 Accounts Receivable · CR **2130 Customer Deposits** | DR **1150 Supplier Prepayments** · CR 2100 Accounts Payable |
+| Deposit paid | ordinary payment | ordinary payment |
+| Deposit applied to the final invoice/bill (`source_type 'deposit_application'`) | DR 2130 · CR 1120 | DR 2100 · CR 1150 |
+| Application voided | the reversing entry (keeps `source_type 'deposit_application'`) | same |
+
+Customer deposits are a liability until the work is delivered, not revenue; supplier prepayments are an asset (a receivable-like claim on goods or services). Rules: only what has been **paid** (payment allocations) minus earlier applications may be applied; the amount cannot exceed the target's amount due; the target must have a line linked to the deposit's order; a deposit document with a POSTED application cannot be voided, and a payment that funds an applied deposit cannot be voided until the applications are voided; deposit documents are locked against draft edits. An application is a third settlement source beside payments and credit/debit-note allocations, defined once in `settlementSql.ts`, so aging, party ledgers, statements and reconciliation include it (AR control = Σ party open items = aging total still holds). A quote can carry `deposit_percent_bp`; converting it to an order creates the DRAFT deposit document, converting it straight to an invoice is refused.
+
+- [x] Quote settings UI, org-timezone quote dates, editable quote email templates, verified-email acceptance, quote PDF
+- [x] Orders with confirm/close/reopen/cancel, partial invoicing and billing with remaining quantities, a quote converting to an order
+- [x] Deposit invoices and bills, application, void; party ledgers, aging and statements reconciled; cross-tenant isolation tested
+- Not built: a qualified electronic signature (needs a trust-service provider); GST/VAT on advances (deposits carry 0% tax — flag this before using it where advances are taxed); foreign-currency deposits (refused); refund of an unapplied deposit (a cancelled order with a paid deposit leaves a 2130 balance; clear it with a manual journal — 2130 is not a control account); a goods-receipt / delivery-note document (stock still moves on the invoice/bill); non-Latin text in the PDF; a product-wide timezone; PDF attached to emails.
+- Known gap: the staff PDF download (`downloadQuotePdf`) uses a plain `fetch` without `apiDownloadBlob`'s 401-refresh, so an expired access token fails the download until the page next refreshes its session.
+
+Full detail: [roadmap.md § Phase 42, as delivered](roadmap.md#phase-42-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-42--quote-follow-ups-templates-verified-email-orders-deposits-accounting--applied).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.
@@ -568,7 +595,7 @@ Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-deliv
   - emailed statements with user-editable templates and a revocable public link;
   - Stripe card payment from that link, recorded as an ordinary receipt.
   - Not built within it: aging on as-at settlement, per-currency statements, PDF attachments, Stripe Connect, refunds, partial invoice payment, a sweep for PENDING intents, scheduled statement runs — see [Phase 39, as delivered](roadmap.md#phase-39-as-delivered).
-- **Quotes are shipped** (Phase 41). Not built within it: partial conversion, sales and purchase orders, deposits/prepayments on acceptance, a qualified e-signature, PDF output, editable quote emails, a settings UI for quote prefixes/default validity/default terms, organization-timezone expiry (UTC today, like every document) — see [Phase 41, as delivered](roadmap.md#phase-41-as-delivered).
+- **Quotes are shipped** (Phase 41); its follow-ups — settings UI, org-timezone dates, editable emails, verified-email acceptance, PDF, orders with partial billing, and deposits — are shipped in [Phase 42](#phase-42--quote-follow-ups-orders-partial-billing-deposits--shipped). **Still not built:** a qualified e-signature (QES needs a trust-service provider), auto-conversion on acceptance.
 - **Payment terms, item catalogue and party import are shipped** (Phase 24). Not built within it: discount/end-of-month terms ("2/10 Net 30" — net-days only; a discount needs a second term kind and a GL posting), any inventory mechanic on `items` *within Phase 24* (on-hand quantity, stock movement and COGS posting arrived in Phase 32 — see the Phase 32 section above; item-level reporting is still not built), an importer for anything other than customers and vendors (no contacts, no products, no opening AR/AP balances via this path). The UI-only "Expense" label is a deliberate half-measure, not a gap: the schema, API, types and every test still say `bills` — see [Phase 24, as delivered](roadmap.md#phase-24-as-delivered).
 
 When a phase lands, tick its boxes and update [roadmap.md](roadmap.md), [api.md](api.md), [schema.md](schema.md) and `CLAUDE.md` in the same change. A doc that describes a feature which does not exist is the failure mode that killed the previous build ([guardrails.md](guardrails.md#appendix--lessons-from-the-discarded-build)).

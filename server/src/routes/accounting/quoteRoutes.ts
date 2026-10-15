@@ -31,6 +31,7 @@ export function buildQuoteRouter(direction: QuoteDirection): Router {
 
   router.get('/', authenticate, requirePermission(key.view), c.list);
   router.get('/:id', authenticate, requirePermission(key.view), c.getOne);
+  router.get('/:id/pdf', authenticate, requirePermission(key.view), c.pdf);
 
   router.post('/', authenticate, requirePermission(key.edit), c.create);
   router.patch('/:id', authenticate, requirePermission(key.edit), c.update);
@@ -41,6 +42,7 @@ export function buildQuoteRouter(direction: QuoteDirection): Router {
   router.post('/:id/accept', authenticate, requirePermission(key.send), c.accept);
   router.post('/:id/decline', authenticate, requirePermission(key.send), c.decline);
   router.post('/:id/void', authenticate, requirePermission(key.send), c.void_);
+  router.post('/:id/email-preview', authenticate, requirePermission(key.send), c.emailPreview);
   router.post('/:id/links/:linkId/revoke', authenticate, requirePermission(key.send), c.revokeLink);
 
   router.post('/:id/convert', authenticate, requirePermission(key.convert), c.convert);

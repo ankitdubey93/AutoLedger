@@ -142,6 +142,24 @@ export function renderEmail(template: EmailTemplate, data: Record<string, unknow
         `${purchase ? 'Please confirm or decline these prices' : 'You can accept or decline it online'} until ${validUntil}.`,
       ];
       const action = { label: purchase ? 'Review and confirm' : 'Review and accept', url };
+      // Phase 42: a filled template (subject + body) replaces the built-in
+      // wording. Rows enqueued before that carry neither and keep the above.
+      const templSubject = str(data, 'subject');
+      const templBody = str(data, 'body');
+      if (templSubject !== '' && templBody !== '') {
+        const paragraphs = [
+          ...message,
+          ...templBody
+            .split(/\n\s*\n/)
+            .map((p) => p.trim())
+            .filter((p) => p !== ''),
+        ];
+        return {
+          subject: templSubject,
+          html: layout(heading, paragraphs.map((p) => esc(p).replace(/\n/g, '<br>')), action),
+          text: textBody(paragraphs, action),
+        };
+      }
       return {
         subject: heading,
         html: layout(heading, lines.map((p) => esc(p).replace(/\n/g, '<br>')), action),
@@ -167,6 +185,19 @@ export function renderEmail(template: EmailTemplate, data: Record<string, unknow
         subject: `Quote ${number} ${verb} — ${party}`,
         html: layout(`Quote ${number} ${verb}`, lines.map(esc), action),
         text: textBody(lines, action),
+      };
+    }
+    case 'quote_acceptance_code': {
+      const number = str(data, 'quoteNumber');
+      const code = str(data, 'code');
+      const lines = [
+        `Your verification code is ${code}.`,
+        'It expires in 10 minutes. If you did not ask for it, ignore this email.',
+      ];
+      return {
+        subject: `Your code to accept quote ${number}`,
+        html: layout(`Accept quote ${number}`, lines.map(esc), null),
+        text: textBody(lines, null),
       };
     }
     case 'invitation_accepted': {

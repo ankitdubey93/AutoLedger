@@ -68,6 +68,15 @@ const INVOICE_SETTINGS_DEFAULTS: Omit<InvoiceSettings, 'configured'> = {
   showPaymentTerms: true,
   showDueDate: true,
   bankDetails: null,
+  quotePrefix: 'QU-',
+  quoteNextNumber: 1,
+  purchaseQuotePrefix: 'PQ-',
+  purchaseQuoteNextNumber: 1,
+  defaultQuoteValidityDays: 30,
+  defaultQuoteTerms: null,
+  quoteAcceptanceRequiresCode: false,
+  customerDepositAccountId: null,
+  supplierPrepaymentAccountId: null,
 };
 
 export interface UpdateInvoiceSettingsInput {
@@ -96,6 +105,15 @@ export interface UpdateInvoiceSettingsInput {
   showPaymentTerms?: boolean | undefined;
   showDueDate?: boolean | undefined;
   bankDetails?: string | null | undefined;
+  quotePrefix?: string | undefined;
+  quoteNextNumber?: number | undefined;
+  purchaseQuotePrefix?: string | undefined;
+  purchaseQuoteNextNumber?: number | undefined;
+  defaultQuoteValidityDays?: number | undefined;
+  defaultQuoteTerms?: string | null | undefined;
+  quoteAcceptanceRequiresCode?: boolean | undefined;
+  customerDepositAccountId?: string | null | undefined;
+  supplierPrepaymentAccountId?: string | null | undefined;
 }
 
 interface SettingsRow {
@@ -124,6 +142,15 @@ interface SettingsRow {
   show_payment_terms: boolean;
   show_due_date: boolean;
   bank_details: string | null;
+  quote_prefix: string;
+  quote_next_number: number;
+  purchase_quote_prefix: string;
+  purchase_quote_next_number: number;
+  default_quote_validity_days: number;
+  default_quote_terms: string | null;
+  quote_acceptance_requires_code: boolean;
+  customer_deposit_account_id: string | null;
+  supplier_prepayment_account_id: string | null;
 }
 
 function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
@@ -153,6 +180,15 @@ function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
     showPaymentTerms: row.show_payment_terms,
     showDueDate: row.show_due_date,
     bankDetails: row.bank_details,
+    quotePrefix: row.quote_prefix,
+    quoteNextNumber: row.quote_next_number,
+    purchaseQuotePrefix: row.purchase_quote_prefix,
+    purchaseQuoteNextNumber: row.purchase_quote_next_number,
+    defaultQuoteValidityDays: row.default_quote_validity_days,
+    defaultQuoteTerms: row.default_quote_terms,
+    quoteAcceptanceRequiresCode: row.quote_acceptance_requires_code,
+    customerDepositAccountId: row.customer_deposit_account_id,
+    supplierPrepaymentAccountId: row.supplier_prepayment_account_id,
     configured: true,
   };
 }
@@ -165,7 +201,10 @@ export async function getInvoiceSettings(orgId: string): Promise<InvoiceSettings
             show_tax_number, show_business_number, show_legal_name,
             billing_address, payment_terms, footer_notes, accent_color,
             template_id, document_title, font_family, density, show_logo, show_org_address,
-            show_payment_terms, show_due_date, bank_details
+            show_payment_terms, show_due_date, bank_details,
+            quote_prefix, quote_next_number, purchase_quote_prefix, purchase_quote_next_number,
+            default_quote_validity_days, default_quote_terms, quote_acceptance_requires_code,
+            customer_deposit_account_id, supplier_prepayment_account_id
        FROM ledger_invoice_settings
       WHERE org_id = $1`,
     [orgId],
@@ -209,6 +248,15 @@ export async function updateInvoiceSettings(
     showPaymentTerms: 'show_payment_terms',
     showDueDate: 'show_due_date',
     bankDetails: 'bank_details',
+    quotePrefix: 'quote_prefix',
+    quoteNextNumber: 'quote_next_number',
+    purchaseQuotePrefix: 'purchase_quote_prefix',
+    purchaseQuoteNextNumber: 'purchase_quote_next_number',
+    defaultQuoteValidityDays: 'default_quote_validity_days',
+    defaultQuoteTerms: 'default_quote_terms',
+    quoteAcceptanceRequiresCode: 'quote_acceptance_requires_code',
+    customerDepositAccountId: 'customer_deposit_account_id',
+    supplierPrepaymentAccountId: 'supplier_prepayment_account_id',
   } as const;
 
   const columns: string[] = [];
@@ -242,7 +290,9 @@ export async function updateInvoiceSettings(
       pgErrorCode(err) === PG_FOREIGN_KEY_VIOLATION &&
       (constraint === 'fk_invoice_settings_receivable_account' ||
         constraint === 'fk_invoice_settings_revenue_account' ||
-        constraint === 'fk_invoice_settings_tax_account')
+        constraint === 'fk_invoice_settings_tax_account' ||
+        constraint === 'fk_ledger_invoice_settings_customer_deposit_account' ||
+        constraint === 'fk_ledger_invoice_settings_supplier_prepayment_account')
     ) {
       throw new ApiError(422, 'Account does not exist in this organization');
     }
@@ -343,6 +393,8 @@ const SERIES_COUNTER = {
   DEBIT_NOTE: { prefix: 'debit_note_prefix', next: 'debit_note_next_number' },
   SALES_QUOTE: { prefix: 'quote_prefix', next: 'quote_next_number' },
   PURCHASE_QUOTE: { prefix: 'purchase_quote_prefix', next: 'purchase_quote_next_number' },
+  SALES_ORDER: { prefix: 'order_prefix', next: 'order_next_number' },
+  PURCHASE_ORDER: { prefix: 'purchase_order_prefix', next: 'purchase_order_next_number' },
 } as const;
 
 type SeriesKind = keyof typeof SERIES_COUNTER;
@@ -384,6 +436,15 @@ export async function allocateQuoteNumber(
   direction: 'SALES' | 'PURCHASE',
 ): Promise<string> {
   return allocateSeriesNumber(client, orgId, direction === 'SALES' ? 'SALES_QUOTE' : 'PURCHASE_QUOTE');
+}
+
+/** Phase 42 — an order's number, allocated at confirmation (a deleted draft burns no number). */
+export async function allocateOrderNumber(
+  client: Queryable,
+  orgId: string,
+  direction: 'SALES' | 'PURCHASE',
+): Promise<string> {
+  return allocateSeriesNumber(client, orgId, direction === 'SALES' ? 'SALES_ORDER' : 'PURCHASE_ORDER');
 }
 
 /** Mirrors migrations 007 and 089's column DEFAULTs, for an org with no settings row yet. */

@@ -45,6 +45,8 @@ const KIND_LABELS: Record<PartyLedgerEntryKind, string> = {
   CREDIT_NOTE_VOID: 'Credit note voided',
   DEBIT_NOTE: 'Debit note',
   DEBIT_NOTE_VOID: 'Debit note voided',
+  DEPOSIT_APPLICATION: 'Deposit applied',
+  DEPOSIT_APPLICATION_VOID: 'Deposit application voided',
 };
 
 /** Phase 26 — a note row links to its own page, not the party's invoice/expense list. */

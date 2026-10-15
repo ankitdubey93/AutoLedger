@@ -14,6 +14,8 @@ export const OUTBOX_EVENT_TYPES = [
   'quote.accepted',
   'quote.declined',
   'quote.converted',
+  'order.confirmed',
+  'order.cancelled',
 ] as const;
 
 export type OutboxEventType = (typeof OUTBOX_EVENT_TYPES)[number];

@@ -3,6 +3,7 @@ import * as settingsController from '../../controllers/accounting/settingsContro
 import * as invoiceSettingsController from '../../controllers/accounting/invoiceSettingsController.js';
 import * as statementController from '../../controllers/accounting/statementController.js';
 import * as statementEmailController from '../../controllers/accounting/statementEmailController.js';
+import * as quoteEmailTemplateController from '../../controllers/accounting/quoteEmailTemplateController.js';
 import * as onlinePaymentController from '../../controllers/accounting/onlinePaymentController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { allowAnyMember, requirePermission } from '../../middleware/rbac.js';
@@ -40,6 +41,12 @@ router.get('/statement-email-templates', authenticate, requirePermission('statem
 router.post('/statement-email-templates', authenticate, requirePermission('settings.manage'), statementEmailController.createTemplate);
 router.patch('/statement-email-templates/:id', authenticate, requirePermission('settings.manage'), statementEmailController.updateTemplate);
 router.delete('/statement-email-templates/:id', authenticate, requirePermission('settings.manage'), statementEmailController.deleteTemplate);
+
+// Phase 42 Slice C — quote email templates.
+router.get('/quote-email-templates', authenticate, requirePermission('quotes.view'), quoteEmailTemplateController.list);
+router.post('/quote-email-templates', authenticate, requirePermission('settings.manage'), quoteEmailTemplateController.create);
+router.patch('/quote-email-templates/:id', authenticate, requirePermission('settings.manage'), quoteEmailTemplateController.update);
+router.delete('/quote-email-templates/:id', authenticate, requirePermission('settings.manage'), quoteEmailTemplateController.remove);
 
 // Phase 39c — online payment of statements.
 router.get('/online-payments', authenticate, allowAnyMember, onlinePaymentController.getSettings);

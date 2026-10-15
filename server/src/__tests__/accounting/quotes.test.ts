@@ -1,4 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Response } from 'supertest';
 import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
@@ -489,5 +490,41 @@ describe('quotes — cross-tenant isolation', () => {
     // And org A's customer is not a valid party for org B.
     const res = await agentB.post(QUOTES).send(await salesPayload(userB.orgId, customerA));
     expect(res.status).toBe(422);
+  });
+});
+
+/** supertest only buffers text/JSON by default; collect the raw PDF bytes. */
+function binary(res: Response, cb: (err: Error | null, body: Buffer) => void): void {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+}
+
+describe('quotes — PDF', () => {
+  it('GET /quotes/:id/pdf -> 200 application/pdf, body starts %PDF-, filename QU-000001.pdf', async () => {
+    const id = await sentQuote(agentA, QUOTES, await salesPayload(userA.orgId, customerA));
+    const res = await agentA.get(`${QUOTES}/${id}/pdf`).buffer(true).parse(binary);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('application/pdf');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="QU-000001.pdf"');
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect(res.headers['x-content-type-options']).toBe('nosniff');
+    const body = res.body as Buffer;
+    expect(body.subarray(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(Number(res.headers['content-length'])).toBe(body.length);
+  });
+
+  it('a draft downloads as quote-draft.pdf', async () => {
+    const id = await draftQuote(agentA, QUOTES, await salesPayload(userA.orgId, customerA));
+    const res = await agentA.get(`${QUOTES}/${id}/pdf`).buffer(true).parse(binary);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-disposition']).toBe('attachment; filename="quote-draft.pdf"');
+  });
+
+  it("org B cannot download org A's quote PDF -> 404", async () => {
+    const id = await sentQuote(agentA, QUOTES, await salesPayload(userA.orgId, customerA));
+    expect((await agentB.get(`${QUOTES}/${id}/pdf`)).status).toBe(404);
+    // Wrong direction is also a 404.
+    expect((await agentA.get(`${PURCHASE_QUOTES}/${id}/pdf`)).status).toBe(404);
   });
 });

@@ -546,6 +546,8 @@ A missing `ledger_invoice_settings` row is **not** a 404 — `GET /` returns `20
 
 **Invoice template fields — Phase 30.** Nine more optional fields on the same `PATCH /`: `templateId` — one of `'classic'`/`'modern'`/`'compact'`, a **closed set of code-defined layouts**, not user-authored markup (`400` for any other value; zod rejects it before it reaches SQL, and the DB CHECK `ck_invoice_settings_template_id` rejects it a second time if the schema is ever bypassed) · `documentTitle` — non-blank, `<= 24` chars, the label printed above the invoice number (default `'INVOICE'`) · `fontFamily` — `'sans'`/`'serif'` · `density` — `'comfortable'`/`'compact'` · `showLogo`/`showOrgAddress`/`showPaymentTerms`/`showDueDate` — booleans, each gating one disclosure block on the rendered document · `bankDetails` — free text, `<= 500` chars, nullable, rendered as its own footer block when set. These render through one shared component, `InvoiceDocument.tsx`, used identically by the real invoice page and the template editor's live preview — see [ledger-core.md § Phase 30](accounting.md#phase-30--invoice-templates-organization-profile--settings-tabs--shipped).
 
+**Quote and order fields — Phase 42.** Eleven more optional fields on the same `PATCH /` (and returned by `GET /`): `quotePrefix` (default `QU-`, ≤ 12), `quoteNextNumber` (default 1, 1–9 999 999), `purchaseQuotePrefix` (`PQ-`), `purchaseQuoteNextNumber`, `defaultQuoteValidityDays` (default 30, 1–365), `defaultQuoteTerms` (≤ 5000, nullable), `quoteAcceptanceRequiresCode` (boolean, default `false` — see verified-email acceptance under Quotes), `customerDepositAccountId` and `supplierPrepaymentAccountId` (nullable account ids; unset falls back to the default chart's `2130` / `1150`; a foreign or missing account is `422`). The order counters (`order_prefix` `SO-`, `purchase_order_prefix` `PO-` and their next numbers) exist in the table and are consumed by order confirmation but are **not** exposed here. Quote numbers are freely settable like invoice numbers; sending a quote whose number is already used is `409 That quote number is already in use — raise the next quote number in Settings → Invoices`.
+
 Failure paths: `400` from the schema (invalid `accentColor` — must be `#rrggbb`, invalid basis points, invalid padding, invalid `templateId`/`fontFamily`/`density`, blank `documentTitle`) · `400 No fields to update` · `422 Account does not exist in this organization`.
 
 #### Customers — `/api/v1/customers` — Phase 3.8
@@ -709,7 +711,9 @@ The same resource in two directions, built by one router factory. The direction 
 | POST | `/:id/decline` | `…send` | Record a decline received another way |
 | POST | `/:id/void` | `…send` | Withdraw a SENT or ACCEPTED quote; revokes its live link |
 | POST | `/:id/links/:linkId/revoke` | `…send` | Revoke a live review link |
-| POST | `/:id/convert` | `quotes.convert` (needs `invoices.edit`) · `purchase_quotes.convert` (needs `bills.edit`) | ACCEPTED → a **DRAFT** invoice / bill — `201 { document: { kind: 'INVOICE' \| 'BILL', id } }` |
+| POST | `/:id/convert` | `quotes.convert` (needs `invoices.edit`) · `purchase_quotes.convert` (needs `bills.edit`) | ACCEPTED → a **DRAFT** invoice / bill, or (`target: 'ORDER'`, Phase 42) a CONFIRMED sales / purchase order — `201 { document: { kind: 'INVOICE' \| 'BILL' \| 'ORDER', id } }` |
+| POST | `/:id/email-preview` | `…send` | Phase 42 — body `{ templateId: uuid \| null }`; renders the quote email's `subject` and `body` exactly as send would, without sending — `200 { success, subject, body }` |
+| GET | `/:id/pdf` | `…view` | Phase 42 — the quote as an A4 PDF (`application/pdf`, `Content-Disposition: attachment; filename="QU-000001.pdf"` — `-rev2` suffix from revision 2; `quote-draft.pdf` for a draft; `Cache-Control: no-store`, `X-Content-Type-Options: nosniff`). `404` for another org's quote |
 
 **Nothing here posts to the ledger.** A quote is an offer; under IFRS 15 / ASC 606 a contract exists only on acceptance, and revenue/expense is recognised by the invoice/bill it becomes, when that is issued/approved. Conversion creates a draft through `invoiceService.createInvoiceOnClient` / `billService.createBillOnClient` on the same transaction.
 
@@ -718,6 +722,10 @@ The same resource in two directions, built by one router factory. The direction 
 **`POST /:id/send`** — `{ delivery: 'EMAIL' | 'MANUAL', toEmail, message }`. On a DRAFT: refuses (`422`) a quote already past `validUntil`; allocates `QU-000001` / `PQ-000001` (a revision inherits its predecessor's number, so drafts never burn a number); re-snapshots the party; stores `contentSha256` (SHA-256 of the canonical content); supersedes a SENT predecessor and revokes its links; emits `quote.sent`. `EMAIL` also revokes any live link, stores a new token **as its hash only** in `quote_links` (valid through `validUntil` + 30 days, read-only after expiry) and enqueues `quote_sent` with the `/quote/:token` link. On a SENT quote only `EMAIL` is allowed (re-send).
 
 **`POST /:id/convert`** — `{ documentDate?, dueDate?, vendorReference? }`. Due date: the explicit date, else the quote's payment term, else `default_due_days`. Purchase: `vendorReference` defaults to the quote's `partyReference`, else its number. The new document carries `sourceQuote: { id, quoteNumber, revision }`. Once only (`ux_invoices_source_quote` / `ux_bills_source_quote`, even after a void). **Deleting** that draft returns the quote to ACCEPTED; voiding an issued one does not.
+
+**Phase 42 changes to quotes.** `POST /:id/send` also accepts `templateId` (uuid or `null` = the org's default template for the direction, else the built-in; another org's id is `422 Email template not found`). `POST /` and `PATCH /:id` accept `depositPercentBp` (integer 1–10000, nullable): the share asked as a deposit on acceptance; shown on the quote, in its content hash, and on the PDF; refused (`422`) on a non-base-currency quote. `POST /:id/convert` accepts `target` (`'INVOICE'` default, or `'ORDER'`); a quote with a deposit percentage refuses `target: 'INVOICE'` (`422 This quote asks for a deposit — convert it to an order`) and, converted to an order, also creates the DRAFT deposit invoice/bill in the same transaction. Cancelling the resulting order does not revert the quote. **Quote dates use the organization's timezone** (`ledger_settings.timezone`): validity, expiry, the revision date, the conversion default date and the sweep; every other document keeps UTC "today". `PATCH /settings` now rejects an unknown zone with `400 Unknown time zone`.
+
+**Verified-email acceptance (Phase 42).** When `quoteAcceptanceRequiresCode` is on, the public view reports `requiresEmailCode: true`; the signer asks for a 6-digit code (below), and `accept` must carry `signerEmail` and `code`. The code is stored only as a hash, expires in 10 minutes, allows 5 attempts and at most 5 codes per link per hour (`429 Too many codes requested — try again later`). Failures are `422`: `Enter your email to receive a verification code`, `Enter the verification code we emailed you`, `Request a new verification code` (none live, expired, or issued to a different email), `That code is not correct`, `Too many attempts — request a new code`. A wrong guess is counted even though the request fails. The evidence row records `signerEmailVerified` (also returned on the internal `response`). **This is email-possession evidence, not a qualified electronic signature.**
 
 Status filter on `GET /`: `status` is the **effective** status — `SENT` excludes, and `EXPIRED` includes, sent quotes past `validUntil`. With no filter, SUPERSEDED versions are omitted. Also `partyId`, `from`/`to` (quote date), `q` (number, party, title, reference), `sort` (`quoteDate`, `validUntil`, `number`, `party`, `total`, `status`) and `dir`.
 
@@ -729,12 +737,61 @@ Failure paths: `400` from the schema · `404 Quote not found` (also another org'
 |---|---|---|
 | GET | `/public/quotes/:token` | `{ quote: { merchant: {name, addressLines, hasLogo}, direction, quoteNumber, revision, effectiveStatus, canRespond, partyName, partyAddress, partyTaxNumber, partyReference, quoteDate, validUntil, currencyCode, title, notes, terms, paymentTerms, lines[{lineNumber, description, quantityMilli, unitPriceCents, taxRateBp, netCents, taxCents}], subtotalCents, taxCents, totalCents, contentSha256, response: {response, signerName, respondedAt} \| null } }`. No ids, accounts or evidence detail. Stamps `last_viewed_at` |
 | GET | `/public/quotes/:token/logo` | The org logo (PNG/JPEG/GIF/WebP only), or 404 |
-| POST | `/public/quotes/:token/accept` | `{ signerName (1–200), signerEmail?, acceptTerms: true, contentSha256 }`. Writes insert-only evidence (name, email, terms, IP, user agent, the hash) and moves SENT → ACCEPTED; emits `quote.accepted`; emails the sender (`quote_responded`). `400` without `acceptTerms: true` or a name · `409` if the hash no longer matches, the quote expired, or it was already answered |
+| GET | `/public/quotes/:token/pdf` | Phase 42 — the same PDF as the staff route, no session; an unknown/revoked token is the uniform `404` |
+| POST | `/public/quotes/:token/verify-email` | Phase 42 — `{ signerEmail }` (lowercased); emails a fresh 6-digit code to it — `202 { success, expiresAt }`, `Cache-Control: no-store`; `409 This quote is no longer open for a response`, `429` past 5 codes per link per hour |
+| POST | `/public/quotes/:token/accept` | `{ signerName (1–200), signerEmail?, code? (6 digits), acceptTerms: true, contentSha256 }`. Writes insert-only evidence (name, email, terms, IP, user agent, the hash) and moves SENT → ACCEPTED; emits `quote.accepted`; emails the sender (`quote_responded`). `400` without `acceptTerms: true` or a name · `409` if the hash no longer matches, the quote expired, or it was already answered |
 | POST | `/public/quotes/:token/decline` | `{ reason? (≤ 1000) }`. SENT → DECLINED; emits `quote.declined` |
 
 Webhook events: `quote.sent`, `quote.accepted`, `quote.declined`, `quote.converted` (payload: `quoteId`, `direction`, `quoteNumber`, and per event `revision`/`totalCents`/`currencyCode`, `channel`, or `documentKind`/`documentId`).
 
-**Not built:** partial conversion (several invoices from one quote), sales/purchase orders, deposits, a qualified electronic signature (acceptance is a typed name + ticked terms + evidence), PDF output (print from the browser), editable quote email templates, a settings UI for the `QU-`/`PQ-` prefixes, default validity and default terms (the columns exist).
+**Not built:** a qualified electronic signature (QES — acceptance is a typed name, ticked terms, optional verified-email code and evidence), auto-conversion on acceptance, non-Latin text in the PDF (built-in Helvetica is WinAnsi), PDF attached to emails. (Orders, partial billing, deposits, the settings fields, templates, verified email, PDF and the org timezone were delivered in Phase 42.)
+
+#### Quote email templates — `/api/v1/settings/quote-email-templates` — Phase 42
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/?direction=SALES\|PURCHASE` | `quotes.view` | The org's templates for that direction, or the built-in one (`builtIn: true`, `id: null`) when none is stored — `{ success, templates }`; no/invalid `direction` is `400 direction must be SALES or PURCHASE` |
+| POST | `/` | `settings.manage` | `{ direction, name (≤100), subject (≤200), body (≤5000), isDefault }` — `201 { success, template }`. Making a template default un-defaults the previous one |
+| PATCH | `/:id` | `settings.manage` | Any of `name`, `subject`, `body`, `isDefault` — `200 { success, template }` |
+| DELETE | `/:id` | `settings.manage` | `204` |
+
+Placeholders (surface `QUOTE`): `[Quote Number]`, `[Quote Total]`, `[Valid Until]`, `[Quote Title]`, plus the contact, organisation and date families. Only `{{double-brace}}` tokens are refused (`422`); `[Bracket text]` is plain prose. `404 Email template not found` for a missing or other org's id.
+
+#### Orders — `/api/v1/orders` (sales order, `SO-`) · `/api/v1/purchase-orders` (purchase order, `PO-`) — Phase 42
+
+One router per direction; a sales order id is a `404` on the purchase path. Lifecycle `DRAFT → CONFIRMED → CLOSED | CANCELLED`, `CLOSED → CONFIRMED` (reopen). **No order action writes a journal entry.** Permissions `sales_orders.view|edit|convert` and `purchase_orders.view|edit|convert`.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/` | `…view` | Paginated `{ success, count, totalCount, currentPage, totalPages, orders }`; filters `status`, `partyId`, `from`, `to`, `q`, `sort` ∈ `orderDate,number,party,total,status`, `dir` |
+| GET | `/:id` | `…view` | `{ success, order }` — lines carry derived `billedQuantityMilli` and `remainingQuantityMilli`; `billingStatus` is `NOT_BILLED` / `PARTIALLY_BILLED` / `FULLY_BILLED`; `documents` lists linked invoices/bills (deposit documents included) |
+| POST | `/` | `…edit` | Create a DRAFT — `201`. Body as a quote with `orderDate` and optional `expectedDate` |
+| PATCH | `/:id` | `…edit` | Replace a draft (`409 Only a draft order can be edited`) |
+| DELETE | `/:id` | `…edit` | Delete a draft — `204` (`409 Only a draft order can be deleted — cancel it instead`) |
+| POST | `/:id/confirm` | `…edit` | Allocates the number, re-snapshots the party; emits `order.confirmed` |
+| POST | `/:id/close` · `/:id/reopen` | `…edit` | CONFIRMED ↔ CLOSED |
+| POST | `/:id/cancel` | `…edit` | `{ reason }`; refused `409 Void the invoices raised against this order first` while a non-void invoice/bill line links to it; emits `order.cancelled` |
+| POST | `/:id/convert` | `…convert` | `{ documentDate?, dueDate?, vendorReference?, lines?: [{ orderLineId, quantityMilli }] }` — raises a **DRAFT** invoice (sales) or bill (purchase) for the given quantities (`lines: null` = everything remaining) — `201 { success, document: { kind, id } }`. `409 Only a confirmed order can be invoiced`, `409 Everything on this order has been billed`, `422 Line <n> has only <x> left to bill`. Purchase `vendorReference` defaults to `<orderNumber>-<n>` |
+| POST | `/:id/deposit` | `…convert` | See Deposits |
+
+Invoice and bill lines accept `orderLineId` (uuid or `null`). The link is validated when a draft is saved: the order must be CONFIRMED and belong to the same party and currency (`422 Order line not found` — also another org's —, `Only a confirmed order can be invoiced`, `That order belongs to a different customer|vendor`, `An order can only be billed in its own currency`). Total linked quantity can never exceed the ordered quantity: checked under a row lock, and again by a deferred database trigger at commit (`422` with the order-line message). Voiding the invoice/bill or deleting the draft frees the quantity.
+
+#### Deposits and prepayments — Phase 42
+
+A deposit is an invoice (`kind: 'DEPOSIT'`) or bill raised against a CONFIRMED order in the **base currency**, 0% tax, one line on `2130 Customer Deposits` (sales, a Liability) or `1150 Supplier Prepayments` (purchase, an Asset). Issuing/approving it posts DR AR / CR 2130 (sales) or DR 1150 / CR AP (purchase). `Invoice`/`Bill` responses gain `kind`, `depositForOrderId`, `depositAppliedCents` and (single read) `depositApplications`; `amountDueCents` subtracts applied deposits.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| POST | `/orders/:id/deposit` · `/purchase-orders/:id/deposit` | `sales_orders.convert` · `purchase_orders.convert` | `{ percentBp \| amountCents (exactly one), documentDate?, dueDate?, vendorReference? }` — creates the DRAFT deposit document — `201 { success, document: { kind, id } }`. `409 Only a confirmed order can take a deposit`, `422 Deposits are available on base-currency orders only`, `422 Deposits on this order would exceed its total`, `422 Give a percentage or an amount` |
+| POST | `/invoices/:id/apply-deposit` | `invoices.issue` | `{ depositDocumentId, amountCents, applicationDate }` — applies a paid deposit to this ISSUED, standard invoice; posts DR 2130 / CR AR — `201 { success, application }` |
+| POST | `/bills/:id/apply-prepayment` | `bills.approve` | Same body on a POSTED, standard bill; posts DR AP / CR 1150 |
+| POST | `/deposit-applications/sales/:id/void` | `invoices.void` | `{ entryDate? }` — voids an application with a reversing journal (the reversal keeps `source_type 'deposit_application'`); `409 This deposit application has already been voided` — `200 { success, application }` |
+| POST | `/deposit-applications/purchase/:id/void` | `bills.void` | Same, purchase direction; an application of the other direction is `404` |
+
+Rules and failures: the target must have at least one line linked to the deposit's order (`422 This deposit belongs to a different order`); `amount ≤ paid on the deposit − already applied` (`422 Only <x> of this deposit has been received and not yet applied`) and `≤ the target's amount due`; the application date may not precede either document; `409 Only an issued invoice can take a deposit` / `…approved bill…`. A deposit document is locked against draft edits (`409`). A deposit document or target with a POSTED application cannot be voided (`409 Void the deposit applications on this invoice first` / `…bill first`), and a payment that funds an applied deposit cannot be voided (`409`, same message) until the applications are voided. Webhook events added: `order.confirmed`, `order.cancelled`.
+
+**Not built:** foreign-currency deposits, GST/VAT on advances, cash refund of an unapplied deposit (a cancelled order with a paid deposit leaves a 2130 balance for a manual journal), a goods-receipt / delivery-note document.
+
 
 #### Products & Services (items) — `/api/v1/items` — Phase 24, extended in Phase 32
 

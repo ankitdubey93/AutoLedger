@@ -173,8 +173,8 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
 
     const lines: { invoiceId: string; amountCents: number }[] = [];
     for (const invoice of rows) {
-      const { paidCents, noteAppliedCents } = await settledCentsOnClient(client, send.orgId, 'invoice_id', invoice.id);
-      const outstanding = parseCents(invoice.total_cents) - paidCents - noteAppliedCents;
+      const { paidCents, noteAppliedCents, depositAppliedCents } = await settledCentsOnClient(client, send.orgId, 'invoice_id', invoice.id);
+      const outstanding = parseCents(invoice.total_cents) - paidCents - noteAppliedCents - depositAppliedCents;
       if (outstanding <= 0) throw new ApiError(422, `Invoice ${invoice.invoice_number ?? invoice.id} is already paid`);
       lines.push({ invoiceId: invoice.id, amountCents: outstanding });
     }

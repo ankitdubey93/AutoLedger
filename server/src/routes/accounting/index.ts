@@ -13,9 +13,11 @@ import statementSendRoutes from './statementSendRoutes.js';
 import publicStatementRoutes from './publicStatementRoutes.js';
 import publicQuoteRoutes from './publicQuoteRoutes.js';
 import { buildQuoteRouter } from './quoteRoutes.js';
+import { buildOrderRouter } from './orderRoutes.js';
 import stripeWebhookRoutes from './stripeWebhookRoutes.js';
 import onlinePaymentRoutes from './onlinePaymentRoutes.js';
 import creditNoteRoutes from './creditNoteRoutes.js';
+import depositRoutes from './depositRoutes.js';
 import customerRoutes from './customerRoutes.js';
 import debitNoteRoutes from './debitNoteRoutes.js';
 import fiscalPeriodRoutes from './fiscalPeriodRoutes.js';
@@ -44,6 +46,8 @@ router.use('/bills', billRoutes);
 router.use('/credit-notes', creditNoteRoutes);
 router.use('/customers', customerRoutes);
 router.use('/debit-notes', debitNoteRoutes);
+// Phase 42 — deposit applications (voids only; applying is on invoices and bills).
+router.use('/deposit-applications', depositRoutes);
 router.use('/fiscal-periods', fiscalPeriodRoutes);
 router.use('/fx-rates', fxRateRoutes);
 router.use('/fx-revaluations', fxRevaluationRoutes);
@@ -51,6 +55,9 @@ router.use('/invoices', invoiceRoutes);
 // Phase 41 — quotes, one router per direction.
 router.use('/quotes', buildQuoteRouter('SALES'));
 router.use('/purchase-quotes', buildQuoteRouter('PURCHASE'));
+// Phase 42 — sales and purchase orders, one router per direction.
+router.use('/orders', buildOrderRouter('SALES'));
+router.use('/purchase-orders', buildOrderRouter('PURCHASE'));
 router.use('/items', itemRoutes);
 router.use('/journals', journalRoutes);
 router.use('/migration-imports', migrationImportRoutes);

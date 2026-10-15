@@ -1,5 +1,7 @@
 import type { RequestHandler } from 'express';
 import * as billService from '../../services/accounting/billService.js';
+import * as depositService from '../../services/accounting/depositService.js';
+import { applyDepositSchema } from '../../schemas/accounting/depositSchema.js';
 import {
   approveBillSchema,
   createBillSchema,
@@ -127,4 +129,13 @@ export const void_: RequestHandler = async (req, res) => {
   const { entryDate } = parseBody(voidBillSchema, req.body ?? {});
   const bill = await billService.voidBill(user.orgId, user.id, id, entryDate);
   res.json({ success: true, bill });
+};
+
+/** POST /bills/:id/apply-prepayment — apply a paid DEPOSIT bill to this STANDARD bill (Phase 42). */
+export const applyPrepayment: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const id = requireParam(req, 'id');
+  const input = parseBody(applyDepositSchema, req.body);
+  const application = await depositService.applyDeposit(user.orgId, user.id, 'PURCHASE', id, input);
+  res.status(201).json({ success: true, application });
 };

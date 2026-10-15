@@ -3,12 +3,15 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Printer } from 'lucide-react';
 import {
   ApiRequestError,
+  applyDeposit,
   getInvoice,
   getInvoiceSettings,
   getOrganizationProfile,
   issueInvoice,
   listCreditNotes,
+  listInvoices,
   listPayments,
+  voidDepositApplication,
   voidInvoice,
   type CreditNote,
   type Invoice,
@@ -16,7 +19,7 @@ import {
   type OrganizationProfile,
   type Payment,
 } from '../../services/fetchServices';
-import { formatCents } from '../../utils/money';
+import { formatCents, parseCentsInput } from '../../utils/money';
 import { useDocumentObjectUrl } from '../../utils/useDocumentObjectUrl';
 import { useOrg } from '../../context/OrgContext';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
@@ -61,6 +64,7 @@ export default function InvoiceDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'issue' | 'void' | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [showApplyDeposit, setShowApplyDeposit] = useState(false);
   const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
   const logoSrc = useDocumentObjectUrl(profile?.logoDocumentId ?? null);
@@ -110,6 +114,20 @@ export default function InvoiceDetailPage() {
       ignore = true;
     };
   }, [invoiceId, reloadToken]);
+
+  /** Phase 42 — voids one deposit application; the document reloads with the reversed amounts. */
+  async function handleVoidApplication(applicationId: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await voidDepositApplication('SALES', applicationId);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not void the deposit application');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleIssue() {
     if (invoice === null) return;
@@ -185,6 +203,14 @@ export default function InvoiceDetailPage() {
         <div>
           <h2 className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'Draft invoice'}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(invoice.status)}</p>
+          {invoice.kind === 'DEPOSIT' && (
+            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
+              Deposit
+            </span>
+          )}
+          {invoice.lines.some((line) => line.orderLineId !== null) && (
+            <p className="text-sm text-[var(--muted)] m-0 mt-1">Raised against an order</p>
+          )}
           {invoice.sourceQuote !== null && (
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
               From quote{' '}
@@ -222,6 +248,16 @@ export default function InvoiceDetailPage() {
               className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Record payment
+            </button>
+          )}
+          {invoice.status === 'ISSUED' && invoice.kind === 'STANDARD' && invoice.amountDueCents > 0 && invoice.currencyCode === baseCurrency && (
+            <button
+              type="button"
+              onClick={() => setShowApplyDeposit(true)}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+            >
+              Apply deposit
             </button>
           )}
           {invoice.status === 'ISSUED' && (
@@ -330,6 +366,47 @@ export default function InvoiceDetailPage() {
         </div>
       )}
 
+      {invoice.depositApplications.length > 0 && (
+        <div className="no-print flex flex-col gap-2">
+          <h3 className="text-sm font-semibold m-0">Deposits applied</h3>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[30rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-2 font-medium">Deposit</th>
+                  <th className="p-2 font-medium">Date</th>
+                  <th className="p-2 font-medium">Status</th>
+                  <th className="p-2 font-medium text-right">Amount</th>
+                  <th className="p-2 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {invoice.depositApplications.map((application) => (
+                  <tr key={application.id} className="border-t border-[var(--border)]">
+                    <td className="p-2 font-mono text-xs">{application.depositDocumentNumber ?? 'Draft'}</td>
+                    <td className="p-2 tabular-nums">{formatDate(application.applicationDate)}</td>
+                    <td className="p-2">{application.status === 'POSTED' ? 'Applied' : 'Void'}</td>
+                    <td className="p-2 text-right tabular-nums">{formatCents(application.amountCents)}</td>
+                    <td className="p-2 text-right">
+                      {application.status === 'POSTED' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleVoidApplication(application.id)}
+                          disabled={busy}
+                          className="px-2 py-1 rounded-md text-xs text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+                        >
+                          Void
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {creditNotes.length > 0 && (
         <div className="no-print flex flex-col gap-2">
           <h3 className="text-sm font-semibold m-0">Credit notes</h3>
@@ -392,6 +469,16 @@ export default function InvoiceDetailPage() {
           onCancel={() => setConfirmAction(null)}
         />
       )}
+      {showApplyDeposit && (
+        <ApplyDepositDialog
+          target={invoice}
+          onClose={() => setShowApplyDeposit(false)}
+          onApplied={() => {
+            setShowApplyDeposit(false);
+            setReloadToken((n) => n + 1);
+          }}
+        />
+      )}
       {showPaymentDialog && (
         <PaymentDialog
           direction="RECEIVE"
@@ -421,5 +508,136 @@ export default function InvoiceDetailPage() {
         />
       )}
     </section>
+  );
+}
+
+const fieldClass =
+  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
+
+function todayIso(): string {
+  const now = new Date();
+  return `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Phase 42 — applies an issued deposit invoice of the same customer to this
+ * invoice. The server re-checks the amount against what the deposit has been
+ * paid; the deposit list is filtered client-side to DEPOSIT documents.
+ */
+function ApplyDepositDialog({
+  target,
+  onClose,
+  onApplied,
+}: {
+  target: Invoice;
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [deposits, setDeposits] = useState<Invoice[] | null>(null);
+  const [depositId, setDepositId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [applicationDate, setApplicationDate] = useState(todayIso);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    listInvoices({ customerId: target.customerId })
+      .then((res) => {
+        if (ignore) return;
+        const issued = res.invoices.filter((i) => i.kind === 'DEPOSIT' && i.status === 'ISSUED');
+        setDeposits(issued);
+        setDepositId(issued[0]?.id ?? '');
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setDeposits([]);
+        setError(err instanceof Error ? err.message : 'Could not load the deposits');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [target.customerId]);
+
+  const cents = parseCentsInput(amount);
+  const ready = depositId !== '' && cents !== null && cents > 0 && applicationDate !== '';
+
+  async function submit() {
+    if (cents === null || cents <= 0 || depositId === '') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await applyDeposit(target.id, { depositDocumentId: depositId, amountCents: cents, applicationDate });
+      onApplied();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not apply the deposit');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Apply deposit"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
+      <div className="animate-pop-in w-full max-w-lg rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
+        <h3 className="text-base font-semibold m-0">Apply deposit</h3>
+        {deposits === null ? (
+          <p className="text-sm text-[var(--muted)] m-0">Loading deposits…</p>
+        ) : deposits.length === 0 ? (
+          <p className="text-sm text-[var(--muted)] m-0">This customer has no issued deposit invoices.</p>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Deposit invoice</span>
+              <select value={depositId} onChange={(e) => setDepositId(e.target.value)} className={fieldClass}>
+                {deposits.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.invoiceNumber ?? 'Draft'} · {formatCents(d.totalCents)} {d.currencyCode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Amount to apply</span>
+              <input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={`${fieldClass} text-right tabular-nums`}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Application date</span>
+              <input
+                type="date"
+                value={applicationDate}
+                onChange={(e) => setApplicationDate(e.target.value)}
+                className={fieldClass}
+              />
+            </label>
+          </>
+        )}
+        {error !== null && <p className="status status--bad m-0">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          {deposits !== null && deposits.length > 0 && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              disabled={busy || !ready}
+              onClick={() => void submit()}
+            >
+              Apply to invoice
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -31,12 +31,21 @@ export default function InvoiceSettingsPage() {
   const [numberPrefix, setNumberPrefix] = useState('');
   const [numberPadding, setNumberPadding] = useState(6);
   const [nextNumber, setNextNumber] = useState(1);
+  const [quotePrefix, setQuotePrefix] = useState('');
+  const [quoteNextNumber, setQuoteNextNumber] = useState(1);
+  const [purchaseQuotePrefix, setPurchaseQuotePrefix] = useState('');
+  const [purchaseQuoteNextNumber, setPurchaseQuoteNextNumber] = useState(1);
+  const [defaultQuoteValidityDays, setDefaultQuoteValidityDays] = useState(30);
+  const [defaultQuoteTerms, setDefaultQuoteTerms] = useState('');
+  const [quoteAcceptanceRequiresCode, setQuoteAcceptanceRequiresCode] = useState(false);
   const [defaultDueDays, setDefaultDueDays] = useState(30);
   const [defaultTaxRate, setDefaultTaxRate] = useState('');
   const [taxLabel, setTaxLabel] = useState('Tax');
   const [receivableAccountId, setReceivableAccountId] = useState('');
   const [defaultRevenueAccountId, setDefaultRevenueAccountId] = useState('');
   const [taxPayableAccountId, setTaxPayableAccountId] = useState('');
+  const [customerDepositAccountId, setCustomerDepositAccountId] = useState('');
+  const [supplierPrepaymentAccountId, setSupplierPrepaymentAccountId] = useState('');
   const [showLegalName, setShowLegalName] = useState(true);
   const [showTaxNumber, setShowTaxNumber] = useState(true);
   const [showBusinessNumber, setShowBusinessNumber] = useState(false);
@@ -60,12 +69,21 @@ export default function InvoiceSettingsPage() {
         setNumberPrefix(settingsRes.numberPrefix);
         setNumberPadding(settingsRes.numberPadding);
         setNextNumber(settingsRes.nextNumber);
+        setQuotePrefix(settingsRes.quotePrefix);
+        setQuoteNextNumber(settingsRes.quoteNextNumber);
+        setPurchaseQuotePrefix(settingsRes.purchaseQuotePrefix);
+        setPurchaseQuoteNextNumber(settingsRes.purchaseQuoteNextNumber);
+        setDefaultQuoteValidityDays(settingsRes.defaultQuoteValidityDays);
+        setDefaultQuoteTerms(settingsRes.defaultQuoteTerms ?? '');
+        setQuoteAcceptanceRequiresCode(settingsRes.quoteAcceptanceRequiresCode);
         setDefaultDueDays(settingsRes.defaultDueDays);
         setDefaultTaxRate(settingsRes.defaultTaxRateBp === 0 ? '' : formatRate(settingsRes.defaultTaxRateBp));
         setTaxLabel(settingsRes.taxLabel);
         setReceivableAccountId(settingsRes.receivableAccountId ?? '');
         setDefaultRevenueAccountId(settingsRes.defaultRevenueAccountId ?? '');
         setTaxPayableAccountId(settingsRes.taxPayableAccountId ?? '');
+        setCustomerDepositAccountId(settingsRes.customerDepositAccountId ?? '');
+        setSupplierPrepaymentAccountId(settingsRes.supplierPrepaymentAccountId ?? '');
         setShowLegalName(settingsRes.showLegalName);
         setShowTaxNumber(settingsRes.showTaxNumber);
         setShowBusinessNumber(settingsRes.showBusinessNumber);
@@ -93,12 +111,21 @@ export default function InvoiceSettingsPage() {
         numberPrefix,
         numberPadding,
         nextNumber,
+        quotePrefix,
+        quoteNextNumber,
+        purchaseQuotePrefix,
+        purchaseQuoteNextNumber,
+        defaultQuoteValidityDays,
+        defaultQuoteTerms: defaultQuoteTerms.trim() === '' ? null : defaultQuoteTerms.trim(),
+        quoteAcceptanceRequiresCode,
         defaultDueDays,
         defaultTaxRateBp: defaultTaxRate.trim() === '' ? 0 : (parseRateInput(defaultTaxRate) ?? 0),
         taxLabel,
         receivableAccountId: receivableAccountId === '' ? null : receivableAccountId,
         defaultRevenueAccountId: defaultRevenueAccountId === '' ? null : defaultRevenueAccountId,
         taxPayableAccountId: taxPayableAccountId === '' ? null : taxPayableAccountId,
+        customerDepositAccountId: customerDepositAccountId === '' ? null : customerDepositAccountId,
+        supplierPrepaymentAccountId: supplierPrepaymentAccountId === '' ? null : supplierPrepaymentAccountId,
         showLegalName,
         showTaxNumber,
         showBusinessNumber,
@@ -170,6 +197,91 @@ export default function InvoiceSettingsPage() {
           Next invoice will be numbered {numberPrefix}
           {String(nextNumber).padStart(numberPadding, '0')}.
         </p>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-3 border border-[var(--border)] rounded-lg p-4">
+        <legend className="text-sm font-semibold px-1">Quotes</legend>
+
+        <div className="flex gap-3">
+          <label className="flex flex-col gap-1 text-sm flex-1">
+            <span className="text-[var(--muted)]">Sales quote prefix</span>
+            <input
+              type="text"
+              value={quotePrefix}
+              onChange={(e) => setQuotePrefix(e.target.value)}
+              maxLength={12}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm w-28">
+            <span className="text-[var(--muted)]">Next sales quote number</span>
+            <input
+              type="number"
+              min={1}
+              max={9999999}
+              value={quoteNextNumber}
+              onChange={(e) => setQuoteNextNumber(Number(e.target.value))}
+              className={inputClass}
+            />
+          </label>
+        </div>
+
+        <div className="flex gap-3">
+          <label className="flex flex-col gap-1 text-sm flex-1">
+            <span className="text-[var(--muted)]">Purchase quote prefix</span>
+            <input
+              type="text"
+              value={purchaseQuotePrefix}
+              onChange={(e) => setPurchaseQuotePrefix(e.target.value)}
+              maxLength={12}
+              className={inputClass}
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-sm w-28">
+            <span className="text-[var(--muted)]">Next purchase quote number</span>
+            <input
+              type="number"
+              min={1}
+              max={9999999}
+              value={purchaseQuoteNextNumber}
+              onChange={(e) => setPurchaseQuoteNextNumber(Number(e.target.value))}
+              className={inputClass}
+            />
+          </label>
+        </div>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Quotes are valid for (days)</span>
+          <input
+            type="number"
+            min={1}
+            max={365}
+            value={defaultQuoteValidityDays}
+            onChange={(e) => setDefaultQuoteValidityDays(Number(e.target.value))}
+            className={inputClass}
+          />
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Default quote terms</span>
+          <textarea
+            value={defaultQuoteTerms}
+            onChange={(e) => setDefaultQuoteTerms(e.target.value)}
+            rows={4}
+            maxLength={5000}
+            className={inputClass}
+          />
+        </label>
+
+        <label className="flex items-start gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={quoteAcceptanceRequiresCode}
+            onChange={(e) => setQuoteAcceptanceRequiresCode(e.target.checked)}
+            className="mt-0.5"
+          />
+          <span>Require customers to verify their email with a code before accepting</span>
+        </label>
       </fieldset>
 
       <fieldset className="flex flex-col gap-3 border border-[var(--border)] rounded-lg p-4">
@@ -251,6 +363,38 @@ export default function InvoiceSettingsPage() {
           >
             <option value="">Auto (2140)</option>
             {accountOptions(accounts, 'Liability').map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Customer deposits account</span>
+          <select
+            value={customerDepositAccountId}
+            onChange={(e) => setCustomerDepositAccountId(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Auto (2130)</option>
+            {accountOptions(accounts, 'Liability').map((a) => (
+              <option key={a.id} value={a.id}>
+                {a.code} · {a.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Supplier prepayments account</span>
+          <select
+            value={supplierPrepaymentAccountId}
+            onChange={(e) => setSupplierPrepaymentAccountId(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">Auto (1150)</option>
+            {accountOptions(accounts, 'Asset').map((a) => (
               <option key={a.id} value={a.id}>
                 {a.code} · {a.name}
               </option>

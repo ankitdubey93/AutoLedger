@@ -15,6 +15,12 @@ import SalesQuoteDetailPage from '../Pages/sales/SalesQuoteDetailPage';
 import PurchaseQuotesPage from '../Pages/purchases/PurchaseQuotesPage';
 import NewPurchaseQuotePage from '../Pages/purchases/NewPurchaseQuotePage';
 import PurchaseQuoteDetailPage from '../Pages/purchases/PurchaseQuoteDetailPage';
+import SalesOrdersPage from '../Pages/sales/SalesOrdersPage';
+import NewSalesOrderPage from '../Pages/sales/NewSalesOrderPage';
+import SalesOrderDetailPage from '../Pages/sales/SalesOrderDetailPage';
+import PurchaseOrdersPage from '../Pages/purchases/PurchaseOrdersPage';
+import NewPurchaseOrderPage from '../Pages/purchases/NewPurchaseOrderPage';
+import PurchaseOrderDetailPage from '../Pages/purchases/PurchaseOrderDetailPage';
 import NewCreditNotePage from '../Pages/sales/NewCreditNotePage';
 import CreditNoteDetailPage from '../Pages/sales/CreditNoteDetailPage';
 import CustomersPage from '../Pages/sales/CustomersPage';
@@ -87,6 +93,7 @@ import InvoiceSettingsPage from '../Pages/settings/InvoiceSettingsPage';
 import InvoiceTemplatePage from '../Pages/settings/InvoiceTemplatePage';
 import StatementTemplatePage from '../Pages/settings/StatementTemplatePage';
 import EmailTemplatesPage from '../Pages/settings/EmailTemplatesPage';
+import QuoteEmailTemplatesPage from '../Pages/settings/QuoteEmailTemplatesPage';
 import OnlinePaymentsSettingsPage from '../Pages/settings/OnlinePaymentsSettingsPage';
 import PaymentTermsSettingsPage from '../Pages/settings/PaymentTermsSettingsPage';
 import InventoryCatalogueSettingsPage from '../Pages/settings/InventoryCatalogueSettingsPage';
@@ -131,6 +138,15 @@ export default function ProductRoutes() {
           <Route path="/purchase-quotes/new" element={<NewPurchaseQuotePage />} />
           <Route path="/purchase-quotes/:quoteId" element={<PurchaseQuoteDetailPage />} />
           <Route path="/purchase-quotes/:quoteId/edit" element={<NewPurchaseQuotePage />} />
+          {/* Phase 42 — sales and purchase orders. */}
+          <Route path="/sales-orders" element={<SalesOrdersPage />} />
+          <Route path="/sales-orders/new" element={<NewSalesOrderPage />} />
+          <Route path="/sales-orders/:orderId" element={<SalesOrderDetailPage />} />
+          <Route path="/sales-orders/:orderId/edit" element={<NewSalesOrderPage />} />
+          <Route path="/purchase-orders" element={<PurchaseOrdersPage />} />
+          <Route path="/purchase-orders/new" element={<NewPurchaseOrderPage />} />
+          <Route path="/purchase-orders/:orderId" element={<PurchaseOrderDetailPage />} />
+          <Route path="/purchase-orders/:orderId/edit" element={<NewPurchaseOrderPage />} />
           <Route path="/credit-notes" element={<CreditNotesPage />} />
           <Route path="/credit-notes/new" element={<NewCreditNotePage />} />
           <Route path="/credit-notes/:noteId" element={<CreditNoteDetailPage />} />
@@ -231,6 +247,7 @@ export default function ProductRoutes() {
           <Route path="/settings/invoice-template" element={<InvoiceTemplatePage />} />
           <Route path="/settings/statement-template" element={<StatementTemplatePage />} />
           <Route path="/settings/email-templates" element={<EmailTemplatesPage />} />
+          <Route path="/settings/quote-email-templates" element={<QuoteEmailTemplatesPage />} />
           <Route path="/settings/online-payments" element={<OnlinePaymentsSettingsPage />} />
           <Route path="/settings/payment-terms" element={<PaymentTermsSettingsPage />} />
           <Route path="/settings/inbox" element={<InboxSettingsPage />} />

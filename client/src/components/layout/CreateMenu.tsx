@@ -12,8 +12,10 @@ import { useCan } from '../../context/AuthContext';
  */
 const ITEMS = [
   { label: 'Quote', to: '/quotes/new', permission: 'quotes.edit' },
+  { label: 'Sales order', to: '/sales-orders/new', permission: 'sales_orders.edit' },
   { label: 'Invoice', to: '/invoices/new', permission: 'invoices.edit' },
   { label: 'Purchase quote', to: '/purchase-quotes/new', permission: 'purchase_quotes.edit' },
+  { label: 'Purchase order', to: '/purchase-orders/new', permission: 'purchase_orders.edit' },
   { label: 'Expense', to: '/expenses/new', permission: 'bills.edit' },
   { label: 'Upload a bill', to: '/inbox', permission: 'capture.process' },
   { label: 'Journal entry', to: '/journals/new', permission: 'journals.create' },

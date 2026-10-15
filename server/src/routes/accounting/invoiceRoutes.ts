@@ -36,4 +36,11 @@ router.post(
   invoiceController.void_,
 );
 
+router.post(
+  '/:id/apply-deposit',
+  authenticate,
+  requirePermission('invoices.issue'),
+  invoiceController.applyDeposit,
+);
+
 export default router;

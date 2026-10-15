@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import request from 'supertest';
+import type { Response } from 'supertest';
 import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
 import { createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
@@ -227,5 +228,33 @@ describe('public quote link — cross-tenant isolation', () => {
     expect(JSON.stringify(res.body)).not.toContain('Org Bravo');
     const { rows } = await pool.query('SELECT 1 FROM quote_responses WHERE org_id = $1', [userB.orgId]);
     expect(rows).toHaveLength(0);
+  });
+});
+
+/** supertest only buffers text/JSON by default; collect the raw PDF bytes. */
+function binary(res: Response, cb: (err: Error | null, body: Buffer) => void): void {
+  const chunks: Buffer[] = [];
+  res.on('data', (c: Buffer) => chunks.push(c));
+  res.on('end', () => cb(null, Buffer.concat(chunks)));
+}
+
+describe('public quote PDF', () => {
+  it('GET /public/quotes/:token/pdf -> 200 without a session', async () => {
+    const { token } = await emailedQuote();
+    const res = await request(app).get(`${PUBLIC}/${token}/pdf`).buffer(true).parse(binary);
+    expect(res.status).toBe(200);
+    expect(res.headers['content-type']).toContain('application/pdf');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="QU-000001.pdf"');
+    expect(res.headers['cache-control']).toBe('no-store');
+    expect((res.body as Buffer).subarray(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  it('a revoked token -> 404', async () => {
+    const { id, token } = await emailedQuote();
+    const linkId = (await agent.get(`${QUOTES}/${id}`)).body.quote.links[0].id as string;
+    expect((await agent.post(`${QUOTES}/${id}/links/${linkId}/revoke`).send({})).status).toBe(200);
+    const res = await request(app).get(`${PUBLIC}/${token}/pdf`);
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('This quote link is not valid or has expired');
   });
 });

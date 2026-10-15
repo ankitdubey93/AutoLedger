@@ -63,10 +63,11 @@ interface DraftLine {
   taxRate: string;
   itemId: string;
   stockLocationId: string;
+  orderLineId: string;
 }
 
 function emptyLine(): DraftLine {
-  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '', itemId: '', stockLocationId: '' };
+  return { description: '', quantity: '', unitPrice: '', expenseAccountId: '', taxRate: '', itemId: '', stockLocationId: '', orderLineId: '' };
 }
 
 function today(): string {
@@ -205,6 +206,7 @@ export default function NewBillPage() {
             taxRate: line.taxRateBp === 0 ? '' : formatRate(line.taxRateBp),
             itemId: line.itemId ?? '',
             stockLocationId: line.stockLocationId ?? '',
+            orderLineId: line.orderLineId ?? '',
           })),
         );
         setSeeded(true);
@@ -368,6 +370,7 @@ export default function NewBillPage() {
             line.itemId !== '' && items.find((i) => i.id === line.itemId)?.itemType === 'INVENTORY' && line.stockLocationId !== ''
               ? line.stockLocationId
               : null,
+          orderLineId: line.orderLineId === '' ? null : line.orderLineId,
         })),
       };
 

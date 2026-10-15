@@ -465,7 +465,7 @@ async function assertWithinCaps(
   const baseCurrency = await baseCurrencyOf(client, orgId);
   if (bill.currency_code.trim() !== baseCurrency) {
     const settled = await settledCentsOnClient(client, orgId, 'bill_id', bill.id);
-    const dueCents = billTotal - settled.paidCents - settled.noteAppliedCents;
+    const dueCents = billTotal - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
     if (totalCents > dueCents) {
       throw new ApiError(422, 'A foreign-currency debit note cannot exceed the amount still due on its bill');
     }
@@ -844,7 +844,7 @@ export async function issueDebitNote(
     // paid bill takes nothing — the whole note stays as unapplied credit
     // on the vendor's account.
     const settled = await settledCentsOnClient(client, orgId, 'bill_id', bill.id);
-    const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents;
+    const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
     const applyCents = Math.min(totalCents, dueCents);
     if (applyCents > 0) {
       await client.query(
@@ -984,7 +984,7 @@ export async function applyDebitNote(
     }
 
     const settled = await settledCentsOnClient(client, orgId, 'bill_id', bill.id);
-    const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents;
+    const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
     if (input.amountCents > dueCents) {
       throw new ApiError(422, 'Amount exceeds the amount still due on this bill');
     }

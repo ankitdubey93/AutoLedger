@@ -42,4 +42,11 @@ router.post(
   billController.void_,
 );
 
+router.post(
+  '/:id/apply-prepayment',
+  authenticate,
+  requirePermission('bills.approve'),
+  billController.applyPrepayment,
+);
+
 export default router;

@@ -4,9 +4,9 @@ import { parseCents } from '../../utils/money.js';
 /**
  * The one definition of "how much of a document is settled" (Phase 26).
  *
- * A document — an invoice or a bill — is settled by two things: POSTED
- * payment allocations (Phase 3.9) and ISSUED credit/debit note allocations
- * (Phase 26). Settlement is never stored; every "amount due" in the codebase
+ * A document — an invoice or a bill — is settled by three things: POSTED
+ * payment allocations (Phase 3.9), ISSUED credit/debit note allocations
+ * (Phase 26) and POSTED deposit applications (Phase 42). Settlement is never stored; every "amount due" in the codebase
  * is `total − settledCentsSubquery(...)`, derived on every read, so voiding a
  * payment or a note un-settles its documents for free (the allocation rows
  * stay, immutably, and stop counting once their parent leaves POSTED/ISSUED).
@@ -77,13 +77,37 @@ export function noteAppliedCentsSubquery(
                        AND n.status = 'ISSUED'), 0)::text`;
 }
 
-/** Payments + applied notes — what every amount-due computation subtracts from a document's total. */
+const DEPOSIT_TARGET_COLUMN = {
+  invoice_id: 'target_invoice_id',
+  bill_id: 'target_bill_id',
+} as const;
+
+/**
+ * Sums POSTED deposit applications against one target document (Phase 42) —
+ * the third settlement source. `da.status = 'POSTED'` plays the same role as
+ * the payment subquery's `p.status = 'POSTED'`: voiding an application
+ * un-settles its target for free.
+ */
+export function depositAppliedCentsSubquery(
+  alias: string,
+  column: SettlementColumn,
+  amountColumn: SettlementAmountColumn = 'amount_cents',
+): string {
+  const targetColumn = DEPOSIT_TARGET_COLUMN[column];
+  return `COALESCE((SELECT SUM(da.${amountColumn})
+                      FROM deposit_applications da
+                     WHERE da.org_id = ${alias}.org_id
+                       AND da.${targetColumn} = ${alias}.id
+                       AND da.status = 'POSTED'), 0)::text`;
+}
+
+/** Payments + applied notes + applied deposits — what every amount-due computation subtracts from a document's total. */
 export function settledCentsSubquery(
   alias: string,
   column: SettlementColumn,
   amountColumn: SettlementAmountColumn = 'amount_cents',
 ): string {
-  return `(${allocatedCentsSubquery(alias, column, amountColumn)}::bigint + ${noteAppliedCentsSubquery(alias, column, amountColumn)}::bigint)::text`;
+  return `(${allocatedCentsSubquery(alias, column, amountColumn)}::bigint + ${noteAppliedCentsSubquery(alias, column, amountColumn)}::bigint + ${depositAppliedCentsSubquery(alias, column, amountColumn)}::bigint)::text`;
 }
 
 const NOTE_OWN = {
@@ -119,8 +143,9 @@ export async function settledCentsOnClient(
   orgId: string,
   column: SettlementColumn,
   documentId: string,
-): Promise<{ paidCents: number; noteAppliedCents: number }> {
+): Promise<{ paidCents: number; noteAppliedCents: number; depositAppliedCents: number }> {
   const source = NOTE_SOURCES[column];
+  const depositColumn = DEPOSIT_TARGET_COLUMN[column];
 
   const { rows: paidRows } = await client.query<{ total: string }>(
     `SELECT COALESCE(SUM(pa.amount_cents), 0)::text AS total
@@ -138,9 +163,17 @@ export async function settledCentsOnClient(
     [orgId, documentId],
   );
 
+  const { rows: depositRows } = await client.query<{ total: string }>(
+    `SELECT COALESCE(SUM(da.amount_cents), 0)::text AS total
+       FROM deposit_applications da
+      WHERE da.org_id = $1 AND da.${depositColumn} = $2 AND da.status = 'POSTED'`,
+    [orgId, documentId],
+  );
+
   return {
     paidCents: parseCents(paidRows[0]?.total ?? '0'),
     noteAppliedCents: parseCents(noteRows[0]?.total ?? '0'),
+    depositAppliedCents: parseCents(depositRows[0]?.total ?? '0'),
   };
 }
 
@@ -203,14 +236,36 @@ export function noteAppliedAsOfCentsSubquery(
                        AND (nv.id IS NULL OR nv.entry_date > ${asOf}::date)), 0)::text`;
 }
 
-/** Payments + applied notes, as they stood on `asOf`. */
+/**
+ * Deposit applications applied on or before `asOf` (by `application_date`) and
+ * not yet voided at that date. A void's date is its void journal entry's
+ * `entry_date`, as for notes and payments (`voided_at` is a wall-clock
+ * timestamp and would disagree with the ledger for a back-dated void).
+ */
+export function depositAppliedAsOfCentsSubquery(
+  alias: string,
+  column: SettlementColumn,
+  asOf: SqlParam,
+  amountColumn: SettlementAmountColumn = 'amount_cents',
+): string {
+  const targetColumn = DEPOSIT_TARGET_COLUMN[column];
+  return `COALESCE((SELECT SUM(da.${amountColumn})
+                      FROM deposit_applications da
+                 LEFT JOIN journal_entries dv ON dv.id = da.void_journal_entry_id AND dv.org_id = da.org_id
+                     WHERE da.org_id = ${alias}.org_id
+                       AND da.${targetColumn} = ${alias}.id
+                       AND da.application_date <= ${asOf}::date
+                       AND (dv.id IS NULL OR dv.entry_date > ${asOf}::date)), 0)::text`;
+}
+
+/** Payments + applied notes + applied deposits, as they stood on `asOf`. */
 export function settledAsOfCentsSubquery(
   alias: string,
   column: SettlementColumn,
   amountColumn: SettlementAmountColumn,
   asOf: SqlParam,
 ): string {
-  return `(${allocatedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint + ${noteAppliedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint)::text`;
+  return `(${allocatedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint + ${noteAppliedAsOfCentsSubquery(alias, column, amountColumn, asOf)}::bigint + ${depositAppliedAsOfCentsSubquery(alias, column, asOf, amountColumn)}::bigint)::text`;
 }
 
 /**

@@ -107,6 +107,7 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
         netCents: 60000,
         taxCents: 0,
         itemId: null,
+        orderLineId: null,
       },
     ],
     allocatedCents: 0,
@@ -114,6 +115,10 @@ function baseBill(overrides: Partial<Bill> = {}): Bill {
     amountDueCents: 0,
     settlementStatus: 'NOT_APPLICABLE',
     sourceQuote: null,
+    kind: 'STANDARD',
+    depositForOrderId: null,
+    depositAppliedCents: 0,
+    depositApplications: [],
     ...overrides,
   };
 }

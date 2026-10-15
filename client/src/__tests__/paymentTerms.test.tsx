@@ -220,6 +220,15 @@ const invoiceSettings: InvoiceSettings = {
   showPaymentTerms: true,
   showDueDate: true,
   bankDetails: null,
+  quotePrefix: 'QU-',
+  quoteNextNumber: 1,
+  purchaseQuotePrefix: 'PQ-',
+  purchaseQuoteNextNumber: 1,
+  defaultQuoteValidityDays: 30,
+  defaultQuoteTerms: null,
+  quoteAcceptanceRequiresCode: false,
+  customerDepositAccountId: null,
+  supplierPrepaymentAccountId: null,
   configured: true,
 };
 

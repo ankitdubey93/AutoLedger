@@ -2,17 +2,20 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ApiRequestError,
+  applyPrepayment,
   approveBill,
   getBill,
+  listBills,
   listDebitNotes,
   listPayments,
   submitBill,
   voidBill,
+  voidDepositApplication,
   type Bill,
   type DebitNote,
   type Payment,
 } from '../../services/fetchServices';
-import { formatCents, formatQuantity, formatRate } from '../../utils/money';
+import { formatCents, formatQuantity, formatRate, parseCentsInput } from '../../utils/money';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -54,6 +57,7 @@ export default function BillDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'void' | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
+  const [showApplyPrepayment, setShowApplyPrepayment] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
 
   useEffect(() => {
@@ -122,6 +126,21 @@ export default function BillDetailPage() {
     }
   }
 
+  /** Phase 42 — voids one prepayment application; the document reloads with the reversed amounts. */
+  async function handleVoidApplication(applicationId: string) {
+    if (bill === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await voidDepositApplication('PURCHASE', applicationId);
+      setReloadToken((n) => n + 1);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not void the prepayment application');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleVoid() {
     if (bill === null) return;
     setBusy(true);
@@ -168,6 +187,9 @@ export default function BillDetailPage() {
   // Phase 38c — the permission the server checks on these routes.
   const canApprove = can('bills.approve');
 
+  /** Phase 42 — prepayments are base currency only; the ledger's base currency decides. */
+  const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : bill.currencyCode;
+
   return (
     <section className="flex flex-col gap-6">
       <BackLink to="/expenses" label="Back to expenses" />
@@ -176,6 +198,14 @@ export default function BillDetailPage() {
         <div>
           <h2 className="text-lg font-semibold m-0">{bill.vendorReference}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(bill.status)}</p>
+          {bill.kind === 'DEPOSIT' && (
+            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
+              Deposit
+            </span>
+          )}
+          {bill.lines.some((line) => line.orderLineId !== null) && (
+            <p className="text-sm text-[var(--muted)] m-0 mt-1">Raised against an order</p>
+          )}
           {bill.sourceQuote !== null && (
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
               From quote{' '}
@@ -223,6 +253,16 @@ export default function BillDetailPage() {
               className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Approve
+            </button>
+          )}
+          {bill.status === 'POSTED' && bill.kind === 'STANDARD' && bill.amountDueCents > 0 && canApprove && bill.currencyCode === baseCurrency && (
+            <button
+              type="button"
+              onClick={() => setShowApplyPrepayment(true)}
+              disabled={busy}
+              className="px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+            >
+              Apply prepayment
             </button>
           )}
           {bill.status === 'POSTED' && bill.amountDueCents > 0 && (
@@ -411,6 +451,47 @@ export default function BillDetailPage() {
         </div>
       )}
 
+      {bill.depositApplications.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <h3 className="text-sm font-semibold m-0">Deposits applied</h3>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[30rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-2 font-medium">Prepayment</th>
+                  <th className="p-2 font-medium">Date</th>
+                  <th className="p-2 font-medium">Status</th>
+                  <th className="p-2 font-medium text-right">Amount</th>
+                  <th className="p-2 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {bill.depositApplications.map((application) => (
+                  <tr key={application.id} className="border-t border-[var(--border)]">
+                    <td className="p-2 font-mono text-xs">{application.depositDocumentNumber ?? 'Draft'}</td>
+                    <td className="p-2 tabular-nums">{formatDate(application.applicationDate)}</td>
+                    <td className="p-2">{application.status === 'POSTED' ? 'Applied' : 'Void'}</td>
+                    <td className="p-2 text-right tabular-nums">{formatCents(application.amountCents)}</td>
+                    <td className="p-2 text-right">
+                      {application.status === 'POSTED' && (
+                        <button
+                          type="button"
+                          onClick={() => void handleVoidApplication(application.id)}
+                          disabled={busy}
+                          className="px-2 py-1 rounded-md text-xs text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+                        >
+                          Void
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {debitNotes.length > 0 && (
         <div className="flex flex-col gap-2">
           <h3 className="text-sm font-semibold m-0">Debit notes</h3>
@@ -471,6 +552,16 @@ export default function BillDetailPage() {
           onCancel={() => setConfirmAction(null)}
         />
       )}
+      {showApplyPrepayment && (
+        <ApplyPrepaymentDialog
+          target={bill}
+          onClose={() => setShowApplyPrepayment(false)}
+          onApplied={() => {
+            setShowApplyPrepayment(false);
+            setReloadToken((n) => n + 1);
+          }}
+        />
+      )}
       {showPaymentDialog && (
         <PaymentDialog
           direction="PAY"
@@ -500,5 +591,140 @@ export default function BillDetailPage() {
         />
       )}
     </section>
+  );
+}
+
+const prepaymentFieldClass =
+  'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
+
+function prepaymentToday(): string {
+  const now = new Date();
+  return `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+}
+
+/**
+ * Phase 42 — applies an approved prepayment bill of the same vendor to this
+ * bill. The server re-checks the amount against what the prepayment has been
+ * paid; the list is filtered client-side to DEPOSIT bills.
+ */
+function ApplyPrepaymentDialog({
+  target,
+  onClose,
+  onApplied,
+}: {
+  target: Bill;
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [prepayments, setPrepayments] = useState<Bill[] | null>(null);
+  const [prepaymentId, setPrepaymentId] = useState('');
+  const [amount, setAmount] = useState('');
+  const [applicationDate, setApplicationDate] = useState(prepaymentToday);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ignore = false;
+    listBills({ vendorId: target.vendorId })
+      .then((res) => {
+        if (ignore) return;
+        const posted = res.bills.filter((b) => b.kind === 'DEPOSIT' && b.status === 'POSTED');
+        setPrepayments(posted);
+        setPrepaymentId(posted[0]?.id ?? '');
+      })
+      .catch((err: unknown) => {
+        if (ignore) return;
+        setPrepayments([]);
+        setError(err instanceof Error ? err.message : 'Could not load the prepayments');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [target.vendorId]);
+
+  const cents = parseCentsInput(amount);
+  const ready = prepaymentId !== '' && cents !== null && cents > 0 && applicationDate !== '';
+
+  async function submit() {
+    if (cents === null || cents <= 0 || prepaymentId === '') return;
+    setBusy(true);
+    setError(null);
+    try {
+      await applyPrepayment(target.id, { depositDocumentId: prepaymentId, amountCents: cents, applicationDate });
+      onApplied();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not apply the prepayment');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Apply prepayment"
+      className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
+      <div className="animate-pop-in w-full max-w-lg rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
+        <h3 className="text-base font-semibold m-0">Apply prepayment</h3>
+        {prepayments === null ? (
+          <p className="text-sm text-[var(--muted)] m-0">Loading prepayments…</p>
+        ) : prepayments.length === 0 ? (
+          <p className="text-sm text-[var(--muted)] m-0">This vendor has no approved prepayment bills.</p>
+        ) : (
+          <>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Prepayment bill</span>
+              <select
+                value={prepaymentId}
+                onChange={(e) => setPrepaymentId(e.target.value)}
+                className={prepaymentFieldClass}
+              >
+                {prepayments.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.vendorReference} · {formatCents(p.totalCents)} {p.currencyCode}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Amount to apply</span>
+              <input
+                inputMode="decimal"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+                className={`${prepaymentFieldClass} text-right tabular-nums`}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-sm">
+              <span className="text-[var(--muted)]">Application date</span>
+              <input
+                type="date"
+                value={applicationDate}
+                onChange={(e) => setApplicationDate(e.target.value)}
+                className={prepaymentFieldClass}
+              />
+            </label>
+          </>
+        )}
+        {error !== null && <p className="status status--bad m-0">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="btn btn--ghost" onClick={onClose}>
+            Cancel
+          </button>
+          {prepayments !== null && prepayments.length > 0 && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              disabled={busy || !ready}
+              onClick={() => void submit()}
+            >
+              Apply to bill
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

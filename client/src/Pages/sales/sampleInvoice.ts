@@ -37,6 +37,7 @@ const lines: InvoiceLine[] = [
     netCents: 180_000,
     taxCents: 18_000,
     itemId: null,
+    orderLineId: null,
   },
   {
     id: 'sample-line-2',
@@ -52,6 +53,7 @@ const lines: InvoiceLine[] = [
     netCents: 85_000,
     taxCents: 8_500,
     itemId: null,
+    orderLineId: null,
   },
   {
     id: 'sample-line-3',
@@ -67,6 +69,7 @@ const lines: InvoiceLine[] = [
     netCents: 90_000,
     taxCents: 0,
     itemId: null,
+    orderLineId: null,
   },
 ];
 lines.forEach((line) => Object.freeze(line));
@@ -110,4 +113,8 @@ export const SAMPLE_INVOICE: Invoice = Object.freeze({
   amountDueCents: 381_500,
   settlementStatus: 'UNPAID',
   sourceQuote: null,
+  kind: 'STANDARD',
+  depositForOrderId: null,
+  depositAppliedCents: 0,
+  depositApplications: [],
 });

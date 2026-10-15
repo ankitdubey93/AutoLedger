@@ -17,9 +17,18 @@ import { prepareStockLinesOnClient } from './documentStockLines.js';
 import * as invoiceService from './invoiceService.js';
 import * as billService from './billService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
+import { createOrderFromQuoteOnClient } from './orderService.js';
 import * as fxRateService from './fxRateService.js';
+import { orgTodayOnClient } from './settingsService.js';
 import * as paymentTermService from './paymentTermService.js';
 import { formatMoney } from './statementEmailService.js';
+import { renderQuoteEmailOnClient } from './quoteEmailTemplateService.js';
+import { renderQuotePdf } from './quotePdfRenderer.js';
+import { addressLines } from './publicStatementService.js';
+import * as organizationService from '../organizationService.js';
+import * as organizationProfileService from '../organizationProfileService.js';
+import * as documentService from '../documentService.js';
+import type { PlaceholderContext } from '../../utils/placeholders.js';
 import { transitionQuoteOnClient } from './quoteStatusService.js';
 import {
   canTransitionQuote,
@@ -85,11 +94,6 @@ function pgErrorMessage(err: unknown): string {
   return 'Database rejected the quote';
 }
 
-/** UTC calendar date — the convention every document service uses. */
-export function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 /** The party table and label per direction. Identifiers come only from here (rule 4). */
 const PARTY = {
   SALES: { table: 'customers', column: 'customer_id', label: 'Customer' },
@@ -118,6 +122,8 @@ export interface CreateQuoteInput {
   terms?: string | null | undefined;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  /** Phase 42 — share of the total asked for as a deposit on acceptance (basis points), or null. */
+  depositPercentBp?: number | null | undefined;
   lines: QuoteLineInput[];
 }
 
@@ -127,12 +133,15 @@ export interface SendQuoteInput {
   delivery: 'EMAIL' | 'MANUAL';
   toEmail: string | null;
   message: string | null;
+  templateId: string | null;
 }
 
 export interface ConvertQuoteInput {
   documentDate: string | null;
   dueDate: string | null;
   vendorReference: string | null;
+  /** Phase 42 — ORDER converts to a confirmed order instead of a draft invoice/bill. */
+  target: 'INVOICE' | 'ORDER';
 }
 
 export const QUOTE_SORT_KEYS = ['quoteDate', 'validUntil', 'number', 'party', 'total', 'status'] as const;
@@ -187,6 +196,7 @@ interface QuoteRow {
   subtotal_cents: string;
   tax_cents: string;
   total_cents: string;
+  deposit_percent_bp: number | null;
   indicative_fx_rate: string | null;
   indicative_base_total_cents: string | null;
   content_sha256: string | null;
@@ -212,7 +222,7 @@ const QUOTE_SELECT = `SELECT q.id, q.direction, q.customer_id, q.vendor_id,
                              q.party_name_snapshot, q.party_address_snapshot, q.party_tax_number_snapshot,
                              q.party_email_snapshot, q.party_reference, q.title, q.notes, q.terms,
                              q.payment_terms, q.payment_terms_code,
-                             q.subtotal_cents, q.tax_cents, q.total_cents,
+                             q.subtotal_cents, q.tax_cents, q.total_cents, q.deposit_percent_bp,
                              q.indicative_fx_rate::text AS indicative_fx_rate, q.indicative_base_total_cents,
                              q.content_sha256, q.sent_at, q.sent_by, q.accepted_at, q.declined_at, q.expired_at,
                              q.voided_at, q.void_reason, q.superseded_at, q.converted_at,
@@ -300,6 +310,7 @@ async function loadResponse(q: Queryable, orgId: string, quoteId: string): Promi
     channel: QuoteResponseChannel;
     signer_name: string | null;
     signer_email: string | null;
+    signer_email_verified: boolean;
     terms_accepted: boolean;
     decline_reason: string | null;
     client_ip: string | null;
@@ -310,7 +321,7 @@ async function loadResponse(q: Queryable, orgId: string, quoteId: string): Promi
     quote_content_sha256: string;
     responded_at: Date;
   }>(
-    `SELECT r.response, r.channel, r.signer_name, r.signer_email, r.terms_accepted, r.decline_reason,
+    `SELECT r.response, r.channel, r.signer_name, r.signer_email, r.signer_email_verified, r.terms_accepted, r.decline_reason,
             r.client_ip, r.user_agent, r.recorded_by, u.name AS recorded_by_name, r.note,
             r.quote_content_sha256, r.responded_at
        FROM quote_responses r
@@ -325,6 +336,7 @@ async function loadResponse(q: Queryable, orgId: string, quoteId: string): Promi
     channel: r.channel,
     signerName: r.signer_name,
     signerEmail: r.signer_email,
+    signerEmailVerified: r.signer_email_verified,
     termsAccepted: r.terms_accepted,
     declineReason: r.decline_reason,
     clientIp: r.client_ip,
@@ -384,6 +396,14 @@ async function loadConvertedDocument(
   direction: QuoteDirection,
   quoteId: string,
 ): Promise<QuoteConvertedDocument | null> {
+  // Phase 42 — a quote converts to an order OR a document, never both.
+  const { rows: orderRows } = await q.query<{ id: string; order_number: string | null; status: string }>(
+    'SELECT id, order_number, status FROM orders WHERE org_id = $1 AND source_quote_id = $2',
+    [orgId, quoteId],
+  );
+  const order = orderRows[0];
+  if (order !== undefined) return { kind: 'ORDER', id: order.id, number: order.order_number, status: order.status };
+
   if (direction === 'SALES') {
     const { rows } = await q.query<{ id: string; invoice_number: string | null; status: string }>(
       'SELECT id, invoice_number, status FROM invoices WHERE org_id = $1 AND source_quote_id = $2',
@@ -410,16 +430,16 @@ async function loadQuote(q: Queryable, orgId: string, direction: QuoteDirection,
   // 404 rather than 403: a 403 would confirm the id exists in another tenant.
   if (row === undefined) throw new ApiError(404, 'Quote not found');
 
-  const [lines, revisions, links, response, convertedDocument] = await Promise.all([
-    loadLines(q, orgId, row.id),
-    loadRevisions(q, orgId, row.root_quote_id),
-    loadLinks(q, orgId, row.id),
-    loadResponse(q, orgId, row.id),
-    loadConvertedDocument(q, orgId, direction, row.id),
-  ]);
+  // Sequential on purpose: `q` may be a transaction's checked-out client, and pg
+  // deprecates (and in v9 rejects) overlapping queries on one client.
+  const lines = await loadLines(q, orgId, row.id);
+  const revisions = await loadRevisions(q, orgId, row.root_quote_id);
+  const links = await loadLinks(q, orgId, row.id);
+  const response = await loadResponse(q, orgId, row.id);
+  const convertedDocument = await loadConvertedDocument(q, orgId, direction, row.id);
 
   return {
-    ...toSummary(row, today()),
+    ...toSummary(row, await orgTodayOnClient(q, orgId)),
     rootQuoteId: row.root_quote_id,
     supersedesQuoteId: row.supersedes_quote_id,
     partyNameSnapshot: row.party_name_snapshot,
@@ -433,6 +453,7 @@ async function loadQuote(q: Queryable, orgId: string, direction: QuoteDirection,
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    depositPercentBp: row.deposit_percent_bp,
     indicativeFxRate: row.indicative_fx_rate,
     indicativeBaseTotalCents:
       row.indicative_base_total_cents === null ? null : parseCents(row.indicative_base_total_cents),
@@ -467,6 +488,7 @@ function buildFilters(
   orgId: string,
   direction: QuoteDirection,
   options: ListQuotesOptions,
+  asOf: string,
 ): { where: string; values: unknown[] } {
   const clauses = ['q.org_id = $1', 'q.direction = $2'];
   const values: unknown[] = [orgId, direction];
@@ -479,9 +501,9 @@ function buildFilters(
   // The effective status: a SENT quote past its validity reads EXPIRED
   // before the sweep persists it, so the two filters partition on the date.
   if (options.status === 'SENT') {
-    add((p) => `q.status = 'SENT' AND q.valid_until >= ${p}::date`, today());
+    add((p) => `q.status = 'SENT' AND q.valid_until >= ${p}::date`, asOf);
   } else if (options.status === 'EXPIRED') {
-    add((p) => `(q.status = 'EXPIRED' OR (q.status = 'SENT' AND q.valid_until < ${p}::date))`, today());
+    add((p) => `(q.status = 'EXPIRED' OR (q.status = 'SENT' AND q.valid_until < ${p}::date))`, asOf);
   } else if (options.status !== null) {
     add((p) => `q.status = ${p}`, options.status);
   } else {
@@ -511,7 +533,8 @@ export async function listQuotes(
   options: ListQuotesOptions,
 ): Promise<{ quotes: QuoteSummary[]; totalCount: number }> {
   const offset = (options.page - 1) * options.limit;
-  const { where, values } = buildFilters(orgId, direction, options);
+  const asOf = await orgTodayOnClient(pool, orgId);
+  const { where, values } = buildFilters(orgId, direction, options, asOf);
 
   const { rows: countRows } = await pool.query<{ total: string }>(
     `SELECT count(*) AS total FROM quotes q WHERE ${where}`,
@@ -529,7 +552,6 @@ export async function listQuotes(
     [...values, options.limit, offset],
   );
 
-  const asOf = today();
   return { quotes: rows.map((r) => toSummary(r, asOf)), totalCount };
 }
 
@@ -584,6 +606,7 @@ interface PreparedQuote {
   terms: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  depositPercentBp: number | null;
   party: PartySnapshot;
   indicativeFxRate: string | null;
   indicativeBaseTotalCents: number | null;
@@ -612,6 +635,12 @@ async function prepareOnClient(
   const baseCurrency = orgRows[0]?.base_currency.trim();
   if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
   const currencyCode = input.currencyCode ?? baseCurrency;
+
+  const depositPercentBp = input.depositPercentBp ?? null;
+  if (depositPercentBp !== null && currencyCode !== baseCurrency) {
+    // Early feedback for what the order conversion would refuse (deposits are base-currency only).
+    throw new ApiError(422, 'Deposits are available on base-currency quotes only');
+  }
 
   const party = await readPartyOnClient(client, orgId, direction, input.partyId);
   const defaults = await invoiceSettingsService.getQuoteDefaultsOnClient(client, orgId);
@@ -668,6 +697,7 @@ async function prepareOnClient(
     terms: input.terms === undefined ? defaults.terms : input.terms,
     paymentTerms,
     paymentTermsCode,
+    depositPercentBp,
     party,
     indicativeFxRate,
     indicativeBaseTotalCents,
@@ -724,6 +754,9 @@ function mapWriteError(err: unknown): never {
     if (constraint === 'ux_quotes_one_draft_per_root' || constraint === 'ux_quotes_supersedes') {
       throw new ApiError(409, 'A draft revision of this quote already exists');
     }
+    if (constraint === 'ux_quotes_number') {
+      throw new ApiError(409, 'That quote number is already in use — raise the next quote number in Settings → Invoices');
+    }
     if (constraint === 'ux_quote_responses_quote') {
       throw new ApiError(409, 'This quote has already been answered');
     }
@@ -758,9 +791,10 @@ export async function createQuote(
           quote_date, valid_until, currency_code,
           party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
           party_reference, title, notes, terms, payment_terms, payment_terms_code,
-          subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by)
+          subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by,
+          deposit_percent_bp)
        VALUES ($1, $2, $3, $4, $5, $1, 1, 'DRAFT', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-               $19, $20, $21, $22, $23, $24)`,
+               $19, $20, $21, $22, $23, $24, $25)`,
       [
         quoteId,
         orgId,
@@ -786,6 +820,7 @@ export async function createQuote(
         prepared.indicativeFxRate,
         prepared.indicativeBaseTotalCents,
         userId,
+        prepared.depositPercentBp,
       ],
     );
     await insertLinesOnClient(client, orgId, quoteId, prepared.totals);
@@ -886,8 +921,8 @@ export async function updateQuote(
               party_email_snapshot = $9, party_reference = $10, title = $11, notes = $12, terms = $13,
               payment_terms = $14, payment_terms_code = $15,
               subtotal_cents = $16, tax_cents = $17, total_cents = $18,
-              indicative_fx_rate = $19, indicative_base_total_cents = $20
-        WHERE id = $21 AND org_id = $22`,
+              indicative_fx_rate = $19, indicative_base_total_cents = $20, deposit_percent_bp = $21
+        WHERE id = $22 AND org_id = $23`,
       [
         direction === 'SALES' ? input.partyId : null,
         direction === 'PURCHASE' ? input.partyId : null,
@@ -909,6 +944,7 @@ export async function updateQuote(
         prepared.totalCents,
         prepared.indicativeFxRate,
         prepared.indicativeBaseTotalCents,
+        prepared.depositPercentBp,
         id,
         orgId,
       ],
@@ -956,6 +992,7 @@ function canonicalContent(
     notes: string | null;
     terms: string | null;
     paymentTerms: string | null;
+    depositPercentBp: number | null;
     subtotalCents: number;
     taxCents: number;
     totalCents: number;
@@ -979,6 +1016,9 @@ function canonicalContent(
     notes: quote.notes,
     terms: quote.terms,
     paymentTerms: quote.paymentTerms,
+    // Phase 42 — after paymentTerms. Applies to quotes sent from Phase 42 on; a
+    // quote already sent keeps its stored hash (it is never recomputed).
+    depositPercentBp: quote.depositPercentBp,
     lines: lines.map((l) => ({
       lineNumber: l.lineNumber,
       description: l.description,
@@ -1011,7 +1051,7 @@ async function finalizeOnClient(
   if (!canTransitionQuote(locked.status, 'SENT')) {
     throw new ApiError(409, `A ${locked.status.toLowerCase()} quote cannot be sent`);
   }
-  if (locked.validUntil < today()) {
+  if (locked.validUntil < (await orgTodayOnClient(client, orgId))) {
     throw new ApiError(422, 'This quote’s validity date has passed — change it before sending');
   }
 
@@ -1055,6 +1095,7 @@ async function finalizeOnClient(
         notes: quote.notes,
         terms: quote.terms,
         paymentTerms: quote.paymentTerms,
+        depositPercentBp: quote.depositPercentBp,
         subtotalCents: quote.subtotalCents,
         taxCents: quote.taxCents,
         totalCents: quote.totalCents,
@@ -1105,7 +1146,7 @@ export async function sendQuote(
       await finalizeOnClient(client, orgId, userId, direction, id);
     } else if (current.status !== 'SENT' || input.delivery === 'MANUAL') {
       throw new ApiError(409, current.status === 'SENT' ? 'This quote has already been sent' : `A ${current.status.toLowerCase()} quote cannot be sent`);
-    } else if (current.validUntil < today()) {
+    } else if (current.validUntil < (await orgTodayOnClient(client, orgId))) {
       throw new ApiError(409, 'This quote has expired — create a revision to send it again');
     }
 
@@ -1131,6 +1172,13 @@ export async function sendQuote(
       const { rows: orgRows } = await client.query<{ name: string }>('SELECT name FROM organizations WHERE id = $1', [
         orgId,
       ]);
+      const rendered = await renderQuoteEmailOnClient(
+        client,
+        orgId,
+        direction,
+        input.templateId,
+        quoteEmailContext(quote, orgRows[0]?.name ?? ''),
+      );
       await enqueueEmailOnClient(client, {
         orgId,
         to: toEmail.toLowerCase(),
@@ -1145,12 +1193,106 @@ export async function sendQuote(
           total: formatMoney(quote.totalCents, quote.currencyCode),
           validUntil: quote.validUntil,
           message: input.message,
+          subject: rendered.subject,
+          body: rendered.body,
         },
         link: publicLinkFor(token),
       });
     }
   });
   return getQuoteById(orgId, direction, id);
+}
+
+function quoteEmailContext(quote: Quote, organisationName: string): PlaceholderContext {
+  return {
+    date: quote.quoteDate,
+    contactName: quote.partyNameSnapshot,
+    organisationName,
+    quoteNumber: quote.quoteNumber,
+    quoteTotal: formatMoney(quote.totalCents, quote.currencyCode),
+    validUntil: quote.validUntil,
+    quoteTitle: quote.title,
+  };
+}
+
+/** POST /:id/email-preview — the subject and body the chosen template would send for this quote. Read-only. */
+export async function previewQuoteEmail(
+  orgId: string,
+  direction: QuoteDirection,
+  id: string,
+  templateId: string | null,
+): Promise<{ subject: string; body: string }> {
+  const quote = await loadQuote(pool, orgId, direction, id);
+  const { rows } = await pool.query<{ name: string }>('SELECT name FROM organizations WHERE id = $1', [orgId]);
+  return renderQuoteEmailOnClient(pool, orgId, direction, templateId, quoteEmailContext(quote, rows[0]?.name ?? ''));
+}
+
+const PDF_LOGO_TYPES = new Set(['image/png', 'image/jpeg']);
+
+/** Reads the org logo from the Document Vault (tenant-scoped); PNG/JPEG only, anything else is no logo. */
+async function readLogoBytes(orgId: string, logoDocumentId: string | null): Promise<Buffer | null> {
+  if (logoDocumentId === null) return null;
+  const { document, stream } = await documentService.openDocumentStream(orgId, logoDocumentId);
+  if (!PDF_LOGO_TYPES.has(document.mimeType)) {
+    stream.destroy();
+    return null;
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+  return Buffer.concat(chunks);
+}
+
+/** Renders an already-loaded quote. Shared by the staff and public routes — both scope by `orgId`. */
+export async function buildQuotePdf(orgId: string, quote: Quote): Promise<{ filename: string; pdf: Buffer }> {
+  const [organization, profile] = await Promise.all([
+    organizationService.getById(orgId),
+    organizationProfileService.getProfile(orgId),
+  ]);
+  const logo = await readLogoBytes(orgId, profile.logoDocumentId);
+  const pdf = await renderQuotePdf({
+    merchantName: organization.name,
+    merchantAddressLines: addressLines(profile),
+    logo,
+    direction: quote.direction,
+    quoteNumber: quote.quoteNumber,
+    revision: quote.revision,
+    partyName: quote.partyNameSnapshot,
+    partyAddress: quote.partyAddressSnapshot,
+    partyTaxNumber: quote.partyTaxNumberSnapshot,
+    partyReference: quote.partyReference,
+    quoteDate: quote.quoteDate,
+    validUntil: quote.validUntil,
+    currencyCode: quote.currencyCode,
+    title: quote.title,
+    notes: quote.notes,
+    terms: quote.terms,
+    paymentTerms: quote.paymentTerms,
+    depositPercentBp: quote.depositPercentBp,
+    lines: quote.lines.map((l) => ({
+      description: l.description,
+      quantityMilli: l.quantityMilli,
+      unitPriceCents: l.unitPriceCents,
+      taxRateBp: l.taxRateBp,
+      netCents: l.netCents,
+    })),
+    subtotalCents: quote.subtotalCents,
+    taxCents: quote.taxCents,
+    totalCents: quote.totalCents,
+  });
+  const filename =
+    quote.quoteNumber === null
+      ? 'quote-draft.pdf'
+      : `${quote.quoteNumber}${quote.revision > 1 ? `-rev${String(quote.revision)}` : ''}.pdf`;
+  return { filename, pdf };
+}
+
+/** GET /:id/pdf */
+export async function getQuotePdf(
+  orgId: string,
+  direction: QuoteDirection,
+  id: string,
+): Promise<{ filename: string; pdf: Buffer }> {
+  return buildQuotePdf(orgId, await getQuoteById(orgId, direction, id));
 }
 
 /** POST /:id/revise — a new DRAFT revision of a sent, declined or expired quote. */
@@ -1179,19 +1321,21 @@ export async function reviseQuote(
 
     // A revision is a fresh offer: dated today, open for as long as the original was.
     const quoteId = randomUUID();
-    const quoteDate = today();
+    const quoteDate = await orgTodayOnClient(client, orgId);
     await client.query(
       `INSERT INTO quotes
          (id, org_id, direction, customer_id, vendor_id, root_quote_id, supersedes_quote_id, revision, status,
           quote_date, valid_until, currency_code,
           party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
           party_reference, title, notes, terms, payment_terms, payment_terms_code,
-          subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by)
+          subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by,
+          deposit_percent_bp)
        SELECT $1, org_id, direction, customer_id, vendor_id, root_quote_id, id, revision + 1, 'DRAFT',
               $2::date, $2::date + (valid_until - quote_date), currency_code,
               party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
               party_reference, title, notes, terms, payment_terms, payment_terms_code,
-              subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, $3
+              subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, $3,
+              deposit_percent_bp
          FROM quotes WHERE id = $4 AND org_id = $5`,
       [quoteId, quoteDate, userId, id, orgId],
     );
@@ -1244,6 +1388,8 @@ export interface ResponseEvidence {
   linkId: string | null;
   signerName: string | null;
   signerEmail: string | null;
+  /** True only when an emailed one-time code for signerEmail was consumed in this transaction. */
+  signerEmailVerified: boolean;
   termsAccepted: boolean;
   declineReason: string | null;
   clientIp: string | null;
@@ -1276,7 +1422,7 @@ export async function respondOnClient(
   if (row.status !== 'SENT' || row.content_sha256 === null) {
     throw new ApiError(409, 'This quote is no longer open for a response');
   }
-  if (row.valid_until < today()) {
+  if (row.valid_until < (await orgTodayOnClient(client, orgId))) {
     throw new ApiError(409, 'This quote has expired and can no longer be accepted or declined');
   }
   if (evidence.expectedContentSha256 !== null && evidence.expectedContentSha256 !== row.content_sha256) {
@@ -1286,8 +1432,8 @@ export async function respondOnClient(
   await client.query(
     `INSERT INTO quote_responses
        (org_id, quote_id, link_id, response, channel, signer_name, signer_email, terms_accepted,
-        decline_reason, client_ip, user_agent, recorded_by, note, quote_content_sha256)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+        decline_reason, client_ip, user_agent, recorded_by, note, quote_content_sha256, signer_email_verified)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       orgId,
       quoteId,
@@ -1303,6 +1449,7 @@ export async function respondOnClient(
       evidence.recordedBy,
       evidence.note,
       row.content_sha256,
+      evidence.signerEmailVerified,
     ],
   );
   await transitionQuoteOnClient(client, orgId, quoteId, evidence.response);
@@ -1345,6 +1492,7 @@ export async function recordResponse(
       linkId: null,
       signerName: input.response === 'ACCEPTED' ? input.signerName : null,
       signerEmail: null,
+      signerEmailVerified: false,
       termsAccepted: input.response === 'ACCEPTED',
       declineReason: input.response === 'DECLINED' ? input.reason : null,
       clientIp: null,
@@ -1366,6 +1514,11 @@ export async function recordResponse(
  * or expense only when it is issued/approved, at the FX rate of its own date.
  * Once only — `ux_invoices_source_quote` / `ux_bills_source_quote` decide a
  * race; deleting the draft (not voiding it) frees the quote again.
+ *
+ * Phase 42: `target: 'ORDER'` creates a confirmed order instead (partial
+ * invoicing/billing then happens against the order). An order cannot be
+ * deleted once confirmed, so there is no revert path, and cancelling it does
+ * not reopen the quote.
  */
 export async function convertQuote(
   orgId: string,
@@ -1373,7 +1526,7 @@ export async function convertQuote(
   direction: QuoteDirection,
   id: string,
   input: ConvertQuoteInput,
-): Promise<{ kind: 'INVOICE' | 'BILL'; id: string }> {
+): Promise<{ kind: 'INVOICE' | 'BILL' | 'ORDER'; id: string }> {
   return runQuoteWrite(async (client) => {
     const locked = await lockQuoteOnClient(client, orgId, direction, id);
     if (locked.status !== 'ACCEPTED') {
@@ -1383,7 +1536,23 @@ export async function convertQuote(
       );
     }
     const quote = await loadQuote(client, orgId, direction, id);
-    const documentDate = input.documentDate ?? today();
+    if (input.target === 'ORDER') {
+      const orderId = await createOrderFromQuoteOnClient(client, orgId, userId, quote);
+      await transitionQuoteOnClient(client, orgId, id, 'CONVERTED', { userId });
+      await emitEvent(client, orgId, MODULE_TAGS.accounting, 'quote.converted', {
+        quoteId: id,
+        direction,
+        quoteNumber: quote.quoteNumber,
+        documentKind: 'ORDER',
+        documentId: orderId,
+      });
+      return { kind: 'ORDER' as const, id: orderId };
+    }
+    if (quote.depositPercentBp !== null) {
+      // The deposit is raised against a CONFIRMED order; there is no order to hang it on here.
+      throw new ApiError(422, 'This quote asks for a deposit — convert it to an order');
+    }
+    const documentDate = input.documentDate ?? (await orgTodayOnClient(client, orgId));
     let dueDate: string | undefined = input.dueDate ?? undefined;
     if (dueDate === undefined && quote.paymentTermsCode === null) {
       const defaults = await invoiceSettingsService.getQuoteDefaultsOnClient(client, orgId);
@@ -1469,8 +1638,8 @@ export async function convertQuote(
  */
 export async function listOrgsWithExpiredSentQuotes(): Promise<string[]> {
   const { rows } = await pool.query<{ org_id: string }>(
-    `SELECT DISTINCT org_id FROM quotes WHERE status = 'SENT' AND valid_until < $1::date`,
-    [today()],
+    `SELECT DISTINCT org_id FROM quotes WHERE status = 'SENT' AND valid_until < ($1::date + 1)`,
+    [new Date().toISOString().slice(0, 10)],
   );
   return rows.map((r) => r.org_id);
 }
@@ -1482,12 +1651,13 @@ export async function listOrgsWithExpiredSentQuotes(): Promise<string[]> {
  */
 export async function expireQuotesForOrg(orgId: string): Promise<number> {
   return withTransaction(async (client) => {
+    const orgToday = await orgTodayOnClient(client, orgId);
     const { rows } = await client.query<{ id: string }>(
       `SELECT id FROM quotes
         WHERE org_id = $1 AND status = 'SENT' AND valid_until < $2::date
         ORDER BY id
         FOR UPDATE SKIP LOCKED`,
-      [orgId, today()],
+      [orgId, orgToday],
     );
     for (const row of rows) {
       await transitionQuoteOnClient(client, orgId, row.id, 'EXPIRED');

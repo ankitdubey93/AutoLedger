@@ -29,9 +29,11 @@ const BASE = '/api/v1/accounts';
  * total, 34 -> 35 postable.
  * Phase 32 adds 5050 Cost of Sales — Inventory and 5400 Inventory Adjustments &
  * Shrinkage, both postable leaves: 45 -> 47 total, 35 -> 37 postable.
+ * Phase 42 adds 1150 Supplier Prepayments and 2130 Customer Deposits, both
+ * postable leaves: 47 -> 49 total, 37 -> 39 postable.
  */
-const SEEDED_TOTAL = 47;
-const SEEDED_POSTABLE = 37;
+const SEEDED_TOTAL = 49;
+const SEEDED_POSTABLE = 39;
 
 let userA: SeededUser;
 let userB: SeededUser;
@@ -76,7 +78,7 @@ describe('the default chart is seeded at registration', () => {
     expect(res.body.accounts).toHaveLength(SEEDED_TOTAL);
   });
 
-  it('marks exactly 37 of them postable, the rest header rollups', async () => {
+  it('marks exactly 39 of them postable, the rest header rollups', async () => {
     const agent = await loginAgent(app, userA);
     const { body } = await agent.get(BASE);
 

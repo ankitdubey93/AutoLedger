@@ -27,6 +27,9 @@ const billLineSchema = z.object({
   itemId: z.uuid().nullable().default(null),
   // Phase 32: where an INVENTORY line moves stock. Null = Inventory's default location.
   stockLocationId: z.uuid().nullable().default(null),
+  // Phase 42: which order line this line bills. The service checks the order
+  // is confirmed, the same vendor and currency; the database caps the quantity.
+  orderLineId: z.uuid().nullable().default(null),
 });
 
 export const createBillSchema = z

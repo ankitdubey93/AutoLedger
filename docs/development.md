@@ -301,6 +301,7 @@ Added in Phase 10:
 | `tesseract.js` | server | AP-Flow's **local** OCR with bounding boxes. Local is the point — PII is located and masked before any image leaves the machine. Downloads `eng.traineddata` (~15MB) into `server/.tesseract/` on first real use; every test injects a fake `OcrAdapter` instead, so `npm test` never triggers the download |
 | `sharp` | server | Rasterizing and masking image buffers for the redaction pipeline (a native binding to libvips) |
 | `pdfjs-dist` | server | Rendering PDF pages to images before OCR. `@napi-rs/canvas` appears in `package-lock.json` as this package's own transitive `optionalDependency` — its Node canvas factory, lazily loaded, never imported directly here and never added to `dependencies` |
+| `pdfkit` | server | Writing quote PDFs (Phase 42) — pure JavaScript, built-in standard fonts, no native binding. Resolved `0.20.2`; its types come from the dev dependency `@types/pdfkit` `0.17.6` |
 | `@anthropic-ai/sdk` | server | AP-Flow's vision extraction of already-redacted documents, forced into a `record_invoice` tool call rather than free-form JSON. Needs `ANTHROPIC_API_KEY` in `server/.env`; every test injects a stub `VisionClient` and stubs `fetch` to throw, so the suite needs no key and makes no network call |
 
 No client-side dependency this phase — `ApFlowDocumentsPage`/`ApFlowDocumentDetailPage` are hand-rolled components, matching every other LedgerCore/AP-Flow page.

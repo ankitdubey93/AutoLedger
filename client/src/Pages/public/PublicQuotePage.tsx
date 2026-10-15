@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { CheckCircle2, Printer, XCircle } from 'lucide-react';
+import { CheckCircle2, Download, Printer, XCircle } from 'lucide-react';
 import {
   acceptPublicQuote,
   ApiRequestError,
   declinePublicQuote,
+  downloadPublicQuotePdf,
   getPublicQuote,
   getPublicQuoteLogo,
   type PublicQuoteView,
+  requestPublicQuoteCode,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import { formatDate } from '../../utils/date';
@@ -26,17 +28,33 @@ import QuoteDocument from '../sales/quotes/QuoteDocument';
  * is refused rather than accepted unseen.
  */
 
+/** Hands a Blob to the browser as a file download (Phase 42, Slice E). */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export default function PublicQuotePage() {
   const { token = '' } = useParams<{ token: string }>();
   const [view, setView] = useState<PublicQuoteView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [logoSrc, setLogoSrc] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const [mode, setMode] = useState<'accept' | 'decline'>('accept');
   const [signerName, setSignerName] = useState('');
   const [signerEmail, setSignerEmail] = useState('');
   const [agreed, setAgreed] = useState(false);
   const [reason, setReason] = useState('');
+  const [code, setCode] = useState('');
+  const [codeSentTo, setCodeSentTo] = useState<string | null>(null);
+  const [sendingCode, setSendingCode] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -74,6 +92,31 @@ export default function PublicQuotePage() {
     };
   }, [token, view?.merchant.hasLogo]);
 
+  async function downloadPdf() {
+    if (view === null) return;
+    setPdfError(null);
+    try {
+      const blob = await downloadPublicQuotePdf(token);
+      saveBlob(blob, `${view.quoteNumber}.pdf`);
+    } catch (err: unknown) {
+      setPdfError(err instanceof Error ? err.message : 'Could not download the PDF');
+    }
+  }
+
+  async function sendCode() {
+    const email = signerEmail.trim();
+    setSendingCode(true);
+    setError(null);
+    try {
+      await requestPublicQuoteCode(token, email);
+      setCodeSentTo(email);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not send the code');
+    } finally {
+      setSendingCode(false);
+    }
+  }
+
   async function respond() {
     if (view === null) return;
     setBusy(true);
@@ -86,6 +129,7 @@ export default function PublicQuotePage() {
               signerEmail: signerEmail.trim() === '' ? null : signerEmail.trim(),
               acceptTerms: true,
               contentSha256: view.contentSha256,
+              code: view.requiresEmailCode ? code.trim() : null,
             })
           : await declinePublicQuote(token, reason.trim() === '' ? null : reason.trim());
       setView(res.quote);
@@ -114,7 +158,9 @@ export default function PublicQuotePage() {
 
   const purchase = view.direction === 'PURCHASE';
   const noun = purchase ? 'price confirmation' : 'quote';
-  const canAccept = signerName.trim() !== '' && agreed && !busy;
+  const emailReady = !view.requiresEmailCode || signerEmail.trim() !== '';
+  const codeReady = !view.requiresEmailCode || /^\d{6}$/.test(code.trim());
+  const canAccept = signerName.trim() !== '' && agreed && emailReady && codeReady && !busy;
 
   return (
     <main className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
@@ -218,16 +264,45 @@ export default function PublicQuotePage() {
                     />
                   </label>
                   <label className="flex flex-col gap-1">
-                    <span className="text-[var(--muted)]">Your email (optional)</span>
+                    <span className="text-[var(--muted)]">
+                      {view.requiresEmailCode ? 'Your email' : 'Your email (optional)'}
+                    </span>
                     <input
                       type="email"
                       value={signerEmail}
                       maxLength={254}
                       autoComplete="email"
+                      required={view.requiresEmailCode}
                       onChange={(e) => setSignerEmail(e.target.value)}
                       className={inputClass}
                     />
                   </label>
+                  {view.requiresEmailCode && (
+                    <div className="flex flex-col gap-2">
+                      <button
+                        type="button"
+                        className={secondaryButtonClass}
+                        disabled={signerEmail.trim() === '' || sendingCode}
+                        onClick={() => void sendCode()}
+                      >
+                        {sendingCode ? 'Sending…' : 'Send code'}
+                      </button>
+                      {codeSentTo !== null && (
+                        <p className="m-0 text-xs text-[var(--muted)]">We emailed a 6-digit code to {codeSentTo}.</p>
+                      )}
+                      <label className="flex flex-col gap-1">
+                        <span className="text-[var(--muted)]">Verification code</span>
+                        <input
+                          value={code}
+                          inputMode="numeric"
+                          maxLength={6}
+                          autoComplete="one-time-code"
+                          onChange={(e) => setCode(e.target.value)}
+                          className={inputClass}
+                        />
+                      </label>
+                    </div>
+                  )}
                   <label className="flex items-start gap-2">
                     <input type="checkbox" checked={agreed} onChange={(e) => setAgreed(e.target.checked)} className="mt-0.5" />
                     <span>
@@ -263,6 +338,13 @@ export default function PublicQuotePage() {
               {error !== null && <p className="status status--bad m-0">{error}</p>}
             </div>
           )}
+
+          {pdfError !== null && <p className="status status--bad m-0">{pdfError}</p>}
+          <button type="button" className={secondaryButtonClass} onClick={() => void downloadPdf()}>
+            <span className="inline-flex items-center gap-1.5">
+              <Download size={15} aria-hidden="true" /> Download PDF
+            </span>
+          </button>
 
           <button type="button" className={secondaryButtonClass} onClick={() => window.print()}>
             <span className="inline-flex items-center gap-1.5">

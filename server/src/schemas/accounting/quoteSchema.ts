@@ -38,6 +38,8 @@ export const createQuoteSchema = z
     terms: z.string().trim().max(5000).nullable().optional(),
     paymentTerms: z.string().trim().max(500).nullable().default(null),
     paymentTermsCode: z.string().trim().max(30).nullable().default(null),
+    /** Phase 42 — deposit asked for on acceptance, in basis points of the total; null = none. */
+    depositPercentBp: z.int().min(1).max(10_000).nullable().default(null),
     lines: z.array(quoteLineSchema).min(1, 'A quote needs at least one line').max(QUOTE_MAX_LINES),
   })
   .refine((v) => v.validUntil === undefined || v.validUntil >= v.quoteDate, {
@@ -53,6 +55,7 @@ export const sendQuoteSchema = z
     delivery: z.enum(['EMAIL', 'MANUAL']),
     toEmail: z.email().trim().toLowerCase().max(254).nullable().default(null),
     message: z.string().trim().max(2000).nullable().default(null),
+    templateId: z.uuid().nullable().default(null),
   })
   .refine((v) => v.delivery === 'MANUAL' || v.toEmail !== null, {
     message: 'An email address is required to email a quote',
@@ -80,6 +83,12 @@ export const convertQuoteSchema = z.object({
   dueDate: z.iso.date().nullable().default(null),
   /** Purchase only — the vendor's own invoice number for the bill. */
   vendorReference: z.string().trim().min(1).max(100).nullable().default(null),
+  /**
+   * Phase 42 — INVOICE (default; a DRAFT invoice/bill as before) or ORDER (a
+   * confirmed sales/purchase order the quote's lines are then billed against,
+   * in parts). Date/reference fields apply to INVOICE only.
+   */
+  target: z.enum(['INVOICE', 'ORDER']).default('INVOICE'),
 });
 
 // ------------------------------------------------------------- public page
@@ -89,6 +98,12 @@ export const publicAcceptQuoteSchema = z.object({
   signerEmail: z.email().trim().toLowerCase().max(254).nullable().default(null),
   acceptTerms: z.literal(true, { error: 'You must accept the terms to accept this quote' }),
   contentSha256: z.string().regex(/^[0-9a-f]{64}$/),
+  /** The 6-digit code emailed to signerEmail (Phase 42 D); required when the org turns verification on. */
+  code: z.string().regex(/^\d{6}$/).nullable().default(null),
+});
+
+export const publicVerifyEmailSchema = z.object({
+  signerEmail: z.email().trim().toLowerCase().max(254),
 });
 
 export const publicDeclineQuoteSchema = z.object({

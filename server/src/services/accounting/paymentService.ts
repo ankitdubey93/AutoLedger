@@ -364,7 +364,7 @@ async function lockAndValidateTargets(
     targets.set(invoiceId, {
       id: invoiceId,
       totalCents: parseCents(row.total_cents),
-      allocatedCents: settled.paidCents + settled.noteAppliedCents,
+      allocatedCents: settled.paidCents + settled.noteAppliedCents + settled.depositAppliedCents,
       counterpartyId: row.customer_id,
       currencyCode: documentCurrency,
       fxRate: row.fx_rate,
@@ -402,7 +402,7 @@ async function lockAndValidateTargets(
     targets.set(billId, {
       id: billId,
       totalCents: parseCents(row.total_cents),
-      allocatedCents: settled.paidCents + settled.noteAppliedCents,
+      allocatedCents: settled.paidCents + settled.noteAppliedCents + settled.depositAppliedCents,
       counterpartyId: row.vendor_id,
       currencyCode: documentCurrency,
       fxRate: row.fx_rate,
@@ -779,6 +779,49 @@ export async function createPayment(
 }
 
 /**
+ * Phase 42 (Slice G): a deposit application is capped at what the deposit
+ * document has been paid minus earlier applications. Voiding a payment that
+ * funded a deposit would silently break that after the fact, so it is refused
+ * unless the remaining payments still cover the POSTED applications. The
+ * deposit document is locked FOR UPDATE (the same lock `applyDeposit` takes),
+ * so the check cannot race an application. Runs on the caller's client.
+ */
+async function assertNoAppliedDepositFundedBy(client: PoolClient, orgId: string, paymentId: string): Promise<void> {
+  const checks = [
+    { table: 'invoices', allocationColumn: 'invoice_id', applicationColumn: 'deposit_invoice_id', noun: 'invoice' },
+    { table: 'bills', allocationColumn: 'bill_id', applicationColumn: 'deposit_bill_id', noun: 'bill' },
+  ] as const;
+  for (const c of checks) {
+    const { rows } = await client.query<{ id: string }>(
+      `SELECT d.id
+         FROM ${c.table} d
+        WHERE d.org_id = $1 AND d.kind = 'DEPOSIT'
+          AND EXISTS (SELECT 1 FROM payment_allocations pa
+                       WHERE pa.org_id = d.org_id AND pa.${c.allocationColumn} = d.id AND pa.payment_id = $2)
+        ORDER BY d.id
+          FOR UPDATE`,
+      [orgId, paymentId],
+    );
+    for (const deposit of rows) {
+      const { rows: sums } = await client.query<{ paid_after: string; applied: string }>(
+        `SELECT
+           (SELECT COALESCE(SUM(pa.amount_cents), 0)
+              FROM payment_allocations pa
+              JOIN payments p ON p.id = pa.payment_id AND p.org_id = pa.org_id
+             WHERE pa.org_id = $1 AND pa.${c.allocationColumn} = $2 AND p.status = 'POSTED' AND p.id <> $3)::text AS paid_after,
+           (SELECT COALESCE(SUM(da.amount_cents), 0)
+              FROM deposit_applications da
+             WHERE da.org_id = $1 AND da.${c.applicationColumn} = $2 AND da.status = 'POSTED')::text AS applied`,
+        [orgId, deposit.id, paymentId],
+      );
+      if (parseCents(sums[0]?.paid_after ?? '0') < parseCents(sums[0]?.applied ?? '0')) {
+        throw new ApiError(409, `Void the deposit applications on this ${c.noun} first`);
+      }
+    }
+  }
+}
+
+/**
  * Voids a payment on the caller's transaction, posting the reversal. Throws
  * ApiError(409, 'This payment has already been voided') if it is not
  * POSTED. Does not COMMIT.
@@ -802,6 +845,8 @@ export async function voidPaymentOnClient(
   if (!canTransitionPayment(row.status, 'VOID')) {
     throw new ApiError(409, 'This payment has already been voided');
   }
+
+  await assertNoAppliedDepositFundedBy(client, orgId, id);
 
   const reversalId = await journalService.reverseEntryOnClient(
     client,

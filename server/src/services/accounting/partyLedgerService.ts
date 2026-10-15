@@ -58,6 +58,10 @@ interface PartyConfig {
   noteKind: 'CREDIT_NOTE' | 'DEBIT_NOTE';
   noteVoidKind: 'CREDIT_NOTE_VOID' | 'DEBIT_NOTE_VOID';
   noteSubqueryKind: 'credit' | 'debit';
+  /** Phase 42 — the column of `deposit_applications` naming the TARGET document (the party's final invoice/bill). */
+  depositTargetColumn: 'target_invoice_id' | 'target_bill_id';
+  depositKind: 'DEPOSIT_APPLICATION';
+  depositVoidKind: 'DEPOSIT_APPLICATION_VOID';
 }
 
 const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
@@ -77,6 +81,9 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     noteKind: 'CREDIT_NOTE',
     noteVoidKind: 'CREDIT_NOTE_VOID',
     noteSubqueryKind: 'credit',
+    depositTargetColumn: 'target_invoice_id',
+    depositKind: 'DEPOSIT_APPLICATION',
+    depositVoidKind: 'DEPOSIT_APPLICATION_VOID',
   },
   VENDOR: {
     partyTable: 'vendors',
@@ -94,6 +101,9 @@ const PARTY_CONFIG: Record<PartyKind, PartyConfig> = {
     noteKind: 'DEBIT_NOTE',
     noteVoidKind: 'DEBIT_NOTE_VOID',
     noteSubqueryKind: 'debit',
+    depositTargetColumn: 'target_bill_id',
+    depositKind: 'DEPOSIT_APPLICATION',
+    depositVoidKind: 'DEPOSIT_APPLICATION_VOID',
   },
 };
 
@@ -152,6 +162,16 @@ function buildPartyRowsCte(config: PartyConfig): string {
     SELECT '${config.noteVoidKind}'::text, n.id, n.${config.noteNumberColumn}, n.void_journal_entry_id
       FROM ${config.noteTable} n
      WHERE n.org_id = $1 AND n.${config.partyColumn} = $2 AND n.void_journal_entry_id IS NOT NULL
+    UNION ALL
+    SELECT '${config.depositKind}'::text, da.id, d.${config.numberColumn}, da.journal_entry_id
+      FROM deposit_applications da
+      JOIN ${config.docTable} d ON d.id = da.${config.depositTargetColumn} AND d.org_id = da.org_id
+     WHERE da.org_id = $1 AND d.${config.partyColumn} = $2
+    UNION ALL
+    SELECT '${config.depositVoidKind}'::text, da.id, d.${config.numberColumn}, da.void_journal_entry_id
+      FROM deposit_applications da
+      JOIN ${config.docTable} d ON d.id = da.${config.depositTargetColumn} AND d.org_id = da.org_id
+     WHERE da.org_id = $1 AND d.${config.partyColumn} = $2 AND da.void_journal_entry_id IS NOT NULL
   ),
   party_rows AS (
     SELECT pe.kind, pe.document_id, pe.document_number,

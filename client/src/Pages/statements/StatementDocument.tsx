@@ -55,6 +55,8 @@ const KIND_LABELS: Record<PartyLedgerEntryKind, string> = {
   CREDIT_NOTE_VOID: 'Credit note voided',
   DEBIT_NOTE: 'Debit note',
   DEBIT_NOTE_VOID: 'Debit note voided',
+  DEPOSIT_APPLICATION: 'Deposit applied',
+  DEPOSIT_APPLICATION_VOID: 'Deposit application voided',
 };
 
 const AGING_LABELS: Record<AgingBucket, string> = {

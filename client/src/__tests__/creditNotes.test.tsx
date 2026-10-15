@@ -82,6 +82,7 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
         netCents: 1200000,
         taxCents: 0,
         itemId: null,
+        orderLineId: null,
       },
     ],
     allocatedCents: 0,
@@ -89,6 +90,10 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
     amountDueCents: 1200000,
     settlementStatus: 'UNPAID',
     sourceQuote: null,
+    kind: 'STANDARD',
+    depositForOrderId: null,
+    depositAppliedCents: 0,
+    depositApplications: [],
     ...overrides,
   };
 }

@@ -57,6 +57,15 @@ const invoiceSettings: InvoiceSettings = {
   showPaymentTerms: true,
   showDueDate: true,
   bankDetails: null,
+  quotePrefix: 'QU-',
+  quoteNextNumber: 1,
+  purchaseQuotePrefix: 'PQ-',
+  purchaseQuoteNextNumber: 1,
+  defaultQuoteValidityDays: 30,
+  defaultQuoteTerms: null,
+  quoteAcceptanceRequiresCode: false,
+  customerDepositAccountId: null,
+  supplierPrepaymentAccountId: null,
   configured: true,
 };
 
@@ -107,6 +116,7 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
         netCents: 25000,
         taxCents: 4500,
         itemId: null,
+        orderLineId: null,
       },
       {
         id: 'line-2',
@@ -122,6 +132,7 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
         netCents: 10000,
         taxCents: 0,
         itemId: null,
+        orderLineId: null,
       },
     ],
     allocatedCents: 10000,
@@ -129,6 +140,10 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
     amountDueCents: 29500,
     settlementStatus: 'PARTIALLY_PAID',
     sourceQuote: null,
+    kind: 'STANDARD',
+    depositForOrderId: null,
+    depositAppliedCents: 0,
+    depositApplications: [],
     ...overrides,
   };
 }

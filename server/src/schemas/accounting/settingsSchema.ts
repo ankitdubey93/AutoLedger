@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isValidTimeZone } from '../../utils/orgDate.js';
 import { SUPPORTED_CURRENCIES } from '../../config/currencies.js';
 
 /**
@@ -18,7 +19,7 @@ export const onboardingSchema = z.object({
   fiscalYearStartDay: z.int().min(1).max(28).default(1),
   booksStartDate: z.iso.date(),
   industry: z.string().trim().max(80).nullable().default(null),
-  timezone: z.string().trim().max(64).default('UTC'),
+  timezone: z.string().trim().max(64).refine(isValidTimeZone, { message: 'Unknown time zone' }).default('UTC'),
   cashAccountId: z.uuid().nullable().default(null),
 });
 
@@ -29,7 +30,7 @@ export const updateSettingsSchema = z
     fiscalYearStartDay: z.int().min(1).max(28).optional(),
     booksStartDate: z.iso.date().optional(),
     industry: z.string().trim().max(80).nullable().optional(),
-    timezone: z.string().trim().max(64).optional(),
+    timezone: z.string().trim().max(64).refine(isValidTimeZone, { message: 'Unknown time zone' }).optional(),
     cashAccountId: z.uuid().nullable().optional(),
     unmatchedAlertThresholdCents: z.int().min(0).optional(),
     realizedFxGainAccountId: z.uuid().nullable().optional(),
