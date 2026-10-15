@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { SUPPORTED_CURRENCIES } from '../../config/currencies.js';
+import { applyCreditsSchema } from './applyCreditsSchema.js';
 
 /**
  * Request schemas for Accounting sales invoices.
@@ -54,5 +55,8 @@ export const createInvoiceSchema = z
 
 export const updateInvoiceSchema = createInvoiceSchema;
 
-export const issueInvoiceSchema = z.object({ entryDate: z.iso.date().nullable().default(null) });
+export const issueInvoiceSchema = z.object({
+  entryDate: z.iso.date().nullable().default(null),
+  applyCredits: applyCreditsSchema,
+});
 export const voidInvoiceSchema = z.object({ entryDate: z.iso.date().nullable().default(null) });

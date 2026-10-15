@@ -221,6 +221,9 @@ function mockDetailRoutes(bill: Bill) {
       );
     }
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
+    if (url.endsWith(`/api/v1/bills/${bill.id}/available-credits`)) {
+      return Promise.resolve(jsonResponse(200, { success: true, credits: [] }));
+    }
     if (url.endsWith(`/api/v1/bills/${bill.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, bill }));
     }
@@ -286,7 +289,7 @@ describe('BillDetailPage', () => {
       }),
     ).toBeUndefined();
 
-    await user.click(screen.getByRole('button', { name: 'Approve expense' }));
+    await user.click(await screen.findByRole('button', { name: 'Approve expense' }));
 
     await waitFor(() => {
       const call = fetchMock.mock.calls.find((c) => {

@@ -4,6 +4,7 @@ import {
   ApiRequestError,
   applyPrepayment,
   approveBill,
+  getAvailableCredits,
   getBill,
   listBills,
   listDebitNotes,
@@ -11,6 +12,7 @@ import {
   submitBill,
   voidBill,
   voidDepositApplication,
+  type AvailableCredit,
   type Bill,
   type DebitNote,
   type Payment,
@@ -19,6 +21,8 @@ import { formatCents, formatQuantity, formatRate, parseCentsInput } from '../../
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import ApplyCreditsDialog from '../../components/ApplyCreditsDialog';
+import type { ApplyCredit } from '../../components/ApplyCreditsDialog';
 import PaymentDialog from '../sales/PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
@@ -56,6 +60,8 @@ export default function BillDetailPage() {
   const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'approve' | 'void' | null>(null);
+  const [creditsOffer, setCreditsOffer] = useState<AvailableCredit[] | null>(null);
+  const [creditsError, setCreditsError] = useState<string | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showApplyPrepayment, setShowApplyPrepayment] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
@@ -107,6 +113,46 @@ export default function BillDetailPage() {
       setBill(updated);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Could not submit the expense');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Phase 43c — approving first looks for open debit notes and prepayments. Any
+   * to offer opens the apply-credit dialog; none (or a failed lookup — credit is
+   * optional) goes straight to the ordinary confirmation.
+   */
+  async function startApprove() {
+    if (bill === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { credits } = await getAvailableCredits('PURCHASE', bill.id);
+      if (credits.length > 0) {
+        setCreditsError(null);
+        setCreditsOffer(credits);
+      } else {
+        setConfirmAction('approve');
+      }
+    } catch {
+      setConfirmAction('approve');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleApproveWithCredits(applyCredits: ApplyCredit[]) {
+    if (bill === null) return;
+    setBusy(true);
+    setCreditsError(null);
+    try {
+      const { bill: updated } = await approveBill(bill.id, null, applyCredits);
+      setBill(updated);
+      setCreditsOffer(null);
+      setReloadToken((n) => n + 1);
+    } catch (err: unknown) {
+      setCreditsError(err instanceof Error ? err.message : 'Could not approve the expense');
     } finally {
       setBusy(false);
     }
@@ -248,7 +294,7 @@ export default function BillDetailPage() {
           {bill.status === 'AWAITING_APPROVAL' && canApprove && (
             <button
               type="button"
-              onClick={() => setConfirmAction('approve')}
+              onClick={() => void startApprove()}
               disabled={busy}
               className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
@@ -542,6 +588,23 @@ export default function BillDetailPage() {
             void handleApprove();
           }}
           onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {creditsOffer !== null && (
+        <ApplyCreditsDialog
+          direction="PURCHASE"
+          title="Approving posts this expense."
+          documentTotalCents={bill.totalCents}
+          amountDueCents={bill.amountDueCents}
+          credits={creditsOffer}
+          busy={busy}
+          error={creditsError}
+          onConfirm={(applyCredits) => void handleApproveWithCredits(applyCredits)}
+          onSkip={() => {
+            setCreditsOffer(null);
+            setConfirmAction('approve');
+          }}
+          onCancel={() => setCreditsOffer(null)}
         />
       )}
       {confirmAction === 'void' && (

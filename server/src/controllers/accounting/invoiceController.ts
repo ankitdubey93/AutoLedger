@@ -13,6 +13,8 @@ import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
 import { optionalIsoDate, optionalText, optionalUuid, readPagination, readSort } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
+import { loadAccess } from '../../middleware/rbac.js';
+import * as availableCreditsService from '../../services/accounting/availableCreditsService.js';
 import { isInvoiceStatus, type InvoiceStatus } from '../../types/accounting.js';
 import type { Request } from 'express';
 
@@ -107,9 +109,24 @@ export const remove: RequestHandler = async (req, res) => {
 export const issue: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const id = requireParam(req, 'id');
-  const { entryDate } = parseBody(issueInvoiceSchema, req.body ?? {});
-  const invoice = await invoiceService.issueInvoice(user.orgId, user.id, id, entryDate);
+  const { entryDate, applyCredits } = parseBody(issueInvoiceSchema, req.body ?? {});
+  // Applying a credit note needs its own permission on top of invoices.issue; a
+  // deposit needs nothing more (it matches POST /:id/apply-deposit).
+  if (applyCredits.some((c) => c.kind === 'NOTE')) {
+    const access = await loadAccess(req);
+    if (!access.permissions.has('credit_notes.issue')) {
+      throw new ApiError(403, 'Applying a credit note needs the "Issue and apply credit notes" permission.');
+    }
+  }
+  const invoice = await invoiceService.issueInvoice(user.orgId, user.id, id, entryDate, applyCredits);
   res.json({ success: true, invoice });
+};
+
+/** GET /invoices/:id/available-credits — open credit notes and deposits this invoice could take (Phase 43c). */
+export const availableCredits: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const result = await availableCreditsService.listAvailableCredits(user.orgId, 'SALES', requireParam(req, 'id'));
+  res.json({ success: true, ...result });
 };
 
 /** POST /invoices/:id/void */

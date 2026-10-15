@@ -387,7 +387,14 @@ async function lockDocumentsOnClient(
   );
 }
 
-export async function applyDeposit(
+/**
+ * The body of `applyDeposit`, on the CALLER's transaction client (Phase 43c) so
+ * approving a bill or issuing an invoice can apply a deposit in the same
+ * transaction. Locks target and deposit by id via `lockDocumentsOnClient`; no
+ * transaction of its own and no `pool` (rule 5).
+ */
+export async function applyDepositOnClient(
+  client: PoolClient,
   orgId: string,
   userId: string,
   direction: QuoteDirection,
@@ -395,132 +402,143 @@ export async function applyDeposit(
   input: ApplyDepositBody,
 ): Promise<DepositApplication> {
   const d = DOC[direction];
+
+  if (input.depositDocumentId === targetId) {
+    throw new ApiError(422, `A ${d.noun} cannot take its own ${d.depositNoun}`);
+  }
+  const docs = await lockDocumentsOnClient(client, orgId, direction, [targetId, input.depositDocumentId]);
+  const target = docs.get(targetId);
+  if (target === undefined) throw new ApiError(404, direction === 'SALES' ? 'Invoice not found' : 'Bill not found');
+  const deposit = docs.get(input.depositDocumentId);
+  if (deposit === undefined) {
+    throw new ApiError(404, direction === 'SALES' ? 'Deposit invoice not found' : 'Prepayment bill not found');
+  }
+
+  if (target.kind !== 'STANDARD' || target.status !== d.openStatus) {
+    throw new ApiError(409, `Only an ${d.openNoun} can take a ${d.depositNoun}`);
+  }
+  if (deposit.kind !== 'DEPOSIT') {
+    throw new ApiError(422, `That ${d.noun} is not a ${d.depositNoun}`);
+  }
+  if (deposit.status !== d.openStatus) {
+    throw new ApiError(409, `Only an ${d.openNoun} can be applied`);
+  }
+  if (deposit.partyId !== target.partyId) {
+    throw new ApiError(422, `That ${d.depositNoun} belongs to a different ${d.partyNoun}`);
+  }
+  if (deposit.currencyCode !== target.currencyCode) {
+    throw new ApiError(422, `A ${d.depositNoun} can only be applied to a ${d.noun} in the same currency`);
+  }
+  if (target.currencyCode !== (await baseCurrencyOf(client, orgId))) {
+    throw new ApiError(422, 'Deposits are available on base-currency documents only');
+  }
+  if (deposit.depositForOrderId === null) throw new Error(`Deposit ${deposit.id} has no order`);
+
+  const { rows: linkedRows } = await client.query<{ linked: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM ${d.lineTable} l
+         JOIN order_lines ol ON ol.org_id = l.org_id AND ol.id = l.order_line_id
+        WHERE l.org_id = $1 AND l.${d.lineFk} = $2 AND ol.order_id = $3
+     ) AS linked`,
+    [orgId, target.id, deposit.depositForOrderId],
+  );
+  if (linkedRows[0]?.linked !== true) {
+    throw new ApiError(422, `This ${d.depositNoun} belongs to a different order`);
+  }
+
+  if (input.applicationDate < deposit.documentDate || input.applicationDate < target.documentDate) {
+    throw new ApiError(422, `A ${d.depositNoun} cannot be applied before either document is dated`);
+  }
+
+  // What has actually been RECEIVED: POSTED payment allocations only — a
+  // credit note or another application does not fund a deposit.
+  const depositSettled = await settledCentsOnClient(client, orgId, d.allocationColumn, deposit.id);
+  const { rows: appliedRows } = await client.query<{ applied: string }>(
+    direction === 'SALES'
+      ? `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied FROM deposit_applications
+          WHERE org_id = $1 AND deposit_invoice_id = $2 AND status = 'POSTED'`
+      : `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied FROM deposit_applications
+          WHERE org_id = $1 AND deposit_bill_id = $2 AND status = 'POSTED'`,
+    [orgId, deposit.id],
+  );
+  const availableCents = depositSettled.paidCents - parseCents(appliedRows[0]?.applied ?? '0');
+  if (input.amountCents > availableCents) {
+    throw new ApiError(
+      422,
+      `Only ${formatCents(Math.max(availableCents, 0))} of this ${d.depositNoun} has been received and not yet applied`,
+    );
+  }
+
+  const targetSettled = await settledCentsOnClient(client, orgId, d.allocationColumn, target.id);
+  const dueCents =
+    target.totalCents - targetSettled.paidCents - targetSettled.noteAppliedCents - targetSettled.depositAppliedCents;
+  if (input.amountCents > dueCents) {
+    throw new ApiError(422, 'Amount exceeds the amount still due');
+  }
+
+  const { depositAccountId } = await resolveDepositAccountsOnClient(client, orgId, direction);
+  const applicationId = randomUUID();
+  const description = `${direction === 'SALES' ? 'Deposit' : 'Prepayment'} ${deposit.number ?? deposit.id} applied to ${target.number ?? target.id}`;
+
+  let lines: journalService.JournalLineInput[];
+  if (direction === 'SALES') {
+    const { receivableAccountId } = await invoiceService.resolvePostingAccounts(client, orgId, false);
+    lines = [
+      { accountId: depositAccountId, debitCents: input.amountCents, creditCents: 0 },
+      { accountId: receivableAccountId, debitCents: 0, creditCents: input.amountCents },
+    ];
+  } else {
+    const { payableAccountId } = await resolveApPostingAccountsOnClient(client, orgId, false);
+    lines = [
+      { accountId: payableAccountId, debitCents: input.amountCents, creditCents: 0 },
+      { accountId: depositAccountId, debitCents: 0, creditCents: input.amountCents },
+    ];
+  }
+
+  // createEntryOnClient runs the fiscal-period guard, as it does for credit notes.
+  const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
+    entryDate: input.applicationDate,
+    description,
+    sourceType: 'deposit_application',
+    sourceId: applicationId,
+    lines,
+  });
+
+  await client.query(
+    `INSERT INTO deposit_applications
+       (id, org_id, direction, deposit_invoice_id, target_invoice_id, deposit_bill_id, target_bill_id,
+        amount_cents, base_amount_cents, application_date, journal_entry_id, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11)`,
+    [
+      applicationId,
+      orgId,
+      direction,
+      direction === 'SALES' ? deposit.id : null,
+      direction === 'SALES' ? target.id : null,
+      direction === 'PURCHASE' ? deposit.id : null,
+      direction === 'PURCHASE' ? target.id : null,
+      input.amountCents,
+      input.applicationDate,
+      journalEntryId,
+      userId,
+    ],
+  );
+
+  return await getApplicationOnClient(client, orgId, direction, applicationId);
+}
+
+export async function applyDeposit(
+  orgId: string,
+  userId: string,
+  direction: QuoteDirection,
+  targetId: string,
+  input: ApplyDepositBody,
+): Promise<DepositApplication> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
 
-    if (input.depositDocumentId === targetId) {
-      throw new ApiError(422, `A ${d.noun} cannot take its own ${d.depositNoun}`);
-    }
-    const docs = await lockDocumentsOnClient(client, orgId, direction, [targetId, input.depositDocumentId]);
-    const target = docs.get(targetId);
-    if (target === undefined) throw new ApiError(404, direction === 'SALES' ? 'Invoice not found' : 'Bill not found');
-    const deposit = docs.get(input.depositDocumentId);
-    if (deposit === undefined) {
-      throw new ApiError(404, direction === 'SALES' ? 'Deposit invoice not found' : 'Prepayment bill not found');
-    }
-
-    if (target.kind !== 'STANDARD' || target.status !== d.openStatus) {
-      throw new ApiError(409, `Only an ${d.openNoun} can take a ${d.depositNoun}`);
-    }
-    if (deposit.kind !== 'DEPOSIT') {
-      throw new ApiError(422, `That ${d.noun} is not a ${d.depositNoun}`);
-    }
-    if (deposit.status !== d.openStatus) {
-      throw new ApiError(409, `Only an ${d.openNoun} can be applied`);
-    }
-    if (deposit.partyId !== target.partyId) {
-      throw new ApiError(422, `That ${d.depositNoun} belongs to a different ${d.partyNoun}`);
-    }
-    if (deposit.currencyCode !== target.currencyCode) {
-      throw new ApiError(422, `A ${d.depositNoun} can only be applied to a ${d.noun} in the same currency`);
-    }
-    if (target.currencyCode !== (await baseCurrencyOf(client, orgId))) {
-      throw new ApiError(422, 'Deposits are available on base-currency documents only');
-    }
-    if (deposit.depositForOrderId === null) throw new Error(`Deposit ${deposit.id} has no order`);
-
-    const { rows: linkedRows } = await client.query<{ linked: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM ${d.lineTable} l
-           JOIN order_lines ol ON ol.org_id = l.org_id AND ol.id = l.order_line_id
-          WHERE l.org_id = $1 AND l.${d.lineFk} = $2 AND ol.order_id = $3
-       ) AS linked`,
-      [orgId, target.id, deposit.depositForOrderId],
-    );
-    if (linkedRows[0]?.linked !== true) {
-      throw new ApiError(422, `This ${d.depositNoun} belongs to a different order`);
-    }
-
-    if (input.applicationDate < deposit.documentDate || input.applicationDate < target.documentDate) {
-      throw new ApiError(422, `A ${d.depositNoun} cannot be applied before either document is dated`);
-    }
-
-    // What has actually been RECEIVED: POSTED payment allocations only — a
-    // credit note or another application does not fund a deposit.
-    const depositSettled = await settledCentsOnClient(client, orgId, d.allocationColumn, deposit.id);
-    const { rows: appliedRows } = await client.query<{ applied: string }>(
-      direction === 'SALES'
-        ? `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied FROM deposit_applications
-            WHERE org_id = $1 AND deposit_invoice_id = $2 AND status = 'POSTED'`
-        : `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied FROM deposit_applications
-            WHERE org_id = $1 AND deposit_bill_id = $2 AND status = 'POSTED'`,
-      [orgId, deposit.id],
-    );
-    const availableCents = depositSettled.paidCents - parseCents(appliedRows[0]?.applied ?? '0');
-    if (input.amountCents > availableCents) {
-      throw new ApiError(
-        422,
-        `Only ${formatCents(Math.max(availableCents, 0))} of this ${d.depositNoun} has been received and not yet applied`,
-      );
-    }
-
-    const targetSettled = await settledCentsOnClient(client, orgId, d.allocationColumn, target.id);
-    const dueCents =
-      target.totalCents - targetSettled.paidCents - targetSettled.noteAppliedCents - targetSettled.depositAppliedCents;
-    if (input.amountCents > dueCents) {
-      throw new ApiError(422, 'Amount exceeds the amount still due');
-    }
-
-    const { depositAccountId } = await resolveDepositAccountsOnClient(client, orgId, direction);
-    const applicationId = randomUUID();
-    const description = `${direction === 'SALES' ? 'Deposit' : 'Prepayment'} ${deposit.number ?? deposit.id} applied to ${target.number ?? target.id}`;
-
-    let lines: journalService.JournalLineInput[];
-    if (direction === 'SALES') {
-      const { receivableAccountId } = await invoiceService.resolvePostingAccounts(client, orgId, false);
-      lines = [
-        { accountId: depositAccountId, debitCents: input.amountCents, creditCents: 0 },
-        { accountId: receivableAccountId, debitCents: 0, creditCents: input.amountCents },
-      ];
-    } else {
-      const { payableAccountId } = await resolveApPostingAccountsOnClient(client, orgId, false);
-      lines = [
-        { accountId: payableAccountId, debitCents: input.amountCents, creditCents: 0 },
-        { accountId: depositAccountId, debitCents: 0, creditCents: input.amountCents },
-      ];
-    }
-
-    // createEntryOnClient runs the fiscal-period guard, as it does for credit notes.
-    const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
-      entryDate: input.applicationDate,
-      description,
-      sourceType: 'deposit_application',
-      sourceId: applicationId,
-      lines,
-    });
-
-    await client.query(
-      `INSERT INTO deposit_applications
-         (id, org_id, direction, deposit_invoice_id, target_invoice_id, deposit_bill_id, target_bill_id,
-          amount_cents, base_amount_cents, application_date, journal_entry_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11)`,
-      [
-        applicationId,
-        orgId,
-        direction,
-        direction === 'SALES' ? deposit.id : null,
-        direction === 'SALES' ? target.id : null,
-        direction === 'PURCHASE' ? deposit.id : null,
-        direction === 'PURCHASE' ? target.id : null,
-        input.amountCents,
-        input.applicationDate,
-        journalEntryId,
-        userId,
-      ],
-    );
-
-    const application = await getApplicationOnClient(client, orgId, direction, applicationId);
+    const application = await applyDepositOnClient(client, orgId, userId, direction, targetId, input);
     await client.query('COMMIT');
     return application;
   } catch (err) {

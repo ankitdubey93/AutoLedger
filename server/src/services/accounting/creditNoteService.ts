@@ -910,6 +910,76 @@ export async function voidCreditNote(
 }
 
 /**
+ * The body of `applyCreditNote`, on the CALLER's transaction client (Phase 43c)
+ * so issuing an invoice can apply credits in the same transaction. Posts
+ * nothing: applying only matches the note against the invoice. No transaction
+ * of its own and no `pool` (rule 5).
+ */
+export async function applyCreditNoteOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  id: string,
+  input: ApplyCreditNoteInput,
+): Promise<void> {
+  const note = await lockNote(client, orgId, id);
+  if (note.status !== 'ISSUED') {
+    throw new ApiError(409, 'Only an issued credit note can be applied');
+  }
+
+  const baseCurrency = await baseCurrencyOf(client, orgId);
+  const currencyCode = note.currency_code.trim();
+  if (currencyCode !== baseCurrency && input.invoiceId !== note.invoice_id) {
+    throw new ApiError(422, 'A foreign-currency credit note can only be applied to its original invoice');
+  }
+
+  const invoice = await lockInvoice(client, orgId, input.invoiceId);
+  if (invoice.customer_id !== note.customer_id) {
+    throw new ApiError(422, 'That invoice belongs to a different customer');
+  }
+  if (invoice.status !== 'ISSUED') {
+    throw new ApiError(422, 'Only an issued invoice can have credit applied');
+  }
+  if (invoice.currency_code.trim() !== currencyCode) {
+    throw new ApiError(422, 'A credit note can only be applied to an invoice in the same currency');
+  }
+  if (input.allocationDate < note.issue_date || input.allocationDate < invoice.issue_date) {
+    throw new ApiError(422, 'A credit cannot be applied before the credit note or the invoice is dated');
+  }
+
+  const { rows: appliedRows } = await client.query<{ applied: string }>(
+    `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied
+       FROM credit_note_allocations WHERE org_id = $1 AND credit_note_id = $2`,
+    [orgId, id],
+  );
+  const unappliedCents = parseCents(note.total_cents) - parseCents(appliedRows[0]?.applied ?? '0');
+  if (input.amountCents > unappliedCents) {
+    throw new ApiError(422, 'Amount exceeds the credit still available on this credit note');
+  }
+
+  const settled = await settledCentsOnClient(client, orgId, 'invoice_id', invoice.id);
+  const dueCents = parseCents(invoice.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
+  if (input.amountCents > dueCents) {
+    throw new ApiError(422, 'Amount exceeds the amount still due on this invoice');
+  }
+
+  await client.query(
+    `INSERT INTO credit_note_allocations
+       (org_id, credit_note_id, invoice_id, amount_cents, base_amount_cents, allocation_date, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      orgId,
+      id,
+      invoice.id,
+      input.amountCents,
+      convertToBase(cents(input.amountCents), note.fx_rate),
+      input.allocationDate,
+      userId,
+    ],
+  );
+}
+
+/**
  * Applies unapplied credit to an open invoice of the same customer.
  *
  * Posts NO journal entry, on purpose: the note already credited Accounts
@@ -927,61 +997,7 @@ export async function applyCreditNote(
   try {
     await beginTransaction(client);
 
-    const note = await lockNote(client, orgId, id);
-    if (note.status !== 'ISSUED') {
-      throw new ApiError(409, 'Only an issued credit note can be applied');
-    }
-
-    const baseCurrency = await baseCurrencyOf(client, orgId);
-    const currencyCode = note.currency_code.trim();
-    if (currencyCode !== baseCurrency && input.invoiceId !== note.invoice_id) {
-      throw new ApiError(422, 'A foreign-currency credit note can only be applied to its original invoice');
-    }
-
-    const invoice = await lockInvoice(client, orgId, input.invoiceId);
-    if (invoice.customer_id !== note.customer_id) {
-      throw new ApiError(422, 'That invoice belongs to a different customer');
-    }
-    if (invoice.status !== 'ISSUED') {
-      throw new ApiError(422, 'Only an issued invoice can have credit applied');
-    }
-    if (invoice.currency_code.trim() !== currencyCode) {
-      throw new ApiError(422, 'A credit note can only be applied to an invoice in the same currency');
-    }
-    if (input.allocationDate < note.issue_date || input.allocationDate < invoice.issue_date) {
-      throw new ApiError(422, 'A credit cannot be applied before the credit note or the invoice is dated');
-    }
-
-    const { rows: appliedRows } = await client.query<{ applied: string }>(
-      `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied
-         FROM credit_note_allocations WHERE org_id = $1 AND credit_note_id = $2`,
-      [orgId, id],
-    );
-    const unappliedCents = parseCents(note.total_cents) - parseCents(appliedRows[0]?.applied ?? '0');
-    if (input.amountCents > unappliedCents) {
-      throw new ApiError(422, 'Amount exceeds the credit still available on this credit note');
-    }
-
-    const settled = await settledCentsOnClient(client, orgId, 'invoice_id', invoice.id);
-    const dueCents = parseCents(invoice.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
-    if (input.amountCents > dueCents) {
-      throw new ApiError(422, 'Amount exceeds the amount still due on this invoice');
-    }
-
-    await client.query(
-      `INSERT INTO credit_note_allocations
-         (org_id, credit_note_id, invoice_id, amount_cents, base_amount_cents, allocation_date, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        orgId,
-        id,
-        invoice.id,
-        input.amountCents,
-        convertToBase(cents(input.amountCents), note.fx_rate),
-        input.allocationDate,
-        userId,
-      ],
-    );
+    await applyCreditNoteOnClient(client, orgId, userId, id, input);
 
     await client.query('COMMIT');
     return await getCreditNoteById(orgId, id);

@@ -306,6 +306,9 @@ function mockDetailRoutes(invoice: Invoice) {
     if (url.includes('/api/v1/settings')) {
       return Promise.resolve(jsonResponse(200, { success: true, settings: ledgerSettings }));
     }
+    if (url.endsWith(`/api/v1/invoices/${invoice.id}/available-credits`)) {
+      return Promise.resolve(jsonResponse(200, { success: true, credits: [] }));
+    }
     if (url.endsWith(`/api/v1/invoices/${invoice.id}`)) {
       return Promise.resolve(jsonResponse(200, { success: true, invoice }));
     }
@@ -490,7 +493,7 @@ describe('InvoiceDetailPage', () => {
     await screen.findByRole('button', { name: 'Issue' });
     await user.click(screen.getByRole('button', { name: 'Issue' }));
 
-    const dialog = screen.getByRole('dialog');
+    const dialog = await screen.findByRole('dialog');
     expect(dialog).toBeInTheDocument();
     const issueCall = fetchMock.mock.calls.find((call) => {
       const [input, init] = call as [RequestInfo | URL, RequestInit?];

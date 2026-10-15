@@ -23,6 +23,12 @@ router.get('/:id', authenticate, requirePermission('invoices.view'), invoiceCont
 router.post('/', authenticate, requirePermission('invoices.edit'), invoiceController.create);
 router.patch('/:id', authenticate, requirePermission('invoices.edit'), invoiceController.update);
 router.delete('/:id', authenticate, requirePermission('invoices.edit'), invoiceController.remove);
+router.get(
+  '/:id/available-credits',
+  authenticate,
+  requirePermission('invoices.issue'),
+  invoiceController.availableCredits,
+);
 router.post(
   '/:id/issue',
   authenticate,

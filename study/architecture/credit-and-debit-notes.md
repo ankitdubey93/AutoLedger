@@ -42,6 +42,14 @@ When a note is applied to an invoice, the note has already credited 1120 and the
 
 On issue, a note auto-applies to its original up to what is still due: `min(note total, total − paid − already credited)`. If the invoice was already paid in full, nothing applies and the whole note is **unapplied credit** — the customer's account now owes *them*. AR aging and party open items therefore `UNION ALL` the unapplied remainder of every ISSUED note as a **negative** open item (always bucketed `CURRENT`), and every `outstanding_cents > 0` filter became `<> 0`. Without that, the control account would move by the note while the subledger showed nothing, and Phase 25's `reconciles` check would go false.
 
+### Applying several credits atomically with the posting (Phase 43c)
+
+Approving a bill / issuing an invoice can now apply open notes and prepayments in the **same transaction**. The mechanism is the `*OnClient` split: each apply function's body moved, byte for byte, into a core that takes the caller's `PoolClient` (`applyDebitNoteOnClient`, `applyCreditNoteOnClient`, `applyDepositOnClient`); the public function became connect, `BEGIN`, core, `COMMIT`. `approveBill` then runs `approveBillOnClient`, then `applyCreditsOnClient` (which only orders the calls and picks each allocation date), then `COMMIT`. Because every statement uses one client, a core's 422 (wrong party, over the amount due, over the credit's balance) rolls the approval back too: there is never an approved bill with half its credits applied.
+
+**Deterministic lock order.** The document row is already locked by the approval; then notes are processed in ascending id, then deposits in ascending id. Two requests touching the same set of rows lock them in the same order, so they queue rather than deadlock. A deposit application then locks target + deposit by id inside `lockDocumentsOnClient`; the approval path has already locked the target first, whereas a standalone `apply-prepayment` locks the same pair purely in id order, so when the deposit's id sorts before the target's the two paths take the pair in opposite orders and can form a cycle. Postgres does not prevent that; its deadlock detector aborts one transaction with SQLSTATE `40P01` after `deadlock_timeout` (1s by default). We map that code to `409 Another change to these documents was in progress - try again`. Detect-and-retry was chosen over inventing a global ordering across code paths that were never designed together.
+
+**Read vs write.** `GET .../available-credits` is advisory: it computes what would be legal against this draft, but the cores re-check every rule at apply time, so a stale offer fails closed. It runs at READ COMMITTED, not a REPEATABLE READ snapshot, because the shared `withTransaction` helper issues audit-context statements after `BEGIN`, and `SET TRANSACTION ISOLATION LEVEL` must precede the first query. (Verified against PG 16 docs behaviour; the helper change to allow it was not made.)
+
 ### Caps, enforced twice
 
 - **Cumulative:** Σ totals of ISSUED notes against one invoice ≤ the invoice total. The service checks this under a `FOR UPDATE` lock on the invoice; a `DEFERRABLE INITIALLY DEFERRED` constraint trigger re-checks it at COMMIT.
@@ -66,6 +74,7 @@ Rules in play: [guardrails](../../docs/guardrails.md) rule 6 (posted documents a
 - `server/src/services/accounting/settlementSql.ts` — `allocatedCentsSubquery`, `noteAppliedCentsSubquery`, `settledCentsSubquery`, `noteOwnAppliedCentsSubquery`, `settledCentsOnClient`
 - `server/src/services/accounting/creditNoteService.ts`, `debitNoteService.ts` — draft/issue/void/apply
 - `server/src/services/accounting/agingService.ts`, `partyLedgerService.ts` — negative open items, `CREDIT_NOTE`/`DEBIT_NOTE` ledger rows
+- `server/src/services/accounting/availableCreditsService.ts` - `listAvailableCredits` and `applyCreditsOnClient` (Phase 43c); `server/src/__tests__/accounting/applyCreditsOnApproval.test.ts`
 - `server/src/__tests__/accounting/noteSettlement.test.ts` — the reconciliation claim with an unapplied credit
 - `walkthrough/08-returns-and-adjustments.md` — month 4 of the hand-entered scenario, replayed through the real API by `walkthrough.test.ts`
 
@@ -99,6 +108,15 @@ A: Because it's reversing part of the invoice. The invoice put `amount × invoic
 
 **Q: Tell me about a time a change had to be behaviour-preserving before it could be useful.**
 A: Adding credit notes meant changing what "amount due" means everywhere it was computed. I first moved the definition into one module and switched every call site to it while notes still didn't exist, with the requirement that the full 1,702-test suite stay green with an unchanged count. Only then did I add the note tables and services. The extension itself then had nothing left to break except the new behaviour, and the end-to-end walkthrough replay — four months entered through the real API and checked cent for cent against a computed answer key — was the final proof.
+
+**Q: How do you apply credits atomically with approving a bill?**
+A: Split each apply function into a core that takes the caller's transaction client, and call the cores from the approval's own transaction after the posting. Everything shares one client, so any refusal rolls the approval back. The one trap is a stray `pool.query` inside a core, which would escape the transaction and survive the rollback, so the cores contain none.
+
+**Q: Where can this still deadlock, and what do you do about it?**
+A: Within the approval, locks are taken in ascending id order, which prevents cycles between two approvals. A concurrent standalone prepayment application locks a different sequence, so a cycle is possible. Postgres detects it and aborts one transaction with `40P01`; we map that to a 409 asking the user to retry. We accept detection over prevention because forcing one global order across every path would mean rewriting code that was not designed together.
+
+**Q: Why can the preview of available credits be wrong, and why is that safe?**
+A: It is a read at READ COMMITTED, so another user can consume a credit between the read and the approval. It is safe because it is only an offer: the apply cores re-check party, currency, amount due and amount available under row locks, and fail with a 422 that rolls everything back.
 
 ## Follow-ups they'll dig into
 

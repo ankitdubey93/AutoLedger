@@ -1507,11 +1507,34 @@ export async function deleteInvoice(id: string): Promise<void> {
 export function issueInvoice(
   id: string,
   entryDate: string | null = null,
+  applyCredits?: { kind: 'NOTE' | 'DEPOSIT'; id: string; amountCents: number }[],
 ): Promise<{ success: boolean; invoice: Invoice }> {
   return apiFetch(`/invoices/${id}/issue`, {
     method: 'POST',
-    body: JSON.stringify({ entryDate }),
+    body: JSON.stringify({ entryDate, applyCredits }),
   });
+}
+
+/** One open credit a draft bill or invoice can apply on approval or issue (Phase 43c). */
+export interface AvailableCredit {
+  kind: 'NOTE' | 'DEPOSIT';
+  id: string;
+  number: string | null;
+  date: string;
+  currencyCode: string;
+  availableCents: number;
+}
+
+/**
+ * GET /bills/:id/available-credits (PURCHASE) or /invoices/:id/available-credits (SALES).
+ * Lists the party's open debit/credit notes and prepayments/deposits for a draft document.
+ */
+export function getAvailableCredits(
+  direction: 'PURCHASE' | 'SALES',
+  id: string,
+): Promise<{ success: boolean; credits: AvailableCredit[] }> {
+  const base = direction === 'PURCHASE' ? 'bills' : 'invoices';
+  return apiFetch(`/${base}/${id}/available-credits`);
 }
 
 /**
@@ -2397,10 +2420,11 @@ export function submitBill(id: string): Promise<{ success: boolean; bill: Bill }
 export function approveBill(
   id: string,
   entryDate: string | null = null,
+  applyCredits?: { kind: 'NOTE' | 'DEPOSIT'; id: string; amountCents: number }[],
 ): Promise<{ success: boolean; bill: Bill }> {
   return apiFetch(`/bills/${id}/approve`, {
     method: 'POST',
-    body: JSON.stringify({ entryDate }),
+    body: JSON.stringify({ entryDate, applyCredits }),
   });
 }
 

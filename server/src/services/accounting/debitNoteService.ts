@@ -931,6 +931,76 @@ export async function voidDebitNote(
 }
 
 /**
+ * The body of `applyDebitNote`, on the CALLER's transaction client (Phase 43c)
+ * so approving a bill can apply credits in the same transaction. Posts nothing:
+ * applying only matches the note against the bill. No transaction of its own
+ * and no `pool` (rule 5).
+ */
+export async function applyDebitNoteOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  id: string,
+  input: ApplyDebitNoteInput,
+): Promise<void> {
+  const note = await lockNote(client, orgId, id);
+  if (note.status !== 'ISSUED') {
+    throw new ApiError(409, 'Only an issued debit note can be applied');
+  }
+
+  const baseCurrency = await baseCurrencyOf(client, orgId);
+  const currencyCode = note.currency_code.trim();
+  if (currencyCode !== baseCurrency && input.billId !== note.bill_id) {
+    throw new ApiError(422, 'A foreign-currency debit note can only be applied to its original bill');
+  }
+
+  const bill = await lockBill(client, orgId, input.billId);
+  if (bill.vendor_id !== note.vendor_id) {
+    throw new ApiError(422, 'That bill belongs to a different vendor');
+  }
+  if (bill.status !== 'POSTED') {
+    throw new ApiError(422, 'Only an approved bill can have a debit applied');
+  }
+  if (bill.currency_code.trim() !== currencyCode) {
+    throw new ApiError(422, 'A debit note can only be applied to a bill in the same currency');
+  }
+  if (input.allocationDate < note.issue_date || input.allocationDate < bill.bill_date) {
+    throw new ApiError(422, 'A debit cannot be applied before the debit note or the bill is dated');
+  }
+
+  const { rows: appliedRows } = await client.query<{ applied: string }>(
+    `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied
+       FROM debit_note_allocations WHERE org_id = $1 AND debit_note_id = $2`,
+    [orgId, id],
+  );
+  const unappliedCents = parseCents(note.total_cents) - parseCents(appliedRows[0]?.applied ?? '0');
+  if (input.amountCents > unappliedCents) {
+    throw new ApiError(422, 'Amount exceeds the credit still available on this debit note');
+  }
+
+  const settled = await settledCentsOnClient(client, orgId, 'bill_id', bill.id);
+  const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
+  if (input.amountCents > dueCents) {
+    throw new ApiError(422, 'Amount exceeds the amount still due on this bill');
+  }
+
+  await client.query(
+    `INSERT INTO debit_note_allocations
+       (org_id, debit_note_id, bill_id, amount_cents, base_amount_cents, allocation_date, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      orgId,
+      id,
+      bill.id,
+      input.amountCents,
+      convertToBase(cents(input.amountCents), note.fx_rate),
+      input.allocationDate,
+      userId,
+    ],
+  );
+}
+
+/**
  * Applies unapplied credit to an open bill of the same vendor.
  *
  * Posts NO journal entry, on purpose: the note already debited Accounts
@@ -948,61 +1018,7 @@ export async function applyDebitNote(
   try {
     await beginTransaction(client);
 
-    const note = await lockNote(client, orgId, id);
-    if (note.status !== 'ISSUED') {
-      throw new ApiError(409, 'Only an issued debit note can be applied');
-    }
-
-    const baseCurrency = await baseCurrencyOf(client, orgId);
-    const currencyCode = note.currency_code.trim();
-    if (currencyCode !== baseCurrency && input.billId !== note.bill_id) {
-      throw new ApiError(422, 'A foreign-currency debit note can only be applied to its original bill');
-    }
-
-    const bill = await lockBill(client, orgId, input.billId);
-    if (bill.vendor_id !== note.vendor_id) {
-      throw new ApiError(422, 'That bill belongs to a different vendor');
-    }
-    if (bill.status !== 'POSTED') {
-      throw new ApiError(422, 'Only an approved bill can have a debit applied');
-    }
-    if (bill.currency_code.trim() !== currencyCode) {
-      throw new ApiError(422, 'A debit note can only be applied to a bill in the same currency');
-    }
-    if (input.allocationDate < note.issue_date || input.allocationDate < bill.bill_date) {
-      throw new ApiError(422, 'A debit cannot be applied before the debit note or the bill is dated');
-    }
-
-    const { rows: appliedRows } = await client.query<{ applied: string }>(
-      `SELECT COALESCE(SUM(amount_cents), 0)::text AS applied
-         FROM debit_note_allocations WHERE org_id = $1 AND debit_note_id = $2`,
-      [orgId, id],
-    );
-    const unappliedCents = parseCents(note.total_cents) - parseCents(appliedRows[0]?.applied ?? '0');
-    if (input.amountCents > unappliedCents) {
-      throw new ApiError(422, 'Amount exceeds the credit still available on this debit note');
-    }
-
-    const settled = await settledCentsOnClient(client, orgId, 'bill_id', bill.id);
-    const dueCents = parseCents(bill.total_cents) - settled.paidCents - settled.noteAppliedCents - settled.depositAppliedCents;
-    if (input.amountCents > dueCents) {
-      throw new ApiError(422, 'Amount exceeds the amount still due on this bill');
-    }
-
-    await client.query(
-      `INSERT INTO debit_note_allocations
-         (org_id, debit_note_id, bill_id, amount_cents, base_amount_cents, allocation_date, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-      [
-        orgId,
-        id,
-        bill.id,
-        input.amountCents,
-        convertToBase(cents(input.amountCents), note.fx_rate),
-        input.allocationDate,
-        userId,
-      ],
-    );
+    await applyDebitNoteOnClient(client, orgId, userId, id, input);
 
     await client.query('COMMIT');
     return await getDebitNoteById(orgId, id);

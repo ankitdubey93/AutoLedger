@@ -8,11 +8,13 @@ import {
   getInvoiceSettings,
   getOrganizationProfile,
   issueInvoice,
+  getAvailableCredits,
   listCreditNotes,
   listInvoices,
   listPayments,
   voidDepositApplication,
   voidInvoice,
+  type AvailableCredit,
   type CreditNote,
   type Invoice,
   type InvoiceSettings,
@@ -25,6 +27,8 @@ import { useOrg } from '../../context/OrgContext';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import ApplyCreditsDialog from '../../components/ApplyCreditsDialog';
+import type { ApplyCredit } from '../../components/ApplyCreditsDialog';
 import PaymentDialog from './PaymentDialog';
 import InvoiceDocument from './InvoiceDocument';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
@@ -63,6 +67,8 @@ export default function InvoiceDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmAction, setConfirmAction] = useState<'issue' | 'void' | null>(null);
+  const [creditsOffer, setCreditsOffer] = useState<AvailableCredit[] | null>(null);
+  const [creditsError, setCreditsError] = useState<string | null>(null);
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showApplyDeposit, setShowApplyDeposit] = useState(false);
   const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
@@ -124,6 +130,42 @@ export default function InvoiceDetailPage() {
       setReloadToken((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not void the deposit application');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Phase 43c — see BillDetailPage.startApprove: offer open credit before the plain confirmation. */
+  async function startIssue() {
+    if (invoice === null) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const { credits } = await getAvailableCredits('SALES', invoice.id);
+      if (credits.length > 0) {
+        setCreditsError(null);
+        setCreditsOffer(credits);
+      } else {
+        setConfirmAction('issue');
+      }
+    } catch {
+      setConfirmAction('issue');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleIssueWithCredits(applyCredits: ApplyCredit[]) {
+    if (invoice === null) return;
+    setBusy(true);
+    setCreditsError(null);
+    try {
+      const { invoice: updated } = await issueInvoice(invoice.id, null, applyCredits);
+      setInvoice(updated);
+      setCreditsOffer(null);
+      setReloadToken((n) => n + 1);
+    } catch (err: unknown) {
+      setCreditsError(err instanceof Error ? err.message : 'Could not issue the invoice');
     } finally {
       setBusy(false);
     }
@@ -233,7 +275,7 @@ export default function InvoiceDetailPage() {
           {invoice.status === 'DRAFT' && (
             <button
               type="button"
-              onClick={() => setConfirmAction('issue')}
+              onClick={() => void startIssue()}
               disabled={busy}
               className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
@@ -461,6 +503,23 @@ export default function InvoiceDetailPage() {
             void handleIssue();
           }}
           onCancel={() => setConfirmAction(null)}
+        />
+      )}
+      {creditsOffer !== null && (
+        <ApplyCreditsDialog
+          direction="SALES"
+          title="Issuing posts this invoice."
+          documentTotalCents={invoice.totalCents}
+          amountDueCents={invoice.amountDueCents}
+          credits={creditsOffer}
+          busy={busy}
+          error={creditsError}
+          onConfirm={(applyCredits) => void handleIssueWithCredits(applyCredits)}
+          onSkip={() => {
+            setCreditsOffer(null);
+            setConfirmAction('issue');
+          }}
+          onCancel={() => setCreditsOffer(null)}
         />
       )}
       {confirmAction === 'void' && (

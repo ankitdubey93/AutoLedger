@@ -9,6 +9,7 @@ import type { FillMode, PlaceholderContext } from '../../utils/placeholders.js';
 import { fillField, fillOptionalField, LINE_DESCRIPTION_MAX, NOTES_MAX } from '../../utils/placeholderFields.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
+import { applyCreditsOnClient, type ApplyCreditInput } from './availableCreditsService.js';
 import type { JournalLineInput } from './journalService.js';
 import { classifyStockLinesOnClient, prepareStockLinesOnClient } from './documentStockLines.js';
 import { resolveStockAccountsOnClient } from './itemService.js';
@@ -49,6 +50,7 @@ import { revertConversionOnClient } from './quoteStatusService.js';
  */
 
 const PG_RAISE_EXCEPTION = 'P0001';
+const PG_DEADLOCK_DETECTED = '40P01';
 const PG_UNIQUE_VIOLATION = '23505';
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 
@@ -1286,16 +1288,22 @@ export async function issueInvoice(
   userId: string,
   id: string,
   entryDate: string | null,
+  applyCredits: readonly ApplyCreditInput[] = [],
 ): Promise<Invoice> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
     await issueInvoiceOnClient(client, orgId, userId, id, entryDate);
+    // Phase 43c — same transaction: a rejected credit rolls the issue back.
+    await applyCreditsOnClient(client, orgId, userId, 'SALES', id, applyCredits);
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_DEADLOCK_DETECTED) {
+      throw new ApiError(409, 'Another change to these documents was in progress — try again');
+    }
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_invoices_org_number') {
       throw new ApiError(409, 'Invoice number already exists — try again');
     }

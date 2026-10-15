@@ -569,6 +569,10 @@ Full detail: [roadmap.md § Phase 41, as delivered](roadmap.md#phase-41-as-deliv
 - [x] Attachments panels on credit notes, debit notes and orders (new attachable entity types)
 - Not built: reading attachments of an order from its bill, backfilling the link on already-posted documents
 
+### Phase 43c — apply open credit on approval / issue ✅ shipped
+
+Approving a bill (issuing an invoice) can apply open debit notes / prepayments (credit notes / deposits) in the **same transaction**: `approveBill` / `issueInvoice` call `approveBillOnClient` / `issueInvoiceOnClient`, then `availableCreditsService.applyCreditsOnClient` on the same client, then `COMMIT`; any refusal (wrong party or currency, more than is due, more than the credit has available) rolls back the posting with it. **Lock order: document row → notes (ascending id) → deposits (ascending id, each application locking target + deposit by id via `lockDocumentsOnClient`).** A concurrent `apply-prepayment` on the same pair can still deadlock; Postgres aborts one with `40P01`, mapped to `409` (detected, not prevented). `GET …/available-credits` runs at READ COMMITTED (see roadmap); it is advisory, since the apply cores re-check every rule. The allocation date is the later of the document's date and the credit's date. Capture auto-post, recurring runs, imports and order conversion never pass credits.
+
 ### Phase 42 — quote follow-ups: orders, partial billing, deposits ✅ shipped
 
 Closes the Phase 41 "not built" list, except a qualified e-signature. The accounting-relevant parts are orders and deposits; the rest is workflow.

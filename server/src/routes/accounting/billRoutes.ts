@@ -34,6 +34,12 @@ router.post(
   requirePermission('bills.edit'),
   billController.submit,
 );
+router.get(
+  '/:id/available-credits',
+  authenticate,
+  requirePermission('bills.approve'),
+  billController.availableCredits,
+);
 router.post('/:id/approve', authenticate, requirePermission('bills.approve'), billController.approve);
 router.post(
   '/:id/void',

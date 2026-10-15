@@ -2178,3 +2178,17 @@ export interface DepositApplication {
   voidJournalEntryId: string | null;
   createdAt: string;
 }
+
+/** Phase 43c — one open credit that could be applied to a draft bill/invoice at approval/issue. */
+export interface AvailableCredit {
+  kind: 'NOTE' | 'DEPOSIT';
+  id: string;
+  number: string | null;
+  date: string;
+  currencyCode: string;
+  availableCents: number;
+}
+
+export interface AvailableCredits {
+  credits: AvailableCredit[];
+}

@@ -15,6 +15,7 @@ import {
 } from '../../utils/placeholderFields.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
+import { applyCreditsOnClient, type ApplyCreditInput } from './availableCreditsService.js';
 import * as fxRateService from './fxRateService.js';
 import * as paymentTermService from './paymentTermService.js';
 import { assertOrderLineLinksOnClient, assertOrderReferenceOnClient } from './orderLineLinks.js';
@@ -61,6 +62,7 @@ import { revertConversionOnClient } from './quoteStatusService.js';
  */
 
 const PG_RAISE_EXCEPTION = 'P0001';
+const PG_DEADLOCK_DETECTED = '40P01';
 const PG_UNIQUE_VIOLATION = '23505';
 const PG_FOREIGN_KEY_VIOLATION = '23503';
 
@@ -1554,16 +1556,22 @@ export async function approveBill(
   userId: string,
   id: string,
   entryDate: string | null,
+  applyCredits: readonly ApplyCreditInput[] = [],
 ): Promise<Bill> {
   const client = await pool.connect();
   try {
     await beginTransaction(client);
     await approveBillOnClient(client, orgId, userId, id, entryDate);
+    // Phase 43c — same transaction: a rejected credit rolls the approval back.
+    await applyCreditsOnClient(client, orgId, userId, 'PURCHASE', id, applyCredits);
     await client.query('COMMIT');
     return await getBillById(orgId, id);
   } catch (err) {
     await client.query('ROLLBACK');
     if (err instanceof ApiError) throw err;
+    if (pgErrorCode(err) === PG_DEADLOCK_DETECTED) {
+      throw new ApiError(409, 'Another change to these documents was in progress — try again');
+    }
     // Phase 40 — a filled reference raced another bill to the same text.
     if (pgErrorCode(err) === PG_UNIQUE_VIOLATION && pgConstraint(err) === 'ux_bills_vendor_reference') {
       throw new ApiError(409, 'This vendor reference has already been entered for this vendor');

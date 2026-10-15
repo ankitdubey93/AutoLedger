@@ -14,6 +14,8 @@ import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
 import { optionalIsoDate, optionalText, optionalUuid, readPagination, readSort } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
+import { loadAccess } from '../../middleware/rbac.js';
+import * as availableCreditsService from '../../services/accounting/availableCreditsService.js';
 import { isBillStatus, type BillStatus } from '../../types/accounting.js';
 import type { Request } from 'express';
 
@@ -117,9 +119,24 @@ export const submit: RequestHandler = async (req, res) => {
 export const approve: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const id = requireParam(req, 'id');
-  const { entryDate } = parseBody(approveBillSchema, req.body ?? {});
-  const bill = await billService.approveBill(user.orgId, user.id, id, entryDate);
+  const { entryDate, applyCredits } = parseBody(approveBillSchema, req.body ?? {});
+  // Applying a debit note needs its own permission on top of bills.approve; a
+  // prepayment needs nothing more (it matches POST /:id/apply-prepayment).
+  if (applyCredits.some((c) => c.kind === 'NOTE')) {
+    const access = await loadAccess(req);
+    if (!access.permissions.has('debit_notes.issue')) {
+      throw new ApiError(403, 'Applying a debit note needs the "Issue and apply debit notes" permission.');
+    }
+  }
+  const bill = await billService.approveBill(user.orgId, user.id, id, entryDate, applyCredits);
   res.json({ success: true, bill });
+};
+
+/** GET /bills/:id/available-credits — open debit notes and prepayments this bill could take (Phase 43c). */
+export const availableCredits: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const result = await availableCreditsService.listAvailableCredits(user.orgId, 'PURCHASE', requireParam(req, 'id'));
+  res.json({ success: true, ...result });
 };
 
 /** POST /bills/:id/void */
