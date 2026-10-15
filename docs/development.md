@@ -127,7 +127,7 @@ No application secrets live here.
 | `PG_DATABASE` | **yes** | |
 | `ACCESS_TOKEN_SECRET` | **yes** | Access JWTs (15m). ≥32 chars |
 | `REFRESH_TOKEN_SECRET` | **yes** | Refresh JWTs (7d). ≥32 chars, and **must differ** from the access secret |
-| `LOG_LEVEL` | no — defaults `info` (`silent` under test) | 2026-09-29 — pino's minimum level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Logs are newline-delimited JSON on stdout; pipe through `npx pino-pretty` to read them locally. In development the password-reset link is logged at `info` |
+| `LOG_LEVEL` | no — defaults `info` (`silent` under test) | 2026-09-29 — pino's minimum level: `fatal` \| `error` \| `warn` \| `info` \| `debug` \| `trace` \| `silent`. Logs are newline-delimited JSON on stdout; pipe through `npx pino-pretty` to read them locally. In development the password-reset link is logged at `info` | The `request completed` line's `path` has the value of any route param named `token` or `secret` replaced by `[redacted]` (invitation, quote and statement links, the inbound-mail webhook), and the query string is dropped (rule 11).
 | `REDIS_HOST` | no — defaults `localhost` | Phase 7 — background jobs and the webhook dispatcher |
 | `REDIS_PORT` | no — defaults `6379` | |
 | `REDIS_DB` | no — defaults `0` | Database index. Each test worker pins itself to its own index (1..3, never 0) so `npm test` never touches your dev queues |
@@ -141,10 +141,13 @@ No application secrets live here.
 | `GOOGLE_OAUTH_REDIRECT_URI` | no — defaults `http://localhost:5000/api/v1/integrations/drive/oauth/callback` | Phase 19.2, path **changed in 19.3** when the route moved off `/api/v1/capture/drive`. Must exactly match an authorized redirect URI on the Google Cloud OAuth client. A `.env` still pinning the pre-19.3 path (`/api/v1/ap-flow/drive/oauth/callback`) **stops working in Phase 33** — that alias was removed with the `/ap-flow` prefix; point the URI (and the Google Cloud OAuth client) at the default. After a successful or failed connect the browser lands on `/settings/connections?drive=…`. |
 | `INTEGRATION_ENCRYPTION_KEY` | no — defaults `''` | Phase 19.2 — AES-256-GCM key (`utils/secretBox.ts`) for the OAuth path's refresh tokens and PKCE verifiers at rest. Not needed for the service-account path, which stores no per-tenant secret. When set, must be 64 hex characters (32 bytes) or the server refuses to boot — the same fail-loud posture `ACCESS_TOKEN_SECRET`'s length check takes. Not a JWT secret (rule 11) — a separate concern, never reused. Phase 38b: also encrypts emailed token links while they sit in `email_outbox`, and is **required in production** whenever `MAIL_TRANSPORT` is not `log` |
 | `MAIL_TRANSPORT` | no — defaults `log` | Phase 38b — where email goes: `log` (written to the server log; in production only the fact of a message, never its link), `mailpit` (a local Mailpit inbox — `docker compose --profile mail up -d mailpit`, then open http://localhost:8025), or `brevo` (real delivery; free plan 300 emails/day). Pinned to `log` under test |
-| `BREVO_API_KEY` | only when `MAIL_TRANSPORT=brevo` | Brevo → SMTP & API → API Keys. Sent as the `api-key` header to `POST https://api.brevo.com/v3/smtp/email`; never logged |
+| `BREVO_API_KEY` | only when `MAIL_TRANSPORT=brevo` or `INBOUND_MAIL=brevo` | Brevo → SMTP & API → API Keys. Sent as the `api-key` header to `POST https://api.brevo.com/v3/smtp/email`; never logged |
 | `MAIL_FROM_EMAIL` | only when `MAIL_TRANSPORT=brevo` — defaults `no-reply@autoledger.local` | The From address of every email. With Brevo it must be a **verified sender** in your Brevo account (Senders, Domains & Dedicated IPs → Senders); a free account can verify a single address without owning a domain. Organizations choose only the display name and reply-to |
 | `MAIL_FROM_NAME` | no — defaults `AutoLedger` | The From display name when an organization has not set its own |
 | `MAILPIT_URL` | no — defaults `http://localhost:8025` | Where the `mailpit` transport posts (`/api/v1/send`) |
+| `INBOUND_MAIL` | no — defaults `off` | Phase 43d — `off` \| `brevo`. `brevo` accepts Brevo's inbound-parsing webhook (`POST /api/v1/public/inbound-mail/brevo/:secret`) and turns on each organization's email-in address; `off` makes every inbound-mail route `404`. `brevo` requires `BREVO_API_KEY`, `INBOUND_MAIL_DOMAIN` and `INBOUND_MAIL_WEBHOOK_SECRET`, or the server refuses to boot |
+| `INBOUND_MAIL_DOMAIN` | only when `INBOUND_MAIL=brevo` | The receiving subdomain (e.g. `in.example.com`) whose MX records point at Brevo; addresses are `<token>@<this domain>`. Lowercased on read |
+| `INBOUND_MAIL_WEBHOOK_SECRET` | only when `INBOUND_MAIL=brevo` — at least 32 characters | The secret path segment that authenticates the webhook (Brevo documents no signature for inbound mail). Generate with `openssl rand -hex 32`. It is part of a URL: it is redacted from the request log, but Brevo or a proxy may record the URL — rotate it if exposed. Not a JWT secret (rule 11) |
 | `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` | no — both default `''`; set together | Phase 39c — card payment on emailed statement links. Outside production both must be **test** keys (`sk_test_`/`rk_test_`, `pk_test_`) or the server refuses to boot. Unset, the public statement page shows remittance details instead of a card form. The secret key is sent only as `Authorization: Bearer` to `api.stripe.com` and never logged; the publishable key is sent to the public page |
 | `STRIPE_WEBHOOK_SECRET` | no — defaults `''` | Phase 39c — verifies `Stripe-Signature` on `POST /api/v1/public/stripe/webhook`; must start `whsec_`. Locally, `stripe listen --forward-to localhost:5000/api/v1/public/stripe/webhook` prints one. Without it, settlement still happens when the customer's browser confirms; the webhook covers a closed tab |
 
@@ -172,6 +175,23 @@ The recommended path needs a one-time Google Cloud setup, done once per deployme
 6. In the app: **Integrations** → copy the service-account address → share a Drive folder with it (Viewer) → paste the folder's link and choose what it's for.
 
 The OAuth path (secondary, for a Workspace tenant that blocks external sharing) instead needs a Web application OAuth client: **APIs & Services → Credentials → Create Credentials → OAuth client ID**, authorized redirect URI `http://localhost:5000/api/v1/integrations/drive/oauth/callback` (or your deployed origin), then `GOOGLE_OAUTH_CLIENT_ID`/`GOOGLE_OAUTH_CLIENT_SECRET` plus a generated `INTEGRATION_ENCRYPTION_KEY` (`openssl rand -hex 32`).
+
+### Setting up email-in (Brevo inbound parsing)
+
+Optional; needs a Brevo account and a domain you control. A real end-to-end run against Brevo has not been done — the code is tested against a faked provider.
+
+1. Choose a receiving **subdomain** (not your main mail domain), e.g. `in.example.com`, and add two MX records on it: priority `10` → `inbound1.sendinblue.com.` and priority `20` → `inbound2.sendinblue.com.`.
+2. Set in `server/.env`: `INBOUND_MAIL=brevo`, `INBOUND_MAIL_DOMAIN=in.example.com`, `INBOUND_MAIL_WEBHOOK_SECRET=$(openssl rand -hex 32)`, and a `BREVO_API_KEY`. Restart the server **and the worker** (the worker processes the `inbound-mail-process` job).
+3. The webhook must be reachable from the internet (a tunnel such as `cloudflared` or `ngrok` for local work). Register it once with Brevo:
+
+   ```bash
+   curl -X POST https://api.brevo.com/v3/webhooks \
+     -H "api-key: $BREVO_API_KEY" -H "content-type: application/json" \
+     -d '{"type":"inbound","events":["inboundEmailProcessed"],"domain":"in.example.com","url":"https://<public-host>/api/v1/public/inbound-mail/brevo/<INBOUND_MAIL_WEBHOOK_SECRET>"}'
+   ```
+4. Open Settings → Bill inbox → "Email bills in" for the organization's address and send it a PDF. A message appears in the list; the file appears in the bill inbox.
+
+Attachments are downloaded with the `api-key` header only. Brevo's reference also lists an OAuth bearer; if downloads return `401` the integration needs a plan update.
 
 ### `client/.env`
 

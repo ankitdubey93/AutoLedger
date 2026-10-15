@@ -1173,6 +1173,21 @@ Failure paths: `503 Google Drive is not configured on this server` · `503 Googl
 
 ---
 
+### Integrations — `/api/v1/integrations/inbound-mail` — Phase 43d
+
+Each organization has an email-in address for the bill inbox: `<token>@<INBOUND_MAIL_DOMAIN>`. A PDF, PNG or JPEG attachment on a message sent to it is captured exactly like a direct upload. Every route here is `404 Email-in is not enabled` unless the server has `INBOUND_MAIL=brevo`.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| GET | `/` | `capture.view` | `{ success, address, rotatedAt }` — the active address, created on first read. `rotatedAt` is `null` until the first rotation |
+| POST | `/rotate` | `capture.process` | Retires the current address (it never routes again) and issues a new one, in one transaction. Same response shape |
+| GET | `/messages` | `capture.view` | `{ success, messages: [{ id, fromAddress, subject, receivedAt, status, attachmentCount, importedCount, error }], totalCount, currentPage, totalPages }`, newest first, `?page=&limit=`. `status` is `RECEIVED`, `IMPORTED`, `PARTIAL`, `REJECTED` or `FAILED` |
+| POST | `/api/v1/public/inbound-mail/brevo/:secret` | none — the path secret is the credential | Brevo's inbound-parsing webhook (`{ items: [{ MessageId, From: { Address }, Recipients, Subject?, Attachments?: [{ Name, ContentType, ContentLength, DownloadToken }] }] }`, unknown keys ignored). `404 Not found` for a disabled feature **or** a wrong secret (same response, no oracle). After a valid secret: `200 { success: true }` even if no recipient matched an address, so the provider does not retry; `400 Unrecognised inbound mail payload` for a malformed body. Recording is idempotent on `(org, provider, MessageId)`; processing runs in the `inbound-mail-process` job (3 attempts). Not rate-limited (mirrors the Stripe webhook) |
+
+Message outcomes: all eligible attachments captured → `IMPORTED`; some → `PARTIAL`; none eligible (`No PDF, PNG or JPEG attachment`) or none readable (`No attachment could be read as a bill`) → `REJECTED`; a download or database failure → `FAILED` (the job retries). The secret in the webhook path is replaced by `[redacted]` in the request log.
+
+---
+
 ### Capture (bill inbox) — `/api/v1/capture` — Phases 10–11, 19, 19.1
 
 Full spec: [capture.md](capture.md). A document reaches capture by uploading to `/api/v1/documents` first and registering it here by id, via `/documents/upload` (both in one call, Phase 19), or via a Drive folder connected at `/api/v1/integrations/drive` (Phase 19.2, promoted to the platform in Phase 19.3 — see the Integrations section above). Phase 10 produces a draft extraction; Phase 11 adds account classification, the review queue, and one-click posting into accounting; Phase 19 adds a second extraction provider (Gemini), rewrites posting onto a real accounting bill, and adds a confidence-gated auto-post; Phase 19.1 adds AI token/cost visibility per document (see `/api/v1/ai-usage` above); a 2026-09-18 fix (below) adds a `DUPLICATE` status so a repeat capture of identical bytes is a visible, reviewable row instead of a silent no-op.

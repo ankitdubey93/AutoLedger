@@ -10,6 +10,7 @@ import { handleIntegrationDriveSync } from './handlers/integrationDriveSyncHandl
 import { handleRecurringSweep } from './handlers/recurringSweepHandler.js';
 import { handleRecurringGenerate } from './handlers/recurringGenerateHandler.js';
 import { handleEmailDrain } from './handlers/emailDrainHandler.js';
+import { handleInboundMailProcess } from './handlers/inboundMailProcessHandler.js';
 import { handleQuoteExpirySweep } from './handlers/quoteExpirySweepHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
@@ -42,6 +43,7 @@ const HANDLERS: {
   'recurring-generate': handleRecurringGenerate,
   'email-drain': handleEmailDrain,
   'quote-expiry-sweep': handleQuoteExpirySweep,
+  'inbound-mail-process': handleInboundMailProcess,
 };
 
 let workers: Worker[] = [];

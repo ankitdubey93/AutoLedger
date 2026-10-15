@@ -9,6 +9,7 @@ import webhookDeliveryRoutes from './webhookDeliveries.js';
 import onboardingRoutes from './onboarding.js';
 import documentRoutes from './documents.js';
 import integrationRoutes from './integrations/index.js';
+import { publicInboundMailRoutes } from './integrations/inboundMail.js';
 import accountingRoutes from './accounting/index.js';
 import captureRoutes from './capture/index.js';
 import inventoryRoutes from './inventory/index.js';
@@ -66,6 +67,8 @@ apiRouter.use('/ai-usage', aiUsageRoutes);
 // routes its files to the owning app through that app's own service
 // (guardrails rule 16, module boundaries), so this belongs to no single app slug.
 apiRouter.use('/integrations', integrationRoutes);
+// Phase 43d — Brevo's inbound-mail webhook. Unauthenticated; the path secret is the credential.
+apiRouter.use('/public/inbound-mail', publicInboundMailRoutes);
 
 // --- Module routers ---
 // Inventory and capture first: accounting is mounted at the root, and its

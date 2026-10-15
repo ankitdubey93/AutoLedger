@@ -14,6 +14,7 @@ export const QUEUE_NAMES = [
   'recurring-generate',
   'email-drain',
   'quote-expiry-sweep',
+  'inbound-mail-process',
   'dead-letter',
 ] as const;
 
@@ -41,6 +42,16 @@ export interface JobPayloads {
   'recurring-generate': { orgId: string; scheduleId: string };
   'email-drain': Record<string, never>;
   'quote-expiry-sweep': Record<string, never>;
+  /**
+   * Phase 43d. Unlike the other payloads this carries the attachments'
+   * provider download tokens (not mail content): they exist nowhere else, and
+   * they are short-lived provider handles, never logged.
+   */
+  'inbound-mail-process': {
+    orgId: string;
+    messageId: string;
+    attachments: { downloadToken: string; name: string; contentType: string; contentLength: number }[];
+  };
   'dead-letter': {
     queue: QueueName;
     jobId: string;

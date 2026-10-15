@@ -922,6 +922,10 @@ Four additive, idempotent migrations in the order below. Money is `BIGINT` cents
 - Backfill: the single order reachable through the document's lines (`order_line_id → order_lines.order_id`), **only for editable documents** (bills `DRAFT`/`AWAITING_APPROVAL`, invoices `DRAFT`) — the immutability triggers reject any column change on a posted row and are never disabled. Posted documents keep a NULL header link; their line-level `order_line_id` remains the record.
 - `document_links.entity_type` is only length-checked, so the new attachable types (`credit_note`, `debit_note`, `order`) need no schema change.
 
+**`096_platform_inbound_mail.sql`** (Phase 43d)
+- `inbound_mail_addresses` — `id`, `org_id` (CASCADE), `token` TEXT (16 lowercase base32 characters, **`ck_inbound_mail_addresses_token`**; **`ux_inbound_mail_addresses_token`** UNIQUE globally — it is how an inbound message finds its organization), `purpose` (`'VENDOR_BILL'`, `ck_inbound_mail_addresses_purpose`), `is_active`, `created_by` (RESTRICT), `created_at`, `rotated_at`. Partial unique **`ux_inbound_mail_addresses_org_active`** `(org_id, purpose) WHERE is_active` — at most one live address; `ux_inbound_mail_addresses_org_id_id` is the composite-FK target.
+- `inbound_messages` — one row per received email: `org_id`, `address_id` (composite FK **`fk_inbound_messages_address`** → `(org_id, id)` `ON DELETE CASCADE`), `provider`, `provider_message_id`, `from_address`, `subject`, `received_at`, `status` (`RECEIVED`/`IMPORTED`/`PARTIAL`/`REJECTED`/`FAILED`, `ck_inbound_messages_status`), `attachment_count`, `imported_count`, `error` (max 500 characters). **`ux_inbound_messages_provider_msg`** UNIQUE `(org_id, provider, provider_message_id)` is the idempotency key. No body or attachment is stored; the download tokens travel in the queue job only. Indexes on `(org_id, received_at DESC)` and each FK column.
+
 Chart note: rows `1150` and `2130` are additions to the default-chart table below (that table predates several later additions and is a representative listing).
 
 ## Phase 17 — target tables

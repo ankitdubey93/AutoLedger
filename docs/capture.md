@@ -194,6 +194,10 @@ Produces a draft. Posts nothing to the ledger.
 
 **Acceptance ✅ — verified.** See [roadmap.md](roadmap.md#phase-194-as-delivered).
 
+### Phase 43d — email-in intake
+
+A fourth way a file reaches the bill inbox, alongside direct upload, two-step registration and Drive folders. Each organization has one address `<token>@<INBOUND_MAIL_DOMAIN>` (Settings → Bill inbox → "Email bills in"); Brevo's inbound parsing posts a webhook per received email, the message is recorded idempotently by the provider's message id, and a worker job downloads each PDF/PNG/JPEG attachment and passes it to `captureFile` — the same function a direct upload and the Drive dispatcher use, so extraction, PII masking, duplicate detection (a repeat becomes a visible `DUPLICATE` row) and metering are unchanged. Other attachment types are ignored; a message with nothing readable ends `REJECTED` with `No attachment could be read as a bill` or `No PDF, PNG or JPEG attachment`. Rotating the address retires the old one immediately. Spec: [api.md](api.md#integrations--apiv1integrationsinbound-mail--phase-43d); setup: [development.md](development.md#setting-up-email-in-brevo-inbound-parsing). Not built: any provider other than Brevo, per-sender allow lists, replying to the sender, and a verified end-to-end run against a real Brevo account.
+
 ---
 
 ## Not built

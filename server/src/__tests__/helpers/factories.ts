@@ -44,6 +44,7 @@ export async function resetTables(): Promise<void> {
               documents, document_links,
               ap_flow_documents, ap_flow_pages, ap_flow_extractions,
               ap_flow_line_items, ap_flow_vendor_account_map,
+              inbound_mail_addresses, inbound_messages,
               integration_drive_connections, integration_drive_folders, integration_drive_files,
               stock_settings, stock_uoms, stock_categories, stock_attribute_definitions,
               stock_code_schemes, stock_code_counters, stock_locations, stock_items,

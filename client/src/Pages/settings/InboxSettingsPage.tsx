@@ -6,6 +6,7 @@ import { formatCents, parseCentsInput } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingState from '../../components/ui/LoadingState';
+import InboxEmailInCard from '../inbox/InboxEmailInCard';
 
 /**
  * Capture's settings page — the auto-post gate a reviewer or owner tunes
@@ -142,6 +143,8 @@ export default function InboxSettingsPage() {
           </div>
         </div>
       )}
+
+      <InboxEmailInCard />
 
       <div className="card flex flex-col gap-2">
         <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">

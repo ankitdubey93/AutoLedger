@@ -12,6 +12,30 @@ import { logger } from '../utils/logger.js';
 const INCOMING_REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 /**
+ * Route params whose value is a credential carried in the URL path — an
+ * invitation/quote/statement link token, or the inbound-mail webhook secret.
+ * Their value is replaced in the logged path (rule 11).
+ */
+const SECRET_PARAMS = ['token', 'secret'] as const;
+
+function redactPath(path: string, params: Record<string, unknown> | undefined): string {
+  if (params === undefined) return path;
+  let result = path;
+  for (const name of SECRET_PARAMS) {
+    const value = params[name];
+    if (typeof value !== 'string' || value === '') continue;
+    // Params are URL-decoded; the logged path is still encoded. Match both.
+    for (const form of new Set([value, encodeURIComponent(value)])) {
+      result = result
+        .split('/')
+        .map((segment) => (segment === form ? '[redacted]' : segment))
+        .join('/');
+    }
+  }
+  return result;
+}
+
+/**
  * Opens the per-request `AsyncLocalStorage` context that Phase 5's audit
  * trail reads the actor and IP from. Mounted first in `app.ts`, before
  * `cors` — even a request that never reaches a route (a CORS rejection, a
@@ -46,6 +70,25 @@ export const attachRequestContext: RequestHandler = (req, res, next) => {
   // `originalUrl` without the query string — a query can carry search terms
   // or a reset token, neither of which belongs in a log.
   const startedAt = process.hrtime.bigint();
+  // Express reassigns `req.params` for every matched layer and restores the
+  // outer value as it unwinds, so neither a handler's nor the error
+  // middleware's view survives to 'finish'. An accessor on `req` sees each
+  // assignment and keeps the credential params.
+  const routeParams: Record<string, unknown> = {};
+  let currentParams: unknown = req.params;
+  Object.defineProperty(req, 'params', {
+    configurable: true,
+    enumerable: true,
+    get: () => currentParams,
+    set: (value: unknown) => {
+      currentParams = value;
+      if (typeof value !== 'object' || value === null) return;
+      for (const name of SECRET_PARAMS) {
+        const v = (value as Record<string, unknown>)[name];
+        if (typeof v === 'string' && v !== '') routeParams[name] = v;
+      }
+    },
+  });
   res.on('finish', () => {
     logger.info(
       {
@@ -53,7 +96,7 @@ export const attachRequestContext: RequestHandler = (req, res, next) => {
         userId: context.userId ?? undefined,
         orgId: context.orgId ?? undefined,
         method: req.method,
-        path: req.originalUrl.split('?')[0],
+        path: redactPath(req.originalUrl.split('?')[0] ?? '', routeParams),
         status: res.statusCode,
         durationMs: Number((process.hrtime.bigint() - startedAt) / 1_000_000n),
       },

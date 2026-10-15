@@ -6205,3 +6205,44 @@ export function voidDepositApplication(
     body: JSON.stringify({ entryDate: null }),
   });
 }
+
+/** Phase 43d — an organization's email-in address for the bill inbox (`address` is `<token>@<domain>`). */
+export interface InboundMailAddress {
+  address: string;
+  rotatedAt: string | null;
+}
+
+/** One row of the email-in message log (`inbound_messages`). */
+export interface InboundMailMessage {
+  id: string;
+  fromAddress: string;
+  subject: string | null;
+  receivedAt: string;
+  status: 'RECEIVED' | 'IMPORTED' | 'PARTIAL' | 'REJECTED' | 'FAILED';
+  attachmentCount: number;
+  importedCount: number;
+  error: string | null;
+}
+
+export interface InboundMailMessagesPage {
+  success: boolean;
+  messages: InboundMailMessage[];
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+/** GET /integrations/inbound-mail — 404 when INBOUND_MAIL is off. */
+export function getInboundMailAddress(): Promise<{ success: boolean } & InboundMailAddress> {
+  return apiFetch('/integrations/inbound-mail');
+}
+
+/** POST /integrations/inbound-mail/rotate — the previous address stops working. */
+export function rotateInboundMailAddress(): Promise<{ success: boolean } & InboundMailAddress> {
+  return apiFetch('/integrations/inbound-mail/rotate', { method: 'POST' });
+}
+
+/** GET /integrations/inbound-mail/messages?page= */
+export function listInboundMessages(params: { page: number }): Promise<InboundMailMessagesPage> {
+  return apiFetch(`/integrations/inbound-mail/messages?page=${params.page}`);
+}

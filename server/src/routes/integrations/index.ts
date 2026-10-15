@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import driveRoutes from './driveRoutes.js';
+import inboundMailRoutes from './inboundMail.js';
 
 /**
  * Platform integrations, mounted at /api/v1/integrations by routes/index.ts.
@@ -10,5 +11,6 @@ import driveRoutes from './driveRoutes.js';
 const router = Router();
 
 router.use('/drive', driveRoutes);
+router.use('/inbound-mail', inboundMailRoutes);
 
 export default router;

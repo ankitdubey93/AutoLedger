@@ -206,6 +206,15 @@ const parsed = {
   MAIL_FROM_NAME: optional('MAIL_FROM_NAME', 'AutoLedger'),
   MAILPIT_URL: optional('MAILPIT_URL', 'http://localhost:8025'),
 
+  // Phase 43d — email-in for the bill inbox. `brevo` accepts Brevo's inbound
+  // parsing webhook (POST /public/inbound-mail/brevo/:secret); `off` (default)
+  // makes every inbound-mail route 404. The domain is the receiving
+  // subdomain whose MX records point at Brevo; the secret is the path
+  // segment that authenticates the webhook (Brevo documents no signature).
+  INBOUND_MAIL: oneOf('INBOUND_MAIL', ['off', 'brevo'] as const, 'off'),
+  INBOUND_MAIL_DOMAIN: optional('INBOUND_MAIL_DOMAIN', '').toLowerCase(),
+  INBOUND_MAIL_WEBHOOK_SECRET: optional('INBOUND_MAIL_WEBHOOK_SECRET', ''),
+
   // Phase 39c — online payment of an emailed statement, through Stripe. All
   // optional: unset, the public statement page simply offers no card form.
   // One platform Stripe account (no Connect): the secret key never leaves the
@@ -249,6 +258,16 @@ if (parsed.NODE_ENV === 'production' && parsed.MAIL_TRANSPORT !== 'log' && parse
   problems.push(
     'A real MAIL_TRANSPORT in production requires INTEGRATION_ENCRYPTION_KEY, which encrypts emailed links at rest.',
   );
+}
+
+// Phase 43d — a live inbound webhook needs the key to download attachments,
+// the domain to recognise its addresses, and a long secret in its URL.
+if (parsed.INBOUND_MAIL === 'brevo') {
+  if (parsed.BREVO_API_KEY === '') problems.push('INBOUND_MAIL=brevo requires BREVO_API_KEY.');
+  if (parsed.INBOUND_MAIL_DOMAIN === '') problems.push('INBOUND_MAIL=brevo requires INBOUND_MAIL_DOMAIN.');
+  if (parsed.INBOUND_MAIL_WEBHOOK_SECRET.length < 32) {
+    problems.push('INBOUND_MAIL=brevo requires INBOUND_MAIL_WEBHOOK_SECRET of at least 32 characters.');
+  }
 }
 
 // Phase 39c — Stripe keys come as a pair, and outside production only test
