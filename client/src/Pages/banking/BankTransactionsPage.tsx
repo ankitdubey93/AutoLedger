@@ -20,6 +20,10 @@ import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
+import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
+import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
 
 /**
  * The bank-line approval queue. Every unmatched line's top candidates are
@@ -66,6 +70,8 @@ export default function BankTransactionsPage() {
   const [postJournalAccountId, setPostJournalAccountId] = useState('');
   const [postJournalDescription, setPostJournalDescription] = useState('');
   const [postJournalSuccess, setPostJournalSuccess] = useState<{ lineId: string; accountId: string; description: string; amountCents: number } | null>(null);
+  const placeholderTarget = usePlaceholderTarget('postJournalDescription');
+  const organisationName = useOrganizationName();
 
   const status = (params.get('status') ?? '') as BankTransactionStatus | '';
   const q = params.get('q') ?? '';
@@ -367,10 +373,16 @@ export default function BankTransactionsPage() {
                           </select>
                           <input
                             type="text"
+                            {...placeholderTarget.bind('postJournalDescription', setPostJournalDescription)}
                             value={postJournalDescription}
                             onChange={(e) => setPostJournalDescription(e.target.value)}
                             placeholder={txn.description}
                             className={`${inputClass} flex-1 min-w-40`}
+                          />
+                          <PlaceholderPicker
+                            surface="BANK_LINE"
+                            onInsert={placeholderTarget.insert}
+                            preview={{ date: txn.txnDate, organisationName }}
                           />
                           <button
                             type="button"
@@ -389,6 +401,11 @@ export default function BankTransactionsPage() {
                             Cancel
                           </button>
                         </div>
+                        <PlaceholderHints
+                          text={postJournalDescription}
+                          surface="BANK_LINE"
+                          preview={{ date: txn.txnDate, organisationName }}
+                        />
                       </div>
                     )}
 

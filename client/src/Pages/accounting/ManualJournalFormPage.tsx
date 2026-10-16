@@ -229,7 +229,11 @@ export default function ManualJournalFormPage() {
               <label htmlFor="journal-narration" className="text-[var(--muted)]">
                 Narration
               </label>
-              <PlaceholderPicker surface="JOURNAL" onInsert={placeholderTarget.insert} />
+              <PlaceholderPicker
+                surface="JOURNAL"
+                onInsert={placeholderTarget.insert}
+                preview={{ date: entryDate, organisationName }}
+              />
             </div>
             <input
               id="journal-narration"

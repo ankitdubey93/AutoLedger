@@ -13,6 +13,8 @@ import { inputClass } from '../../components/ui/formClasses';
 import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
 import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
 import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
+import { SAMPLE_CUSTOMER_NAME, SAMPLE_INVOICE } from '../sales/sampleInvoice';
 
 /**
  * Invoice numbering, defaults, and branding — read with sensible defaults
@@ -53,6 +55,15 @@ export default function InvoiceSettingsPage() {
   const [paymentTerms, setPaymentTerms] = useState('');
   const [footerNotes, setFooterNotes] = useState('');
   const placeholderTarget = usePlaceholderTarget('footerNotes');
+  const organisationName = useOrganizationName();
+  // Phase 46b — the footer previews against the sample invoice.
+  const previewContext = {
+    date: SAMPLE_INVOICE.issueDate,
+    dueDate: SAMPLE_INVOICE.dueDate,
+    contactName: SAMPLE_CUSTOMER_NAME,
+    organisationName,
+    invoiceNumber: SAMPLE_INVOICE.invoiceNumber,
+  };
   const [accentColor, setAccentColor] = useState('#2563eb');
 
   const [seeded, setSeeded] = useState(false);
@@ -448,7 +459,7 @@ export default function InvoiceSettingsPage() {
             <label htmlFor="invoice-footer-notes" className="text-[var(--muted)]">
               Footer notes
             </label>
-            <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+            <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} preview={previewContext} />
           </div>
           <textarea
             id="invoice-footer-notes"
@@ -458,7 +469,7 @@ export default function InvoiceSettingsPage() {
             rows={2}
             className={inputClass}
           />
-          <PlaceholderHints text={footerNotes} surface="INVOICE" />
+          <PlaceholderHints text={footerNotes} surface="INVOICE" preview={previewContext} />
         </div>
 
         <label className="flex items-center gap-3 text-sm">

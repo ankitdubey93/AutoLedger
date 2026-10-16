@@ -15,6 +15,7 @@ import { inputClass } from '../../components/ui/formClasses';
 import PlaceholderPicker from '../../components/placeholders/PlaceholderPicker';
 import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
 import { usePlaceholderTarget } from '../../utils/usePlaceholderTarget';
+import { useOrganizationName } from '../../context/OrgContext';
 import { formatCents, parseCentsInput } from '../../utils/money';
 import { useTableSort } from '../../utils/useTableSort';
 import { useClientPage } from '../../utils/useClientPage';
@@ -44,6 +45,8 @@ function BankRuleForm({
   const [targetAccountId, setTargetAccountId] = useState(prefill?.account || '');
   const [description, setDescription] = useState('');
   const placeholderTarget = usePlaceholderTarget('description');
+  const organisationName = useOrganizationName();
+  const previewContext = { date: new Date().toISOString().slice(0, 10), organisationName };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -206,7 +209,7 @@ function BankRuleForm({
           <label htmlFor="bank-rule-description" className="text-[var(--muted)]">
             Description (optional)
           </label>
-          <PlaceholderPicker surface="BANK_LINE" onInsert={placeholderTarget.insert} />
+          <PlaceholderPicker surface="BANK_LINE" onInsert={placeholderTarget.insert} preview={previewContext} />
         </div>
         <input
           id="bank-rule-description"
@@ -218,7 +221,7 @@ function BankRuleForm({
           placeholder="Bank fee [Month]"
           className={inputClass}
         />
-        <PlaceholderHints text={description} surface="BANK_LINE" />
+        <PlaceholderHints text={description} surface="BANK_LINE" preview={previewContext} />
       </div>
 
       <div className="flex items-center gap-3">

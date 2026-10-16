@@ -1,11 +1,18 @@
 import { Braces } from 'lucide-react';
 import Menu, { type MenuItem } from '../ui/Menu';
-import { placeholdersFor, type PlaceholderSurface } from '../../utils/placeholders';
+import {
+  fillPlaceholders,
+  placeholdersFor,
+  type PlaceholderContext,
+  type PlaceholderSurface,
+} from '../../utils/placeholders';
 
 interface PlaceholderPickerProps {
   surface: PlaceholderSurface;
   onInsert: (token: string) => void;
   disabled?: boolean;
+  /** Phase 46b — when given (with a real date), each entry shows what it becomes. */
+  preview?: PlaceholderContext;
 }
 
 const DATE_PRESETS: { label: string; token: string }[] = [
@@ -19,17 +26,22 @@ const DATE_PRESETS: { label: string; token: string }[] = [
  * surface offers, from the shared registry, then the common date offsets.
  * Pair it with `usePlaceholderTarget`, whose `insert` is `onInsert`.
  */
-export default function PlaceholderPicker({ surface, onInsert, disabled = false }: PlaceholderPickerProps) {
+export default function PlaceholderPicker({ surface, onInsert, disabled = false, preview }: PlaceholderPickerProps) {
+  // A date input mid-edit (or cleared) has no date to fill from yet.
+  const context = preview !== undefined && /^\d{4}-\d{2}-\d{2}$/.test(preview.date) ? preview : undefined;
+  const shortcutFor = (token: string): string =>
+    context === undefined ? token : `${token} → ${fillPlaceholders(token, surface, context, 'partial')}`;
+
   const items: MenuItem[] = [
     ...placeholdersFor(surface).map((def) => ({
       label: def.label,
-      shortcut: `[${def.label}]`,
+      shortcut: shortcutFor(`[${def.label}]`),
       onSelect: () => onInsert(`[${def.label}]`),
     })),
     { type: 'separator' as const },
     ...DATE_PRESETS.map((preset) => ({
       label: preset.label,
-      shortcut: preset.token,
+      shortcut: shortcutFor(preset.token),
       onSelect: () => onInsert(preset.token),
     })),
   ];

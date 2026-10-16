@@ -146,7 +146,11 @@ export default function NewRepeatingJournalPage() {
               <label htmlFor="repeating-narration" className="text-[var(--muted)]">
                 Narration
               </label>
-              <PlaceholderPicker surface="JOURNAL" onInsert={placeholderTarget.insert} />
+              <PlaceholderPicker
+                surface="JOURNAL"
+                onInsert={placeholderTarget.insert}
+                preview={{ date: startDate, organisationName, occurrence: 1 }}
+              />
             </div>
             <input
               id="repeating-narration"
@@ -166,7 +170,7 @@ export default function NewRepeatingJournalPage() {
             <PlaceholderHints
               text={narration}
               surface="JOURNAL"
-              preview={{ date: startDate, organisationName }}
+              preview={{ date: startDate, organisationName, occurrence: 1 }}
             />
           </div>
         </div>

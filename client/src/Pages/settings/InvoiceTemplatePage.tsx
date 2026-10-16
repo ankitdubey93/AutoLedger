@@ -16,7 +16,7 @@ import {
 import { useOrg } from '../../context/OrgContext';
 import { useDocumentObjectUrl } from '../../utils/useDocumentObjectUrl';
 import InvoiceDocument from '../sales/InvoiceDocument';
-import { SAMPLE_INVOICE } from '../sales/sampleInvoice';
+import { SAMPLE_CUSTOMER_NAME, SAMPLE_INVOICE } from '../sales/sampleInvoice';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import { inputClass } from '../../components/ui/formClasses';
@@ -129,6 +129,14 @@ export default function InvoiceTemplatePage() {
   const [profile, setProfile] = useState<OrganizationProfile | null>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const placeholderTarget = usePlaceholderTarget('footerNotes');
+  // Phase 46b — the title, bank details and footer preview against the sample invoice.
+  const previewContext = {
+    date: SAMPLE_INVOICE.issueDate,
+    dueDate: SAMPLE_INVOICE.dueDate,
+    contactName: SAMPLE_CUSTOMER_NAME,
+    organisationName: organization?.name ?? null,
+    invoiceNumber: SAMPLE_INVOICE.invoiceNumber,
+  };
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -343,7 +351,7 @@ export default function InvoiceTemplatePage() {
               <span className="text-xs text-[var(--muted)]">
                 Placeholders here and in the title are filled in for each invoice.
               </span>
-              <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+              <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} preview={previewContext} />
             </div>
 
             <label className="flex flex-col gap-1 text-sm">
@@ -367,7 +375,12 @@ export default function InvoiceTemplatePage() {
                 className={inputClass}
               />
             </label>
-            <PlaceholderHints text={[draft.documentTitle, draft.bankDetails, draft.footerNotes]} surface="INVOICE" />
+            <PlaceholderHints
+              text={[draft.documentTitle, draft.bankDetails, draft.footerNotes]}
+              labels={['Title', 'Bank details', 'Footer']}
+              surface="INVOICE"
+              preview={previewContext}
+            />
           </fieldset>
 
           {titleBlank && <p className="status status--bad">Document title cannot be blank.</p>}

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -259,6 +259,20 @@ describe('BankTransactionsPage', () => {
       const [, init] = call as [RequestInfo | URL, RequestInit];
       expect(init.body as string).toContain('acc-6600');
     });
+  });
+
+  it('the post-journal memo offers placeholders and previews them against the line date (Phase 46b)', async () => {
+    mockListRoutes([transaction({ suggestions: [], txnDate: '2026-06-01' })]);
+    const user = userEvent.setup();
+    renderPage();
+
+    await screen.findByText('PAYMENT RECEIVED INV-0001');
+    await user.click(screen.getByRole('button', { name: 'Post journal' }));
+
+    const memo = await screen.findByPlaceholderText('PAYMENT RECEIVED INV-0001');
+    fireEvent.change(memo, { target: { value: 'Fees [Month]' } });
+    expect(await screen.findByTestId('placeholder-preview')).toHaveTextContent('Preview: Fees June');
+    expect(screen.getByRole('button', { name: 'Insert placeholder' })).toBeInTheDocument();
   });
 
   it('a matched line settled by a journal entry shows a View entry link', async () => {

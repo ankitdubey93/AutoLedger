@@ -128,6 +128,15 @@ export default function StatementTemplatePage() {
   }, [loaded, draft]);
 
   const previewStatement = useMemo(() => sampleStatement(draft?.defaultType ?? 'OUTSTANDING'), [draft?.defaultType]);
+  // Phase 46b — the title and footer preview against the sample statement.
+  const previewContext = {
+    date: previewStatement.statementDate,
+    contactName: previewStatement.party.name,
+    organisationName: organization?.name ?? null,
+    statementDate: previewStatement.statementDate,
+    periodFrom: previewStatement.from,
+    periodTo: previewStatement.statementDate,
+  };
 
   const dirty = useMemo(
     () => loaded !== null && draft !== null && JSON.stringify(draft) !== JSON.stringify(toDraft(loaded)),
@@ -262,7 +271,7 @@ export default function StatementTemplatePage() {
               <span className="text-xs text-[var(--muted)]">
                 Placeholders here and in the title are filled in for each statement.
               </span>
-              <PlaceholderPicker surface="STATEMENT" onInsert={placeholderTarget.insert} />
+              <PlaceholderPicker surface="STATEMENT" onInsert={placeholderTarget.insert} preview={previewContext} />
             </div>
             <label className="flex flex-col gap-1 text-sm">
               <span className="text-[var(--muted)]">Footer notes</span>
@@ -275,7 +284,12 @@ export default function StatementTemplatePage() {
                 className={inputClass}
               />
             </label>
-            <PlaceholderHints text={[draft.documentTitle, draft.footerNotes]} surface="STATEMENT" />
+            <PlaceholderHints
+              text={[draft.documentTitle, draft.footerNotes]}
+              labels={['Title', 'Footer']}
+              surface="STATEMENT"
+              preview={previewContext}
+            />
           </fieldset>
 
           {titleBlank && <p className="status status--bad">Document title cannot be blank.</p>}

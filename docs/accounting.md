@@ -529,6 +529,8 @@ Xero-style placeholders: write `Rent for [Month] [Year]` once and every document
 - [x] An "Insert placeholder" picker on every field that takes them — invoice, bill and note notes and lines, the bill reference, the journal description, bank rules, the invoice and statement templates and the email templates — with a live preview and non-blocking "did you mean [Month]?" hints.
 - [x] Cross-tenant isolation: names come only from the issuing organization; another organization's bills never count as a reference collision; another organization cannot issue or approve a draft (404).
 
+**Phase 46b — previews everywhere.** Every placeholder field previews each field (not only the first), pickers show resolved values next to each placeholder, bank-line journal memos get a picker, hints and a preview, and a recurring schedule's detail page shows what its next run will read. Client only; no server change.
+
 **Not built:** localized month names (there is no organization locale setting to choose them by); placeholders in the invoice-settings `paymentTerms` field (stored but never rendered); editing a schedule's text without editing its source document. A Bill-inbox bill approved later by hand is filled like a typed one — only the inbox's own auto-post skips filling.
 
 ### Phase 41 — quotes (sales and purchase) ✅ shipped

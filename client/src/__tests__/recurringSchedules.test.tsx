@@ -5,6 +5,7 @@ import RecurringSchedulesPage from '../Pages/accounting/RecurringSchedulesPage';
 import RecurringScheduleDetailPage from '../Pages/accounting/RecurringScheduleDetailPage';
 import MakeRecurringDialog from '../components/MakeRecurringDialog';
 import * as fetchServices from '../services/fetchServices';
+import { SAMPLE_INVOICE } from '../Pages/sales/sampleInvoice';
 
 /**
  * Phase 34b — client tests for recurring schedules.
@@ -274,5 +275,35 @@ describe('RecurringScheduleDetailPage', () => {
     await waitFor(() => {
       expect(fetchServices.endRecurringSchedule).toHaveBeenCalledWith('sched-1');
     });
+  });
+});
+
+/** Phase 46b — "Next run will read" previews the source's template text for the next date. */
+describe('RecurringScheduleDetailPage next-run preview', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('previews the source notes against the next run date', async () => {
+    vi.mocked(fetchServices.getRecurringSchedule).mockResolvedValue({
+      success: true,
+      schedule: { ...mockSchedule, nextRunDate: '2026-11-01', nextOccurrenceIndex: 1, runs: [] },
+    });
+    vi.mocked(fetchServices.getInvoice).mockResolvedValue({
+      success: true,
+      invoice: { ...SAMPLE_INVOICE, notes: 'Retainer [Month]', notesTemplate: 'Retainer [Month]', lines: [] },
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/recurring/sched-1']}>
+        <Routes>
+          <Route path="/recurring/:scheduleId" element={<RecurringScheduleDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Next run will read')).toBeInTheDocument();
+    expect(await screen.findByTestId('placeholder-preview')).toHaveTextContent('Preview: Retainer November');
+    expect(fetchServices.getInvoice).toHaveBeenCalledWith('inv-1');
   });
 });

@@ -572,7 +572,16 @@ export default function NewBillPage() {
             <label htmlFor="bill-notes" className="text-[var(--muted)]">
               Notes
             </label>
-            <PlaceholderPicker surface="BILL" onInsert={placeholderTarget.insert} />
+            <PlaceholderPicker
+              surface="BILL"
+              onInsert={placeholderTarget.insert}
+              preview={{
+                date: billDate,
+                dueDate: dueDate === '' ? null : dueDate,
+                contactName: vendors.find((v) => v.id === vendorId)?.name ?? null,
+                organisationName,
+              }}
+            />
           </div>
           <textarea
             id="bill-notes"

@@ -203,6 +203,14 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
         ? { to: `/${config.originalPath}/${original.id}`, label: `Back to ${config.originalNoun}` }
         : { to: `/${config.path}`, label: `Back to ${config.plural.toLowerCase()}` };
 
+  // Phase 46b — the notes field's placeholders preview against this note's own values.
+  // A credit note's [Invoice Number] is the invoice it corrects.
+  const notesPreview = {
+    date: issueDate,
+    contactName: original?.partyName ?? null,
+    organisationName,
+    ...(config.kind === 'CREDIT_NOTE' && original ? { invoiceNumber: original.label } : {}),
+  };
   if (loadError !== null) {
     return (
       <section className="flex flex-col gap-3">
@@ -419,7 +427,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
           <label htmlFor="note-notes" className="text-[var(--muted)]">
             Notes (optional)
           </label>
-          <PlaceholderPicker surface={config.kind} onInsert={placeholderTarget.insert} />
+          <PlaceholderPicker surface={config.kind} onInsert={placeholderTarget.insert} preview={notesPreview} />
         </div>
         <textarea
           id="note-notes"
@@ -433,7 +441,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
         <PlaceholderHints
           text={[notes, ...lines.map((line) => line.description)]}
           surface={config.kind}
-          preview={{ date: issueDate, contactName: original?.partyName ?? null, organisationName }}
+          preview={notesPreview}
         />
       </div>
 

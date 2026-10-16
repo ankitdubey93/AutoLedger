@@ -3,6 +3,10 @@ import { Link, useParams } from 'react-router-dom';
 import { Play, Pause, StopCircle } from 'lucide-react';
 import {
   ApiRequestError,
+  getBill,
+  getInvoice,
+  getJournal,
+  getManualJournal,
   getRecurringSchedule,
   runRecurringSchedule,
   pauseRecurringSchedule,
@@ -12,7 +16,10 @@ import {
 } from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import PlaceholderHints from '../../components/placeholders/PlaceholderHints';
 import { formatDate } from '../../utils/date';
+import { useOrganizationName } from '../../context/OrgContext';
+import { templateTextsFor, type RecurringSource, type TemplatePreview } from './recurringPreview';
 
 /**
  * Phase 34b — one recurring schedule detail. Shows the template, runs,
@@ -41,6 +48,24 @@ function documentLink(schedule: RecurringScheduleDetail): string {
   return `/journals/${schedule.sourceId}`;
 }
 
+/** Phase 46b — the schedule's source document, fetched with the existing helpers. */
+async function loadRecurringSource(schedule: RecurringScheduleDetail): Promise<RecurringSource> {
+  if (schedule.kind === 'INVOICE') {
+    const res = await getInvoice(schedule.sourceId);
+    return { kind: 'INVOICE', invoice: res.invoice };
+  }
+  if (schedule.kind === 'BILL') {
+    const res = await getBill(schedule.sourceId);
+    return { kind: 'BILL', bill: res.bill };
+  }
+  if (schedule.sourceManualJournalId !== null) {
+    const res = await getManualJournal(schedule.sourceManualJournalId);
+    return { kind: 'MANUAL_JOURNAL', journal: res.journal };
+  }
+  const res = await getJournal(schedule.sourceId);
+  return { kind: 'JOURNAL', entry: res.entry };
+}
+
 function runDocumentLink(schedule: RecurringScheduleDetail, runIdx: number): string | null {
   const run = schedule.runs[runIdx];
   if (!run) return null;
@@ -58,6 +83,26 @@ export default function RecurringScheduleDetailPage() {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState<'end' | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
+  const [nextRunPreview, setNextRunPreview] = useState<TemplatePreview | null>(null);
+  const organisationName = useOrganizationName();
+
+  // Phase 46b — a source that fails to load hides the section; it never shows an error.
+  useEffect(() => {
+    if (schedule === null) return;
+    let ignore = false;
+    setNextRunPreview(null);
+    void (async () => {
+      try {
+        const source = await loadRecurringSource(schedule);
+        if (!ignore) setNextRunPreview(templateTextsFor(schedule, source, organisationName));
+      } catch {
+        if (!ignore) setNextRunPreview(null);
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [schedule, organisationName]);
 
   useEffect(() => {
     if (scheduleId === undefined) return;
@@ -281,6 +326,18 @@ export default function RecurringScheduleDetailPage() {
           </div>
         )}
       </dl>
+
+      {nextRunPreview !== null && nextRunPreview.context !== null && (
+        <div>
+          <h3 className="text-sm font-semibold m-0 mb-3">Next run will read</h3>
+          <PlaceholderHints
+            text={nextRunPreview.texts}
+            labels={nextRunPreview.labels}
+            surface={nextRunPreview.surface}
+            preview={nextRunPreview.context}
+          />
+        </div>
+      )}
 
       {schedule.runs.length > 0 && (
         <div>

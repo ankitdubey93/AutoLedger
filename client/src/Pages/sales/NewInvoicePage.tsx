@@ -576,7 +576,16 @@ export default function NewInvoicePage() {
             <label htmlFor="invoice-notes" className="text-[var(--muted)]">
               Notes
             </label>
-            <PlaceholderPicker surface="INVOICE" onInsert={placeholderTarget.insert} />
+            <PlaceholderPicker
+              surface="INVOICE"
+              onInsert={placeholderTarget.insert}
+              preview={{
+                date: issueDate,
+                dueDate: dueDate === '' ? null : dueDate,
+                contactName: customers.find((c) => c.id === customerId)?.name ?? null,
+                organisationName,
+              }}
+            />
           </div>
           <textarea
             id="invoice-notes"
