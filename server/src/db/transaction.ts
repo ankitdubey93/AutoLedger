@@ -46,7 +46,7 @@ export async function beginTransaction(client: PoolClient): Promise<void> {
 /**
  * `connect` -> `beginTransaction` -> `fn` -> `COMMIT`, with `ROLLBACK` and
  * `release` on any throw — the same shape every hand-rolled transaction in
- * this codebase already follows (see `journalService.createEntry`), factored
+ * this codebase already follows (see `manualJournalService.createManualJournal`), factored
  * out for the single-statement writes that did not previously open one.
  *
  * Deliberately does no error mapping: it re-throws whatever `fn` or the

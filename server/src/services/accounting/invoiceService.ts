@@ -41,7 +41,7 @@ import { revertConversionOnClient } from './quoteStatusService.js';
  * invoice is immutable in the database as well as in this service — migration
  * 009's `trg_invoices_immutable` trigger enforces it independently. The only
  * correction path for an issued invoice is `voidInvoice`, which posts a
- * reversing journal entry, exactly like `journalService.reverseEntry` does for
+ * reversing journal entry, exactly like `journalService.reverseEntryOnClient` does for
  * a manual entry (guardrails rule 6).
  *
  * This file never writes `journal_entries` or `ledger_lines` directly — every

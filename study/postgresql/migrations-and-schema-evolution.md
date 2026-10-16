@@ -157,6 +157,16 @@ ALTER TABLE bank_transactions ADD CONSTRAINT chk_bank_txn_matched_fields CHECK (
 
 ---
 
+### Phase 44 — a set-based backfill, replacing a CHECK, and flagging from usage
+
+Verified on PostgreSQL 16.15. Migration 097 had to give every existing manual, recurring and imported journal a document row.
+
+**Backfill through a `TEMP TABLE ... ON COMMIT DROP` id map.** The new parent table has a trigger that refuses lines unless the parent is DRAFT, and its CHECKs require a POSTED row to carry its entry id. So the backfill (1) builds `_mj_backfill` with `gen_random_uuid() AS mj_id` per existing entry (one row-by-row-free `CREATE TEMP TABLE ... AS SELECT`), (2) inserts all parents as DRAFT using those ids, (3) inserts all lines joining on the map, (4) `UPDATE`s the parents to POSTED or VOIDED from the same map. The map is what lets steps 2-4 be three set-based statements instead of a PL/pgSQL loop: it carries the generated id so each later statement can join to it. `ON COMMIT DROP` ties its lifetime to the migration's transaction (each migration file runs inside its own `BEGIN`/`COMMIT`, see "Transactional DDL" above), so nothing leaks into the session. Idempotency comes from `WHERE NOT EXISTS (SELECT 1 FROM manual_journals m WHERE m.journal_entry_id = e.id)`: a second run selects nothing.
+
+**Replacing a CHECK idempotently.** `recurring_schedules.chk_recurring_source_matches_kind` had to admit a new source column. Applied migration 075 cannot be edited, so 097 does `DROP CONSTRAINT IF EXISTS` on the old name and a `DO $$ ... IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = ...)` guarded `ADD CONSTRAINT` under a new name (`..._v2`). The new name matters: the replay test re-runs every file against the live schema, and re-running 075 cannot re-add the old constraint (its `CREATE TABLE IF NOT EXISTS` is a no-op), so a v2 name keeps the second run a no-op instead of a duplicate-name error. The v2 is strictly wider, which is why existing rows still validate; `ADD CONSTRAINT` scans the table under a lock, fine at this size (see the `NOT VALID` discussion above).
+
+**Flagging accounts from usage.** `accounts.bank_account_kind` is new, and existing orgs already have bank accounts. The backfill `UPDATE`s derive the flag from what each account is *used for*: referenced by statement imports, bank transactions, bank rules, `ledger_settings.cash_account_id` or `payments.cash_account_id`, using correlated `EXISTS` (each with an `org_id` predicate) rather than a join, so an account matching several references is flagged once. Asset gets `BANK`, Liability `CREDIT_CARD`, mirroring a CHECK that ties the kind to the account type. Replay caveat: the first UPDATE also flags code `1110`, so a replay re-flags it; acceptable because replay only runs on the test database.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -216,6 +226,18 @@ A: Same drop-then-add idiom as a rename, in a new migration: `DROP CONSTRAINT IF
 
 **Q: Does `ADD CONSTRAINT` block writes on a big table, and how would you avoid that?**
 A: By default, yes — it validates every existing row under a lock that blocks writes for the duration, a full sequential scan. PostgreSQL gives you an escape: `ADD CONSTRAINT ... NOT VALID` skips that initial scan and trusts existing rows, then a separate `VALIDATE CONSTRAINT` does the check later under a much lighter lock that only has to guarantee no new violating row shows up mid-scan. I didn't need it for this particular constraint — the table had rows, but every one already satisfied the new, wider CHECK, so an immediate full validation was cheap — but it's the right tool the moment "every existing row already qualifies" isn't true, or the table is too large to lock even briefly.
+
+**Q: Why use a temp table for the backfill instead of a single INSERT ... SELECT per table?**
+A: Because three statements need the same freshly generated parent id. `gen_random_uuid()` evaluated in separate statements would give different ids, and the lines could not find their parents. Materialising `(mj_id, entry_id, ...)` once in a temp table makes the mapping a join key for the header insert, the line insert and the final promotion. It also lets the parents go in as DRAFT first, which the line-guard trigger requires.
+
+**Q: How do you replace a CHECK constraint in a migration that must be re-runnable?**
+A: Drop the old by name with `IF EXISTS`, add the new one under a different name inside a `DO` block that first checks `pg_constraint`, because `ADD CONSTRAINT` has no `IF NOT EXISTS`. A new name avoids a clash if an older migration is replayed, and keeps the first run and the replay both succeeding. If the new rule is wider than the old, existing rows pass; if it is narrower you must fix data first or add it `NOT VALID` and validate later.
+
+**Q: What does `ON COMMIT DROP` on a temp table give you, and what would go wrong without it?**
+A: The table is dropped automatically when the creating transaction commits. Migrations run each file in a transaction, so the table never outlives the file. Without it the temp table lives until the session ends, and a later migration on the same connection that creates a table of the same name fails with "already exists".
+
+**Q: Why derive a new flag from existing usage instead of defaulting it to NULL?**
+A: Defaulting would have changed behaviour on day one: the new rule refuses manual journals to bank accounts, so every existing bank account would stay silently postable until someone flagged it. Deriving it from the references the application already treats as "this is a bank account" (statement imports, rules, payment cash accounts) makes the new guard accurate immediately. The cost is a heuristic: an account first used for imports after the migration is not flagged automatically, and that is documented as not built.
 
 ## Follow-ups they'll dig into
 

@@ -4,9 +4,11 @@ import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import {
   isAccountType,
+  isBankAccountKind,
   type Account,
   type AccountNode,
   type AccountType,
+  type BankAccountKind,
 } from '../../types/accounting.js';
 
 /**
@@ -38,18 +40,32 @@ interface AccountRow {
   is_postable: boolean;
   is_active: boolean;
   description: string | null;
+  bank_account_kind: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 const ACCOUNT_COLUMNS = `id, code, name, type, parent_id, is_postable, is_active,
-                         description, created_at, updated_at`;
+                         description, bank_account_kind, created_at, updated_at`;
+
+/** A bank flag must match the account's type (rule 12: the flag is not a type). */
+function assertBankKindMatchesType(kind: BankAccountKind | null, type: AccountType): void {
+  if (kind === 'BANK' && type !== 'Asset') {
+    throw new ApiError(422, 'Only an Asset account can be a bank account');
+  }
+  if (kind === 'CREDIT_CARD' && type !== 'Liability') {
+    throw new ApiError(422, 'Only a Liability account can be a credit card account');
+  }
+}
 
 function toAccount(row: AccountRow): Account {
   // Re-validate rather than cast: the column has a CHECK constraint, but a
   // widened enum in a later migration would otherwise reach the API as a lie.
   if (!isAccountType(row.type)) {
     throw new Error(`Unknown account type "${row.type}" on account ${row.id}`);
+  }
+  if (row.bank_account_kind !== null && !isBankAccountKind(row.bank_account_kind)) {
+    throw new Error(`Unknown bank account kind "${row.bank_account_kind}" on account ${row.id}`);
   }
   return {
     id: row.id,
@@ -60,6 +76,7 @@ function toAccount(row: AccountRow): Account {
     isPostable: row.is_postable,
     isActive: row.is_active,
     description: row.description,
+    bankAccountKind: row.bank_account_kind,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -173,16 +190,18 @@ export async function createAccountOnClient(
     parentId: string | null;
     isPostable: boolean;
     description: string | null;
+    bankAccountKind: BankAccountKind | null;
   },
 ): Promise<Account> {
+  assertBankKindMatchesType(input.bankAccountKind, input.type);
   if (input.parentId !== null) {
     await assertParentIsValid(client, orgId, input.parentId, input.type);
   }
 
   try {
     const { rows } = await client.query<AccountRow>(
-      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by, bank_account_kind)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${ACCOUNT_COLUMNS}`,
       [
         orgId,
@@ -193,6 +212,7 @@ export async function createAccountOnClient(
         input.isPostable,
         input.description,
         createdBy,
+        input.bankAccountKind,
       ],
     );
 
@@ -215,6 +235,7 @@ export async function createAccount(
     parentId: string | null;
     isPostable: boolean;
     description: string | null;
+    bankAccountKind: BankAccountKind | null;
   },
 ): Promise<Account> {
   return withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
@@ -267,9 +288,14 @@ export async function updateAccount(
     description?: string | null | undefined;
     isActive?: boolean | undefined;
     parentId?: string | null | undefined;
+    bankAccountKind?: BankAccountKind | null | undefined;
   },
 ): Promise<Account> {
   const existing = await getAccountById(orgId, id);
+
+  if (input.bankAccountKind !== undefined) {
+    assertBankKindMatchesType(input.bankAccountKind, existing.type);
+  }
 
   if (input.parentId !== undefined && input.parentId !== null) {
     if (input.parentId === id) throw new ApiError(422, 'Re-parenting would create a cycle');
@@ -286,6 +312,7 @@ export async function updateAccount(
     description: 'description',
     isActive: 'is_active',
     parentId: 'parent_id',
+    bankAccountKind: 'bank_account_kind',
   } as const;
 
   const assignments: string[] = [];
@@ -323,6 +350,7 @@ interface SeedAccount {
   /** Parent's `code`, resolved to an id at insert time. `null` for a root. */
   parent: string | null;
   postable: boolean;
+  bankAccountKind?: BankAccountKind;
 }
 
 /**
@@ -343,7 +371,7 @@ export const DEFAULT_CHART: readonly SeedAccount[] = [
   // Assets 1000–1999
   { code: '1000', name: 'Assets', type: 'Asset', parent: null, postable: false },
   { code: '1100', name: 'Current Assets', type: 'Asset', parent: '1000', postable: false },
-  { code: '1110', name: 'Operating Cash', type: 'Asset', parent: '1100', postable: true },
+  { code: '1110', name: 'Operating Cash', type: 'Asset', parent: '1100', postable: true, bankAccountKind: 'BANK' },
   { code: '1120', name: 'Accounts Receivable', type: 'Asset', parent: '1100', postable: true },
   { code: '1130', name: 'Prepaid Expenses', type: 'Asset', parent: '1100', postable: true },
   { code: '1140', name: 'Inventory', type: 'Asset', parent: '1100', postable: true },
@@ -443,15 +471,16 @@ export async function seedDefaultChart(q: Queryable, orgId: string): Promise<num
 
   for (const level of chartByDepth()) {
     const { rowCount } = await q.query(
-      `INSERT INTO accounts (org_id, code, name, type, is_postable, parent_id)
+      `INSERT INTO accounts (org_id, code, name, type, is_postable, parent_id, bank_account_kind)
        SELECT $1,
               v.code,
               v.name,
               v.type,
               v.is_postable,
-              (SELECT p.id FROM accounts p WHERE p.org_id = $1 AND p.code = v.parent_code)
-         FROM unnest($2::text[], $3::text[], $4::text[], $5::boolean[], $6::text[])
-              AS v(code, name, type, is_postable, parent_code)
+              (SELECT p.id FROM accounts p WHERE p.org_id = $1 AND p.code = v.parent_code),
+              v.bank_account_kind
+         FROM unnest($2::text[], $3::text[], $4::text[], $5::boolean[], $6::text[], $7::text[])
+              AS v(code, name, type, is_postable, parent_code, bank_account_kind)
        ON CONFLICT (org_id, code) DO NOTHING`,
       [
         orgId,
@@ -460,6 +489,7 @@ export async function seedDefaultChart(q: Queryable, orgId: string): Promise<num
         level.map((a) => a.type),
         level.map((a) => a.postable),
         level.map((a) => a.parent),
+        level.map((a) => a.bankAccountKind ?? null),
       ],
     );
     inserted += rowCount ?? 0;

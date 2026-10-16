@@ -62,13 +62,13 @@ async function post(agent: Agent, orgId: string, entryDate: string, debitCode: s
 /**
  * The shared fixture: a Jan-1 fiscal year 2026, with a prior-year entry and
  * three entries inside 2026 touching revenue, COGS, and an operating expense.
- * Net cash: 500000 - 200000 - 120000 + 90000 = 270000.
+ * Net prepaid-asset balance (1130 stands in for cash, which manual journals refuse): 500000 - 200000 - 120000 + 90000 = 270000.
  */
 async function buildFixture(agent: Agent, orgId: string) {
-  await post(agent, orgId, '2025-11-01', '1110', '4100', 90000); // prior fiscal year
-  await post(agent, orgId, '2026-02-01', '1110', '4100', 500000); // current-year revenue
-  await post(agent, orgId, '2026-02-05', '5100', '1110', 200000); // COGS
-  await post(agent, orgId, '2026-03-01', '6120', '1110', 120000); // operating expense
+  await post(agent, orgId, '2025-11-01', '1130', '4100', 90000); // prior fiscal year
+  await post(agent, orgId, '2026-02-01', '1130', '4100', 500000); // current-year revenue
+  await post(agent, orgId, '2026-02-05', '5100', '1130', 200000); // COGS
+  await post(agent, orgId, '2026-03-01', '6120', '1130', 120000); // operating expense
 }
 
 beforeEach(async () => {
@@ -178,7 +178,7 @@ describe('GET /reports/balance-sheet', () => {
     const agent = await loginAgent(app, userA);
     await onboard(agent);
     await buildFixture(agent, orgA);
-    await post(agent, orgA, '2026-04-01', '1110', '2120', 45000);
+    await post(agent, orgA, '2026-04-01', '1130', '2120', 45000);
 
     const res = await agent.get(`${BALANCE_SHEET}?asOf=2026-12-31`);
 

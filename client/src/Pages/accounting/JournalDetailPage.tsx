@@ -109,7 +109,14 @@ export default function JournalDetailPage() {
     );
   }
 
-  const canReverse = entry.reversesEntryId === null && entry.reversedByEntryId === null;
+  // Phase 44 — a posting may be reversed directly only when no document owns it:
+  // a manual journal is voided through its own page, an invoice or bill through
+  // its own void. Mirrors the server's REVERSIBLE_SOURCE_TYPES.
+  const canReverse =
+    entry.reversesEntryId === null &&
+    entry.reversedByEntryId === null &&
+    ['manual', 'recurring', 'migration_import', 'opening_balance'].includes(entry.sourceType);
+  const hasLineDescriptions = entry.lines.some((line) => line.description !== null);
   const balanced = entry.totalDebitCents === entry.totalCreditCents;
 
   return (
@@ -128,10 +135,19 @@ export default function JournalDetailPage() {
             disabled={busy}
             className="flex items-center gap-1.5 text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] rounded-md cursor-pointer px-3 py-1.5 disabled:opacity-40"
           >
-            <RotateCcw size={14} /> {busy ? 'Reversing…' : 'Reverse'}
+            <RotateCcw size={14} />{' '}
+            {busy ? 'Reversing…' : entry.manualJournalId !== null ? 'Void journal' : 'Reverse'}
           </button>
         )}
-        {entry.sourceType === 'manual' && entry.reversesEntryId === null && (
+        {entry.manualJournalId !== null && (
+          <Link
+            to={`/manual-journals/${entry.manualJournalId}`}
+            className="px-3 py-1.5 rounded-md text-sm no-underline text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)]"
+          >
+            Open manual journal
+          </Link>
+        )}
+        {entry.sourceType === 'manual' && entry.reversesEntryId === null && entry.manualJournalId === null && (
           <button
             type="button"
             onClick={() => setShowMakeRecurringDialog(true)}
@@ -203,6 +219,7 @@ export default function JournalDetailPage() {
         <table className="w-full border-collapse text-sm min-w-[34rem]">
           <thead>
             <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+              {hasLineDescriptions && <th className="p-3 font-medium">Description</th>}
               <th className="p-3 font-medium">Code</th>
               <th className="p-3 font-medium">Account</th>
               <th className="p-3 font-medium">Currency</th>
@@ -213,6 +230,7 @@ export default function JournalDetailPage() {
           <tbody>
             {entry.lines.map((line) => (
               <tr key={line.id} className="border-t border-[var(--border)]">
+                {hasLineDescriptions && <td className="p-3">{line.description ?? ''}</td>}
                 <td className="p-3 font-mono text-xs text-[var(--muted)]">
                   <Link to={`/accounts/${line.accountId}`}>{line.accountCode}</Link>
                 </td>
@@ -236,7 +254,7 @@ export default function JournalDetailPage() {
           </tbody>
           <tfoot>
             <tr className="border-t-2 border-[var(--border)] font-semibold">
-              <td className="p-3" colSpan={3}>
+              <td className="p-3" colSpan={hasLineDescriptions ? 4 : 3}>
                 {balanced ? 'Balanced' : 'Out of balance — this should be impossible'}
               </td>
               <td className="p-3 text-right tabular-nums">{formatCents(entry.totalDebitCents)}</td>

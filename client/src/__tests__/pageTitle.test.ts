@@ -22,6 +22,6 @@ describe('pageTitleFor', () => {
     expect(pageTitleFor('/invoices/new')).toBe('New invoice · AutoLedger');
     expect(pageTitleFor('/login')).toBe('Sign in · AutoLedger');
     expect(pageTitleFor('/bills/abc')).toBe('Expenses · AutoLedger');
-    expect(pageTitleFor('/journals/')).toBe('Journal entries · AutoLedger');
+    expect(pageTitleFor('/manual-journals/')).toBe('Manual journals · AutoLedger');
   });
 });

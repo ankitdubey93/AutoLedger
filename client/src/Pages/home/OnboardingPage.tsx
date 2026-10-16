@@ -111,7 +111,7 @@ export default function OnboardingPage() {
   }, []);
 
   // Pre-fills from a saved draft once, via the effect-plus-latch pattern
-  // NewJournalEntryPage uses for `?copyFrom=`. A failed fetch is silent — the
+  // the journal form used for `?copyFrom=`. A failed fetch is silent — the
   // wizard still works with blank defaults, it just does not resume.
   useEffect(() => {
     if (draftLoaded) return;

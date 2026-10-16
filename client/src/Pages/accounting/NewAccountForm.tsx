@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { createAccount, type Account, type AccountType } from '../../services/fetchServices';
+import {
+  createAccount,
+  type Account,
+  type AccountType,
+  type BankAccountKind,
+} from '../../services/fetchServices';
 
 /**
  * The chart-of-accounts create form.
@@ -38,6 +43,8 @@ export default function NewAccountForm({
   const [name, setName] = useState('');
   const [type, setType] = useState<AccountType>(initialType);
   const [parentId, setParentId] = useState('');
+  // Phase 44 — a bank account is an Asset, a credit card account a Liability.
+  const [bankAccountKind, setBankAccountKind] = useState<BankAccountKind | null>(null);
   const [isPostable, setIsPostable] = useState(true);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
@@ -55,6 +62,7 @@ export default function NewAccountForm({
         name: name.trim(),
         type,
         parentId: parentId === '' ? null : parentId,
+        bankAccountKind,
         isPostable,
         description: description.trim() === '' ? null : description.trim(),
       });
@@ -107,6 +115,7 @@ export default function NewAccountForm({
             onChange={(e) => {
               setType(e.target.value as AccountType);
               setParentId('');
+              setBankAccountKind(null);
             }}
             className={inputClass}
           >
@@ -133,6 +142,34 @@ export default function NewAccountForm({
           </select>
         </label>
       </div>
+
+      {type === 'Asset' && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Bank account</span>
+          <select
+            value={bankAccountKind === 'BANK' ? 'BANK' : ''}
+            onChange={(e) => setBankAccountKind(e.target.value === 'BANK' ? 'BANK' : null)}
+            className={inputClass}
+          >
+            <option value="">None</option>
+            <option value="BANK">Bank account</option>
+          </select>
+        </label>
+      )}
+
+      {type === 'Liability' && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Credit card</span>
+          <select
+            value={bankAccountKind === 'CREDIT_CARD' ? 'CREDIT_CARD' : ''}
+            onChange={(e) => setBankAccountKind(e.target.value === 'CREDIT_CARD' ? 'CREDIT_CARD' : null)}
+            className={inputClass}
+          >
+            <option value="">None</option>
+            <option value="CREDIT_CARD">Credit card</option>
+          </select>
+        </label>
+      )}
 
       <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
         <input

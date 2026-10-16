@@ -179,6 +179,7 @@ const account4100: Account = {
   isPostable: true,
   isActive: true,
   description: null,
+  bankAccountKind: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };

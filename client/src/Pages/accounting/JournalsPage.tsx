@@ -1,36 +1,33 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { Copy, Eye, Plus, RotateCcw } from 'lucide-react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { Eye, Plus } from 'lucide-react';
 import {
   listAccounts,
   listJournals,
-  reverseJournal,
   type Account,
   type JournalEntry,
   type JournalFilters,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
-import ConfirmDialog from '../../components/ConfirmDialog';
 import { formatDate } from '../../utils/date';
 import { useDebouncedInput } from '../../utils/useDebouncedInput';
 import Pagination from '../../components/ui/Pagination';
 import LoadingState from '../../components/ui/LoadingState';
-import ImportButton from '../../components/imports/ImportButton';
 
 /**
- * The journal register — every posted entry, filterable and paginated.
+ * The General journal — the read-only register of every posting, from every
+ * source (manual journals, invoices, bills, payments, bank lines, imports).
+ * Served at `/reports/general-journal`; `/journals` redirects to the manual
+ * journals list instead.
  *
  * Filters live in the URL via useSearchParams rather than local state, so the
  * register is linkable and survives a reload — the same idiom TrialBalancePage
  * uses for `?type=`. Unlike that page's client-side filter, these filters are
  * server-side: the server holds the full history, not just one page of it.
  *
- * Each row offers View, Duplicate and Reverse. There is no edit and never
- * will be — a posted entry is immutable (guardrails rule 6), enforced again
- * by a database trigger. Duplicate opens the post form pre-filled from this
- * entry (`journals/new?copyFrom=<id>`); Reverse posts the offsetting entry
- * directly, mirroring JournalDetailPage's own `canReverse` rule so the two
- * surfaces never disagree about which entries are correctable.
+ * Each row offers View only. There is no edit, and no reverse or duplicate
+ * here: a posted entry is immutable (guardrails rule 6), and correcting one is
+ * done from the document that owns it (a manual journal, an invoice or a bill).
  */
 
 const PAGE_LIMIT = 50;
@@ -53,7 +50,6 @@ function accountSummary(entry: JournalEntry): string {
 }
 
 export default function JournalsPage() {
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
@@ -61,9 +57,6 @@ export default function JournalsPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const [reversingId, setReversingId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [confirmEntry, setConfirmEntry] = useState<JournalEntry | null>(null);
 
   const from = params.get('from') ?? '';
   const to = params.get('to') ?? '';
@@ -116,18 +109,6 @@ export default function JournalsPage() {
     };
   }, [from, to, accountId, q, page]);
 
-  async function handleReverse(entryId: string) {
-    setReversingId(entryId);
-    setActionError(null);
-    try {
-      const { entry: reversal } = await reverseJournal(entryId);
-      navigate(`/journals/${reversal.id}`);
-    } catch (err: unknown) {
-      setActionError(err instanceof Error ? err.message : 'Could not reverse the entry');
-      setReversingId(null);
-    }
-  }
-
   function setFilter(key: string, value: string) {
     const next = new URLSearchParams(params);
     if (value === '') next.delete(key);
@@ -154,14 +135,12 @@ export default function JournalsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Journal entries</h2>
+          <h2 className="text-lg font-semibold m-0">General journal</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
-            Every entry ever posted. Append-only — a correction is a reversing entry, never an
-            edit.
+            Every posting from every source. Manual journals are created under Accounting → Manual journals.
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ImportButton kind="JOURNALS" returnTo="/journals" />
           <Link
             to="/journals/new"
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
@@ -224,7 +203,6 @@ export default function JournalsPage() {
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}
-      {actionError !== null && <p className="status status--bad">{actionError}</p>}
       {!loaded && error === null && <LoadingState />}
 
       {loaded && (
@@ -280,26 +258,6 @@ export default function JournalsPage() {
                           >
                             <Eye size={14} aria-hidden="true" /> View
                           </Link>
-                          <Link
-                            to={`/journals/new?copyFrom=${entry.id}`}
-                            aria-label="Duplicate entry"
-                            title="Copy into a new entry — a posted entry can never be edited"
-                            className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--text)] border border-transparent"
-                          >
-                            <Copy size={14} aria-hidden="true" />
-                          </Link>
-                          {entry.reversesEntryId === null && entry.reversedByEntryId === null && (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmEntry(entry)}
-                              disabled={reversingId !== null}
-                              aria-label="Reverse entry"
-                              title="Post the offsetting entry — the only correction path"
-                              className="p-1.5 rounded-md bg-transparent border border-transparent cursor-pointer text-[var(--muted)] hover:text-[var(--text)] disabled:opacity-40"
-                            >
-                              <RotateCcw size={14} aria-hidden="true" />
-                            </button>
-                          )}
                         </div>
                       </td>
                     </tr>
@@ -320,27 +278,6 @@ export default function JournalsPage() {
             />
           )}
         </>
-      )}
-
-      {confirmEntry !== null && (
-        <ConfirmDialog
-          title="Reverse this entry?"
-          body={
-            <>
-              This posts a new offsetting entry dated {formatDate(confirmEntry.entryDate)}. The original entry
-              is never changed or deleted. This cannot be undone.
-            </>
-          }
-          confirmLabel="Reverse entry"
-          tone="danger"
-          busy={reversingId !== null}
-          onConfirm={() => {
-            const target = confirmEntry;
-            setConfirmEntry(null);
-            void handleReverse(target.id);
-          }}
-          onCancel={() => setConfirmEntry(null)}
-        />
       )}
     </section>
   );

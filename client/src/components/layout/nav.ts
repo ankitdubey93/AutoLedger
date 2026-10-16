@@ -102,7 +102,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     heading: 'Accounting',
     items: [
       { to: '/accounts', label: 'Chart of accounts', icon: ListTree, end: false, permission: 'accounts.view' },
-      { to: '/journals', label: 'Journal entries', icon: BookOpen, end: false, permission: 'journals.view' },
+      { to: '/manual-journals', label: 'Manual journals', icon: BookOpen, end: false, permission: 'journals.view' },
       { to: '/recurring', label: 'Recurring', icon: Repeat, end: false, permission: 'recurring.view' },
       { to: '/fiscal-periods', label: 'Fiscal periods', icon: CalendarCheck, end: false, permission: 'periods.view' },
       { to: '/fx-rates', label: 'Exchange rates', icon: Coins, end: false, permission: 'fx.view' },
@@ -116,6 +116,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     items: [
       { to: '/reports', label: 'Reports', icon: FileBarChart, end: false, permission: 'reports.view' },
       { to: '/trial-balance', label: 'Trial balance', icon: Scale, end: false, permission: 'reports.view' },
+      { to: '/reports/general-journal', label: 'General journal', icon: BookOpen, end: false, permission: 'journals.view' },
     ],
   },
   {

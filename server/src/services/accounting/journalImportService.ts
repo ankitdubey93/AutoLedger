@@ -14,7 +14,8 @@ import {
 } from './importRowStore.js';
 import { accountCodeError, loadAccountsByCodeOnClient } from './importAccountLookup.js';
 import { JOURNAL_COLUMNS, journalGroupKey } from './importJournalColumns.js';
-import { createEntryOnClient, listControlAccountsOnClient } from './journalService.js';
+import { listManualJournalBlockedAccountsOnClient } from './journalService.js';
+import { postNewManualJournalOnClient } from './manualJournalService.js';
 import { periodStatusOnClient } from './fiscalPeriodService.js';
 
 /**
@@ -22,8 +23,8 @@ import { periodStatusOnClient } from './fiscalPeriodService.js';
  * for the grouped `JOURNALS` kind. Many CSV rows are one journal entry: rows
  * group by `JournalNumber`, or by Date + Narration (Xero-style) when there is
  * no number. Each entry is validated as a whole and posted through
- * `createEntryOnClient` with `source_type 'migration_import'`. Every lookup is
- * org-scoped (rule 1) and runs on the caller's client (rule 5); amounts are
+ * `manualJournalService.postNewManualJournalOnClient` (origin IMPORT,
+ * `source_type 'migration_import'`). Every lookup is org-scoped (rule 1) and runs on the caller's client (rule 5); amounts are
  * integer cents (rule 3); an entry must balance here, in `createEntryOnClient`
  * and in the deferred DB trigger (rule 7).
  */
@@ -120,7 +121,7 @@ export async function validateRows(
     orgId,
     uniq(rows.map((r) => text(r.values, 'accountCode'))),
   );
-  const controls = await listControlAccountsOnClient(client, orgId);
+  const controls = await listManualJournalBlockedAccountsOnClient(client, orgId);
   const periodCache = new Map<string, Awaited<ReturnType<typeof periodStatusOnClient>>>();
 
   const lines: LineRow[] = rows.map((r) => ({
@@ -326,12 +327,15 @@ export async function commitOnClient(
     });
 
     try {
-      await createEntryOnClient(client, orgId, createdBy, {
+      await postNewManualJournalOnClient(client, orgId, createdBy, {
+        narration,
         entryDate: date,
-        description: narration,
+        lines: lines.map((l) => ({ ...l, description: null })),
+        origin: 'IMPORT',
+        recurringScheduleId: null,
         sourceType: 'migration_import',
         sourceId: importId,
-        lines,
+        occurrence: null,
       });
     } catch (err) {
       if (err instanceof ApiError) throw new ApiError(err.status, `The ${label} (${rowSpan}): ${err.message}`);

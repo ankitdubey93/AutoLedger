@@ -6,6 +6,7 @@ import {
   type Account,
   type AccountNode,
   type AccountType,
+  type BankAccountKind,
 } from '../../services/fetchServices';
 import { TYPE_STYLES } from '../accounting/AccountsPage';
 import NewAccountForm, { ACCOUNT_TYPES } from '../accounting/NewAccountForm';
@@ -38,11 +39,13 @@ function ChartRow({
   depth,
   onRenamed,
   onToggleActive,
+  onToggleBank,
 }: {
   node: AccountNode;
   depth: number;
   onRenamed: (id: string, name: string) => Promise<void>;
   onToggleActive: (node: AccountNode) => Promise<void>;
+  onToggleBank: (node: AccountNode) => Promise<void>;
 }) {
   const Icon = node.isPostable ? Landmark : Folder;
   const [editing, setEditing] = useState(false);
@@ -85,6 +88,30 @@ function ChartRow({
     }
   }
 
+  async function handleBankToggle() {
+    setBusy(true);
+    setRowError(null);
+    try {
+      await onToggleBank(node);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not update the account');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Phase 44 — only a postable Asset can be a bank account, and only a postable
+  // Liability a credit card account (the server enforces the type match).
+  const bankToggleLabel =
+    node.bankAccountKind !== null
+      ? node.type === 'Asset'
+        ? 'Unmark bank'
+        : 'Unmark credit card'
+      : node.type === 'Asset'
+        ? 'Mark as bank'
+        : 'Mark as credit card';
+  const showBankToggle = node.isPostable && (node.type === 'Asset' || node.type === 'Liability');
+
   return (
     <>
       <li
@@ -121,6 +148,12 @@ function ChartRow({
         >
           {node.type}
         </span>
+
+        {node.bankAccountKind !== null && (
+          <span className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset ring-[var(--border)] text-[var(--muted)] shrink-0">
+            {node.bankAccountKind === 'BANK' ? 'Bank' : 'Card'}
+          </span>
+        )}
 
         <span
           className={[
@@ -173,6 +206,17 @@ function ChartRow({
         >
           {node.isActive ? 'Retire' : 'Activate'}
         </button>
+
+        {showBankToggle && (
+          <button
+            type="button"
+            onClick={() => void handleBankToggle()}
+            disabled={busy}
+            className="btn btn--ghost text-xs shrink-0"
+          >
+            {bankToggleLabel}
+          </button>
+        )}
       </li>
 
       {rowError !== null && (
@@ -188,6 +232,7 @@ function ChartRow({
           depth={depth + 1}
           onRenamed={onRenamed}
           onToggleActive={onToggleActive}
+          onToggleBank={onToggleBank}
         />
       ))}
     </>
@@ -230,6 +275,13 @@ export default function ChartSettingsPage() {
 
   async function handleToggleActive(node: AccountNode) {
     await updateAccount(node.id, { isActive: !node.isActive });
+    setReloadToken((t) => t + 1);
+  }
+
+  async function handleToggleBank(node: AccountNode) {
+    const kind: BankAccountKind | null =
+      node.bankAccountKind !== null ? null : node.type === 'Asset' ? 'BANK' : 'CREDIT_CARD';
+    await updateAccount(node.id, { bankAccountKind: kind });
     setReloadToken((t) => t + 1);
   }
 
@@ -295,6 +347,7 @@ export default function ChartSettingsPage() {
                       depth={0}
                       onRenamed={handleRenamed}
                       onToggleActive={handleToggleActive}
+                      onToggleBank={handleToggleBank}
                     />
                   ))}
                 </ul>

@@ -49,6 +49,7 @@ function account(overrides: Partial<Account> = {}): Account {
     isPostable: true,
     isActive: true,
     description: null,
+    bankAccountKind: null,
     createdAt: new Date('2026-01-01').toISOString(),
     updatedAt: new Date('2026-01-01').toISOString(),
     ...overrides,

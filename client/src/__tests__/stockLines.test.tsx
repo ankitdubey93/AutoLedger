@@ -31,7 +31,7 @@ function jsonResponse(status: number, body: unknown): Response {
 const now = new Date().toISOString();
 
 function account(id: string, code: string, name: string, type: Account['type']): Account {
-  return { id, code, name, type, parentId: null, isPostable: true, isActive: true, description: null, createdAt: now, updatedAt: now };
+  return { id, code, name, type, parentId: null, isPostable: true, isActive: true, description: null, bankAccountKind: null, createdAt: now, updatedAt: now };
 }
 const accounts: Account[] = [
   account('acc-4100', '4100', 'Product Revenue', 'Revenue'),

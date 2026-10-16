@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
-import * as journalService from '../../services/accounting/journalService.js';
+import * as manualJournalService from '../../services/accounting/manualJournalService.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
 
@@ -177,14 +177,19 @@ describe('Phase 5 — audit actor and client IP', () => {
     const debitAccount = await accountId(orgA, '6120');
     const creditAccount = await accountId(orgA, '2120');
 
-    await journalService.createEntry(orgA, userA.id, {
-      entryDate: '2026-08-15',
-      description: 'Posted with no HTTP request',
-      lines: [
-        { accountId: debitAccount, debitCents: 1000, creditCents: 0 },
-        { accountId: creditAccount, debitCents: 0, creditCents: 1000 },
-      ],
-    });
+    await manualJournalService.createManualJournal(
+      orgA,
+      userA.id,
+      {
+        entryDate: '2026-08-15',
+        narration: 'Posted with no HTTP request',
+        lines: [
+          { accountId: debitAccount, description: null, debitCents: 1000, creditCents: 0 },
+          { accountId: creditAccount, description: null, debitCents: 0, creditCents: 1000 },
+        ],
+      },
+      'post',
+    );
 
     const rows = await auditRows(orgA, 'journal_entries');
     expect(rows).toHaveLength(1);

@@ -3,6 +3,7 @@ import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
 import { addMember, createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
+import { createCustomer, issueInvoice, receivePayment } from '../helpers/accountingFixtures.js';
 
 /**
  * Accounting — the dashboard. Integration tier, real PostgreSQL.
@@ -38,13 +39,13 @@ async function accountId(orgId: string, code: string): Promise<string> {
   return row.id;
 }
 
-/** A revenue sale: debit cash (1110), credit product revenue (4100). */
+/** A revenue sale: debit prepaid (1130 — manual journals refuse bank accounts), credit product revenue (4100). */
 async function sale(orgId: string, amountCents: number, entryDate = '2026-06-01') {
   return {
     entryDate,
     description: `Sale ${String(amountCents)}`,
     lines: [
-      { accountId: await accountId(orgId, '1110'), debitCents: amountCents, creditCents: 0 },
+      { accountId: await accountId(orgId, '1130'), debitCents: amountCents, creditCents: 0 },
       { accountId: await accountId(orgId, '4100'), debitCents: 0, creditCents: amountCents },
     ],
   };
@@ -159,7 +160,12 @@ describe('the cash tile', () => {
     const currentAssetsHeader = await accountId(orgA, '1100'); // parent of 1110, 1120, 1130, 1140, 1180
     await onboard(agent, { cashAccountId: currentAssetsHeader });
 
-    await agent.post(JOURNALS).send(await sale(orgA, 100000, '2026-06-01'));
+    // Cash comes from a real receipt (a manual journal can't touch 1110):
+    // invoice 100000 (AR +100000) then paid in full (cash +100000, AR -100000),
+    // so the 1100 subtree nets to 100000.
+    const customerId = await createCustomer(agent, 'Cash Tile Customer');
+    const invoice = await issueInvoice(agent, orgA, customerId, 100000, '2026-06-01', '2026-06-30');
+    await receivePayment(agent, orgA, customerId, '2026-06-01', [{ invoiceId: invoice.id, amountCents: 100000 }]);
 
     const res = await agent.get(DASHBOARD).query({ asOf: '2026-06-01' });
     expect(res.body.position.cashCents).toBe(100000);

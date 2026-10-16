@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ACCOUNT_TYPES } from '../../types/accounting.js';
+import { ACCOUNT_TYPES, BANK_ACCOUNT_KINDS } from '../../types/accounting.js';
 
 /**
  * Request schemas for the chart of accounts.
@@ -16,6 +16,7 @@ export const createAccountSchema = z.object({
   parentId: z.uuid().nullable().default(null),
   isPostable: z.boolean().default(true),
   description: z.string().trim().max(500).nullable().default(null),
+  bankAccountKind: z.enum(BANK_ACCOUNT_KINDS).nullable().default(null),
 });
 
 /**
@@ -31,6 +32,7 @@ export const updateAccountSchema = z
     description: z.string().trim().max(500).nullable().optional(),
     isActive: z.boolean().optional(),
     parentId: z.uuid().nullable().optional(),
+    bankAccountKind: z.enum(BANK_ACCOUNT_KINDS).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {
     message: 'No fields to update',

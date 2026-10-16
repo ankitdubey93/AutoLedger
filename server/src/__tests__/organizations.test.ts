@@ -99,7 +99,7 @@ async function postSale(agent: Awaited<ReturnType<typeof loginAgent>>, orgId: st
     entryDate: '2026-06-01',
     description: 'Fixture sale',
     lines: [
-      { accountId: await accountId(orgId, '1110'), debitCents: 10000, creditCents: 0 },
+      { accountId: await accountId(orgId, '1130'), debitCents: 10000, creditCents: 0 },
       { accountId: await accountId(orgId, '4200'), debitCents: 0, creditCents: 10000 },
     ],
   });

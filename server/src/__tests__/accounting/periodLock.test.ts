@@ -55,7 +55,7 @@ async function journalPayload(orgId: string, entryDate: string) {
     entryDate,
     description: 'Test entry',
     lines: [
-      { accountId: await accountId(orgId, '1110'), debitCents: 10000, creditCents: 0 },
+      { accountId: await accountId(orgId, '1130'), debitCents: 10000, creditCents: 0 },
       { accountId: await accountId(orgId, '4100'), debitCents: 0, creditCents: 10000 },
     ],
   };

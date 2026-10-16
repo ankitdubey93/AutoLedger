@@ -55,6 +55,7 @@ function makeAccount(overrides: {
     isPostable: overrides.isPostable ?? true,
     isActive: overrides.isActive ?? true,
     description: null,
+    bankAccountKind: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

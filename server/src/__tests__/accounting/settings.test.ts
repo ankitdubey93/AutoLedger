@@ -54,7 +54,7 @@ async function postSale(agent: Agent, orgId: string, amountCents = 10000) {
     entryDate: '2026-06-01',
     description: 'Fixture sale',
     lines: [
-      { accountId: await accountId(orgId, '1110'), debitCents: amountCents, creditCents: 0 },
+      { accountId: await accountId(orgId, '1130'), debitCents: amountCents, creditCents: 0 },
       { accountId: await accountId(orgId, '4200'), debitCents: 0, creditCents: amountCents },
     ],
   });

@@ -59,8 +59,11 @@ import BankRulesPage from '../Pages/banking/BankRulesPage';
 import AccountsPage from '../Pages/accounting/AccountsPage';
 import AccountLedgerPage from '../Pages/accounting/AccountLedgerPage';
 import JournalsPage from '../Pages/accounting/JournalsPage';
-import NewJournalEntryPage from '../Pages/accounting/NewJournalEntryPage';
 import JournalDetailPage from '../Pages/accounting/JournalDetailPage';
+import ManualJournalsPage from '../Pages/accounting/ManualJournalsPage';
+import ManualJournalFormPage from '../Pages/accounting/ManualJournalFormPage';
+import ManualJournalDetailPage from '../Pages/accounting/ManualJournalDetailPage';
+import NewRepeatingJournalPage from '../Pages/accounting/NewRepeatingJournalPage';
 import RecurringSchedulesPage from '../Pages/accounting/RecurringSchedulesPage';
 import RecurringScheduleDetailPage from '../Pages/accounting/RecurringScheduleDetailPage';
 import FiscalPeriodsPage from '../Pages/accounting/FiscalPeriodsPage';
@@ -213,9 +216,14 @@ export default function ProductRoutes() {
           {/* Accounting */}
           <Route path="/accounts" element={<AccountsPage />} />
           <Route path="/accounts/:accountId" element={<AccountLedgerPage />} />
-          <Route path="/journals" element={<JournalsPage />} />
-          <Route path="/journals/new" element={<NewJournalEntryPage />} />
+          <Route path="/journals" element={<Navigate to="/manual-journals" replace />} />
+          <Route path="/journals/new" element={<Navigate to="/manual-journals/new" replace />} />
           <Route path="/journals/:entryId" element={<JournalDetailPage />} />
+          <Route path="/manual-journals" element={<ManualJournalsPage />} />
+          <Route path="/manual-journals/new" element={<ManualJournalFormPage />} />
+          <Route path="/manual-journals/repeating/new" element={<NewRepeatingJournalPage />} />
+          <Route path="/manual-journals/:journalId" element={<ManualJournalDetailPage />} />
+          <Route path="/manual-journals/:journalId/edit" element={<ManualJournalFormPage />} />
           <Route path="/recurring" element={<RecurringSchedulesPage />} />
           <Route path="/recurring/:scheduleId" element={<RecurringScheduleDetailPage />} />
           <Route path="/fiscal-periods" element={<FiscalPeriodsPage />} />
@@ -231,6 +239,7 @@ export default function ProductRoutes() {
           <Route path="/reports/profit-and-loss" element={<ProfitAndLossPage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/trial-balance" element={<TrialBalancePage />} />
+          <Route path="/reports/general-journal" element={<JournalsPage />} />
 
           {/* Settings */}
           <Route path="/settings" element={<SettingsHubPage />} />

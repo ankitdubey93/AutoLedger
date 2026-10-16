@@ -1621,6 +1621,23 @@ A direct feature request (2026-10-15), numbered like 24/30/32/34/39–42, built 
 - **No OAuth bearer for attachment download** — the Brevo reference lists `api-key` and an OAuth bearer; only `api-key` is sent. If real downloads return `401`, that needs a plan update.
 - Also: no inbound provider other than Brevo, no per-sender allow list, no reply to the sender.
 
+## Phase 44, as delivered
+
+A direct feature request (2026-10-15), numbered like 24/30/32/34/39-43, built to `plans/phase-44-manual-journals.md`: Xero-style **Manual Journals**.
+
+- **Migration `097`:** `manual_journals` / `manual_journal_lines` (Draft / Posted / Voided, plus a `TEMPLATE` state for repeating journals), `ledger_lines.description`, `accounts.bank_account_kind` (a flag, not a sixth type: rule 12), `recurring_schedules.source_manual_journal_id` and the wider `chk_recurring_source_matches_kind_v2`; a set-based backfill turned every existing manual, recurring and imported journal into a Posted/Voided document. See [schema.md](schema.md).
+- **Server:** `manualJournalService` (draft CRUD, post, void, template creation) between `journalService` and `recurringService`; `/api/v1/manual-journals` including `POST /repeating`; `POST /journals` now creates-and-posts a manual journal; `POST /journals/:id/reverse` voids an owning manual journal and refuses document-owned entries (a real bug fixed: it could previously reverse an invoice's posting); recurring runs and `JOURNALS` imports create manual journals; `assertManualJournalAccountsOnClient` refuses control and bank/credit-card accounts. No new permission key and no new dependency.
+- **Client:** Manual journals list (status tabs with counts, Repeating tab), draft/edit form with Save draft / Save & add another / Post, detail page (Edit / Post / Delete / Void / Copy), New repeating journal, General journal report at `/reports/general-journal`, a bank/credit-card toggle on Chart settings and the new-account form.
+- **Tests:** **2297 server (2 skipped) + 664 client** passing at the time (up from 2249 / 660 after Phase 43d). A guardrail review found no violations. Study notes extended in the same change (`document-lifecycle-fsm.md`, `migrations-and-schema-evolution.md`).
+
+**Deliberately not built (Phase 44):**
+- Tracking categories and tax on journal lines.
+- Foreign-currency manual journals.
+- Auto-flagging a newly imported bank account (the flag is manual after the backfill).
+- An integrity check tying manual-journal line totals to their entry.
+- Per-line placeholders (the narration only).
+- Attaching files to a manual journal.
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

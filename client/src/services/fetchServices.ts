@@ -488,6 +488,10 @@ export function removeMember(userId: string): Promise<{ success: boolean }> {
  */
 export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expense';
 
+/** Phase 44. Mirrors server/src/types/accounting.ts's BankAccountKind. */
+export const BANK_ACCOUNT_KINDS = ['BANK', 'CREDIT_CARD'] as const;
+export type BankAccountKind = (typeof BANK_ACCOUNT_KINDS)[number];
+
 export interface Account {
   id: string;
   code: string;
@@ -497,6 +501,8 @@ export interface Account {
   isPostable: boolean;
   isActive: boolean;
   description: string | null;
+  /** Phase 44 — null unless the account is a bank (Asset) or credit card (Liability) account. */
+  bankAccountKind: BankAccountKind | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -510,6 +516,8 @@ export interface LedgerLine {
   accountId: string;
   accountCode: string;
   accountName: string;
+  /** Phase 44 — the line's own description; null if it has none. */
+  description: string | null;
   debitCents: number;
   creditCents: number;
   currencyCode: string;
@@ -528,6 +536,8 @@ export interface JournalEntry {
   sourceId: string | null;
   reversesEntryId: string | null;
   reversedByEntryId: string | null;
+  /** Phase 44 — the manual journal that owns this posting, if any. */
+  manualJournalId: string | null;
   createdBy: string;
   createdByName: string | null;
   createdByEmail: string | null;
@@ -573,6 +583,8 @@ export interface CreateAccountInput {
   parentId: string | null;
   isPostable: boolean;
   description: string | null;
+  /** Phase 44. */
+  bankAccountKind?: BankAccountKind | null;
 }
 
 /**
@@ -598,6 +610,8 @@ export interface UpdateAccountInput {
   description?: string | null;
   isActive?: boolean;
   parentId?: string | null;
+  /** Phase 44. */
+  bankAccountKind?: BankAccountKind | null;
 }
 
 /** PATCH /accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
@@ -742,6 +756,162 @@ export function reverseJournal(
     method: 'POST',
     body: JSON.stringify({ entryDate }),
   });
+}
+
+/* -------------------------------------------- Phase 44 — manual journals */
+
+/** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournalStatus. */
+export const MANUAL_JOURNAL_STATUSES = ['DRAFT', 'TEMPLATE', 'POSTED', 'VOIDED'] as const;
+export type ManualJournalStatus = (typeof MANUAL_JOURNAL_STATUSES)[number];
+
+/** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournalOrigin. */
+export const MANUAL_JOURNAL_ORIGINS = ['MANUAL', 'RECURRING', 'IMPORT'] as const;
+export type ManualJournalOrigin = (typeof MANUAL_JOURNAL_ORIGINS)[number];
+
+/** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournalLine. */
+export interface ManualJournalLine {
+  id: string;
+  lineNumber: number;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  description: string | null;
+  debitCents: number;
+  creditCents: number;
+}
+
+/** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournalSummary. */
+export interface ManualJournalSummary {
+  id: string;
+  status: ManualJournalStatus;
+  origin: ManualJournalOrigin;
+  narration: string;
+  narrationTemplate: string | null;
+  entryDate: string;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  recurringScheduleId: string | null;
+  /** Set on a TEMPLATE: the schedule that runs it. */
+  templateScheduleId: string | null;
+  postedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  totalDebitCents: number;
+  totalCreditCents: number;
+}
+
+/** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournal. */
+export interface ManualJournal extends ManualJournalSummary {
+  lines: ManualJournalLine[];
+}
+
+/** Phase 44. The body of POST/PATCH /manual-journals (and the base of a repeating journal). */
+export interface ManualJournalInput {
+  narration: string;
+  entryDate: string;
+  lines: Array<{
+    accountId: string | null;
+    description: string | null;
+    debitCents: number;
+    creditCents: number;
+  }>;
+}
+
+/** Phase 44. */
+export interface ManualJournalListParams {
+  status?: 'all' | 'draft' | 'posted' | 'voided';
+  q?: string;
+  from?: string;
+  to?: string;
+  page?: number;
+}
+
+/** Phase 44. The body of POST /manual-journals/repeating. */
+export interface CreateRepeatingJournalInput extends ManualJournalInput {
+  name: string;
+  frequency: RecurringFrequency;
+  intervalCount: number;
+  startDate: string;
+  endDate: string | null;
+  autoReverse: boolean;
+}
+
+/** GET /manual-journals — paginated; `counts` ignores the status filter. */
+export function listManualJournals(
+  params: ManualJournalListParams = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  counts: { all: number; draft: number; posted: number; voided: number };
+  journals: ManualJournalSummary[];
+}> {
+  const query = new URLSearchParams();
+  // An empty filter box must send no parameter at all, not `?q=`.
+  if (params.status !== undefined) query.set('status', params.status);
+  if (params.q !== undefined && params.q !== '') query.set('q', params.q);
+  if (params.from !== undefined && params.from !== '') query.set('from', params.from);
+  if (params.to !== undefined && params.to !== '') query.set('to', params.to);
+  if (params.page !== undefined) query.set('page', String(params.page));
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/manual-journals${suffix}`, { signal: signal ?? null });
+}
+
+/** GET /manual-journals/:id */
+export function getManualJournal(
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; journal: ManualJournal }> {
+  return apiFetch(`/manual-journals/${id}`, { signal: signal ?? null });
+}
+
+/** POST /manual-journals — `action` 'draft' saves a draft, 'post' posts it at once. */
+export function createManualJournal(
+  body: ManualJournalInput & { action: 'draft' | 'post' },
+): Promise<{ success: boolean; journal: ManualJournal }> {
+  return apiFetch('/manual-journals', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** PATCH /manual-journals/:id — full replacement; a draft or a repeating template only. */
+export function updateManualJournal(
+  id: string,
+  body: ManualJournalInput,
+): Promise<{ success: boolean; journal: ManualJournal }> {
+  return apiFetch(`/manual-journals/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+/** DELETE /manual-journals/:id — a draft only. */
+export async function deleteManualJournal(id: string): Promise<void> {
+  await apiFetch(`/manual-journals/${id}`, { method: 'DELETE' });
+}
+
+/** POST /manual-journals/:id/post — posts a draft; the GL entry is immutable from here. */
+export function postManualJournal(
+  id: string,
+): Promise<{ success: boolean; journal: ManualJournal }> {
+  return apiFetch(`/manual-journals/${id}/post`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /manual-journals/:id/void — posts a reversal; the original is kept. */
+export function voidManualJournal(
+  id: string,
+  body: { voidDate: string | null },
+): Promise<{ success: boolean; journal: ManualJournal }> {
+  return apiFetch(`/manual-journals/${id}/void`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** POST /manual-journals/repeating — creates the template and its schedule together. */
+export function createRepeatingJournal(
+  body: CreateRepeatingJournalInput,
+): Promise<{ success: boolean; journal: ManualJournal; schedule: RecurringSchedule }> {
+  return apiFetch('/manual-journals/repeating', { method: 'POST', body: JSON.stringify(body) });
 }
 
 /** GET /reports/trial-balance — aggregated from raw lines each call. */
@@ -1111,6 +1281,8 @@ export interface RecurringSchedule {
   kind: RecurringKind;
   name: string;
   sourceId: string;
+  /** Phase 44 — the manual journal this schedule runs from, if it is a repeating journal. */
+  sourceManualJournalId: string | null;
   frequency: RecurringFrequency;
   intervalCount: number;
   startDate: string;

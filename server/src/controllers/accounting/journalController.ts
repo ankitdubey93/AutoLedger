@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as journalService from '../../services/accounting/journalService.js';
+import * as manualJournalService from '../../services/accounting/manualJournalService.js';
 import {
   createJournalSchema,
   reverseJournalSchema,
@@ -53,7 +54,23 @@ export const create: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(createJournalSchema, req.body);
 
-  const entry = await journalService.createEntry(user.orgId, user.id, input);
+  const journal = await manualJournalService.createManualJournal(
+    user.orgId,
+    user.id,
+    {
+      narration: input.description ?? 'Manual journal',
+      entryDate: input.entryDate,
+      lines: input.lines.map((l) => ({
+        accountId: l.accountId,
+        description: null,
+        debitCents: l.debitCents,
+        creditCents: l.creditCents,
+      })),
+    },
+    'post',
+  );
+  if (journal.journalEntryId === null) throw new Error('Posted manual journal has no entry');
+  const entry = await journalService.getEntryById(user.orgId, journal.journalEntryId);
   res.status(201).json({ success: true, entry });
 };
 
@@ -64,6 +81,7 @@ export const reverse: RequestHandler = async (req, res) => {
   // An empty body is normal here, so the schema's defaults have to cover it.
   const { entryDate } = parseBody(reverseJournalSchema, req.body ?? {});
 
-  const entry = await journalService.reverseEntry(user.orgId, user.id, id, entryDate);
+  const reversalId = await manualJournalService.reverseOrVoidEntry(user.orgId, user.id, id, entryDate);
+  const entry = await journalService.getEntryById(user.orgId, reversalId);
   res.status(201).json({ success: true, entry });
 };

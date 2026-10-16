@@ -23,6 +23,7 @@ const headerNode: AccountNode = {
   isPostable: false,
   isActive: true,
   description: null,
+  bankAccountKind: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   children: [
@@ -35,6 +36,7 @@ const headerNode: AccountNode = {
       isPostable: true,
       isActive: true,
       description: null,
+      bankAccountKind: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       children: [],
@@ -48,6 +50,7 @@ const headerNode: AccountNode = {
       isPostable: true,
       isActive: true,
       description: null,
+      bankAccountKind: null,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       children: [],
@@ -112,6 +115,7 @@ const marketingNode: AccountNode = {
   isPostable: true,
   isActive: true,
   description: null,
+  bankAccountKind: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   children: [],
@@ -241,6 +245,7 @@ describe('AccountsPage', () => {
       parentId: null,
       isPostable: true,
       description: null,
+      bankAccountKind: null,
     });
     expect(screen.queryByLabelText('Code')).toBeNull();
   });

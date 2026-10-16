@@ -446,10 +446,10 @@ Every new organization is seeded with the [44-account default chart](schema.md#d
 |---|---|---|---|
 | GET | `/` | any member | Paginated, filterable entries with nested lines — the journal register |
 | GET | `/:id` | any member | One entry with its lines |
-| POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Post a balanced entry (min 2 lines, debits == credits in integer cents) |
-| POST | `/:id/reverse` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Post the reversing entry for a posted journal |
+| POST | `/` | `journals.create` | Creates **and posts** a manual journal (Phase 44: a `manual_journals` document in one step, `description` becomes its narration, default `Manual journal`); returns the GL entry |
+| POST | `/:id/reverse` | `journals.create` | Post the reversing entry for a posted journal. Phase 44: if a manual journal owns the entry this **voids** it; an entry owned by a document (invoice, bill, payment, …) is refused with `409 This entry was posted by a <source_type> document — correct it from that document instead` |
 
-**No `PUT`, no `DELETE`, at any phase** — rule 6. A database trigger rejects the write with SQLSTATE `0A000` even if such a route were added by mistake.
+**No `PUT`, no `DELETE`, at any phase** — rule 6. (Draft editing lives on `/manual-journals`, below.) Phase 44 adds `JournalEntry.manualJournalId` (the owning manual journal, or `null`) and `description` on every ledger line (`LedgerLine.description`, nullable). A database trigger rejects the write with SQLSTATE `0A000` even if such a route were added by mistake.
 
 `sourceType` and `sourceId` are **not accepted from the request body**; a client-posted entry is always `'manual'`. Another app posting into the GL passes them service-to-service, so no caller can forge an entry claiming to have come from capture. Phase 36c adds one more source: an entry posted by a `JOURNALS` CSV import has `sourceType: 'migration_import'` and `sourceId` = the import id (the journal detail page shows it as "Imported (CSV)" with a link to the import). Like every posted entry it is reversed, never edited, and it cannot become a recurring template (`'manual'` only).
 
@@ -460,6 +460,25 @@ Every entry also carries `createdByName` / `createdByEmail` (the posting user, d
 Failure paths: `400` from the schema (fewer than two lines, a line with both sides set, a fractional amount) · `400 <name> must be a date in YYYY-MM-DD format` (`from`/`to`) · `400 accountId must be a UUID` · `422 Entry is unbalanced: debits N, credits M` · `422 Account <code> is a header account and cannot be posted to` · `422 Account not found` · `422 Account <code> is the receivable control account — post to it through an invoice or a payment, not a journal entry` / `422 Account <code> is the payable control account — post to it through a bill or a payment, not a journal entry` (Phase 25, see below) · `409 Entry has already been reversed` · `422 A reversing entry cannot itself be reversed`.
 
 **Control accounts refuse manual journals (Phase 25).** `POST /` rejects any line on the receivable control account (`ledger_invoice_settings.receivableAccountId`, falling back to the postable default-chart `1120`) or the payable control account (`ledger_settings.payableAccountId`, falling back to `2100`). A journal line names no customer or vendor, so it could only ever break the tie between a party's subledger and the control account (`/reports/ar-aging`'s `reconciles`). Documents (invoice issue/void, bill approve/void, payments, FX revaluation) still post there through the service-to-service path, which this check does not apply to. `POST /:id/reverse` is **not** refused: reversing a pre-Phase-25 manual entry on a control account can only restore agreement.
+
+#### Manual journals — `/api/v1/manual-journals` — Phase 44
+
+A manual journal is a document (`DRAFT` / `TEMPLATE` / `POSTED` / `VOIDED`) that owns its immutable GL entry. `PATCH`/`DELETE` are legal only on a `DRAFT` (or, for `PATCH`, a repeating `TEMPLATE`), enforced by the service (`409`) and by database triggers (`0A000`). A posted journal is corrected by voiding it. Every route is `authenticate` first.
+
+| Method | Path | Permission | Body / query | Success | Failures |
+|---|---|---|---|---|---|
+| GET | `/` | `journals.view` | `?status=all\|draft\|posted\|voided` (default `all`), `q` (<=200), `from`, `to`, `page`, `limit` | `200 {success, count, totalCount, currentPage, totalPages, counts:{all,draft,posted,voided}, journals}` | `400` bad query |
+| GET | `/:id` | `journals.view` | | `200 {success, journal}` (with `lines`) | `404 Manual journal not found` |
+| POST | `/` | `journals.create` | `{narration, entryDate, lines:[{accountId, description, debitCents, creditCents}], action:'draft'\|'post'}` | `201 {success, journal}` | `400`; `422` post-time rules |
+| PATCH | `/:id` | `journals.create` | `{narration, entryDate, lines}` (full replacement) | `200 {success, journal}` | `404`; `409 Only a draft or a repeating template can be edited` |
+| DELETE | `/:id` | `journals.create` | | `204` | `404`; `409 Only a draft can be deleted` |
+| POST | `/:id/post` | `journals.create` | | `200 {success, journal}` | `404`; `409 Only a draft can be posted`; `422` post-time rules |
+| POST | `/:id/void` | `journals.create` | `{voidDate?: date\|null}` (null = the original's date) | `200 {success, journal}` | `404`; `409 Only a posted journal can be voided`; `409 Entry has already been reversed`; `422` closed period |
+| POST | `/repeating` | `journals.create` and `recurring.manage` | the manual-journal body plus `name` (1-80), `frequency` (`WEEKLY`/`MONTHLY`/`QUARTERLY`/`YEARLY`), `intervalCount` (1-12, default 1), `startDate`, `endDate` (nullable), `autoReverse` | `201 {success, journal, schedule}` | `400`; `422` template rules |
+
+`/repeating` is registered before `/:id`. **Post-time rules (`422`, in this order):** `A journal needs at least two lines` · `Line N has no account` · `Line N needs a debit or a credit` · `Journal is unbalanced: debits D, credits C` · a **system account** (receivable, payable and inventory control accounts, and any account with `bankAccountKind` set - the message names the account and says to use invoices, bills, Inventory or Banking) · the placeholder fill and GL posting (closed period, header account: their own messages). A draft may hold half-typed lines; the rules apply at post. The narration takes placeholders (surface `JOURNAL`) filled at post. Journal import (`JOURNALS`) and recurring runs create manual journals service-to-service with `origin` `IMPORT` / `RECURRING`.
+
+`Account.bankAccountKind` (`BANK` | `CREDIT_CARD` | `null`) is accepted by `POST /accounts` and `PATCH /accounts/:id`: `422 Only an Asset account can be a bank account` / `422 Only a Liability account can be a credit card account`. `RecurringSchedule.sourceManualJournalId` is set for a schedule created from a repeating journal template (exactly one of it and `sourceId` is set on a `JOURNAL` schedule).
 
 #### Reports — `/api/v1/reports`
 

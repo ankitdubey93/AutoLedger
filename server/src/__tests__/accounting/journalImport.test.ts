@@ -98,8 +98,8 @@ describe('staging and validation', () => {
       [
         HEADER,
         'J-1,2026-03-31,June accruals,6100,1000.00,',
-        'J-1,2026-03-31,June accruals,1110,,600.00',
-        'J-1,2026-03-31,June accruals,1110,,400.00',
+        'J-1,2026-03-31,June accruals,1130,,600.00',
+        'J-1,2026-03-31,June accruals,1130,,400.00',
       ].join('\n'),
     );
     expect(res.status).toBe(201);
@@ -125,9 +125,9 @@ describe('staging and validation', () => {
       [
         XERO_HEADER,
         '2026-03-31,Accrue rent,6100,500.00,',
-        '2026-03-31,Accrue rent,1110,,500.00',
+        '2026-03-31,Accrue rent,1130,,500.00',
         '2026-03-31,Accrue power,6100,80.00,',
-        '2026-03-31,Accrue power,1110,,80.00',
+        '2026-03-31,Accrue power,1130,,80.00',
       ].join('\n'),
     );
     await validate(id);
@@ -142,7 +142,7 @@ describe('staging and validation', () => {
 
   it('a signed Amount column works instead of Debit/Credit', async () => {
     const id = await stageOk(
-      ['JournalNumber,*Date,*Narration,*AccountCode,Amount', 'J-1,2026-03-31,Signed,6100,250', 'J-1,2026-03-31,Signed,1110,-250'].join('\n'),
+      ['JournalNumber,*Date,*Narration,*AccountCode,Amount', 'J-1,2026-03-31,Signed,6100,250', 'J-1,2026-03-31,Signed,1130,-250'].join('\n'),
     );
     await validate(id);
 
@@ -152,7 +152,7 @@ describe('staging and validation', () => {
 
   it('an unbalanced journal flags every row in it', async () => {
     const id = await stageOk(
-      [HEADER, 'J-2,2026-03-31,Off by ten,6100,100.00,', 'J-2,2026-03-31,Off by ten,1110,,90.00'].join('\n'),
+      [HEADER, 'J-2,2026-03-31,Off by ten,6100,100.00,', 'J-2,2026-03-31,Off by ten,1130,,90.00'].join('\n'),
     );
     await validate(id);
 
@@ -176,7 +176,7 @@ describe('staging and validation', () => {
 
   it('mismatched dates within a numbered journal flag the differing row only', async () => {
     const id = await stageOk(
-      [HEADER, 'J-4,2026-03-31,Split dates,6100,100.00,', 'J-4,2026-04-01,Split dates,1110,,100.00'].join('\n'),
+      [HEADER, 'J-4,2026-03-31,Split dates,6100,100.00,', 'J-4,2026-04-01,Split dates,1130,,100.00'].join('\n'),
     );
     await validate(id);
 
@@ -231,7 +231,7 @@ describe('staging and validation', () => {
     expect(close.status).toBe(200);
 
     const id = await stageOk(
-      [HEADER, 'J-6,2026-03-31,Too late,6100,100.00,', 'J-6,2026-03-31,Too late,1110,,100.00'].join('\n'),
+      [HEADER, 'J-6,2026-03-31,Too late,6100,100.00,', 'J-6,2026-03-31,Too late,1130,,100.00'].join('\n'),
     );
     await validate(id);
 
@@ -249,9 +249,9 @@ describe('commit', () => {
       [
         HEADER,
         'J-1,2026-03-31,March rent accrual,6100,500.00,',
-        'J-1,2026-03-31,March rent accrual,1110,,500.00',
+        'J-1,2026-03-31,March rent accrual,1130,,500.00',
         'J-2,2026-04-15,April power accrual,6100,80.00,',
-        'J-2,2026-04-15,April power accrual,1110,,80.00',
+        'J-2,2026-04-15,April power accrual,1130,,80.00',
       ].join('\n'),
     );
     await validate(id);
@@ -281,7 +281,7 @@ describe('commit', () => {
 
   it('revalidate at commit: a period closed after validation blocks commit', async () => {
     const id = await stageOk(
-      [HEADER, 'J-1,2026-03-31,Will be blocked,6100,100.00,', 'J-1,2026-03-31,Will be blocked,1110,,100.00'].join('\n'),
+      [HEADER, 'J-1,2026-03-31,Will be blocked,6100,100.00,', 'J-1,2026-03-31,Will be blocked,1130,,100.00'].join('\n'),
     );
     await validate(id);
     const close = await agentA.post(`${PERIODS}/${await periodIdFor('2026-03-01')}/close`);
@@ -302,7 +302,7 @@ describe('commit', () => {
     const lines = [HEADER];
     for (let i = 1; i <= 200; i += 1) {
       const n = `J-${String(i)}`;
-      lines.push(`${n},2026-03-31,Bulk ${String(i)},6100,10.00,`, `${n},2026-03-31,Bulk ${String(i)},1110,,10.00`);
+      lines.push(`${n},2026-03-31,Bulk ${String(i)},6100,10.00,`, `${n},2026-03-31,Bulk ${String(i)},1130,,10.00`);
     }
     const id = await stageOk(lines.join('\n'));
     await validate(id);
@@ -324,8 +324,8 @@ describe('grouped-kind machinery', () => {
       [
         HEADER,
         'J-1,2026-03-31,First,6100,100.00,',
-        'J-1,2026-03-31,First,1110,,100.00',
-        'J-9,2026-03-31,First,1110,,0.01',
+        'J-1,2026-03-31,First,1130,,100.00',
+        'J-9,2026-03-31,First,1130,,0.01',
       ].join('\n'),
     );
     const before = await getRows(id);
@@ -350,9 +350,9 @@ describe('grouped-kind machinery', () => {
       [
         HEADER,
         'J-1,2026-03-31,Good,6100,100.00,',
-        'J-1,2026-03-31,Good,1110,,100.00',
+        'J-1,2026-03-31,Good,1130,,100.00',
         'J-2,2026-03-31,Bad,6100,100.00,',
-        'J-2,2026-03-31,Bad,1110,,90.00',
+        'J-2,2026-03-31,Bad,1130,,90.00',
       ].join('\n'),
     );
     await validate(id);
@@ -370,7 +370,7 @@ describe('grouped-kind machinery', () => {
   });
 
   it('bulk status: unknown row ids are 404, committed import is 409', async () => {
-    const id = await stageOk([HEADER, 'J-1,2026-03-31,Ok,6100,100.00,', 'J-1,2026-03-31,Ok,1110,,100.00'].join('\n'));
+    const id = await stageOk([HEADER, 'J-1,2026-03-31,Ok,6100,100.00,', 'J-1,2026-03-31,Ok,1130,,100.00'].join('\n'));
     await validate(id);
     const rows = await getRows(id);
 
@@ -403,7 +403,7 @@ describe('tenant isolation', () => {
     const created = await agentA.post('/api/v1/accounts').send({ code: '6999', name: 'Org A only', type: 'Expense' });
     expect(created.status).toBe(201);
 
-    const content = [HEADER, 'J-1,2026-03-31,Mine,6999,100.00,', 'J-1,2026-03-31,Mine,1110,,100.00'].join('\n');
+    const content = [HEADER, 'J-1,2026-03-31,Mine,6999,100.00,', 'J-1,2026-03-31,Mine,1130,,100.00'].join('\n');
 
     const idA = await stageOk(content, agentA);
     await validate(idA);

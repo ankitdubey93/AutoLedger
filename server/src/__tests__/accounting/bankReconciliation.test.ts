@@ -3,6 +3,7 @@ import { createApp } from '../../app.js';
 import { closePool, pool } from '../../db/connect.js';
 import { createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import type { SeededUser } from '../helpers/factories.js';
+import { receivePayment } from '../helpers/accountingFixtures.js';
 
 /**
  * Accounting — bank reconciliation report (Phase 6). Integration tier, real
@@ -15,7 +16,6 @@ const RECONCILIATION = '/api/v1/reports/bank-reconciliation';
 const BANK_IMPORTS = '/api/v1/bank-imports';
 const BANK_TRANSACTIONS = '/api/v1/bank-transactions';
 const INVOICES = '/api/v1/invoices';
-const JOURNALS = '/api/v1/journals';
 const CUSTOMERS = '/api/v1/customers';
 
 const AS_OF = '2026-06-30';
@@ -117,15 +117,10 @@ describe('GET /reports/bank-reconciliation', () => {
   });
 
   it('does not reconcile when a cash movement was never imported', async () => {
-    const revenueAccId = revenueAccountId;
-    await agentA.post(JOURNALS).send({
-      entryDate: '2026-06-05',
-      description: 'Unimported cash movement',
-      lines: [
-        { accountId: cashAccountId, debitCents: 15000, creditCents: 0 },
-        { accountId: revenueAccId, debitCents: 0, creditCents: 15000 },
-      ],
-    });
+    // A manual journal can't touch the bank account, so the cash movement is a
+    // real receipt: invoice 15000, then paid into 1110 (GL cash +15000).
+    const invoice = await seedIssuedInvoice(15000);
+    await receivePayment(agentA, orgA, customerId, '2026-06-05', [{ invoiceId: invoice.id, amountCents: 15000 }]);
 
     const res = await agentA.get(`${RECONCILIATION}?accountId=${cashAccountId}&asOf=${AS_OF}`);
     expect(res.body.reconciles).toBe(false);

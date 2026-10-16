@@ -8,12 +8,14 @@ import { RECURRING_MAX_CATCHUP_PER_RUN } from '../../config/constants.js';
 import * as invoiceService from './invoiceService.js';
 import * as billService from './billService.js';
 import * as journalService from './journalService.js';
+import * as manualJournalService from './manualJournalService.js';
 import {
   canTransitionRecurring,
   isRecurringStatus,
   type Bill,
   type Invoice,
   type JournalEntry,
+  type ManualJournal,
   type RecurringFrequency,
   type RecurringKind,
   type RecurringMode,
@@ -85,7 +87,8 @@ function dayDiff(from: string, to: string): number {
 // ---------------------------------------------------------------- row mapping
 
 const SCHEDULE_SELECT = `SELECT s.id, s.kind, s.name,
-                                 COALESCE(s.source_invoice_id, s.source_bill_id, s.source_journal_entry_id) AS source_id,
+                                 COALESCE(s.source_invoice_id, s.source_bill_id, s.source_journal_entry_id, s.source_manual_journal_id) AS source_id,
+                                 s.source_manual_journal_id,
                                  s.frequency, s.interval_count, s.start_date, s.end_date,
                                  s.next_run_date, s.next_occurrence_index, s.mode, s.auto_reverse, s.status,
                                  s.last_error, s.last_error_at,
@@ -99,6 +102,7 @@ interface ScheduleRow {
   kind: string;
   name: string;
   source_id: string;
+  source_manual_journal_id: string | null;
   frequency: string;
   interval_count: number;
   start_date: string;
@@ -126,6 +130,7 @@ function toSchedule(row: ScheduleRow): RecurringSchedule {
     kind: toKind(row.kind, row.id),
     name: row.name,
     sourceId: row.source_id,
+    sourceManualJournalId: row.source_manual_journal_id,
     frequency: toFrequency(row.frequency, row.id),
     intervalCount: row.interval_count,
     startDate: row.start_date,
@@ -287,7 +292,7 @@ export async function createSchedule(
       }
 
       // Throws its own 422 (the SAP reconciliation-account rule, Phase 25).
-      await journalService.assertNotControlAccountsOnClient(
+      await journalService.assertManualJournalAccountsOnClient(
         client,
         orgId,
         lineRows.map((l) => l.account_id),
@@ -336,6 +341,66 @@ export async function createSchedule(
     if (row === undefined) throw new Error('Recurring schedule vanished mid-transaction');
     return toSchedule(row);
   });
+}
+
+export interface CreateRepeatingJournalInput {
+  name: string;
+  narration: string;
+  lines: manualJournalService.ManualJournalLineInput[];
+  frequency: RecurringFrequency;
+  intervalCount: number;
+  startDate: string;
+  endDate: string | null;
+  autoReverse: boolean;
+}
+
+/**
+ * Phase 44 — a repeating journal created directly: a TEMPLATE manual journal
+ * and its schedule commit together. Lock order: template insert, then the
+ * schedule insert; runs later take the schedule row first.
+ */
+export async function createRepeatingJournal(
+  orgId: string,
+  createdBy: string,
+  input: CreateRepeatingJournalInput,
+): Promise<{ journal: ManualJournal; schedule: RecurringSchedule }> {
+  const { templateId, scheduleId } = await withTransaction(async (client) => {
+    const templateId = await manualJournalService.createTemplateOnClient(client, orgId, createdBy, {
+      narration: input.narration,
+      entryDate: input.startDate,
+      lines: input.lines,
+    });
+    const { rows } = await client.query<{ id: string }>(
+      `INSERT INTO recurring_schedules
+         (org_id, kind, name, source_manual_journal_id, frequency, interval_count, start_date, end_date,
+          next_run_date, next_occurrence_index, mode, auto_reverse, created_by)
+       VALUES ($1, 'JOURNAL', $2, $3, $4, $5, $6, $7, $6, 0, 'POST', $8, $9)
+       RETURNING id`,
+      [
+        orgId,
+        input.name,
+        templateId,
+        input.frequency,
+        input.intervalCount,
+        input.startDate,
+        input.endDate,
+        input.autoReverse,
+        createdBy,
+      ],
+    );
+    const scheduleId = rows[0]?.id;
+    if (scheduleId === undefined) throw new Error('INSERT ... RETURNING produced no row');
+    return { templateId, scheduleId };
+  });
+
+  const journal = await manualJournalService.getManualJournalById(orgId, templateId);
+  const { rows: scheduleRows } = await pool.query<ScheduleRow>(
+    `${SCHEDULE_SELECT} WHERE s.id = $1 AND s.org_id = $2`,
+    [scheduleId, orgId],
+  );
+  const row = scheduleRows[0];
+  if (row === undefined) throw new Error('Recurring schedule vanished after commit');
+  return { journal, schedule: toSchedule(row) };
 }
 
 export async function transitionSchedule(
@@ -445,13 +510,15 @@ interface PreReadRow {
   source_invoice_id: string | null;
   source_bill_id: string | null;
   source_journal_entry_id: string | null;
+  source_manual_journal_id: string | null;
   is_due: boolean;
 }
 
 type Template =
   | { kind: 'INVOICE'; invoice: Invoice }
   | { kind: 'BILL'; bill: Bill }
-  | { kind: 'JOURNAL'; entry: JournalEntry };
+  | { kind: 'JOURNAL'; entry: JournalEntry }
+  | { kind: 'JOURNAL_TEMPLATE'; journal: ManualJournal };
 
 /** Guarded by `chk_recurring_source_matches_kind` — a non-null id for this kind is guaranteed. */
 function requireSourceId(value: string | null, kind: RecurringKind, scheduleId: string): string {
@@ -480,6 +547,10 @@ async function loadTemplate(orgId: string, kind: RecurringKind, pre: PreReadRow)
   if (kind === 'BILL') {
     const bill = await billService.getBillById(orgId, requireSourceId(pre.source_bill_id, kind, pre.id));
     return { kind: 'BILL', bill };
+  }
+  if (pre.source_manual_journal_id !== null) {
+    const journal = await manualJournalService.getManualJournalById(orgId, pre.source_manual_journal_id);
+    return { kind: 'JOURNAL_TEMPLATE', journal };
   }
   const entry = await journalService.getEntryById(
     orgId,
@@ -599,21 +670,33 @@ async function generateOccurrence(
     return { invoiceId: null, billId, journalEntryId: null, reversalEntryId: null };
   }
 
-  const entry = template.entry;
-  const filled = await journalService.fillJournalDescriptionOnClient(
-    client,
-    orgId,
-    entry.descriptionTemplate ?? entry.description,
-    runDate,
-    'JOURNAL',
-    occurrence,
-  );
-  const journalEntryId = await journalService.createEntryOnClient(client, orgId, userId, {
+  const narration =
+    template.kind === 'JOURNAL_TEMPLATE'
+      ? template.journal.narration
+      : (template.entry.descriptionTemplate ?? template.entry.description ?? 'Manual journal');
+  const lines =
+    template.kind === 'JOURNAL_TEMPLATE'
+      ? template.journal.lines.map((l) => ({
+          accountId: l.accountId,
+          description: l.description,
+          debitCents: l.debitCents,
+          creditCents: l.creditCents,
+        }))
+      : template.entry.lines.map((l) => ({
+          accountId: l.accountId,
+          description: l.description,
+          debitCents: l.debitCents,
+          creditCents: l.creditCents,
+        }));
+  const { journalEntryId } = await manualJournalService.postNewManualJournalOnClient(client, orgId, userId, {
+    narration,
     entryDate: runDate,
-    ...filled,
+    lines,
+    origin: 'RECURRING',
+    recurringScheduleId: scheduleId,
     sourceType: 'recurring',
     sourceId: scheduleId,
-    lines: entry.lines.map((l) => ({ accountId: l.accountId, debitCents: l.debitCents, creditCents: l.creditCents })),
+    occurrence,
   });
 
   let reversalEntryId: string | null = null;
@@ -659,7 +742,7 @@ export async function runDueOccurrences(
     // read-only document, so loading it here, before any transaction is
     // open, is intended (see `loadTemplate`'s own comment).
     const { rows: preRows } = await pool.query<PreReadRow>(
-      `SELECT id, kind, source_invoice_id, source_bill_id, source_journal_entry_id,
+      `SELECT id, kind, source_invoice_id, source_bill_id, source_journal_entry_id, source_manual_journal_id,
               (status = 'ACTIVE' AND next_run_date IS NOT NULL AND next_run_date <= current_date) AS is_due
          FROM recurring_schedules WHERE id = $1 AND org_id = $2`,
       [scheduleId, orgId],

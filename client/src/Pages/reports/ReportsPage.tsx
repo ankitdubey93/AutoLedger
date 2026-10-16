@@ -22,6 +22,11 @@ const REPORTS = [
     description: 'Assets = Liabilities + Equity, as at a chosen date.',
     path: 'reports/balance-sheet',
   },
+  {
+    name: 'General journal',
+    description: 'Every posting in date order, from every source.',
+    path: 'reports/general-journal',
+  },
 ];
 
 export default function ReportsPage() {

@@ -212,6 +212,7 @@ export async function commitOnClient(
           parentId,
           isPostable: true,
           description: row.description,
+          bankAccountKind: null,
         });
         resolvedIdByCode.set(code, account.id);
         created += 1;

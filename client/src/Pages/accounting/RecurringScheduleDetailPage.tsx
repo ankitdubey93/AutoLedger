@@ -36,6 +36,8 @@ function kindLabel(kind: string): string {
 function documentLink(schedule: RecurringScheduleDetail): string {
   if (schedule.kind === 'INVOICE') return `/invoices/${schedule.sourceId}`;
   if (schedule.kind === 'BILL') return `/expenses/${schedule.sourceId}`;
+  // Phase 44 — a repeating journal's source is its manual journal, not a ledger entry.
+  if (schedule.sourceManualJournalId !== null) return `/manual-journals/${schedule.sourceManualJournalId}`;
   return `/journals/${schedule.sourceId}`;
 }
 

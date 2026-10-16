@@ -1,10 +1,9 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import JournalsPage from '../Pages/accounting/JournalsPage';
 import JournalDetailPage from '../Pages/accounting/JournalDetailPage';
-import NewJournalEntryPage from '../Pages/accounting/NewJournalEntryPage';
 import type { Account, JournalEntry } from '../services/fetchServices';
 import { formatDate } from '../utils/date';
 
@@ -28,6 +27,7 @@ const account6120: Account = {
   isPostable: true,
   isActive: true,
   description: null,
+  bankAccountKind: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -48,6 +48,7 @@ function baseEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
     descriptionTemplate: null,
     sourceType: 'manual',
     sourceId: null,
+    manualJournalId: null,
     reversesEntryId: null,
     reversedByEntryId: null,
     createdBy: 'u1',
@@ -68,6 +69,7 @@ function baseEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
         fxRate: '1',
         baseDebitCents: 45000,
         baseCreditCents: 0,
+        description: null,
       },
       {
         id: 'line-2',
@@ -80,6 +82,7 @@ function baseEntry(overrides: Partial<JournalEntry> = {}): JournalEntry {
         fxRate: '1',
         baseDebitCents: 0,
         baseCreditCents: 45000,
+        description: null,
       },
     ],
     ...overrides,
@@ -91,33 +94,6 @@ let fetchMock: ReturnType<typeof vi.fn>;
 function mockRegisterRoutes(entries: JournalEntry[]) {
   fetchMock.mockImplementation((input: RequestInfo | URL) => {
     const url = typeof input === 'string' ? input : input.toString();
-    if (url.includes('/api/v1/journals')) {
-      return Promise.resolve(
-        jsonResponse(200, {
-          success: true,
-          count: entries.length,
-          totalCount: entries.length,
-          currentPage: 1,
-          totalPages: 1,
-          entries,
-        }),
-      );
-    }
-    if (url.includes('/api/v1/accounts')) {
-      return Promise.resolve(
-        jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
-      );
-    }
-    return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
-  });
-}
-
-function mockRegisterWithReverse(entries: JournalEntry[], reversalEntry: JournalEntry) {
-  fetchMock.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    if (init?.method === 'POST' && url.includes('/reverse')) {
-      return Promise.resolve(jsonResponse(200, { success: true, entry: reversalEntry }));
-    }
     if (url.includes('/api/v1/journals')) {
       return Promise.resolve(
         jsonResponse(200, {
@@ -252,6 +228,16 @@ describe('JournalsPage', () => {
     });
   });
 
+  it('the General journal register offers no Reverse or Duplicate action', async () => {
+    mockRegisterRoutes([baseEntry({ id: 'entry-plain' })]);
+    renderJournalsPage();
+
+    await screen.findByText('AWS August');
+    expect(screen.queryByRole('button', { name: 'Reverse entry' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Duplicate entry' })).toBeNull();
+    expect(screen.queryByRole('link', { name: 'Import' })).toBeNull();
+  });
+
   it('renders a View link per entry pointing at its detail page', async () => {
     const first = baseEntry();
     const second = baseEntry({ id: 'entry-2', entryDate: '2026-08-16' });
@@ -264,148 +250,6 @@ describe('JournalsPage', () => {
     expect(viewLinks[0]).toHaveAttribute('href', `/journals/${first.id}`);
   });
 
-  it('offers Reverse only on an entry that is neither a reversal nor already reversed', async () => {
-    const plain = baseEntry({ id: 'entry-plain' });
-    const reversal = baseEntry({ id: 'entry-reversal', reversesEntryId: 'entry-plain' });
-    const reversed = baseEntry({ id: 'entry-reversed', reversedByEntryId: 'entry-reversal' });
-    mockRegisterRoutes([plain, reversal, reversed]);
-    renderJournalsPage();
-
-    await screen.findAllByText('AWS August');
-    expect(screen.getAllByRole('button', { name: 'Reverse entry' })).toHaveLength(1);
-  });
-
-  it('clicking Reverse opens a confirmation and does not call the API', async () => {
-    const entry = baseEntry({ id: 'entry-plain' });
-    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
-    mockRegisterWithReverse([entry], reversal);
-    const user = userEvent.setup();
-    renderJournalsPage();
-
-    await screen.findByText('AWS August');
-    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
-
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    const reverseCall = fetchMock.mock.calls.find((call) => {
-      const [input, init] = call as [RequestInfo | URL, RequestInit?];
-      const url = typeof input === 'string' ? input : input.toString();
-      return url.includes('/reverse') && init?.method === 'POST';
-    });
-    expect(reverseCall).toBeUndefined();
-  });
-
-  it('confirming the dialog reverses the entry and navigates to the new one', async () => {
-    const entry = baseEntry({ id: 'entry-plain' });
-    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
-    mockRegisterWithReverse([entry], reversal);
-    const user = userEvent.setup();
-    renderJournalsPage();
-
-    await screen.findByText('AWS August');
-    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Reverse entry' }));
-
-    await waitFor(() => {
-      const location = screen.getByTestId('location').textContent ?? '';
-      expect(location).toBe('/journals/rev-1');
-    });
-    const reverseCall = fetchMock.mock.calls.find((call) => {
-      const [input, init] = call as [RequestInfo | URL, RequestInit?];
-      const url = typeof input === 'string' ? input : input.toString();
-      return url.includes('/reverse') && init?.method === 'POST';
-    });
-    expect(reverseCall).toBeDefined();
-  });
-
-  it('cancelling the dialog leaves the entry alone', async () => {
-    const entry = baseEntry({ id: 'entry-plain' });
-    const reversal = baseEntry({ id: 'rev-1', reversesEntryId: 'entry-plain' });
-    mockRegisterWithReverse([entry], reversal);
-    const user = userEvent.setup();
-    renderJournalsPage();
-
-    await screen.findByText('AWS August');
-    await user.click(screen.getByRole('button', { name: 'Reverse entry' }));
-    const dialog = screen.getByRole('dialog');
-    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }));
-
-    expect(screen.queryByRole('dialog')).toBeNull();
-    const reverseCall = fetchMock.mock.calls.find((call) => {
-      const [input, init] = call as [RequestInfo | URL, RequestInit?];
-      const url = typeof input === 'string' ? input : input.toString();
-      return url.includes('/reverse') && init?.method === 'POST';
-    });
-    expect(reverseCall).toBeUndefined();
-  });
-
-  it('Duplicate links to the post form with the entry id as copyFrom', async () => {
-    const entry = baseEntry({ id: 'entry-plain' });
-    mockRegisterRoutes([entry]);
-    renderJournalsPage();
-
-    await screen.findByText('AWS August');
-    const duplicateLink = screen.getByRole('link', { name: 'Duplicate entry' });
-    expect(duplicateLink).toHaveAttribute(
-      'href',
-      `/journals/new?copyFrom=${entry.id}`,
-    );
-  });
-});
-
-function mockNewEntryRoutes(copiedEntry: JournalEntry) {
-  fetchMock.mockImplementation((input: RequestInfo | URL) => {
-    const url = typeof input === 'string' ? input : input.toString();
-    if (url.endsWith(`/api/v1/journals/${copiedEntry.id}`)) {
-      return Promise.resolve(jsonResponse(200, { success: true, entry: copiedEntry }));
-    }
-    if (url.includes('/api/v1/accounts')) {
-      return Promise.resolve(
-        jsonResponse(200, { success: true, count: 2, accounts: [account6120, account2100] }),
-      );
-    }
-    return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
-  });
-}
-
-function renderNewJournalEntryPage(initialEntry: string) {
-  return render(
-    <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path="/journals/new" element={<NewJournalEntryPage />} />
-      </Routes>
-    </MemoryRouter>,
-  );
-}
-
-describe('NewJournalEntryPage — ?copyFrom=', () => {
-  it('pre-fills date, description and lines from the copied entry', async () => {
-    const source = baseEntry({ id: 'je-1', entryDate: '2026-08-01', description: 'AWS August' });
-    mockNewEntryRoutes(source);
-    renderNewJournalEntryPage('/journals/new?copyFrom=je-1');
-
-    const dateInput = await screen.findByDisplayValue('2026-08-01');
-    expect(dateInput).toBeInTheDocument();
-    expect(screen.getByDisplayValue('AWS August')).toBeInTheDocument();
-    expect(screen.getByLabelText('Debit for line 1')).toHaveValue('450.00');
-    expect(screen.getByLabelText('Credit for line 2')).toHaveValue('450.00');
-  });
-
-  it('does not re-seed the form after the user edits it', async () => {
-    const source = baseEntry({ id: 'je-1', entryDate: '2026-08-01', description: 'AWS August' });
-    mockNewEntryRoutes(source);
-    const user = userEvent.setup();
-    renderNewJournalEntryPage('/journals/new?copyFrom=je-1');
-
-    await screen.findByDisplayValue('AWS August');
-    const descriptionInput = screen.getByLabelText('Description');
-    await user.clear(descriptionInput);
-    await user.type(descriptionInput, 'Edited');
-
-    await waitFor(() => {
-      expect(descriptionInput).toHaveValue('Edited');
-    });
-  });
 });
 
 describe('JournalDetailPage', () => {
@@ -443,13 +287,15 @@ describe('JournalDetailPage', () => {
   });
 });
 
-describe('JournalsPage import', () => {
-  it('the Journals page has an Import button linking to the JOURNALS wizard', async () => {
-    mockRegisterRoutes([baseEntry()]);
-    renderJournalsPage();
+describe('JournalDetailPage manual journal link', () => {
+  it('links to the owning manual journal when manualJournalId is set', async () => {
+    const entry = baseEntry({ manualJournalId: 'mj-1' });
+    mockDetailRoute(entry);
+    renderJournalDetailPage(entry.id);
 
-    await screen.findByText('AWS August');
-    const link = screen.getByRole('link', { name: 'Import' });
-    expect(link).toHaveAttribute('href', '/migration-imports/new?kind=JOURNALS&returnTo=%2Fjournals');
+    const link = await screen.findByRole('link', { name: /open manual journal/i });
+    expect(link).toHaveAttribute('href', '/manual-journals/mj-1');
+    expect(screen.getByRole('button', { name: /void journal/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /make recurring/i })).toBeNull();
   });
 });

@@ -17,6 +17,7 @@ const mockSchedule: fetchServices.RecurringSchedule = {
   kind: 'INVOICE',
   name: 'Monthly invoice',
   sourceId: 'inv-1',
+  sourceManualJournalId: null,
   frequency: 'MONTHLY',
   intervalCount: 1,
   startDate: '2026-09-25',

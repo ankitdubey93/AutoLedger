@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { closePool, pool } from '../db/connect.js';
 import { runIntegrityChecks } from '../db/integrity.js';
-import * as journalService from '../services/accounting/journalService.js';
+import * as manualJournalService from '../services/accounting/manualJournalService.js';
 import { createUserWithOrg, resetTables } from './helpers/factories.js';
 import type { SeededUser } from './helpers/factories.js';
 
@@ -66,14 +66,19 @@ describe('verify:integrity', () => {
   });
 
   it('passes after a balanced entry', async () => {
-    await journalService.createEntry(orgA, userA.id, {
-      entryDate: '2026-08-15',
-      description: 'Balanced',
-      lines: [
-        { accountId: await accountId(orgA, '6120'), debitCents: 10000, creditCents: 0 },
-        { accountId: await accountId(orgA, '2120'), debitCents: 0, creditCents: 10000 },
-      ],
-    });
+    await manualJournalService.createManualJournal(
+      orgA,
+      userA.id,
+      {
+        entryDate: '2026-08-15',
+        narration: 'Balanced',
+        lines: [
+          { accountId: await accountId(orgA, '6120'), description: null, debitCents: 10000, creditCents: 0 },
+          { accountId: await accountId(orgA, '2120'), description: null, debitCents: 0, creditCents: 10000 },
+        ],
+      },
+      'post',
+    );
 
     const report = await runIntegrityChecks();
     expect(report.passed).toBe(true);

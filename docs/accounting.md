@@ -600,6 +600,16 @@ Customer deposits are a liability until the work is delivered, not revenue; supp
 
 Full detail: [roadmap.md § Phase 42, as delivered](roadmap.md#phase-42-as-delivered), [api.md](api.md), [schema.md](schema.md#phase-42--quote-follow-ups-templates-verified-email-orders-deposits-accounting--applied).
 
+### Phase 44 — Manual journals ✅ shipped
+
+Manual journals are Xero-style documents at `/manual-journals` (the all-postings register is now the **General journal** report at `/reports/general-journal`; `/journals` redirects, while `/journals/:entryId` still shows any GL entry).
+- **States:** `DRAFT` (editable, deletable, posts nothing) -> `POSTED` (owns an immutable GL entry) -> `VOIDED` (a reversing entry is posted; the original stays). A repeating journal's `TEMPLATE` is the fourth state: it never posts itself. One FSM table, `MANUAL_JOURNAL_STATUS_TRANSITIONS`, mirrored by CHECKs and triggers (rule 6).
+- **Form:** a mandatory narration (placeholders such as `[Month]`, filled at post), per-line descriptions, **Save draft**, **Save & add another** and **Post**.
+- **System-account rule:** a manual journal may not touch the receivable, payable or inventory control accounts, nor any account flagged `bankAccountKind` (`BANK` / `CREDIT_CARD`, set in Settings -> Chart of accounts, backfilled from bank usage). Money in or out of those goes through invoices, bills, Inventory or Banking (bank-line journals and bank rules are unaffected and keep their own control-account guard).
+- **Repeating journals:** created directly (first date, frequency, optional end date, optional auto-reverse on the first of the next month) as a `TEMPLATE` plus a `JOURNAL` schedule in one transaction; each run posts a fresh `RECURRING` manual journal. "Make recurring" on a posted manual journal still works and now also references the manual journal.
+- **Import:** `JOURNALS` CSV imports create `IMPORT` manual journals (narrations fill placeholders; `[[Month]]` escapes).
+- `POST /journals/:id/reverse` voids a manual-journal-owned entry and refuses document-owned entries (previously it could reverse an invoice's posting and bypass its void).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

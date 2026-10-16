@@ -467,3 +467,48 @@ describe('account balances', () => {
     });
   });
 });
+
+describe('bank and credit-card accounts (Phase 44)', () => {
+  it("a new org's 1110 has bankAccountKind 'BANK'", async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.get(`${BASE}/${await accountId(orgA, '1110')}`);
+    expect(res.status).toBe(200);
+    expect(res.body.account.bankAccountKind).toBe('BANK');
+  });
+
+  it("PATCH an Expense account bankAccountKind BANK -> 422 'Only an Asset account can be a bank account'", async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent.patch(`${BASE}/${await accountId(orgA, '6120')}`).send({ bankAccountKind: 'BANK' });
+    expect(res.status).toBe(422);
+    expect(res.body.error).toBe('Only an Asset account can be a bank account');
+  });
+
+  it('create a Liability with CREDIT_CARD -> 201', async () => {
+    const agent = await loginAgent(app, userA);
+    const res = await agent
+      .post(BASE)
+      .send({ code: '2250', name: 'Company Card', type: 'Liability', bankAccountKind: 'CREDIT_CARD' });
+    expect(res.status).toBe(201);
+    expect(res.body.account.bankAccountKind).toBe('CREDIT_CARD');
+  });
+
+  it('PATCH bankAccountKind null on 1110 -> 200, and a manual journal to 1110 then posts', async () => {
+    const agent = await loginAgent(app, userA);
+    const cash = await accountId(orgA, '1110');
+    const patched = await agent.patch(`${BASE}/${cash}`).send({ bankAccountKind: null });
+    expect(patched.status).toBe(200);
+    expect(patched.body.account.bankAccountKind).toBeNull();
+
+    const res = await agent.post('/api/v1/manual-journals').send({
+      narration: 'Opening float',
+      entryDate: '2026-03-15',
+      action: 'post',
+      lines: [
+        { accountId: cash, description: null, debitCents: 5000, creditCents: 0 },
+        { accountId: await accountId(orgA, '4100'), description: null, debitCents: 0, creditCents: 5000 },
+      ],
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.journal.status).toBe('POSTED');
+  });
+});

@@ -222,6 +222,18 @@ The fill also has to happen *before* anything reads the text downstream. On a bi
 
 Quotes have eight statuses and a trigger (`reject_sent_quote_mutation()`, migration 089) that repeats `QUOTE_TRANSITIONS` in SQL. Rather than trust two hand-kept copies, `quoteConstraints.test.ts` **inserts** a quote in every status (INSERT is unguarded), tries all 56 `from → to` updates with raw SQL, and asserts the database's verdict equals `canTransitionQuote(from, to)`. It failed on its first run: the trigger's "a DRAFT is freely editable" branch returned `NEW` before checking the status, so a raw update could take a draft straight to ACCEPTED. The fix keeps drafts content-editable but restricts their status exit to SENT. Two other quote-specific shapes: a **revision chain** (a sent document is never edited; a new row supersedes it, with partial unique indexes allowing one DRAFT and one SENT per chain) and a **reverse edge driven by another document** (CONVERTED → ACCEPTED fires only when the draft invoice it produced is deleted, from inside the invoice service's delete transaction). Detail: [quotes-acceptance-evidence-and-revisions.md](quotes-acceptance-evidence-and-revisions.md).
 
+### Phase 44 — a draft document that owns an immutable posting
+
+Manual journals used to be "the entry is the document": a journal entry was posted the instant it was created, and `journal_entries`/`ledger_lines` are update-immutable (`reject_mutation()` raises `0A000` on any UPDATE or DELETE). A draft needs the opposite — mutable lines, deletable — so the draft cannot live in those tables. Migration 097 adds a **document row**, `manual_journals` (`DRAFT`/`TEMPLATE`/`POSTED`/`VOIDED`), and its `manual_journal_lines`, which own the GL posting by a composite FK `(org_id, journal_entry_id)`. This is the invoice pattern (009) applied to journals.
+
+**State-dependent header trigger.** `reject_posted_manual_journal_mutation()` is `BEFORE UPDATE OR DELETE`. While `OLD.status` is DRAFT or TEMPLATE, anything goes (a DELETE too). Once POSTED, the only legal UPDATE is `POSTED -> VOIDED`, and only if `to_jsonb(NEW) - 'status' - 'void_journal_entry_id' - 'voided_at' - 'updated_at'` equals the same expression on `OLD`. Subtracting the four columns the void is allowed to touch from the whole-row JSON and comparing the remainder means a new column added later is protected by default (deny-by-default), where a hand-written list of "columns that must not change" would silently omit it. Mind `IS DISTINCT FROM` vs `<>` on jsonb: the rest contains NULLs inside values, but jsonb equality compares whole documents, so `<>` is safe; `IS DISTINCT FROM` is the habit for NULL-able scalar columns.
+
+**Lines guarded by the parent's status.** A line has no status, so `reject_non_draft_manual_journal_line_mutation()` looks the parent up (`SELECT status ... WHERE id = ... AND org_id = ...`) and refuses INSERT/UPDATE/DELETE unless it is DRAFT/TEMPLATE. A `NULL` lookup is allowed deliberately: when the parent is being deleted, `ON DELETE CASCADE` deletes the lines after the parent row is already gone, and the trigger must not block its own cascade. Consequence for the backfill (see the migrations note): lines are inserted while the parent is still DRAFT, and the parent is promoted afterwards.
+
+**Void is a reversal, not a delete.** `POST /:id/void` posts a reversing entry through `reverseEntryOnClient`, then flips `POSTED -> VOIDED` and records `void_journal_entry_id` in the same transaction. Both CHECKs (`chk_manual_journals_voided_complete`: `(status = 'VOIDED') = (void_journal_entry_id IS NOT NULL AND voided_at IS NOT NULL)`) and the trigger agree with `MANUAL_JOURNAL_STATUS_TRANSITIONS`; `canTransitionManualJournal` is the only gate in code (rule 10).
+
+**Rejected alternatives.** (1) A `status` column on `journal_entries`: its immutability trigger is what makes every posting - invoices, payments, bank lines - unchangeable. Making it state-dependent would weaken rule 6 for the entire ledger to serve one document type. (2) A separate drafts table that is deleted on post and re-created as an entry: it loses the identity of the thing the user was editing (the link, audit trail, "Save & add another" history, the template a schedule points at) - the document row keeps one id from draft to void.
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |
@@ -320,6 +332,18 @@ A: Child rows first, then the parent's status flip. The header trigger only chec
 
 **Q: If posted documents are immutable, how does a recurring schedule built from an issued invoice keep regenerating "[Month]"?**
 A: Issuing stores the text as written in a `notes_template` / `description_template` column before overwriting the visible text with the filled version. Recurring generation reads `template ?? text`. The column is written once (`COALESCE(existing, raw)`), so a draft filled at generation and again at issue keeps the original. A draft edit resets it, because the edited text is the new source.
+
+**Q: Why did manual journals get their own document table when invoices and bills already had one and journals did not?**
+A: Because a journal entry used to be the document and the posting at once, and the ledger tables are immutable by trigger. Drafts need rows you can edit and delete, so the editable thing needs a different table from the immutable thing. The document row owns the posting through a composite FK and a partial unique index (`ux_manual_journals_journal_entry`), so each entry has at most one owner and the register can LEFT JOIN to it without fan-out. Putting a status on `journal_entries` instead would have meant weakening the immutability trigger for every module's postings.
+
+**Q: How does the header trigger let a void through but nothing else?**
+A: It branches on `OLD.status`. DRAFT/TEMPLATE: allowed. Otherwise the only allowed transition is POSTED to VOIDED, and the trigger compares `to_jsonb(NEW)` minus the four void-owned keys against the same for OLD; any difference raises `0A000`. Because it subtracts an allow-list of changing keys from the whole row, a column added later is frozen automatically. A hand-written "these columns must be unchanged" list would be silently incomplete after the next ALTER TABLE.
+
+**Q: Why does the line trigger tolerate a missing parent row?**
+A: `ON DELETE CASCADE` removes lines after the parent row is deleted, so the trigger's parent lookup returns NULL during a draft delete. Treating NULL as allowed lets the cascade proceed. It is safe because a parent can only be deleted while DRAFT/TEMPLATE (the header trigger already refused otherwise), and an INSERT of a line for a non-existent parent is rejected by the FK anyway.
+
+**Q: Tell me about a time a trigger and application code had to agree on a state machine.**
+A: Phase 44's manual journals: `MANUAL_JOURNAL_STATUS_TRANSITIONS` in TypeScript, a status CHECK and the header trigger in SQL. The service calls `canTransitionManualJournal` under a `FOR UPDATE` lock before posting or voiding, so the 409 comes from the table, and the trigger is the backstop for any code path (or raw SQL) that bypasses the service. The completeness CHECKs (`POSTED` implies an entry id and posted_at; `DRAFT` implies none) make an inconsistent combination unrepresentable rather than merely unlikely.
 
 ## Follow-ups they'll dig into
 

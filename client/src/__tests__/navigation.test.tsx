@@ -259,8 +259,8 @@ describe('Sidebar navigation', () => {
     await user.click(screen.getByRole('link', { name: /chart of accounts/i }));
     expect(pathname()).toBe('/accounts');
 
-    await user.click(screen.getByRole('link', { name: /journal entries/i }));
-    expect(pathname()).toBe('/journals');
+    await user.click(screen.getByRole('link', { name: /manual journals/i }));
+    expect(pathname()).toBe('/manual-journals');
 
     await user.click(screen.getByRole('link', { name: /trial balance/i }));
     expect(pathname()).toBe('/trial-balance');
@@ -274,9 +274,9 @@ describe('Sidebar navigation', () => {
     const user = userEvent.setup();
 
     await screen.findByText('Chart of accounts');
-    await user.click(screen.getByRole('link', { name: /journal entries/i }));
+    await user.click(screen.getByRole('link', { name: /manual journals/i }));
 
-    expect(screen.getByRole('link', { name: /journal entries/i })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /manual journals/i })).toHaveAttribute(
       'aria-current',
       'page',
     );

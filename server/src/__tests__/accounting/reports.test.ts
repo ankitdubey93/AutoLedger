@@ -31,13 +31,13 @@ async function accountId(orgId: string, code: string): Promise<string> {
   return row.id;
 }
 
-/** A revenue sale: debit cash, credit service revenue. */
+/** A revenue sale: debit prepaid (1130 — bank accounts refuse manual journals), credit service revenue. */
 async function sale(orgId: string, amountCents: number, entryDate = '2026-08-15') {
   return {
     entryDate,
     description: `Sale ${String(amountCents)}`,
     lines: [
-      { accountId: await accountId(orgId, '1110'), debitCents: amountCents, creditCents: 0 },
+      { accountId: await accountId(orgId, '1130'), debitCents: amountCents, creditCents: 0 },
       { accountId: await accountId(orgId, '4200'), debitCents: 0, creditCents: amountCents },
     ],
   };
@@ -92,7 +92,7 @@ describe('trial balance', () => {
 
     const { body } = await agent.get(TRIAL_BALANCE);
 
-    expect(row(body, '1110').debitCents).toBe(45000);
+    expect(row(body, '1130').debitCents).toBe(45000);
     expect(row(body, '4200').creditCents).toBe(45000);
     expect(body.totalDebitCents).toBe(45000);
     expect(body.totalCreditCents).toBe(45000);
@@ -106,8 +106,8 @@ describe('trial balance', () => {
     const { body } = await agent.get(TRIAL_BALANCE);
 
     // Cash is an Asset — debits are positive for it.
-    expect(row(body, '1110').type).toBe('Asset');
-    expect(row(body, '1110').netBalanceCents).toBe(45000);
+    expect(row(body, '1130').type).toBe('Asset');
+    expect(row(body, '1130').netBalanceCents).toBe(45000);
 
     // Service Revenue is Revenue — credits are positive for it. A raw
     // debit-minus-credit would report all income as negative.
@@ -124,7 +124,7 @@ describe('trial balance', () => {
 
     const { body } = await agent.get(TRIAL_BALANCE);
 
-    expect(row(body, '1110').debitCents).toBe(10);
+    expect(row(body, '1130').debitCents).toBe(10);
     expect(body.totalDebitCents).toBe(10);
     expect(body.isBalanced).toBe(true);
   });
@@ -192,7 +192,7 @@ describe('cross-tenant isolation', () => {
 
     expect(body.totalDebitCents).toBe(0);
     expect(body.text).toBeUndefined();
-    expect(row(body, '1110').debitCents).toBe(0);
+    expect(row(body, '1130').debitCents).toBe(0);
   });
 
   it('the service layer is scoped even when called directly', async () => {

@@ -1,6 +1,5 @@
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
-import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, parseCents, sumCents } from '../../utils/money.js';
 import { convertToBase, isCurrencyCode, ONE_RATE } from '../../utils/fxRate.js';
@@ -14,33 +13,20 @@ import type { JournalEntry, LedgerLine } from '../../types/accounting.js';
  * Journal entries — the general ledger.
  *
  * Everything here is org-scoped (guardrails rule 1) and every amount is integer
- * cents (rule 3). `createEntry` is the only write path, and posted rows are
- * immutable afterwards: corrections go through `reverseEntry`, never an UPDATE
+ * cents (rule 3). `createEntryOnClient` is the only write path (the manual path is
+ * `manualJournalService`), and posted rows are immutable afterwards: corrections
+ * go through `reverseEntryOnClient`, never an UPDATE
  * (rule 6, enforced by trigger in 004 as well as here).
  */
 
 type Queryable = Pick<PoolClient, 'query'>;
 
-/** Raised by our own trigger functions in 004. */
-const PG_RAISE_EXCEPTION = 'P0001';
-const PG_UNIQUE_VIOLATION = '23505';
-
-function pgErrorCode(err: unknown): string | undefined {
-  if (typeof err !== 'object' || err === null || !('code' in err)) return undefined;
-  return typeof err.code === 'string' ? err.code : undefined;
-}
-
-function pgErrorMessage(err: unknown): string {
-  if (typeof err === 'object' && err !== null && 'message' in err) {
-    return typeof err.message === 'string' ? err.message : 'Database rejected the entry';
-  }
-  return 'Database rejected the entry';
-}
-
 export interface JournalLineInput {
   accountId: string;
   debitCents: number;
   creditCents: number;
+  /** Phase 44 — a per-line description (manual journals). */
+  description?: string | null;
   /** Phase 8. Omitted means the organization's base currency. */
   currencyCode?: string;
   /** Phase 8. NUMERIC(18,8) as a string. Omitted means ONE_RATE. Required when currencyCode differs from base. */
@@ -77,6 +63,7 @@ interface EntryRow {
   created_by_email: string | null;
   reversed_by_entry_id: string | null;
   created_at: Date;
+  manual_journal_id: string | null;
 }
 
 interface LineRow {
@@ -91,6 +78,7 @@ interface LineRow {
   fx_rate: string;
   base_debit_cents: string;
   base_credit_cents: string;
+  description: string | null;
 }
 
 /**
@@ -113,13 +101,17 @@ const ENTRY_SELECT = `SELECT e.id, e.entry_date, e.description, e.description_te
                              e.reverses_entry_id, e.created_by, e.created_at,
                              u.name  AS created_by_name,
                              u.email AS created_by_email,
-                             r.id    AS reversed_by_entry_id
+                             r.id    AS reversed_by_entry_id,
+                             mj.id   AS manual_journal_id
                         FROM journal_entries e
                         LEFT JOIN users u
                                ON u.id = e.created_by
                         LEFT JOIN journal_entries r
                                ON r.reverses_entry_id = e.id
-                              AND r.org_id = e.org_id`;
+                              AND r.org_id = e.org_id
+                        LEFT JOIN manual_journals mj
+                               ON mj.journal_entry_id = e.id
+                              AND mj.org_id = e.org_id`;
 
 function toLine(row: LineRow): LedgerLine {
   return {
@@ -135,6 +127,7 @@ function toLine(row: LineRow): LedgerLine {
     fxRate: row.fx_rate,
     baseDebitCents: parseCents(row.base_debit_cents),
     baseCreditCents: parseCents(row.base_credit_cents),
+    description: row.description,
   };
 }
 
@@ -155,6 +148,7 @@ function toEntry(row: EntryRow, lines: LedgerLine[]): JournalEntry {
     sourceId: row.source_id,
     reversesEntryId: row.reverses_entry_id,
     reversedByEntryId: row.reversed_by_entry_id,
+    manualJournalId: row.manual_journal_id,
     createdBy: row.created_by,
     createdByName: row.created_by_name,
     createdByEmail: row.created_by_email,
@@ -178,7 +172,7 @@ async function loadLines(
     `SELECT l.id, l.journal_entry_id, l.account_id,
             a.code AS account_code, a.name AS account_name,
             l.debit_cents, l.credit_cents, l.currency_code, l.fx_rate,
-            l.base_debit_cents, l.base_credit_cents
+            l.base_debit_cents, l.base_credit_cents, l.description
        FROM ledger_lines l
        JOIN accounts a ON a.id = l.account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -450,6 +444,51 @@ async function loadControlAccountsOnClient(
   return { map, receivableId, payableId };
 }
 
+/** Phase 44 — entries the GL register may reverse directly (no owning document). */
+export const REVERSIBLE_SOURCE_TYPES: readonly string[] = ['manual', 'recurring', 'migration_import', 'opening_balance'];
+
+/**
+ * Phase 44 — every account a manual journal may not touch, mapped to the 422
+ * message for it: the control accounts (listControlAccountsOnClient, same
+ * messages) plus every account flagged bank_account_kind.
+ */
+export async function listManualJournalBlockedAccountsOnClient(
+  client: Queryable,
+  orgId: string,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>((await loadControlAccountsOnClient(client, orgId)).map);
+  const { rows } = await client.query<{ id: string; code: string; bank_account_kind: string }>(
+    `SELECT id, code, bank_account_kind
+       FROM accounts
+      WHERE org_id = $1 AND bank_account_kind IS NOT NULL
+      ORDER BY code`,
+    [orgId],
+  );
+  for (const row of rows) {
+    if (map.has(row.id)) continue;
+    const label = row.bank_account_kind === 'CREDIT_CARD' ? 'a credit card account' : 'a bank account';
+    map.set(
+      row.id,
+      `Account ${row.code} is ${label} — record money in or out of it through Banking (a bank-line journal or a payment), not a manual journal`,
+    );
+  }
+  return map;
+}
+
+/** Throws ApiError(422, <message>) for the first blocked account, in line order. */
+export async function assertManualJournalAccountsOnClient(
+  client: Queryable,
+  orgId: string,
+  accountIds: string[],
+): Promise<void> {
+  await assertNotControlAccountsOnClient(client, orgId, accountIds);
+  const blocked = await listManualJournalBlockedAccountsOnClient(client, orgId);
+  for (const accountId of accountIds) {
+    const message = blocked.get(accountId);
+    if (message !== undefined) throw new ApiError(422, message);
+  }
+}
+
 /**
  * Posts one balanced entry on a caller-supplied, already-open transaction
  * client. Runs no BEGIN, no COMMIT and no ROLLBACK — the caller owns the
@@ -558,11 +597,11 @@ export async function createEntryOnClient(
   await client.query(
     `INSERT INTO ledger_lines
        (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
-        currency_code, fx_rate, base_debit_cents, base_credit_cents)
+        currency_code, fx_rate, base_debit_cents, base_credit_cents, description)
      SELECT $1, $2, v.account_id, v.debit_cents, v.credit_cents,
-            v.currency_code, v.fx_rate, v.base_debit_cents, v.base_credit_cents
-       FROM unnest($3::uuid[], $4::bigint[], $5::bigint[], $6::text[], $7::numeric[], $8::bigint[], $9::bigint[])
-            AS v(account_id, debit_cents, credit_cents, currency_code, fx_rate, base_debit_cents, base_credit_cents)`,
+            v.currency_code, v.fx_rate, v.base_debit_cents, v.base_credit_cents, v.description
+       FROM unnest($3::uuid[], $4::bigint[], $5::bigint[], $6::text[], $7::numeric[], $8::bigint[], $9::bigint[], $10::text[])
+            AS v(account_id, debit_cents, credit_cents, currency_code, fx_rate, base_debit_cents, base_credit_cents, description)`,
     [
       orgId,
       entryId,
@@ -573,6 +612,7 @@ export async function createEntryOnClient(
       resolvedLines.map((line) => line.fxRate),
       baseDebits,
       baseCredits,
+      resolvedLines.map((line) => line.description ?? null),
     ],
   );
 
@@ -611,53 +651,6 @@ export async function fillJournalDescriptionOnClient(
     { label: 'Description', max: JOURNAL_DESCRIPTION_MAX },
   );
   return { description: filled.text, descriptionTemplate: filled.template };
-}
-
-/**
- * Posts one balanced entry and its lines, atomically.
- *
- * Everything runs on the checked-out `client` (guardrails rule 5) — a stray
- * `pool.query` would take a different connection, commit immediately, and
- * survive the rollback, leaving orphaned lines and an unbalanced book.
- *
- * There is deliberately no work after `COMMIT`. Anything owed afterwards is a
- * queued job (Phase 7), not a fire-and-forget call.
- */
-export async function createEntry(
-  orgId: string,
-  createdBy: string,
-  input: CreateEntryInput,
-): Promise<JournalEntry> {
-  const client = await pool.connect();
-  try {
-    await beginTransaction(client);
-
-    await assertNotControlAccountsOnClient(
-      client,
-      orgId,
-      input.lines.map((line) => line.accountId),
-    );
-
-    const filled = await fillJournalDescriptionOnClient(client, orgId, input.description, input.entryDate);
-    const entryId = await createEntryOnClient(client, orgId, createdBy, { ...input, ...filled });
-
-    // COMMIT is where the deferred balance trigger runs, so a failure here is
-    // still inside the try and still rolls back cleanly.
-    await client.query('COMMIT');
-
-    return await getEntryById(orgId, entryId);
-  } catch (err) {
-    await client.query('ROLLBACK');
-
-    // Surface our own trigger rejections as a domain error rather than letting
-    // a raw Postgres exception reach the client.
-    if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
-      throw new ApiError(422, pgErrorMessage(err));
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
 }
 
 /**
@@ -735,47 +728,13 @@ export async function reverseEntryOnClient(
   await client.query(
     `INSERT INTO ledger_lines
        (org_id, journal_entry_id, account_id, debit_cents, credit_cents,
-        currency_code, fx_rate, base_debit_cents, base_credit_cents)
+        currency_code, fx_rate, base_debit_cents, base_credit_cents, description)
      SELECT org_id, $2, account_id, credit_cents, debit_cents,
-            currency_code, fx_rate, base_credit_cents, base_debit_cents
+            currency_code, fx_rate, base_credit_cents, base_debit_cents, description
        FROM ledger_lines
       WHERE journal_entry_id = $1 AND org_id = $3`,
     [id, reversalId, orgId],
   );
 
   return reversalId;
-}
-
-/**
- * The only correction path (guardrails rule 6).
- */
-export async function reverseEntry(
-  orgId: string,
-  createdBy: string,
-  id: string,
-  entryDate: string | null,
-): Promise<JournalEntry> {
-  const client = await pool.connect();
-  try {
-    await beginTransaction(client);
-
-    const reversalId = await reverseEntryOnClient(client, orgId, createdBy, id, entryDate);
-
-    await client.query('COMMIT');
-    return await getEntryById(orgId, reversalId);
-  } catch (err) {
-    await client.query('ROLLBACK');
-
-    // The partial unique index on reverses_entry_id is what makes the check
-    // above race-safe; this turns its 23505 into the same readable 409.
-    if (pgErrorCode(err) === PG_UNIQUE_VIOLATION) {
-      throw new ApiError(409, 'Entry has already been reversed');
-    }
-    if (pgErrorCode(err) === PG_RAISE_EXCEPTION) {
-      throw new ApiError(422, pgErrorMessage(err));
-    }
-    throw err;
-  } finally {
-    client.release();
-  }
 }

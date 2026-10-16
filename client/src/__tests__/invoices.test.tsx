@@ -15,7 +15,7 @@ import { permissionsFor } from './helpers/permissions';
  * The invoice register, the draft editor, and the invoice detail page.
  *
  * InvoicesPage and NewInvoicePage talk to fetchServices directly, like
- * JournalsPage and NewJournalEntryPage — no AuthContext or OrgContext needed.
+ * JournalsPage and the manual journal form — no AuthContext or OrgContext needed.
  * InvoiceDetailPage reads `useOrg()` (for the organization's name and tax
  * numbers) and `useLedgerSettings()` (for the legal name), so it renders
  * under the same provider stack ledgerCoreOnboarding.test.tsx uses.
@@ -34,6 +34,7 @@ const account4100: Account = {
   isPostable: true,
   isActive: true,
   description: null,
+  bankAccountKind: null,
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };

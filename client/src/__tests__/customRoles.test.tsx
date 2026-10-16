@@ -133,7 +133,7 @@ describe('navigation follows permissions', () => {
   it('a VIEWER still sees every section it could before Phase 38c, except importing statements', () => {
     const viewer = new Set(permissionsFor('VIEWER'));
     const labels = visibleNavGroups((p) => viewer.has(p)).flatMap((g) => g.items.map((i) => i.label));
-    expect(labels).toContain('Journal entries');
+    expect(labels).toContain('Manual journals');
     expect(labels).not.toContain('Import statement');
   });
 });

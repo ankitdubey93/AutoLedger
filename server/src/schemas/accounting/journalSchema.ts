@@ -9,7 +9,7 @@ import { z } from 'zod';
  *
  * Note what is absent: `sourceType` and `sourceId`. A client-posted entry is
  * always `'manual'`. Another app posting into the GL passes them
- * service-to-service through `journalService.createEntry`, never over HTTP —
+ * service-to-service through `manualJournalService.createManualJournal`, never over HTTP —
  * otherwise any caller could forge a ledger entry that claims to have come from
  * Capture (guardrails rule 16).
  */

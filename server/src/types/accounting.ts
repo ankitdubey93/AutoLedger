@@ -67,6 +67,8 @@ export interface Account {
   isPostable: boolean;
   isActive: boolean;
   description: string | null;
+  /** Phase 44 — `BANK` (an Asset) or `CREDIT_CARD` (a Liability); null for every other account. */
+  bankAccountKind: BankAccountKind | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -93,6 +95,8 @@ export interface LedgerLine {
   fxRate: string;
   baseDebitCents: number;
   baseCreditCents: number;
+  /** Phase 44 — the line's own description; null when none was given. */
+  description: string | null;
 }
 
 export interface JournalEntry {
@@ -120,6 +124,8 @@ export interface JournalEntry {
    *  detail page can prove the pair. */
   totalDebitCents: number;
   totalCreditCents: number;
+  /** Phase 44 — the manual journal that owns this posting, if any */
+  manualJournalId: string | null;
   lines: LedgerLine[];
 }
 
@@ -1651,6 +1657,8 @@ export interface RecurringSchedule {
   id: string; kind: RecurringKind; name: string;
   /** The template document: an invoice, bill or journal entry id, per `kind`. */
   sourceId: string;
+  /** Phase 44 — the manual journal template a JOURNAL schedule runs; null for other kinds. */
+  sourceManualJournalId: string | null;
   frequency: RecurringFrequency; intervalCount: number;
   startDate: string; endDate: string | null;
   /** null once ENDED. */
@@ -2191,4 +2199,64 @@ export interface AvailableCredit {
 
 export interface AvailableCredits {
   credits: AvailableCredit[];
+}
+
+// ------------------------------- Phase 44 — manual journals
+
+export const BANK_ACCOUNT_KINDS = ['BANK', 'CREDIT_CARD'] as const;
+export type BankAccountKind = (typeof BANK_ACCOUNT_KINDS)[number];
+export function isBankAccountKind(value: string): value is BankAccountKind {
+  return (BANK_ACCOUNT_KINDS as readonly string[]).includes(value);
+}
+
+export const MANUAL_JOURNAL_STATUSES = ['DRAFT', 'TEMPLATE', 'POSTED', 'VOIDED'] as const;
+export type ManualJournalStatus = (typeof MANUAL_JOURNAL_STATUSES)[number];
+export const MANUAL_JOURNAL_STATUS_TRANSITIONS = {
+  DRAFT: ['POSTED'],
+  TEMPLATE: [],
+  POSTED: ['VOIDED'],
+  VOIDED: [],
+} as const satisfies Record<ManualJournalStatus, readonly ManualJournalStatus[]>;
+export function isManualJournalStatus(value: string): value is ManualJournalStatus {
+  return (MANUAL_JOURNAL_STATUSES as readonly string[]).includes(value);
+}
+export function canTransitionManualJournal(from: ManualJournalStatus, to: ManualJournalStatus): boolean {
+  return (MANUAL_JOURNAL_STATUS_TRANSITIONS[from] as readonly ManualJournalStatus[]).includes(to);
+}
+export const MANUAL_JOURNAL_ORIGINS = ['MANUAL', 'RECURRING', 'IMPORT'] as const;
+export type ManualJournalOrigin = (typeof MANUAL_JOURNAL_ORIGINS)[number];
+
+export interface ManualJournalLine {
+  id: string;
+  lineNumber: number;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  description: string | null;
+  debitCents: number;
+  creditCents: number;
+}
+export interface ManualJournalSummary {
+  id: string;
+  status: ManualJournalStatus;
+  origin: ManualJournalOrigin;
+  narration: string;
+  narrationTemplate: string | null;
+  entryDate: string;
+  journalEntryId: string | null;
+  voidJournalEntryId: string | null;
+  recurringScheduleId: string | null;
+  /** Set on a TEMPLATE: the schedule that runs it. */
+  templateScheduleId: string | null;
+  postedAt: string | null;
+  voidedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  totalDebitCents: number;
+  totalCreditCents: number;
+}
+export interface ManualJournal extends ManualJournalSummary {
+  lines: ManualJournalLine[];
 }
