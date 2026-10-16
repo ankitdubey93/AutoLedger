@@ -20,6 +20,7 @@ router.get('/', authenticate, requirePermission('accounts.view'), accountControl
 // Registered before /:id — otherwise Express would match "balances" as an
 // account id and this route would never run.
 router.get('/balances', authenticate, requirePermission('accounts.view'), accountController.balances);
+router.get('/system', authenticate, requirePermission('accounts.view'), accountController.listSystem);
 router.get('/:id', authenticate, requirePermission('accounts.view'), accountController.getOne);
 router.get('/:id/ledger', authenticate, requirePermission('accounts.view'), accountController.ledger);
 

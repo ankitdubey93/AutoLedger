@@ -10,6 +10,7 @@
  * `utils/money.ts`.
  */
 
+import type { SystemAccountRole } from '../config/systemAccounts.js';
 import type { ComparisonMode, ComparisonPeriod } from '../utils/comparisonPeriods.js';
 import type { DateFormat } from '../utils/dateParse.js';
 import type { ImportCellType } from '../utils/importValues.js';
@@ -74,6 +75,26 @@ export interface Account {
   cashFlowCategory: CashFlowCategory | null;
   createdAt: string;
   updatedAt: string;
+  systemRoles: SystemRoleRef[];
+}
+
+/** Phase 46a — a system role an account currently holds (derived, see config/systemAccounts.ts). */
+export interface SystemRoleRef {
+  role: SystemAccountRole;
+  label: string;
+}
+
+/** Phase 46a — one row of GET /accounts/system. */
+export interface SystemAccountView {
+  role: SystemAccountRole;
+  label: string;
+  defaultCode: string;
+  remappable: boolean;
+  /** Null when neither the setting nor the default code resolves to an account. */
+  accountId: string | null;
+  code: string | null;
+  name: string | null;
+  isActive: boolean | null;
 }
 
 /** An `Account` with its subtree attached, for `GET /accounts?tree=true`. */

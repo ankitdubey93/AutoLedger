@@ -81,7 +81,7 @@ describe('trial balance', () => {
     const { body } = await agent.get(TRIAL_BALANCE);
 
     // 39 of the 49 seeded accounts are postable leaves (Phase 42 adds 1150 and 2130).
-    expect(body.count).toBe(39);
+    expect(body.count).toBe(40);
     expect(body.rows.some((r: { code: string }) => r.code === '1000')).toBe(false);
     expect(body.rows.some((r: { code: string }) => r.code === '1110')).toBe(true);
   });
@@ -142,7 +142,7 @@ describe('trial balance', () => {
     expect(august.body.totalDebitCents).toBe(35000);
 
     // Accounts with no lines in the window still appear, at zero.
-    expect(july.body.count).toBe(39);
+    expect(july.body.count).toBe(40);
   });
 
   it('rejects a malformed asOf', async () => {
@@ -155,11 +155,11 @@ describe('trial balance', () => {
 
   it('excludes a retired account once it has been deactivated', async () => {
     const agent = await loginAgent(app, userA);
-    const id = await accountId(orgA, '1140');
+    const id = await accountId(orgA, '6100');
     await agent.patch(`/api/v1/accounts/${id}`).send({ isActive: false });
 
     const { body } = await agent.get(TRIAL_BALANCE);
-    expect(body.count).toBe(38);
+    expect(body.count).toBe(39);
   });
 
   it('is derived, not stored — no summary table exists', async () => {

@@ -11,6 +11,7 @@ import {
 import { formatCents } from '../../utils/money';
 import NewAccountForm from './NewAccountForm';
 import LoadingState from '../../components/ui/LoadingState';
+import SystemAccountBadge from '../../components/ui/SystemAccountBadge';
 import ImportButton from '../../components/imports/ImportButton';
 
 /**
@@ -137,6 +138,7 @@ function AccountRow({
         >
           {node.type}
         </span>
+        <SystemAccountBadge roles={node.systemRoles ?? []} />
         <span className="text-sm tabular-nums w-24 text-right shrink-0">
           <BalanceFigure cents={figureCents} />
         </span>

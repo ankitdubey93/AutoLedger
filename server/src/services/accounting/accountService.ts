@@ -12,6 +12,7 @@ import {
   type BankAccountKind,
   type CashFlowCategory,
 } from '../../types/accounting.js';
+import { rolesForAccountsOnClient } from './systemAccountService.js';
 
 /**
  * The chart of accounts — Accounting's Phase 3 foundation.
@@ -93,10 +94,17 @@ function toAccount(row: AccountRow): Account {
     cashFlowCategory: row.cash_flow_category,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
+    systemRoles: [],
   };
 }
 
 // ---------------------------------------------------------------------- reads
+
+/** Phase 46a — decorates accounts with the system roles they currently hold (derived, never stored). */
+async function withSystemRoles(q: Queryable, orgId: string, accounts: Account[]): Promise<Account[]> {
+  const roles = await rolesForAccountsOnClient(q, orgId);
+  return accounts.map((a) => ({ ...a, systemRoles: roles.get(a.id) ?? [] }));
+}
 
 export async function listAccounts(
   orgId: string,
@@ -110,7 +118,7 @@ export async function listAccounts(
       ORDER BY code ASC`,
     [orgId, options.includeInactive ?? false],
   );
-  return rows.map(toAccount);
+  return withSystemRoles(pool, orgId, rows.map(toAccount));
 }
 
 /**
@@ -158,7 +166,8 @@ export async function getAccountById(orgId: string, id: string): Promise<Account
   // 404 and not 403: a 403 would confirm the id exists in some other
   // organization, which is itself a leak (docs/api.md).
   if (row === undefined) throw new ApiError(404, 'Account not found');
-  return toAccount(row);
+  const [account] = await withSystemRoles(pool, orgId, [toAccount(row)]);
+  return account ?? toAccount(row);
 }
 
 // --------------------------------------------------------------------- writes
@@ -256,7 +265,9 @@ export async function createAccount(
     cashFlowCategory: CashFlowCategory | null;
   },
 ): Promise<Account> {
-  return withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
+  const created = await withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
+  const [account] = await withSystemRoles(pool, orgId, [created]);
+  return account ?? created;
 }
 
 /**
@@ -312,6 +323,18 @@ export async function updateAccount(
 ): Promise<Account> {
   const existing = await getAccountById(orgId, id);
 
+  // Phase 46a — a system account can be renamed but not retired or flagged as a bank account.
+  const roles = existing.systemRoles;
+  if (roles.length > 0) {
+    const labels = roles.map((r) => r.label).join(' and ');
+    if (input.isActive === false) {
+      throw new ApiError(422, `${labels} is a system account and cannot be retired`);
+    }
+    if (input.bankAccountKind !== undefined && input.bankAccountKind !== null) {
+      throw new ApiError(422, `${labels} is a system account and cannot be a bank or credit card account`);
+    }
+  }
+
   if (input.bankAccountKind !== undefined) {
     assertBankKindMatchesType(input.bankAccountKind, existing.type);
   }
@@ -361,7 +384,8 @@ export async function updateAccount(
 
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Account not found');
-  return toAccount(row);
+  const [account] = await withSystemRoles(pool, orgId, [toAccount(row)]);
+  return account ?? toAccount(row);
 }
 
 // ----------------------------------------------------------------- the seed
@@ -390,6 +414,7 @@ interface SeedAccount {
  *   - 1180 / 2140  tax      — Capture splits input tax out of an invoice (11)
  *   - 4910 / 6810 / 6820 FX — realized and unrealized gain/loss (8)
  *   - 3400 opening balance equity — the import plug (9b)
+ *   - 6830 Rounding — a system account (Phase 46a); no automatic postings yet
  */
 export const DEFAULT_CHART: readonly SeedAccount[] = [
   // Assets 1000–1999
@@ -453,6 +478,7 @@ export const DEFAULT_CHART: readonly SeedAccount[] = [
   { code: '6600', name: 'Bank Fees', type: 'Expense', parent: '6000', postable: true },
   { code: '6810', name: 'Realized FX Loss', type: 'Expense', parent: '6000', postable: true },
   { code: '6820', name: 'Unrealized FX Gain/Loss', type: 'Expense', parent: '6000', postable: true },
+  { code: '6830', name: 'Rounding', type: 'Expense', parent: '6000', postable: true },
 ];
 
 /** Groups the chart by tree depth, so parents always exist before their children. */

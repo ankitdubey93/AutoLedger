@@ -2,6 +2,7 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
+import * as systemAccountService from './systemAccountService.js';
 import type {
   InvoiceSettings,
   InvoiceTemplateId,
@@ -276,14 +277,22 @@ export async function updateInvoiceSettings(
   const placeholders = insertValues.map((_, i) => `$${String(i + 2)}`);
 
   try {
-    await withTransaction((client) =>
-      client.query(
+    await withTransaction(async (client) => {
+      // Phase 46a — a retired account cannot be pointed at by a setting.
+      await systemAccountService.assertActiveAccountsOnClient(client, orgId, [
+        input.receivableAccountId,
+        input.defaultRevenueAccountId,
+        input.taxPayableAccountId,
+        input.customerDepositAccountId,
+        input.supplierPrepaymentAccountId,
+      ]);
+      await client.query(
         `INSERT INTO ledger_invoice_settings (org_id, ${columns.join(', ')})
          VALUES ($1, ${placeholders.join(', ')})
          ON CONFLICT (org_id) DO UPDATE SET ${updateAssignments.join(', ')}`,
         [orgId, ...insertValues],
-      ),
-    );
+      );
+    });
   } catch (err) {
     const constraint = pgConstraint(err);
     if (

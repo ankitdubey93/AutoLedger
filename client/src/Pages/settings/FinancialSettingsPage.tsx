@@ -6,11 +6,13 @@ import {
   getFiscalPeriods,
   listAccounts,
   listPaymentTerms,
+  listSystemAccounts,
   updateLedgerSettings,
   type Account,
   type PaymentTerm,
   type AccountType,
   type FiscalPeriodStatus,
+  type SystemAccountView,
 } from '../../services/fetchServices';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
@@ -30,6 +32,21 @@ import { inputClass, primaryButtonClass } from '../../components/ui/formClasses'
  * Fiscal periods are shown as counts only; generating, closing and locking
  * stay on FiscalPeriodsPage, where the period FSM lives (rule 10).
  */
+
+/**
+ * Phase 46a — the roles whose account is set on the invoicing settings page
+ * (`ledger_invoice_settings.*`); every other remappable role is set here.
+ */
+const INVOICING_SYSTEM_ROLES: ReadonlySet<string> = new Set([
+  'RECEIVABLE',
+  'TAX_OUTPUT',
+  'CUSTOMER_DEPOSITS',
+  'SUPPLIER_PREPAYMENTS',
+]);
+
+function changePathFor(role: string): string {
+  return INVOICING_SYSTEM_ROLES.has(role) ? '/settings/invoicing' : '/settings/financial';
+}
 
 const MONTHS = [
   'January',
@@ -141,6 +158,7 @@ export default function FinancialSettingsPage() {
   const [seeded, setSeeded] = useState(false);
 
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [systemAccounts, setSystemAccounts] = useState<SystemAccountView[]>([]);
   const [periodCounts, setPeriodCounts] = useState<PeriodCounts | null>(null);
 
   const [saving, setSaving] = useState(false);
@@ -178,6 +196,21 @@ export default function FinancialSettingsPage() {
       })
       .catch(() => {
         // Selects simply stay empty; the page is still usable for the fiscal year.
+      });
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    listSystemAccounts()
+      .then((response) => {
+        // `?? []`: a response without the field (a stubbed route) must not crash the tab.
+        if (!ignore) setSystemAccounts(response.systemAccounts ?? []);
+      })
+      .catch(() => {
+        // The section simply stays empty; the rest of the tab is unaffected.
       });
     return () => {
       ignore = true;
@@ -398,6 +431,37 @@ export default function FinancialSettingsPage() {
         </p>
         <TermSelect label="Default terms — sales" value={salesTermId} onChange={setSalesTermId} terms={paymentTerms} />
         <TermSelect label="Default terms — bills" value={purchaseTermId} onChange={setPurchaseTermId} terms={paymentTerms} />
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <h3 className="text-base font-semibold m-0">System accounts</h3>
+        <p className="text-sm text-[var(--muted)] m-0">
+          Accounts the system posts to. They can be renamed but not retired.
+        </p>
+        {systemAccounts.length > 0 && (
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr>
+                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Role</th>
+                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Account</th>
+                <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Change</th>
+              </tr>
+            </thead>
+            <tbody>
+              {systemAccounts.map((row) => (
+                <tr key={row.role}>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)]">{row.label}</td>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                    {row.accountId === null ? 'Not set up' : `${row.code ?? ''} ${row.name ?? ''}`}
+                  </td>
+                  <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                    {row.remappable && <Link to={changePathFor(row.role)}>Change</Link>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
 
       <div className="flex flex-col gap-2">

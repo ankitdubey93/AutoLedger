@@ -11,6 +11,7 @@ import * as organizationProfileService from '../organizationProfileService.js';
 import * as paymentTermService from './paymentTermService.js';
 import * as itemService from './itemService.js';
 import * as inventoryAccountingService from './inventoryAccountingService.js';
+import * as systemAccountService from './systemAccountService.js';
 import type { LedgerSettings } from '../../types/accounting.js';
 import type { UpdateOrganizationProfileInput } from '../../types/organization.js';
 import { MODULE_TAGS } from '../../config/modules.js';
@@ -348,6 +349,18 @@ export async function updateSettings(
 
   try {
     await withTransaction(async (client) => {
+      // Phase 46a — a retired account cannot be pointed at by a setting.
+      await systemAccountService.assertActiveAccountsOnClient(client, orgId, [
+        input.cashAccountId,
+        input.realizedFxGainAccountId,
+        input.realizedFxLossAccountId,
+        input.unrealizedFxAccountId,
+        input.inventoryAccountId,
+        input.cogsAccountId,
+        input.inventoryAdjustmentAccountId,
+        input.stockOpeningAccountId,
+      ]);
+
       // Validated before any write (Phase 35a): a bad inventory account
       // should not leave a profile update or another column change committed.
       for (const field of INVENTORY_ACCOUNT_FIELDS) {

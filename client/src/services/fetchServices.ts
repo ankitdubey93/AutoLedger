@@ -509,8 +509,28 @@ export interface Account {
   bankAccountKind: BankAccountKind | null;
   /** Phase 45 — null means "derived from the account's type and code". Optional so pre-Phase-45 fixtures still typecheck. */
   cashFlowCategory?: CashFlowCategory | null;
+  /** Phase 46a — the system roles this account holds. Optional so pre-46a fixtures still typecheck. */
+  systemRoles?: SystemRoleRef[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Phase 46a. Mirrors server/src/types/accounting.ts's SystemRoleRef. */
+export interface SystemRoleRef {
+  role: string;
+  label: string;
+}
+
+/** Phase 46a. Mirrors server/src/types/accounting.ts's SystemAccountView — one row of GET /accounts/system. */
+export interface SystemAccountView {
+  role: string;
+  label: string;
+  defaultCode: string;
+  remappable: boolean;
+  accountId: string | null;
+  code: string | null;
+  name: string | null;
+  isActive: boolean | null;
 }
 
 export interface AccountNode extends Account {
@@ -579,6 +599,15 @@ export function listAccountTree(signal?: AbortSignal): Promise<{
   accounts: AccountNode[];
 }> {
   return apiFetch('/accounts?tree=true', { signal: signal ?? null });
+}
+
+/** Phase 46a — GET /accounts/system: one row per system role, in registry order. */
+export function listSystemAccounts(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  systemAccounts: SystemAccountView[];
+}> {
+  return apiFetch('/accounts/system', { signal: signal ?? null });
 }
 
 /** Mirrors server/src/schemas/accounting/accountSchema.ts's createAccountSchema. */

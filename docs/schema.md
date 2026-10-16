@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001`–`099`.** Every phase's tables below are marked `— applied` except **Phase 17** (QuickBooks sync), which stays target state — deferred, unbuilt. This line was last correct at `026`; it drifted for a long stretch before an earlier pass caught it — the reminder to re-verify it against `server/src/db/migrations/` on every schema-touching change rather than trusting it by inertia, which is exactly why it's already been re-verified since. `033`–`047` are **retired** (Phase 29, migration `068`) — they stay applied and on disk under rule 13, but the 20 tables they built no longer exist. See [§ Phase 29 — five apps retired](#phase-29--five-apps-retired-platform--applied) below.
+**Applied: `001`–`100`.** Every phase's tables below are marked `— applied` except **Phase 17** (QuickBooks sync), which stays target state — deferred, unbuilt. This line was last correct at `026`; it drifted for a long stretch before an earlier pass caught it — the reminder to re-verify it against `server/src/db/migrations/` on every schema-touching change rather than trusting it by inertia, which is exactly why it's already been re-verified since. `033`–`047` are **retired** (Phase 29, migration `068`) — they stay applied and on disk under rule 13, but the 20 tables they built no longer exist. See [§ Phase 29 — five apps retired](#phase-29--five-apps-retired-platform--applied) below.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -944,6 +944,10 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - `accounts.cash_flow_category` TEXT NULL with **`chk_accounts_cash_flow_category`** (`CASH`/`OPERATING`/`INVESTING`/`FINANCING`, only on `Asset`/`Liability`/`Equity`): an override, `NULL` = derive it. A report attribute, not a sixth account type (rule 12).
 - Backfill: `1590 Accumulated Depreciation` is set to `OPERATING` (a non-cash add-back) where still `NULL`.
 
+**`100_ledger-core_rounding_account.sql`** (Phase 46a)
+- Seeds `6830 Rounding` (Expense, postable, child of `6000`) into every organization that has a `6000` and no `6830` (`INSERT ... SELECT ... ON CONFLICT (org_id, code) DO NOTHING`). `accountService.DEFAULT_CHART` gains the same row.
+- No schema change beyond the seed. `config/systemAccounts.ts` tags it as the `ROUNDING` system role; nothing posts to it automatically yet, because `allocateCents` leaves no residue today.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.
@@ -960,7 +964,7 @@ Exactly five, forever: `Asset`, `Liability`, `Equity`, `Revenue`, `Expense`. Do 
 
 ### Default chart of accounts
 
-**Seeded ✅.** `authService.register` calls `accountService.seedDefaultChart(client, orgId)` inside the transaction that creates the organization — on the checked-out `client`, so a rollback takes the chart with it.
+**Seeded ✅.** `seedDefaultChart` from `organizationService.ts` (`accountService.seedDefaultChart(client, orgId)`) runs inside the transaction that creates the organization — on the checked-out `client`, so a rollback takes the chart with it.
 
 **The backfill is applied ✅.** `003_ledger-core_backfill_chart.sql` seeds every organization that had none, which covers the ones registered during Phases 1–2. It freezes its target list in a temp table before the first insert, because a `NOT EXISTS` predicate repeated per statement would match nothing after the roots were written.
 
@@ -986,14 +990,17 @@ Indentation below is `parent_id`. **H** marks a header account (`is_postable = f
 | 1120 | · · Accounts Receivable | Asset | | 4800 | · Sales Returns & Allowances | Revenue |
 | 1130 | · · Prepaid Expenses | Asset | | 4910 | · Realized FX Gain | Revenue |
 | 1140 | · · Inventory | Asset | | **5000** | Cost of Goods Sold | Expense **H** |
+| 1150 | · · Supplier Prepayments | Asset | | 5050 | · Cost of Sales — Inventory | Expense |
 | 1180 | · · GST/VAT Input Credit | Asset | | 5100 | · Direct Materials | Expense |
 | 1400 | · Non-Current Assets | Asset **H** | | 5200 | · Direct Labor | Expense |
 | 1500 | · · Fixed Assets / Equipment | Asset | | 5300 | · Freight & Duty | Expense |
+|  |  |  |  | 5400 | · Inventory Adjustments & Shrinkage | Expense |
 | 1590 | · · Accumulated Depreciation | Asset | | **6000** | Operating Expenses | Expense **H** |
 | **2000** | Liabilities | Liability **H** | | 6100 | · Salaries & Wages | Expense |
 | 2010 | · Current Liabilities | Liability **H** | | 6110 | · Rent & Utilities | Expense |
 | 2100 | · · Accounts Payable | Liability | | 6120 | · Software & IT Infrastructure | Expense |
 | 2120 | · · Accrued Liabilities | Liability | | 6130 | · Office Supplies | Expense |
+| 2130 | · · Customer Deposits | Liability | |  |  |  |
 | 2140 | · · GST/VAT Output Payable | Liability | | 6140 | · Kitchen & Breakroom | Expense |
 | 2160 | · · Payroll Liabilities | Liability | | 6200 | · Professional Fees | Expense |
 | 2500 | · Non-Current Liabilities | Liability **H** | | 6300 | · Travel & Entertainment | Expense |
@@ -1002,9 +1009,10 @@ Indentation below is `parent_id`. **H** marks a header account (`is_postable = f
 | 3100 | · Common Stock / Owner's Capital | Equity | | 6600 | · Bank Fees | Expense |
 | 3200 | · Retained Earnings | Equity | | 6810 | · Realized FX Loss | Expense |
 | 3300 | · Owner's Draw | Equity | | 6820 | · Unrealized FX Gain/Loss | Expense |
+|  |  |  |  | 6830 | · Rounding | Expense |
 | 3400 | · Opening Balance Equity | Equity | | | | |
 
-**Forty-five accounts: 35 postable leaves and 10 header rollups.** The two counts matter separately — only the 35 can receive a posting, and only they appear on a trial balance. Four groups exist to pay debts forward rather than because Phase 3 needs them, which is deliberate — adding an account to the seed later means writing *another* backfill for every organization created in between:
+**Fifty accounts: 40 postable leaves and 10 header rollups.** The two counts matter separately — only the 40 can receive a posting, and only they appear on a trial balance. Four groups exist to pay debts forward rather than because Phase 3 needs them, which is deliberate — adding an account to the seed later means writing *another* backfill for every organization created in between:
 
 - **`1180` / `2140` (tax)** — AP-Flow splits input tax out of an invoice total into a dedicated account (Phase 11).
 - **`4910` / `6810` / `6820` (FX)** — the multi-currency engine posts realized gain or loss on settlement and unrealized movement at period end (Phase 8).

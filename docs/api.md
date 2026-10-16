@@ -106,7 +106,7 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 
 **`/refresh` is a `POST`, not a `GET`.** It rotates the refresh token, so it is state-changing — and `SameSite=Lax` deliberately still sends cookies on a top-level cross-site *navigation*, which would let a plain link from any site silently rotate a visitor's session and log them out.
 
-**`/register` seeds the chart of accounts** from Phase 3 onward — 44 accounts, inside the same transaction that creates the organization, so a rollback takes them with it ([schema.md](schema.md#default-chart-of-accounts)). It does not log you in: it returns `201` and the client calls `/login` next.
+**`/register` seeds the chart of accounts** from Phase 3 onward — 50 accounts (Phase 46a), inside the same transaction that creates the organization, so a rollback takes them with it ([schema.md](schema.md#default-chart-of-accounts)). It does not log you in: it returns `201` and the client calls `/login` next.
 
 **`/register` and `/login` are rate limited** — 10 failed attempts per 15 minutes per IP, returning `429` in the standard error envelope. Successful logins are not counted, so a shared office NAT cannot lock colleagues out. `/refresh` and `/logout` are deliberately **not** limited: a legitimate client refreshes on a schedule, and the one moment you most want to clear cookies is the moment you must be able to.
 
@@ -421,6 +421,7 @@ Full feature spec and the remaining phases: [accounting.md](accounting.md).
 |---|---|---|---|
 | GET | `/` | any member | The org's chart, ordered by code. `?tree=true` nests by `parentId`; `?includeInactive=true` includes retired accounts |
 | GET | `/balances` | any member | Own and subtree-rollup balance for every account, including headers and inactive accounts. Optional `?asOf=YYYY-MM-DD` |
+| GET | `/system` | `accounts.view` | Phase 46a — one row per system role (16): `200 {success, count, systemAccounts: [{role, label, defaultCode, remappable, accountId, code, name, isActive}]}`. `accountId`/`code`/`name`/`isActive` are `null` when neither the setting nor the default code resolves to an account. Registered before `/:id` |
 | GET | `/:id` | any member | One account |
 | GET | `/:id/ledger` | any member | One postable account's ledger: opening balance, every line with a running balance, period totals, closing balance. `?from=`, `?to=`, `?page=`, `?limit=` |
 | POST | `/` | `OWNER`, `ADMIN`, `ACCOUNTANT` | Create an account |
@@ -436,7 +437,9 @@ Reading the chart is open to any member because a `VIEWER` looking at a report n
 
 Failure paths: `409 Account code already exists` · `422 Parent account not found` (also returned when the parent belongs to another organization — "wrong tenant" and "does not exist" must be indistinguishable) · `422 Parent account must have the same type` · `422 Re-parenting would create a cycle`.
 
-Every new organization is seeded with the [44-account default chart](schema.md#default-chart-of-accounts) — 34 postable leaves and 10 header rollups.
+**System accounts (Phase 46a).** `GET /api/v1/accounts/system` lists the 16 system roles and the account each one currently resolves to. Every account response carries `systemRoles: [{role, label}]`, the system roles the account currently holds (`[]` for an ordinary account). A role is derived from the settings column or the default code, never stored, so it follows a remap. A system account cannot be retired or flagged as a bank or credit card account: `422 <labels> is a system account and cannot be retired` · `422 <labels> is a system account and cannot be a bank or credit card account` (`<labels>` joins the held roles' labels with ` and `). Rename, description, parent and cash flow category stay editable. The settings routes (`PATCH /settings`, `PATCH /settings/invoicing`) refuse a retired account in any account field: `422 Account <code> is retired — activate it before using it here`. See [accounting.md § System accounts](accounting.md#system-accounts-phase-46a).
+
+Every new organization is seeded with the [50-account default chart](schema.md#default-chart-of-accounts) — 40 postable leaves and 10 header rollups.
 
 **`GET /:id/ledger`** (Phase 3.6) — the standard "account detail" view. Balances are type-aware, matching the trial balance's `netBalanceCents`: debit-positive for Asset and Expense, credit-positive otherwise. Rows are oldest-first; `runningBalanceCents` is a window function over the full filtered set, so it continues correctly across pages rather than restarting per page. Every figure is aggregated from raw `ledger_lines` on every request — no summary table. Header accounts are refused: `422 Account <code> is a header account and has no ledger of its own`. Other failure paths: `404 Account not found` · `400 <name> must be a date in YYYY-MM-DD format`.
 

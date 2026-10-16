@@ -610,6 +610,36 @@ Manual journals are Xero-style documents at `/manual-journals` (the all-postings
 - **Import:** `JOURNALS` CSV imports create `IMPORT` manual journals (narrations fill placeholders; `[[Month]]` escapes).
 - `POST /journals/:id/reverse` voids a manual-journal-owned entry and refuses document-owned entries (previously it could reverse an invoice's posting and bypass its void).
 
+### System accounts (Phase 46a) ✅ shipped
+
+Some accounts exist so the system can post to them or reason about them. Each is a **role**, and the account that holds it is shown on the chart as a `System` badge (`Account.systemRoles`).
+
+- **Derived, not stored.** A role's account is its settings column when one is set, else the account with the role's default code. Nothing stores a "this is a system account" flag, so remapping a role in Settings moves it with no data to fix up. The registry is `server/src/config/systemAccounts.ts`; resolution is `systemAccountService.resolveSystemAccountsOnClient`, and a parity test checks it against each posting resolver.
+- **Locked.** A system account cannot be retired or flagged `bankAccountKind`. The settings routes refuse a retired account in any account field. Rename, description, parent and cash flow category stay editable. Settings → Financial shows a **System accounts** panel (`GET /accounts/system`) listing each role, its account and where to change it.
+- **Roles are labels, not account types.** Rule 12 holds: the 16 roles sit over the five types. By default two roles share `3400` (Historical adjustment and Opening stock).
+- **Rounding: seeded, no automatic postings yet.** `6830 Rounding` (Expense, under `6000`) is seeded and tagged `ROUNDING`. `allocateCents` leaves no residue today, so nothing posts to it.
+
+| Role | Label | Default code | Remappable |
+|---|---|---|---|
+| `RECEIVABLE` | Accounts Receivable | 1120 | yes |
+| `PAYABLE` | Accounts Payable | 2100 | no |
+| `TAX_INPUT` | Tax on purchases | 1180 | no |
+| `TAX_OUTPUT` | Tax on sales | 2140 | yes |
+| `RETAINED_EARNINGS` | Retained Earnings | 3200 | no |
+| `OPENING_BALANCE` | Historical adjustment | 3400 | no |
+| `STOCK_OPENING` | Opening stock | 3400 | yes |
+| `REALIZED_FX_GAIN` | Realized currency gains | 4910 | yes |
+| `REALIZED_FX_LOSS` | Realized currency losses | 6810 | yes |
+| `UNREALIZED_FX` | Unrealized currency gains | 6820 | yes |
+| `INVENTORY` | Inventory | 1140 | yes |
+| `COGS` | Cost of sales — inventory | 5050 | yes |
+| `INVENTORY_ADJUSTMENT` | Inventory adjustments | 5400 | yes |
+| `CUSTOMER_DEPOSITS` | Customer deposits | 2130 | yes |
+| `SUPPLIER_PREPAYMENTS` | Supplier prepayments | 1150 | yes |
+| `ROUNDING` | Rounding | 6830 | no |
+
+"Remappable" means a settings page can point the role at another account. `PAYABLE` and `TAX_INPUT` have no API path to remap, so their default codes are fixed in practice.
+
 ### Phase 45 — Reports suite ✅ shipped
 
 Every report is computed from raw ledger lines or document events on each request (no summary table), in base currency, and every one downloads as CSV, XLSX or PDF (`?format=`, see [api.md](api.md)).

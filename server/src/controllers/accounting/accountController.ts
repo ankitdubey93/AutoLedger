@@ -1,6 +1,7 @@
 import type { RequestHandler } from 'express';
 import * as accountService from '../../services/accounting/accountService.js';
 import * as accountLedgerService from '../../services/accounting/accountLedgerService.js';
+import * as systemAccountService from '../../services/accounting/systemAccountService.js';
 import { createAccountSchema, updateAccountSchema } from '../../schemas/accounting/accountSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
@@ -39,6 +40,13 @@ export const list: RequestHandler = async (req, res) => {
     includeInactive: isTrue(req.query.includeInactive),
   });
   res.json({ success: true, count: accounts.length, accounts });
+};
+
+/** GET /accounts/system — Phase 46a. */
+export const listSystem: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const systemAccounts = await systemAccountService.listSystemAccounts(user.orgId);
+  res.json({ success: true, count: systemAccounts.length, systemAccounts });
 };
 
 /** GET /accounts/:id */

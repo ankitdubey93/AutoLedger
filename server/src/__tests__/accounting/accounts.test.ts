@@ -32,8 +32,8 @@ const BASE = '/api/v1/accounts';
  * Phase 42 adds 1150 Supplier Prepayments and 2130 Customer Deposits, both
  * postable leaves: 47 -> 49 total, 37 -> 39 postable.
  */
-const SEEDED_TOTAL = 49;
-const SEEDED_POSTABLE = 39;
+const SEEDED_TOTAL = 50;
+const SEEDED_POSTABLE = 40;
 
 let userA: SeededUser;
 let userB: SeededUser;
@@ -214,7 +214,7 @@ describe('creating and updating accounts', () => {
 
   it('retires an account with isActive rather than deleting it', async () => {
     const agent = await loginAgent(app, userA);
-    const id = await accountId(orgA, '1140');
+    const id = await accountId(orgA, '6100');
 
     const patched = await agent.patch(`${BASE}/${id}`).send({ isActive: false });
     expect(patched.status).toBe(200);

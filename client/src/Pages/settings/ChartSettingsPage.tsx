@@ -17,6 +17,7 @@ import NewAccountForm, {
 } from '../accounting/NewAccountForm';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
+import SystemAccountBadge from '../../components/ui/SystemAccountBadge';
 import LoadingState from '../../components/ui/LoadingState';
 
 /**
@@ -119,6 +120,11 @@ function ChartRow({
         : 'Mark as credit card';
   const showBankToggle = node.isPostable && (node.type === 'Asset' || node.type === 'Liability');
 
+  // Phase 46a — a system account can be renamed but never retired or flagged as a bank account.
+  // Only an ACTIVE system account blocks the Retire button: a legacy retired one must stay reactivatable.
+  const isSystem = (node.systemRoles ?? []).length > 0;
+  const systemLockTitle = 'System accounts cannot be retired or flagged as bank accounts';
+
   // Phase 45 — the cash flow category sits beside the bank toggle, on balance-sheet accounts only.
   async function handleCashFlowChange(value: '' | CashFlowCategory) {
     setBusy(true);
@@ -168,6 +174,7 @@ function ChartRow({
         >
           {node.type}
         </span>
+        <SystemAccountBadge roles={node.systemRoles ?? []} />
 
         {node.bankAccountKind !== null && (
           <span className="text-[11px] px-2 py-0.5 rounded-full ring-1 ring-inset ring-[var(--border)] text-[var(--muted)] shrink-0">
@@ -221,7 +228,8 @@ function ChartRow({
         <button
           type="button"
           onClick={() => void handleToggle()}
-          disabled={busy}
+          disabled={busy || (isSystem && node.isActive)}
+          title={isSystem && node.isActive ? systemLockTitle : undefined}
           className="btn btn--ghost text-xs shrink-0"
         >
           {node.isActive ? 'Retire' : 'Activate'}
@@ -231,7 +239,8 @@ function ChartRow({
           <button
             type="button"
             onClick={() => void handleBankToggle()}
-            disabled={busy}
+            disabled={busy || isSystem}
+            title={isSystem ? systemLockTitle : undefined}
             className="btn btn--ghost text-xs shrink-0"
           >
             {bankToggleLabel}
