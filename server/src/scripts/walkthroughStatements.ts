@@ -5,7 +5,7 @@
  * `walkthrough.test.ts` (which feeds them straight to the real importer,
  * in memory, without depending on the generated folder existing on disk).
  */
-import { WALKTHROUGH_DATASET } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, resolveTokens } from './walkthroughDataset.js';
 import type { ResolvedSettlementLine } from './walkthroughTiers.js';
 import { resolveDate, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
 import { parseMoneyText } from '../utils/money.js';
@@ -71,6 +71,16 @@ export function statement4(anchor: AnchorMonth, lines: ResolvedSettlementLine[])
   return isoStatement(anchor, lines, 4);
 }
 
+/** Statement 5 — Northwind Bank, ISO format again, for month 5. */
+export function statement5(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
+  return isoStatement(anchor, lines, 5);
+}
+
+/** Statement 6 — Meridian Bank, DMY format again, for month 6. */
+export function statement6(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
+  return dmyStatement(anchor, lines, 6);
+}
+
 /** Northwind's format: comma-delimited, ISO dates, one signed Amount column, vendor reference in Reference. */
 function isoStatement(anchor: AnchorMonth, lines: ResolvedSettlementLine[], month: WalkthroughMonth): string {
   const rows = lines.filter((l) => l.month === month).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
@@ -80,7 +90,7 @@ function isoStatement(anchor: AnchorMonth, lines: ResolvedSettlementLine[], mont
   const docByRef = docByRefMap();
   const settlementRows = rows.map((l) => {
     const doc = docByRef.get(l.documentRef);
-    const reference = doc !== undefined && doc.vendorReference !== null && l.lineRef === doc.ref ? doc.vendorReference : '';
+    const reference = doc !== undefined && doc.vendorReference !== null && l.lineRef === doc.ref ? resolveTokens(anchor, doc.vendorReference) : '';
     return { isoDate: l.isoDate, description: l.description, amountCents: l.amountCents, reference };
   });
   const all = [...settlementRows, ...noiseRows].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
@@ -94,10 +104,15 @@ function isoStatement(anchor: AnchorMonth, lines: ResolvedSettlementLine[], mont
 
 /** Statement 2 — Meridian Bank: semicolon-delimited, DMY dates, Debit/Credit pair. */
 export function statement2(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
-  const rows = lines.filter((l) => l.month === 2).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
+  return dmyStatement(anchor, lines, 2);
+}
+
+/** Meridian's format: semicolon-delimited, DMY dates, Debit/Credit pair. */
+function dmyStatement(anchor: AnchorMonth, lines: ResolvedSettlementLine[], month: WalkthroughMonth): string {
+  const rows = lines.filter((l) => l.month === month).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
   const noiseRows = WALKTHROUGH_DATASET.noise
-    .filter((n) => n.month === 2)
-    .map((n) => ({ isoDate: resolveDate(anchor, 2, n.day), description: n.description, amountCents: parseMoneyText(n.amount) }));
+    .filter((n) => n.month === month)
+    .map((n) => ({ isoDate: resolveDate(anchor, month, n.day), description: n.description, amountCents: parseMoneyText(n.amount) }));
   const all = [...rows, ...noiseRows].sort((a, b) => a.isoDate.localeCompare(b.isoDate));
 
   const header = 'Value Date;Narrative;Debit;Credit';
@@ -120,7 +135,7 @@ export function statement3(anchor: AnchorMonth, lines: ResolvedSettlementLine[])
   const docByRef = docByRefMap();
   const settlementRows = rows.map((l) => {
     const doc = docByRef.get(l.documentRef);
-    const checkNo = doc !== undefined && doc.vendorReference !== null && l.lineRef === doc.ref ? doc.vendorReference : '';
+    const checkNo = doc !== undefined && doc.vendorReference !== null && l.lineRef === doc.ref ? resolveTokens(anchor, doc.vendorReference) : '';
     return { isoDate: l.isoDate, description: l.description, amountCents: l.amountCents, checkNo };
   });
   const all = [...settlementRows, ...noiseRows].sort((a, b) => a.isoDate.localeCompare(b.isoDate));

@@ -81,7 +81,7 @@ Open invoice I15 (Product sale — bracket kits, 20 × 600.00, 12,000.00) → **
 
 | | |
 |---|---|
-| **Date** | 2026-09-03 |
+| **Date** | 2026-07-03 |
 | **Reason** | RETURN |
 
 | # | Description | Qty | Unit price | Account |
@@ -98,7 +98,7 @@ Open bill B12 (their no. `INV-IC-9120`, 12,000.00) → **Create debit note**.
 
 | | |
 |---|---|
-| **Date** | 2026-09-05 |
+| **Date** | 2026-07-05 |
 | **Reason** | RETURN |
 | **Vendor's credit note no.** | `IC-CR-0231` |
 
@@ -116,7 +116,7 @@ Open invoice I13 (Fabrication — structural brace set, run 13, 12,100.00) → *
 
 | | |
 |---|---|
-| **Date** | 2026-09-06 |
+| **Date** | 2026-07-06 |
 | **Reason** | PRICE_ADJUSTMENT |
 
 | # | Description | Qty | Unit price | Account |
@@ -125,7 +125,7 @@ Open invoice I13 (Fabrication — structural brace set, run 13, 12,100.00) → *
 
 Replace the lines copied from the original with this one line, **Save**, then **Issue**.
 
-> I13 was already paid in full, so issuing applies **nothing** — the whole 500.00 becomes unapplied credit on Ferrous Works Ltd's account. Then, on the note, **Apply credit** → I16, amount 500.00, date 2026-09-10.
+> I13 was already paid in full, so issuing applies **nothing** — the whole 500.00 becomes unapplied credit on Ferrous Works Ltd's account. Then, on the note, **Apply credit** → I16, amount 500.00, date 2026-07-10.
 
 ## What to check
 

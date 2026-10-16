@@ -1,0 +1,3 @@
+ItemCode,*ItemName,Description,Category,Unit,Barcode,ReorderPoint,SalesUnitPrice,SalesAccount,SalesTaxRate,PurchasesUnitPrice,PurchasesTaxRate,InventoryAssetAccount,CostOfGoodsSoldAccount,OpeningQuantity,OpeningUnitCost,OpeningLocation,OpeningDate
+CAST-6,"Heavy-duty caster, 6 in",Swivel caster with brake,SPR,,,50,95.00,4100,0,42.00,0,1140,5050,,,,
+HFK-12,Hydraulic fitting kit,12-piece fitting kit,SPR,,,40,45.00,4100,0,18.50,0,1140,5050,,,,

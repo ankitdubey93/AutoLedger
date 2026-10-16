@@ -2,7 +2,7 @@
 
 Computed from the same dataset the statements and source documents come from, and verified — in this project's own test suite — against the real AutoLedger reports produced by replaying this exact scenario through the real API. If your numbers disagree with this file, your entries disagree with the scenario, not the other way around.
 
-## Month 1 — as of 2026-06-30
+## Month 1 — as of 2026-04-30
 
 ### Trial balance
 
@@ -42,7 +42,7 @@ Computed from the same dataset the statements and source documents come from, an
 | **Total operating expenses** | **18,263.00** |
 | **Net income** | **47,809.40** |
 
-### Balance sheet — as of 2026-06-30
+### Balance sheet — as of 2026-04-30
 
 | | Amount |
 |---|---|
@@ -90,7 +90,7 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 
 ---
 
-## Month 2 — as of 2026-07-31
+## Month 2 — as of 2026-05-31
 
 ### Trial balance
 
@@ -132,7 +132,7 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 | **Total operating expenses** | **34,701.00** |
 | **Net income** | **69,285.50** |
 
-### Balance sheet — as of 2026-07-31
+### Balance sheet — as of 2026-05-31
 
 | | Amount |
 |---|---|
@@ -180,7 +180,7 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 
 ---
 
-## Month 3 — as of 2026-08-31
+## Month 3 — as of 2026-06-30
 
 ### Trial balance
 
@@ -222,7 +222,7 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 | **Total operating expenses** | **38,219.00** |
 | **Net income** | **98,783.30** |
 
-### Balance sheet — as of 2026-08-31
+### Balance sheet — as of 2026-06-30
 
 | | Amount |
 |---|---|
@@ -270,7 +270,7 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 
 ---
 
-## Month 4 — as of 2026-09-30
+## Month 4 — as of 2026-07-31
 
 ### Trial balance
 
@@ -314,7 +314,7 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 | **Total operating expenses** | **38,257.00** |
 | **Net income** | **104,161.50** |
 
-### Balance sheet — as of 2026-09-30
+### Balance sheet — as of 2026-07-31
 
 | | Amount |
 |---|---|
@@ -359,6 +359,212 @@ Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 | Matched | 39 |
 | Unmatched | 0 |
 | Ignored | 4 |
+
+---
+
+## Month 5 — as of 2026-08-31
+
+### Trial balance
+
+| Account | Debit | Credit |
+|---|---|---|
+| 1110 Operating Cash | 266,615.80 | 98,935.00 |
+| 1120 Accounts Receivable | 193,840.00 | 193,840.00 |
+| 1140 Inventory | 13,950.00 | 3,260.00 |
+| 2100 Accounts Payable | 100,200.00 | 100,200.00 |
+| 2120 Accrued Liabilities |  | 850.00 |
+| 2130 Customer Deposits |  | 4,090.00 |
+| 3100 Common Stock / Owner's Capital |  | 75,000.00 |
+| 4100 Product Revenue |  | 52,100.00 |
+| 4200 Service Revenue |  | 137,650.00 |
+| 4300 Interest Income |  | 75.80 |
+| 4800 Sales Returns & Allowances | 2,300.00 |  |
+| 5050 Cost of Sales — Inventory | 3,260.00 |  |
+| 5100 Direct Materials | 33,650.00 | 1,500.00 |
+| 5300 Freight & Duty | 5,440.00 |  |
+| 6110 Rent & Utilities | 28,150.00 |  |
+| 6120 Software & IT Infrastructure | 6,960.00 |  |
+| 6200 Professional Fees | 8,800.00 |  |
+| 6400 Marketing & Advertising | 4,100.00 |  |
+| 6600 Bank Fees | 235.00 |  |
+| **Total** | **667,500.80** | **667,500.80** |
+
+### Profit & loss (cumulative from month 1)
+
+| | Amount |
+|---|---|
+| 4100 Product Revenue | 52,100.00 |
+| 4200 Service Revenue | 137,650.00 |
+| 4300 Interest Income | 75.80 |
+| 4800 Sales Returns & Allowances | -2,300.00 |
+| **Total revenue** | **187,525.80** |
+| 5050 Cost of Sales — Inventory | 3,260.00 |
+| 5100 Direct Materials | 32,150.00 |
+| 5300 Freight & Duty | 5,440.00 |
+| **Total cost of sales** | **40,850.00** |
+| **Gross profit** | **146,675.80** |
+| 6110 Rent & Utilities | 28,150.00 |
+| 6120 Software & IT Infrastructure | 6,960.00 |
+| 6200 Professional Fees | 8,800.00 |
+| 6400 Marketing & Advertising | 4,100.00 |
+| 6600 Bank Fees | 235.00 |
+| **Total operating expenses** | **48,245.00** |
+| **Net income** | **98,430.80** |
+
+### Balance sheet — as of 2026-08-31
+
+| | Amount |
+|---|---|
+| 1110 Operating Cash | 167,680.80 |
+| 1120 Accounts Receivable | 0.00 |
+| 1140 Inventory | 10,690.00 |
+| **Total assets** | **178,370.80** |
+| 2100 Accounts Payable | 0.00 |
+| 2120 Accrued Liabilities | 850.00 |
+| 2130 Customer Deposits | 4,090.00 |
+| **Total liabilities** | **4,940.00** |
+| 3100 Common Stock / Owner's Capital | 75,000.00 |
+| Retained/current earnings (derived) | 98,430.80 |
+| **Total equity** | **173,430.80** |
+
+Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
+
+### AR aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### AP aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### Bank reconciliation
+
+| | |
+|---|---|
+| GL balance | 167,680.80 |
+| Statement balance | 167,680.80 |
+| **Difference** | **0.00** |
+| Matched | 45 |
+| Unmatched | 0 |
+| Ignored | 5 |
+
+---
+
+## Month 6 — as of 2026-09-30
+
+### Trial balance
+
+| Account | Debit | Credit |
+|---|---|---|
+| 1110 Operating Cash | 272,674.20 | 125,043.00 |
+| 1120 Accounts Receivable | 208,740.00 | 203,970.00 |
+| 1140 Inventory | 13,950.00 | 6,520.00 |
+| 2100 Accounts Payable | 114,870.00 | 114,870.00 |
+| 2120 Accrued Liabilities | 850.00 | 1,700.00 |
+| 2130 Customer Deposits | 4,090.00 | 4,090.00 |
+| 2160 Payroll Liabilities | 11,400.00 | 13,000.00 |
+| 3100 Common Stock / Owner's Capital |  | 75,000.00 |
+| 4100 Product Revenue |  | 59,600.00 |
+| 4200 Service Revenue |  | 145,050.00 |
+| 4300 Interest Income |  | 94.20 |
+| 4800 Sales Returns & Allowances | 2,300.00 |  |
+| 5050 Cost of Sales — Inventory | 6,520.00 |  |
+| 5100 Direct Materials | 33,650.00 | 1,500.00 |
+| 5200 Direct Labor | 9,800.00 |  |
+| 5300 Freight & Duty | 6,680.00 |  |
+| 6100 Salaries & Wages | 3,200.00 |  |
+| 6110 Rent & Utilities | 38,950.00 | 850.00 |
+| 6120 Software & IT Infrastructure | 10,440.00 |  |
+| 6200 Professional Fees | 8,800.00 |  |
+| 6400 Marketing & Advertising | 4,100.00 |  |
+| 6600 Bank Fees | 273.00 |  |
+| **Total** | **751,287.20** | **751,287.20** |
+
+### Profit & loss (cumulative from month 1)
+
+| | Amount |
+|---|---|
+| 4100 Product Revenue | 59,600.00 |
+| 4200 Service Revenue | 145,050.00 |
+| 4300 Interest Income | 94.20 |
+| 4800 Sales Returns & Allowances | -2,300.00 |
+| **Total revenue** | **202,444.20** |
+| 5050 Cost of Sales — Inventory | 6,520.00 |
+| 5100 Direct Materials | 32,150.00 |
+| 5200 Direct Labor | 9,800.00 |
+| 5300 Freight & Duty | 6,680.00 |
+| **Total cost of sales** | **55,150.00** |
+| **Gross profit** | **147,294.20** |
+| 6100 Salaries & Wages | 3,200.00 |
+| 6110 Rent & Utilities | 38,100.00 |
+| 6120 Software & IT Infrastructure | 10,440.00 |
+| 6200 Professional Fees | 8,800.00 |
+| 6400 Marketing & Advertising | 4,100.00 |
+| 6600 Bank Fees | 273.00 |
+| **Total operating expenses** | **64,913.00** |
+| **Net income** | **82,381.20** |
+
+### Balance sheet — as of 2026-09-30
+
+| | Amount |
+|---|---|
+| 1110 Operating Cash | 147,631.20 |
+| 1120 Accounts Receivable | 4,770.00 |
+| 1140 Inventory | 7,430.00 |
+| **Total assets** | **159,831.20** |
+| 2100 Accounts Payable | 0.00 |
+| 2120 Accrued Liabilities | 850.00 |
+| 2130 Customer Deposits | 0.00 |
+| 2160 Payroll Liabilities | 1,600.00 |
+| **Total liabilities** | **2,450.00** |
+| 3100 Common Stock / Owner's Capital | 75,000.00 |
+| Retained/current earnings (derived) | 82,381.20 |
+| **Total equity** | **157,381.20** |
+
+Assets 159,831.20 = Liabilities 2,450.00 + Equity 157,381.20
+
+### AR aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 4,770.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### AP aging
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### Bank reconciliation
+
+| | |
+|---|---|
+| GL balance | 147,631.20 |
+| Statement balance | 147,631.20 |
+| **Difference** | **0.00** |
+| Matched | 54 |
+| Unmatched | 0 |
+| Ignored | 6 |
 
 ---
 

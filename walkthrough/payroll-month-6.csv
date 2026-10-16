@@ -1,0 +1,4 @@
+JournalNumber,*Date,*Narration,*AccountCode,Debit,Credit
+PR-M6,2026-09-25,Payroll — September 2026,5200,9800.00,
+PR-M6,2026-09-25,Payroll — September 2026,6100,3200.00,
+PR-M6,2026-09-25,Payroll — September 2026,2160,,13000.00

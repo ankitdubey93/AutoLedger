@@ -1,0 +1,3 @@
+*ItemCode,*ItemName,Type,Description,SalesUnitPrice,SalesAccount,SalesTaxRate,PurchasesUnitPrice,PurchasesAccount,PurchasesTaxRate
+SVC-FAB,Fabrication labour (per hour),Service,Shop-floor fabrication labour,85.00,4200,0,,,
+SVC-DES,Design & drafting (per hour),Service,CAD design and drafting,110.00,4200,0,,,

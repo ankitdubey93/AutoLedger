@@ -14,6 +14,10 @@
  *   - a money-out journal:    DR <chosen account>   / CR 1110 (Cash)
  *   - issuing a credit note:  DR <revenue account, 4800> / CR 1120 (AR), at the note total (Phase 26)
  *   - issuing a debit note:   DR 2100 (AP)          / CR <expense account>, at the note total (Phase 26)
+ *   - an invoice line for a stock item: also DR 5050 (COGS) / CR 1140 (Inventory) at moving-average cost (Phase 32)
+ *   - a bill line for a stock item: DR 1140 (Inventory) — the line's own account — / CR 2100
+ *   - a deposit applied:      DR 2130 (Customer Deposits) / CR 1120 (AR) (Phase 42/43)
+ *   - a journal:              each line as given; a repeating one once per month, with an optional day-1 reversal
  *   - applying a note:        no journal entry at all — it only matches two
  *                             open items inside the same control account
  *
@@ -25,23 +29,30 @@
  * for cent — this file is an answer key that has been checked, not merely
  * asserted.
  */
-import { WALKTHROUGH_DATASET } from './walkthroughDataset.js';
-import { noteAppliedCents, resolveSettlementLines } from './walkthroughTiers.js';
+import { WALKTHROUGH_DATASET, documentLines, type DatasetDocument } from './walkthroughDataset.js';
+import { depositAppliedCents, noteAppliedCents, resolveSettlementLines } from './walkthroughTiers.js';
 import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
-import { lastDayOfWalkthroughMonth, resolveDate } from './walkthroughDates.js';
+import { WALKTHROUGH_MONTHS, lastDayOfWalkthroughMonth, resolveDate } from './walkthroughDates.js';
 import { parseMoneyText } from '../utils/money.js';
 
 const ACCOUNT_NAMES: Record<string, string> = {
   '1110': 'Operating Cash',
   '1120': 'Accounts Receivable',
+  '1140': 'Inventory',
   '2100': 'Accounts Payable',
+  '2120': 'Accrued Liabilities',
+  '2130': 'Customer Deposits',
+  '2160': 'Payroll Liabilities',
   '3100': "Common Stock / Owner's Capital",
   '4100': 'Product Revenue',
   '4200': 'Service Revenue',
   '4300': 'Interest Income',
   '4800': 'Sales Returns & Allowances',
+  '5050': 'Cost of Sales — Inventory',
   '5100': 'Direct Materials',
+  '5200': 'Direct Labor',
   '5300': 'Freight & Duty',
+  '6100': 'Salaries & Wages',
   '6110': 'Rent & Utilities',
   '6120': 'Software & IT Infrastructure',
   '6200': 'Professional Fees',
@@ -57,24 +68,69 @@ function accountName(code: string): string {
 
 /** One simulated ledger_lines row: exactly one side populated, matching guardrails rule 7. */
 interface SimLine {
-  month: WalkthroughMonth;
+  /** 7 = the month after the scenario (an auto-reversal); never inside a report. */
+  month: WalkthroughMonth | 7;
   code: string;
   debitCents: number;
   creditCents: number;
 }
 
+/** qty × unit price in whole cents; the dataset is chosen so the product is always exact. */
+function lineCents(quantity: string, unitAmount: string): number {
+  return Math.round(Number(quantity) * parseMoneyText(unitAmount));
+}
+
 function buildLedgerLines(): SimLine[] {
   const lines: SimLine[] = [];
+  const stockItems = new Map(WALKTHROUGH_DATASET.stockItems.map((i) => [i.code, i]));
 
   for (const doc of WALKTHROUGH_DATASET.invoices) {
     const totalCents = parseMoneyText(doc.total);
     lines.push({ month: doc.month, code: '1120', debitCents: totalCents, creditCents: 0 });
-    lines.push({ month: doc.month, code: doc.accountCode, debitCents: 0, creditCents: totalCents });
+    for (const line of documentLines(doc)) {
+      lines.push({ month: doc.month, code: line.accountCode, debitCents: 0, creditCents: lineCents(line.quantity, line.unitPrice) });
+      // An invoice line for a stock item also relieves inventory at moving-average cost.
+      const stock = line.itemCode === null ? undefined : stockItems.get(line.itemCode);
+      if (stock !== undefined) {
+        const costCents = lineCents(line.quantity, stock.unitCost);
+        lines.push({ month: doc.month, code: stock.cogsAccount, debitCents: costCents, creditCents: 0 });
+        lines.push({ month: doc.month, code: stock.assetAccount, debitCents: 0, creditCents: costCents });
+      }
+    }
   }
   for (const doc of WALKTHROUGH_DATASET.bills) {
     const totalCents = parseMoneyText(doc.total);
-    lines.push({ month: doc.month, code: doc.accountCode, debitCents: totalCents, creditCents: 0 });
+    for (const line of documentLines(doc)) {
+      lines.push({ month: doc.month, code: line.accountCode, debitCents: lineCents(line.quantity, line.unitPrice), creditCents: 0 });
+    }
     lines.push({ month: doc.month, code: '2100', debitCents: 0, creditCents: totalCents });
+  }
+  for (const application of WALKTHROUGH_DATASET.depositApplications) {
+    const target = WALKTHROUGH_DATASET.invoices.find((d) => d.ref === application.documentRef);
+    if (target === undefined) throw new Error(`walkthrough fixture: no document ${application.documentRef}`);
+    const amountCents = parseMoneyText(application.amount);
+    lines.push({ month: target.month, code: '2130', debitCents: amountCents, creditCents: 0 });
+    lines.push({ month: target.month, code: '1120', debitCents: 0, creditCents: amountCents });
+  }
+  for (const journal of WALKTHROUGH_DATASET.journals) {
+    const lastMonth = journal.repeat === null ? journal.month : journal.repeat.endMonth;
+    for (let m = journal.month; m <= lastMonth; m++) {
+      const month = m as WalkthroughMonth;
+      for (const line of journal.lines) {
+        lines.push({ month, code: line.accountCode, debitCents: parseMoneyText(line.debit), creditCents: parseMoneyText(line.credit) });
+      }
+      if (journal.repeat?.autoReverse === true) {
+        // The mirror lands on day 1 of the following month (month 7 falls outside every report).
+        for (const line of journal.lines) {
+          lines.push({
+            month: (month + 1) as WalkthroughMonth | 7,
+            code: line.accountCode,
+            debitCents: parseMoneyText(line.credit),
+            creditCents: parseMoneyText(line.debit),
+          });
+        }
+      }
+    }
   }
   for (const settlement of resolveSettlementLines({ year: 2000, month: 1 })) {
     // The settlement's own accounting month, not calendar date, drives which
@@ -212,6 +268,12 @@ function shiftIso(iso: string, days: number): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
+/** A document's due date: its explicit `dueDate` when set, otherwise its own date plus `dueDays`. */
+function documentDueDate(anchor: AnchorMonth, doc: DatasetDocument): string {
+  if (doc.dueDate !== undefined) return resolveDate(anchor, doc.dueDate.month, doc.dueDate.day);
+  return resolveDate(anchor, doc.month, doc.day + doc.dueDays);
+}
+
 function emptyAgingBuckets(): ExpectedAgingBucket[] {
   return (Object.keys(AGING_BUCKET_LABELS) as (keyof typeof AGING_BUCKET_LABELS)[]).map((bucket) => ({
     bucket,
@@ -223,9 +285,7 @@ function emptyAgingBuckets(): ExpectedAgingBucket[] {
 export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
   const allLines = buildLedgerLines();
   const settlements = resolveSettlementLines(anchor);
-  const months: WalkthroughMonth[] = [1, 2, 3, 4];
-
-  return months.map((month): ExpectedMonth => {
+  return WALKTHROUGH_MONTHS.map((month): ExpectedMonth => {
     const asOf = lastDayOfWalkthroughMonth(anchor, month);
     const linesThroughMonth = allLines.filter((l) => l.month <= month);
 
@@ -247,8 +307,8 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     // 4800 is a Revenue account carrying a debit balance (sales returns), so
     // it lands here as a negative revenue row.
     const revenueCodes = ['4100', '4200', '4300', '4800'];
-    const costOfSalesCodes = ['5100', '5300'];
-    const opexCodes = ['6110', '6120', '6200', '6400', '6600'];
+    const costOfSalesCodes = ['5050', '5100', '5200', '5300'];
+    const opexCodes = ['6100', '6110', '6120', '6200', '6400', '6600'];
 
     function netBalance(code: string, creditNormal: boolean): number {
       const sums = byAccount.get(code) ?? { debitCents: 0, creditCents: 0 };
@@ -271,8 +331,8 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     const netIncomeCents = grossProfitCents - operatingExpensesTotalCents;
 
     // ---- Balance sheet ----
-    const assetCodes = ['1110', '1120'];
-    const liabilityCodes = ['2100'];
+    const assetCodes = ['1110', '1120', '1140'];
+    const liabilityCodes = ['2100', '2120', '2130', '2160'];
     const equityCodes = ['3100'];
     const assetsRows = rowsFor(assetCodes, false);
     const liabilitiesRows = rowsFor(liabilityCodes, true);
@@ -290,7 +350,7 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
       const settledCents = settlements
         .filter((s) => s.documentRef === ref && s.month <= month)
         .reduce((sum, s) => sum + Math.abs(s.amountCents), 0);
-      return totalCents - settledCents - noteAppliedCents(ref, month);
+      return totalCents - settledCents - noteAppliedCents(ref, month) - depositAppliedCents(ref, month);
     }
 
     const arBuckets = emptyAgingBuckets();
@@ -298,7 +358,7 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
       if (doc.month > month) continue;
       const outstanding = outstandingCents(doc.ref, doc.total);
       if (outstanding <= 0) continue;
-      const dueDate = resolveDate(anchor, doc.month, doc.day + doc.dueDays);
+      const dueDate = documentDueDate(anchor, doc);
       const bucket = agingBucket(dueDate, asOf);
       const entry = arBuckets.find((b) => b.bucket === bucket);
       if (entry !== undefined) entry.amountCents += outstanding;
@@ -309,7 +369,7 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
       if (doc.month > month) continue;
       const outstanding = outstandingCents(doc.ref, doc.total);
       if (outstanding <= 0) continue;
-      const dueDate = resolveDate(anchor, doc.month, doc.day + doc.dueDays);
+      const dueDate = documentDueDate(anchor, doc);
       const bucket = agingBucket(dueDate, asOf);
       const entry = apBuckets.find((b) => b.bucket === bucket);
       if (entry !== undefined) entry.amountCents += outstanding;
@@ -340,7 +400,8 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     // A bank line reaches status = 'MATCHED' whether it settled by matching a
     // document (a payment) or by a direct journal posting (Phase 6.1) — the
     // reconciliation report's matchedCount counts both alike, so this must too.
-    const journaledNoiseCount = noiseThroughMonth.filter((n) => n.resolution.kind === 'POST_JOURNAL').length;
+    // (A bank rule's posting is the same journal shape — the Phase 34 path.)
+    const journaledNoiseCount = noiseThroughMonth.filter((n) => n.resolution.kind !== 'IGNORE').length;
     const matchedCount = settledThroughMonth.length + journaledNoiseCount;
     const ignoredCount = noiseThroughMonth.filter((n) => n.resolution.kind === 'IGNORE').length;
 

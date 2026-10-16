@@ -11,8 +11,18 @@
  * inconsistent across engines and never fails cleanly).
  */
 
-/** Months of the walkthrough, relative to the anchor. Month 4 (Phase 26) is "Returns & adjustments". */
-export type WalkthroughMonth = 1 | 2 | 3 | 4;
+/**
+ * Months of the walkthrough, relative to the anchor. Month 4 (Phase 26) is "Returns & adjustments".
+ * Month 5: products, stock & orders; month 6: closing the quarter.
+ */
+export type WalkthroughMonth = 1 | 2 | 3 | 4 | 5 | 6;
+
+export const WALKTHROUGH_MONTHS: readonly WalkthroughMonth[] = [1, 2, 3, 4, 5, 6];
+
+const MONTH_NAMES = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+] as const;
 
 export interface AnchorMonth {
   year: number;
@@ -35,10 +45,10 @@ export function parseAnchor(raw: string): AnchorMonth {
   return { year, month };
 }
 
-/** Four months back from today, 1st of the month — the no-argument default. */
+/** Six months back from today, 1st of the month — the no-argument default. */
 export function defaultAnchor(): AnchorMonth {
   const now = new Date();
-  const totalMonths = now.getUTCFullYear() * 12 + now.getUTCMonth() - 4;
+  const totalMonths = now.getUTCFullYear() * 12 + now.getUTCMonth() - 6;
   return { year: Math.floor(totalMonths / 12), month: (totalMonths % 12) + 1 };
 }
 
@@ -46,8 +56,8 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-/** `walkthroughMonth` 1–4 relative to the anchor; `day` 1-28. Returns 'YYYY-MM-DD'. */
-export function resolveDate(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth, day: number): string {
+/** `walkthroughMonth` 1–6 (7 only for the auto-reversal after the scenario); `day` 1-28. Returns 'YYYY-MM-DD'. */
+export function resolveDate(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth | 7, day: number): string {
   if (day < 1 || day > 28) throw new Error(`walkthrough date day out of range: ${String(day)}`);
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (walkthroughMonth - 1);
   const year = Math.floor(totalMonths / 12);
@@ -56,7 +66,7 @@ export function resolveDate(anchor: AnchorMonth, walkthroughMonth: WalkthroughMo
 }
 
 /** The last calendar day of a walkthrough month, as 'YYYY-MM-DD'. */
-export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth): string {
+export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth | 7): string {
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (walkthroughMonth - 1);
   const year = Math.floor(totalMonths / 12);
   const month = (totalMonths % 12) + 1;
@@ -64,6 +74,18 @@ export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth:
   // same trick utils/dateParse.ts's daysInMonth uses.
   const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
   return `${String(year)}-${pad2(month)}-${pad2(lastDay)}`;
+}
+
+/** English month name of a walkthrough month. */
+export function monthName(anchor: AnchorMonth, m: WalkthroughMonth | 7): string {
+  const totalMonths = anchor.year * 12 + (anchor.month - 1) + (m - 1);
+  return MONTH_NAMES[totalMonths % 12] ?? '';
+}
+
+/** Calendar year of a walkthrough month. */
+export function calendarYear(anchor: AnchorMonth, m: WalkthroughMonth | 7): number {
+  const totalMonths = anchor.year * 12 + (anchor.month - 1) + (m - 1);
+  return Math.floor(totalMonths / 12);
 }
 
 /** Shifts an ISO date ('YYYY-MM-DD') by a signed number of whole days. */

@@ -6,19 +6,26 @@ import { parseCsv } from '../../utils/csv.js';
 import { parseMoneyText } from '../../utils/money.js';
 import { parseFlexibleDate } from '../../utils/dateParse.js';
 import { scoreMatch } from '../../utils/matchScore.js';
-import { WALKTHROUGH_DATASET, type DatasetDocument } from '../../scripts/walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, documentLines, type DatasetDocument } from '../../scripts/walkthroughDataset.js';
 import { createWalkthroughReplay, type ReplayClient, type WalkthroughReplay } from '../../scripts/walkthroughReplay.js';
 import { resolveSettlementLines, verifyExpectedScores } from '../../scripts/walkthroughTiers.js';
 import { computeExpectedResults } from '../../scripts/walkthroughExpected.js';
-import { statement1, statement2, statement3 } from '../../scripts/walkthroughStatements.js';
-import { resolveDate, type AnchorMonth } from '../../scripts/walkthroughDates.js';
+import { statement1, statement2, statement3, statement5, statement6 } from '../../scripts/walkthroughStatements.js';
+import { accountsCsv, billsCsv, invoicesCsv, payrollJournalCsv, productsCsv, stockItemsCsv } from '../../scripts/walkthroughCsv.js';
+import {
+  WALKTHROUGH_MONTHS,
+  lastDayOfWalkthroughMonth,
+  monthName,
+  resolveDate,
+  type AnchorMonth,
+} from '../../scripts/walkthroughDates.js';
 
 /**
  * The walkthrough scenario (Phase 6.1), Harbor Point Fabrication.
  *
  * The critical case here is the end-to-end replay: the same dataset that
  * drives `07-expected-results.md` is replayed through the real HTTP API —
- * customers, vendors, bills, invoices, four bank statement imports, the
+ * customers, vendors, bills, invoices, six bank statement imports, the
  * match/post-journal/ignore resolutions, and (Phase 26, month 4) credit and
  * debit notes issued and applied — and the *real* reports
  * are asserted to equal `computeExpectedResults`'s output, cent for cent.
@@ -27,7 +34,9 @@ import { resolveDate, type AnchorMonth } from '../../scripts/walkthroughDates.js
  */
 
 const app = createApp();
-const ANCHOR: AnchorMonth = { year: 2026, month: 6 };
+// April 2026 start: the recurring schedules and the auto-reversing accrual only
+// generate occurrences dated on or before today, so every scenario date must be past.
+const ANCHOR: AnchorMonth = { year: 2026, month: 4 };
 
 const CUSTOMERS = '/api/v1/customers';
 const BANK_TRANSACTIONS = '/api/v1/bank-transactions';
@@ -73,7 +82,7 @@ describe('walkthrough dataset — internal checks', () => {
 
   it('every month is internally balanced: trial balance, balance sheet and reconciliation', () => {
     const months = computeExpectedResults(ANCHOR);
-    expect(months).toHaveLength(4);
+    expect(months).toHaveLength(6);
     for (const m of months) {
       expect(m.trialBalance.isBalanced).toBe(true);
       expect(m.balanceSheet.balances).toBe(true);
@@ -102,6 +111,37 @@ describe('walkthrough dataset — internal checks', () => {
       const applied = note.allocations.reduce((sum, a) => sum + parseMoneyText(a.amount), 0);
       expect(applied).toBeLessThanOrEqual(parseMoneyText(note.total));
     }
+  });
+
+  it("every multi-line document's lines sum to its total", () => {
+    for (const doc of [...WALKTHROUGH_DATASET.invoices, ...WALKTHROUGH_DATASET.bills]) {
+      if (doc.entry === 'DEPOSIT') continue;
+      const sum = documentLines(doc).reduce((acc, l) => acc + Math.round(Number(l.quantity) * parseMoneyText(l.unitPrice)), 0);
+      expect(sum, doc.ref).toBe(parseMoneyText(doc.total));
+    }
+  });
+
+  it('every product and stock item is sold at least once', () => {
+    const sold = new Set(
+      WALKTHROUGH_DATASET.invoices.flatMap((i) => documentLines(i).map((l) => l.itemCode)).filter((c) => c !== null),
+    );
+    for (const p of WALKTHROUGH_DATASET.products) expect(sold.has(p.code), p.code).toBe(true);
+    for (const s of WALKTHROUGH_DATASET.stockItems) expect(sold.has(s.code), s.code).toBe(true);
+  });
+
+  it("month 6 matches the plan's hand-checked balances", () => {
+    const month6 = computeExpectedResults(ANCHOR).find((m) => m.month === 6);
+    if (month6 === undefined) throw new Error('no month 6');
+    const bs = (code: string) =>
+      [...month6.balanceSheet.assets, ...month6.balanceSheet.liabilities].find((r) => r.code === code)?.amountCents ?? 0;
+    expect(bs('1140')).toBe(743000);
+    expect(bs('2130')).toBe(0);
+    expect(bs('2120')).toBe(85000);
+    expect(bs('2160')).toBe(160000);
+    expect(bs('1120')).toBe(477000);
+    expect(month6.apAging.reduce((sum, b) => sum + b.amountCents, 0)).toBe(0);
+    expect(month6.arAging.find((b) => b.bucket === 'CURRENT')?.amountCents).toBe(477000);
+    expect(month6.profitAndLoss.costOfSales.find((r) => r.code === '5050')?.amountCents).toBe(652000);
   });
 
   it('regenerating the answer key with the same anchor is deterministic', () => {
@@ -161,6 +201,40 @@ describe('walkthrough statements — parse with the real CSV/date/money utilitie
   });
 });
 
+describe('walkthrough statements 5 and 6 and the import CSVs', () => {
+  const resolved = resolveSettlementLines(ANCHOR);
+
+  it('statements 5 and 6 parse with the real utilities (ISO and DMY)', () => {
+    const five = parseCsv(statement5(ANCHOR, resolved));
+    expect(five.rows.length).toBeGreaterThan(0);
+    const fiveDate = five.headers.findIndex((h) => h.toLowerCase().includes('date'));
+    const fiveAmount = five.headers.findIndex((h) => h.toLowerCase().includes('amount'));
+    for (const row of five.rows) {
+      expect(parseFlexibleDate(row[fiveDate] ?? '', 'ISO')).not.toBeNull();
+      expect(() => parseMoneyText(row[fiveAmount] ?? '')).not.toThrow();
+    }
+    const six = parseCsv(statement6(ANCHOR, resolved));
+    expect(six.rows.length).toBeGreaterThan(0);
+    const sixDate = six.headers.findIndex((h) => h.toLowerCase().includes('date'));
+    for (const row of six.rows) expect(parseFlexibleDate(row[sixDate] ?? '', 'DMY')).not.toBeNull();
+  });
+
+  it('the import CSVs parse with parseCsv and carry the template headers', () => {
+    const headers = (csv: string) => parseCsv(csv).headers;
+    expect(headers(accountsCsv())).toEqual(['*Code', '*Name', '*Type', 'Parent', 'Description']);
+    expect(headers(productsCsv()).filter((h) => h.startsWith('*'))).toEqual(['*ItemCode', '*ItemName']);
+    expect(headers(stockItemsCsv()).filter((h) => h.startsWith('*'))).toEqual(['*ItemName']);
+    expect(headers(invoicesCsv(ANCHOR, 6)).filter((h) => h.startsWith('*'))).toEqual(['*ContactName', '*InvoiceDate', '*Description']);
+    expect(headers(billsCsv(ANCHOR, 6)).filter((h) => h.startsWith('*'))).toEqual([
+      '*ContactName', '*InvoiceNumber', '*InvoiceDate', '*Description',
+    ]);
+    expect(headers(payrollJournalCsv(ANCHOR)).filter((h) => h.startsWith('*'))).toEqual(['*Date', '*Narration', '*AccountCode']);
+    expect(parseCsv(billsCsv(ANCHOR, 6)).rows).toHaveLength(3);
+    expect(parseCsv(invoicesCsv(ANCHOR, 6)).rows).toHaveLength(2);
+    expect(parseCsv(payrollJournalCsv(ANCHOR)).rows).toHaveLength(3);
+  });
+});
+
 // -------------------------------------------------------------- end-to-end
 
 let replay: WalkthroughReplay;
@@ -184,13 +258,14 @@ beforeEach(async () => {
 afterAll(closePool);
 
 describe('walkthrough — end-to-end replay through the real API', () => {
-  it('reproduces the computed answer key for all four months, cent for cent', async () => {
-    await replay.createInterestAccount();
+  it('reproduces the computed answer key for all six months, cent for cent', async () => {
+    await replay.completeSetup('Harbor Point Fabrication');
+    await replay.importAccounts();
     await replay.createVendorsAndCustomers();
 
     const expected = computeExpectedResults(ANCHOR);
 
-    for (const month of [1, 2, 3, 4] as const) {
+    for (const month of WALKTHROUGH_MONTHS) {
       await replay.replayMonth(month, {
         afterNoteIssued: async (note) => {
           if (note.ref !== 'CN2') return;
@@ -237,6 +312,7 @@ describe('walkthrough — end-to-end replay through the real API', () => {
       expect(plRes.status).toBe(200);
       expect(plRes.body.netIncomeCents).toBe(monthExpected.profitAndLoss.netIncomeCents);
       expect(plRes.body.grossProfitCents).toBe(monthExpected.profitAndLoss.grossProfitCents);
+      expect(plRes.body.costOfSales.totalCents).toBe(monthExpected.profitAndLoss.costOfSalesTotalCents);
       expect(plRes.body.revenue.totalCents).toBe(monthExpected.profitAndLoss.revenueTotalCents);
       expect(plRes.body.operatingExpenses.totalCents).toBe(monthExpected.profitAndLoss.operatingExpensesTotalCents);
 
@@ -273,17 +349,49 @@ describe('walkthrough — end-to-end replay through the real API', () => {
       expect(brRes.body.matchedCount).toBe(monthExpected.bankReconciliation.matchedCount);
       expect(brRes.body.unmatchedCount).toBe(0);
       expect(brRes.body.ignoredCount).toBe(monthExpected.bankReconciliation.ignoredCount);
+
+      if (month === 5) {
+        // Months 1-4 are now closed: a late adjustment into one of them is refused.
+        const late = await agent.post('/api/v1/manual-journals').send({
+          narration: 'Late adjustment',
+          entryDate: resolveDate(ANCHOR, 4, 15),
+          lines: [
+            { accountId: await replay.accountId('6600'), debitCents: 1000, creditCents: 0 },
+            { accountId: await replay.accountId('3100'), debitCents: 0, creditCents: 1000 },
+          ],
+          action: 'post',
+        });
+        expect(late.status, late.text).toBe(422);
+      }
     }
+
+    // ---- month 6 checkpoints the tutorial points at ----
+    const lastDay = lastDayOfWalkthroughMonth(ANCHOR, 6);
+    const valuation = await agent.get(`/api/v1/inventory/valuation?asOf=${lastDay}`);
+    expect(valuation.status, valuation.text).toBe(200);
+    expect(valuation.body.valuation.tiesOut).toBe(true);
+    const inventoryRow = (valuation.body.valuation.accounts as Array<{ code: string; glCents: number }>).find((a) => a.code === '1140');
+    expect(inventoryRow?.glCents).toBe(743000);
+
+    const kestrelId = replay.customerId('kestrel-logistics');
+    const statementRes = await agent.get(`/api/v1/statements/customers/${kestrelId}?type=OUTSTANDING&asOf=${lastDay}`);
+    expect(statementRes.status, statementRes.text).toBe(200);
+    expect(statementRes.body.statement.outstandingCents).toBe(477000);
+
+    const rentBill = await agent.get(`/api/v1/bills/${replay.documentId('B15')}`);
+    expect(rentBill.status, rentBill.text).toBe(200);
+    expect(rentBill.body.bill.lines[0].description).toBe(`Shop rent — ${monthName(ANCHOR, 6)}`);
 
     // Every bank line, across all four months, ends up MATCHED or IGNORED —
     // never left UNMATCHED, and every document was entered.
     const cashAccountId = await replay.accountId('1110');
     const unmatchedRes = await agent.get(`${BANK_TRANSACTIONS}?accountId=${cashAccountId}&status=UNMATCHED&limit=100`);
     expect(unmatchedRes.body.transactions).toEqual([]);
-  }, 120_000);
+  }, 240_000);
 
   it("org B cannot see or match into org A's walkthrough bank lines (cross-tenant isolation)", async () => {
-    await replay.createInterestAccount();
+    await replay.completeSetup('Harbor Point Fabrication');
+    await replay.importAccounts();
     await replay.createVendorsAndCustomers();
     await replay.enterBill(WALKTHROUGH_DATASET.bills[0] as DatasetDocument);
     await replay.importStatement(1);

@@ -1,7 +1,7 @@
-import type { WalkthroughMonth } from './walkthroughDates.js';
+import { calendarYear, monthName, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
 
 /**
- * The source-of-truth data for `walkthrough/` — a hand-enterable, four-month
+ * The source-of-truth data for `walkthrough/` — a hand-enterable, six-month
  * accounting scenario for one fictional business, Harbor Point Fabrication.
  * Months 1–3 are ordinary trading; month 4 (Phase 26) is "Returns &
  * adjustments" — a sales return (credit note), a supplier return (debit
@@ -29,7 +29,89 @@ export type Tier =
   | 'REVIEW_LATE'
   | 'REVIEW_ANON'
   | 'REVIEW_PARTIAL'
-  | 'REVIEW_REMAINDER';
+  | 'REVIEW_REMAINDER'
+  /** Never paid inside the scenario — no settlement line. */
+  | 'OPEN';
+
+/** How a document reaches the books in the replay. Absent on a document = 'MANUAL'. */
+export type DocumentEntry = 'MANUAL' | 'IMPORT' | 'ORDER' | 'RECURRING' | 'DEPOSIT';
+
+export interface DatasetLine {
+  /** A Products & Services / stock item code, or null for a free-text line. */
+  itemCode: string | null;
+  description: string;
+  /** Decimal string, e.g. "200". */
+  quantity: string;
+  /** Decimal string, e.g. "42.00". */
+  unitPrice: string;
+  accountCode: string;
+}
+
+export interface DatasetProduct {
+  code: string;
+  name: string;
+  type: 'SERVICE';
+  description: string;
+  salePrice: string;
+  accountCode: string;
+}
+
+export interface DatasetStockItem {
+  code: string;
+  name: string;
+  description: string;
+  category: 'SPR';
+  reorderPoint: number;
+  salePrice: string;
+  purchasePrice: string;
+  /** The single receipt's unit cost — the moving average the simulator uses. */
+  unitCost: string;
+  revenueAccount: '4100';
+  assetAccount: '1140';
+  cogsAccount: '5050';
+}
+
+export interface DatasetOrder {
+  ref: string;
+  direction: 'PURCHASE' | 'SALES';
+  counterpartyKey: string;
+  month: WalkthroughMonth;
+  day: number;
+  /** A sales order raised from a quote: the quote's label and day. */
+  quoteRef: string | null;
+  quoteDay: number | null;
+  lines: DatasetLine[];
+}
+
+export interface DatasetJournal {
+  ref: string;
+  entry: 'REPEATING' | 'IMPORT';
+  narration: string;
+  month: WalkthroughMonth;
+  day: number;
+  lines: { accountCode: string; description: string | null; debit: string; credit: string }[];
+  repeat: { endMonth: WalkthroughMonth; endDay: number; autoReverse: boolean } | null;
+}
+
+export interface DatasetBankRule {
+  name: string;
+  priority: number;
+  direction: 'IN' | 'OUT';
+  memoContains: string;
+  amountMinCents: number | null;
+  amountMaxCents: number | null;
+  bankAccountCode: string;
+  targetAccountCode: string;
+  description: string;
+}
+
+export interface DatasetDepositApplication {
+  depositRef: string;
+  documentRef: string;
+  day: number;
+  /** Decimal string; lands in the month of `documentRef`. */
+  amount: string;
+}
 
 export interface DatasetVendor {
   key: string;
@@ -70,6 +152,16 @@ export interface DatasetDocument {
   anonMemo: string | null;
   /** Set only on the REVIEW_PARTIAL document — where its REVIEW_REMAINDER line lands. */
   remainder: { month: WalkthroughMonth; day: number } | null;
+  /** Multi-line documents only; otherwise one line is synthesised (see `documentLines`). */
+  lines?: DatasetLine[];
+  /** Absent = 'MANUAL'. */
+  entry?: DocumentEntry;
+  /** Absent = same day as the document. `month` 7 = the month after the scenario. */
+  dueDate?: { month: WalkthroughMonth | 7; day: number };
+  /** The order a document is raised from (`ORDER`, `DEPOSIT`). */
+  orderRef?: string;
+  /** Order lines billed by this document; null = the remainder. */
+  orderLines?: { itemCode: string; quantity: string }[] | null;
 }
 
 export interface DatasetNoiseLine {
@@ -78,7 +170,10 @@ export interface DatasetNoiseLine {
   description: string;
   /** Decimal string, signed: "75000.00" or "-45.00". */
   amount: string;
-  resolution: { kind: 'POST_JOURNAL'; accountCode: string } | { kind: 'IGNORE' };
+  resolution:
+    | { kind: 'POST_JOURNAL'; accountCode: string }
+    | { kind: 'RULE'; accountCode: string }
+    | { kind: 'IGNORE' };
 }
 
 export interface DatasetNoteAllocation {
@@ -124,6 +219,14 @@ export interface WalkthroughDataset {
   bills: DatasetDocument[];
   noise: DatasetNoiseLine[];
   notes: DatasetNote[];
+  products: DatasetProduct[];
+  stockItems: DatasetStockItem[];
+  orders: DatasetOrder[];
+  journals: DatasetJournal[];
+  bankRules: DatasetBankRule[];
+  extraVendors: DatasetVendor[];
+  depositApplications: DatasetDepositApplication[];
+  periodCloses: { afterMonth: WalkthroughMonth; closeMonths: WalkthroughMonth[] }[];
 }
 
 export const WALKTHROUGH_DATASET: WalkthroughDataset = {
@@ -328,18 +431,68 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       accountCode: '4200', lineDescription: 'Fabrication — conveyor guard panels, run 16',
       total: '6200.00', vendorReference: null, tier: 'AUTO_2', anonMemo: null, remainder: null,
     },
+    // --- Month 5: products, stock & orders ---
+    {
+      ref: 'D1', counterpartyKey: 'kestrel-logistics', month: 5, day: 8, dueDays: 0,
+      accountCode: '2130', lineDescription: 'Deposit — SO1 (25%)',
+      total: '4090.00', vendorReference: null, tier: 'AUTO_0', anonMemo: null, remainder: null,
+      entry: 'DEPOSIT', orderRef: 'SO1',
+    },
+    {
+      ref: 'I17', counterpartyKey: 'kestrel-logistics', month: 5, day: 12, dueDays: 0,
+      accountCode: '4100', lineDescription: 'Caster and fitting supply — first delivery',
+      total: '7500.00', vendorReference: null, tier: 'AUTO_2', anonMemo: null, remainder: null,
+      entry: 'ORDER', orderRef: 'SO1',
+      orderLines: [{ itemCode: 'CAST-6', quantity: '60' }, { itemCode: 'HFK-12', quantity: '40' }],
+      lines: [
+        { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '60', unitPrice: '95.00', accountCode: '4100' },
+        { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '40', unitPrice: '45.00', accountCode: '4100' },
+      ],
+    },
+    // --- Month 6: closing the quarter ---
+    {
+      ref: 'I18', counterpartyKey: 'brightline-analytics', month: 6, day: 4, dueDays: 0,
+      accountCode: '4200', lineDescription: 'Design & drafting — conveyor retrofit',
+      total: '2640.00', vendorReference: null, tier: 'AUTO_0', anonMemo: null, remainder: null,
+      entry: 'IMPORT',
+      lines: [
+        { itemCode: 'SVC-DES', description: 'Design & drafting — conveyor retrofit', quantity: '24', unitPrice: '110.00', accountCode: '4200' },
+      ],
+    },
+    {
+      ref: 'I19', counterpartyKey: 'orchid-media', month: 6, day: 11, dueDays: 0,
+      accountCode: '4200', lineDescription: 'Fabrication labour — studio set build',
+      total: '3400.00', vendorReference: null, tier: 'REVIEW_ANON', anonMemo: 'STRIPE PAYOUT 7731', remainder: null,
+      entry: 'IMPORT',
+      lines: [
+        { itemCode: 'SVC-FAB', description: 'Fabrication labour — studio set build', quantity: '40', unitPrice: '85.00', accountCode: '4200' },
+      ],
+    },
+    {
+      // Due 30 days after the invoice date: 22 September + 30 days = 22 October (month 7, day 22).
+      ref: 'I20', counterpartyKey: 'kestrel-logistics', month: 6, day: 22, dueDays: 0,
+      accountCode: '4100', lineDescription: 'Caster and fitting supply — remainder',
+      total: '8860.00', vendorReference: null, tier: 'OPEN', anonMemo: null, remainder: null,
+      dueDate: { month: 7, day: 22 },
+      entry: 'ORDER', orderRef: 'SO1', orderLines: null,
+      lines: [
+        { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '60', unitPrice: '95.00', accountCode: '4100' },
+        { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '40', unitPrice: '45.00', accountCode: '4100' },
+        { itemCode: 'SVC-FAB', description: 'Fabrication labour (per hour)', quantity: '16', unitPrice: '85.00', accountCode: '4200' },
+      ],
+    },
   ],
 
   bills: [
     // --- Month 1 ---
     {
       ref: 'B1', counterpartyKey: 'northgate-realty', month: 1, day: 1, dueDays: 0,
-      accountCode: '6110', lineDescription: 'Shop rent — June',
+      accountCode: '6110', lineDescription: 'Shop rent — [Month]',
       total: '9100.00', vendorReference: 'NR-M1-RENT', tier: 'AUTO_0', anonMemo: null, remainder: null,
     },
     {
       ref: 'B2', counterpartyKey: 'cloudspan', month: 1, day: 4, dueDays: 0,
-      accountCode: '6120', lineDescription: 'ERP hosting — June',
+      accountCode: '6120', lineDescription: 'ERP hosting — [Month]',
       total: '3480.00', vendorReference: 'CS-44821', tier: 'AUTO_1', anonMemo: null, remainder: null,
     },
     {
@@ -354,19 +507,19 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     },
     {
       ref: 'B5', counterpartyKey: 'crosswind-freight', month: 1, day: 19, dueDays: 0,
-      accountCode: '5300', lineDescription: 'Outbound freight — June runs',
+      accountCode: '5300', lineDescription: 'Outbound freight — [Month] runs',
       total: '2340.00', vendorReference: 'CWF-0912', tier: 'REVIEW_ANON',
       anonMemo: 'BILL PAY 7734 REF 5590', remainder: null,
     },
     // --- Month 2 ---
     {
       ref: 'B6', counterpartyKey: 'beacon-media', month: 2, day: 5, dueDays: 0,
-      accountCode: '6400', lineDescription: 'Trade publication placement — July',
+      accountCode: '6400', lineDescription: 'Trade publication placement — [Month]',
       total: '4100.00', vendorReference: 'BM-2207', tier: 'AUTO_0', anonMemo: null, remainder: null,
     },
     {
       ref: 'B7', counterpartyKey: 'northgate-realty', month: 2, day: 1, dueDays: 0,
-      accountCode: '6110', lineDescription: 'Shop rent — July',
+      accountCode: '6110', lineDescription: 'Shop rent — [Month]',
       total: '9100.00', vendorReference: 'NR-M2-RENT', tier: 'AUTO_1', anonMemo: null, remainder: null,
     },
     {
@@ -382,12 +535,12 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     },
     {
       ref: 'B10', counterpartyKey: 'cloudspan', month: 3, day: 10, dueDays: 0,
-      accountCode: '6120', lineDescription: 'ERP hosting — August',
+      accountCode: '6120', lineDescription: 'ERP hosting — [Month]',
       total: '3480.00', vendorReference: 'CS-45210', tier: 'AUTO_2', anonMemo: null, remainder: null,
     },
     {
       ref: 'B11', counterpartyKey: 'crosswind-freight', month: 3, day: 16, dueDays: 0,
-      accountCode: '5300', lineDescription: 'Outbound freight — August runs',
+      accountCode: '5300', lineDescription: 'Outbound freight — [Month] runs',
       total: '3100.00', vendorReference: 'CWF-1044', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
     },
     // --- Month 4: returns & adjustments ---
@@ -395,6 +548,48 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       ref: 'B12', counterpartyKey: 'ironclad-supply', month: 4, day: 4, dueDays: 0,
       accountCode: '5100', lineDescription: 'Steel stock, 40mm — 80 bars × 150.00',
       total: '12000.00', vendorReference: 'INV-IC-9120', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
+    },
+    // --- Month 5: products, stock & orders ---
+    {
+      ref: 'B14', counterpartyKey: 'northgate-realty', month: 5, day: 1, dueDays: 0,
+      accountCode: '6110', lineDescription: 'Shop rent — [Month]',
+      total: '9100.00', vendorReference: 'NR-RENT-{M5}', tier: 'AUTO_0', anonMemo: null, remainder: null,
+      entry: 'MANUAL',
+    },
+    {
+      ref: 'B13', counterpartyKey: 'ironclad-supply', month: 5, day: 5, dueDays: 0,
+      accountCode: '1140', lineDescription: 'Castors and fitting kits — PO1',
+      total: '13950.00', vendorReference: 'INV-IC-9455', tier: 'AUTO_1', anonMemo: null, remainder: null,
+      entry: 'ORDER', orderRef: 'PO1', orderLines: null,
+      lines: [
+        { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '200', unitPrice: '42.00', accountCode: '1140' },
+        { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '300', unitPrice: '18.50', accountCode: '1140' },
+      ],
+    },
+    // --- Month 6: closing the quarter ---
+    {
+      ref: 'B15', counterpartyKey: 'northgate-realty', month: 6, day: 1, dueDays: 0,
+      accountCode: '6110', lineDescription: 'Shop rent — [Month]',
+      total: '9100.00', vendorReference: 'NR-RENT-{M6}', tier: 'AUTO_0', anonMemo: null, remainder: null,
+      entry: 'RECURRING',
+    },
+    {
+      ref: 'B16', counterpartyKey: 'lakeshore-power', month: 6, day: 8, dueDays: 0,
+      accountCode: '6110', lineDescription: 'Electricity & water — {M5} usage',
+      total: '850.00', vendorReference: 'LPW-88120', tier: 'AUTO_1', anonMemo: null, remainder: null,
+      entry: 'IMPORT',
+    },
+    {
+      ref: 'B17', counterpartyKey: 'cloudspan', month: 6, day: 10, dueDays: 0,
+      accountCode: '6120', lineDescription: 'ERP hosting — {M6}',
+      total: '3480.00', vendorReference: 'CS-46102', tier: 'AUTO_2', anonMemo: null, remainder: null,
+      entry: 'IMPORT',
+    },
+    {
+      ref: 'B18', counterpartyKey: 'crosswind-freight', month: 6, day: 15, dueDays: 0,
+      accountCode: '5300', lineDescription: 'Outbound freight — {M6} runs',
+      total: '1240.00', vendorReference: 'CWF-1187', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
+      entry: 'IMPORT',
     },
   ],
 
@@ -417,6 +612,15 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     { month: 4, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'POST_JOURNAL', accountCode: '6600' } },
     { month: 4, day: 20, description: 'TRANSFER TO SAVINGS', amount: '-2500.00', resolution: { kind: 'IGNORE' } },
     { month: 4, day: 28, description: 'INTEREST PAID', amount: '16.20', resolution: { kind: 'POST_JOURNAL', accountCode: '4300' } },
+    // --- Month 5 ---
+    { month: 5, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'RULE', accountCode: '6600' } },
+    { month: 5, day: 20, description: 'TRANSFER TO SAVINGS', amount: '-2000.00', resolution: { kind: 'IGNORE' } },
+    { month: 5, day: 28, description: 'INTEREST PAID', amount: '17.30', resolution: { kind: 'RULE', accountCode: '4300' } },
+    // --- Month 6 ---
+    { month: 6, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'RULE', accountCode: '6600' } },
+    { month: 6, day: 26, description: 'PAYROLL NET PAY', amount: '-11400.00', resolution: { kind: 'POST_JOURNAL', accountCode: '2160' } },
+    { month: 6, day: 27, description: 'TRANSFER TO SAVINGS', amount: '-1500.00', resolution: { kind: 'IGNORE' } },
+    { month: 6, day: 28, description: 'INTEREST PAID', amount: '18.40', resolution: { kind: 'RULE', accountCode: '4300' } },
   ],
 
   // Phase 26 — month 4's correcting documents, in the order they are entered.
@@ -450,4 +654,129 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       allocations: [{ documentRef: 'I16', day: 10, amount: '500.00' }],
     },
   ],
+
+  products: [
+    {
+      code: 'SVC-FAB', name: 'Fabrication labour (per hour)', type: 'SERVICE',
+      description: 'Shop-floor fabrication labour', salePrice: '85.00', accountCode: '4200',
+    },
+    {
+      code: 'SVC-DES', name: 'Design & drafting (per hour)', type: 'SERVICE',
+      description: 'CAD design and drafting', salePrice: '110.00', accountCode: '4200',
+    },
+  ],
+
+  stockItems: [
+    {
+      code: 'CAST-6', name: 'Heavy-duty caster, 6 in', description: 'Swivel caster with brake',
+      category: 'SPR', reorderPoint: 50, salePrice: '95.00', purchasePrice: '42.00', unitCost: '42.00',
+      revenueAccount: '4100', assetAccount: '1140', cogsAccount: '5050',
+    },
+    {
+      code: 'HFK-12', name: 'Hydraulic fitting kit', description: '12-piece fitting kit',
+      category: 'SPR', reorderPoint: 40, salePrice: '45.00', purchasePrice: '18.50', unitCost: '18.50',
+      revenueAccount: '4100', assetAccount: '1140', cogsAccount: '5050',
+    },
+  ],
+
+  orders: [
+    {
+      ref: 'PO1', direction: 'PURCHASE', counterpartyKey: 'ironclad-supply', month: 5, day: 3,
+      quoteRef: null, quoteDay: null,
+      lines: [
+        { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '200', unitPrice: '42.00', accountCode: '1140' },
+        { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '300', unitPrice: '18.50', accountCode: '1140' },
+      ],
+    },
+    {
+      // Raised from QU1 (sent and accepted the same day); the order itself is dated "today"
+      // by the product, so `day` here is the quote's date.
+      ref: 'SO1', direction: 'SALES', counterpartyKey: 'kestrel-logistics', month: 5, day: 6,
+      quoteRef: 'QU1', quoteDay: 6,
+      lines: [
+        { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '120', unitPrice: '95.00', accountCode: '4100' },
+        { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '80', unitPrice: '45.00', accountCode: '4100' },
+        { itemCode: 'SVC-FAB', description: 'Fabrication labour (per hour)', quantity: '16', unitPrice: '85.00', accountCode: '4200' },
+      ],
+    },
+  ],
+
+  journals: [
+    {
+      ref: 'ACC1', entry: 'REPEATING', narration: 'Utilities accrual — [Month]', month: 5, day: 28,
+      lines: [
+        { accountCode: '6110', description: 'Estimated electricity & water', debit: '850.00', credit: '0.00' },
+        { accountCode: '2120', description: 'Accrued utilities', debit: '0.00', credit: '850.00' },
+      ],
+      repeat: { endMonth: 6, endDay: 28, autoReverse: true },
+    },
+    {
+      ref: 'PR-M6', entry: 'IMPORT', narration: 'Payroll — {M6} {Y6}', month: 6, day: 25,
+      lines: [
+        { accountCode: '5200', description: null, debit: '9800.00', credit: '0.00' },
+        { accountCode: '6100', description: null, debit: '3200.00', credit: '0.00' },
+        { accountCode: '2160', description: null, debit: '0.00', credit: '13000.00' },
+      ],
+      repeat: null,
+    },
+  ],
+
+  bankRules: [
+    {
+      name: 'Monthly bank service charge', priority: 100, direction: 'OUT', memoContains: 'SERVICE CHARGE',
+      amountMinCents: null, amountMaxCents: 10000, bankAccountCode: '1110', targetAccountCode: '6600',
+      description: 'Bank service charge',
+    },
+    {
+      name: 'Interest on operating account', priority: 110, direction: 'IN', memoContains: 'INTEREST PAID',
+      amountMinCents: null, amountMaxCents: null, bankAccountCode: '1110', targetAccountCode: '4300',
+      description: 'Bank interest',
+    },
+  ],
+
+  extraVendors: [
+    {
+      key: 'lakeshore-power',
+      name: 'Lakeshore Power & Water',
+      email: 'billing@lakeshorepw.example',
+      phone: '+1-555-0488',
+      address: '60 Harbor Utility Way, Sandusky, OH 44870',
+      taxNumber: 'US-34-6620118',
+      expenseAccount: '6110',
+    },
+  ],
+
+  depositApplications: [{ depositRef: 'D1', documentRef: 'I20', day: 22, amount: '4090.00' }],
+
+  periodCloses: [
+    { afterMonth: 5, closeMonths: [1, 2, 3, 4] },
+    { afterMonth: 6, closeMonths: [5] },
+  ],
 };
+
+/** Replaces `{M5}`/`{M6}` with the month's English name and `{Y6}` with month 6's calendar year. */
+export function resolveTokens(anchor: AnchorMonth, text: string): string {
+  return text
+    .replaceAll('{M5}', monthName(anchor, 5))
+    .replaceAll('{M6}', monthName(anchor, 6))
+    .replaceAll('{Y6}', String(calendarYear(anchor, 6)));
+}
+
+/** A document's lines; a single-line document synthesises one from its own fields. */
+export function documentLines(doc: DatasetDocument): DatasetLine[] {
+  if (doc.lines !== undefined) return doc.lines;
+  return [
+    {
+      itemCode: null,
+      description: doc.lineDescription,
+      quantity: '1',
+      unitPrice: doc.total,
+      accountCode: doc.accountCode,
+    },
+  ];
+}
+
+/** The six original vendors plus the one added by form in month 6. */
+export function allVendors(): DatasetVendor[] {
+  return [...WALKTHROUGH_DATASET.vendors, ...WALKTHROUGH_DATASET.extraVendors];
+}

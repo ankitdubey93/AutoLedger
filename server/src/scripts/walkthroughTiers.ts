@@ -5,7 +5,7 @@
  * same scoring inputs `bankMatchService` builds, so a score computed here
  * is provably the score the real matcher will produce, not a guess.
  */
-import { WALKTHROUGH_DATASET, type DatasetDocument, type Tier } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, allVendors, resolveTokens, type DatasetDocument, type Tier } from './walkthroughDataset.js';
 import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
 import { resolveDate } from './walkthroughDates.js';
 import { scoreMatch } from '../utils/matchScore.js';
@@ -43,6 +43,22 @@ export function noteAppliedCents(documentRef: string, throughMonth: WalkthroughM
   return appliedCents;
 }
 
+/**
+ * How much of an invoice a customer deposit settles by the end of
+ * `throughMonth`: every deposit application whose target document sits in a
+ * month up to then. Like a note, it is subtracted from what the bank line
+ * (and the real matcher) sees as due.
+ */
+export function depositAppliedCents(documentRef: string, throughMonth: WalkthroughMonth): number {
+  const doc = WALKTHROUGH_DATASET.invoices.find((d) => d.ref === documentRef);
+  if (doc === undefined || doc.month > throughMonth) return 0;
+  let appliedCents = 0;
+  for (const application of WALKTHROUGH_DATASET.depositApplications) {
+    if (application.documentRef === documentRef) appliedCents += parseMoneyText(application.amount);
+  }
+  return appliedCents;
+}
+
 const TIER_DATE_SHIFT: Partial<Record<Tier, number>> = {
   AUTO_0: 0,
   AUTO_1: 1,
@@ -52,7 +68,7 @@ const TIER_DATE_SHIFT: Partial<Record<Tier, number>> = {
 };
 
 function counterpartyName(doc: DatasetDocument): string {
-  const list = doc.vendorReference === null ? WALKTHROUGH_DATASET.customers : WALKTHROUGH_DATASET.vendors;
+  const list = doc.vendorReference === null ? WALKTHROUGH_DATASET.customers : allVendors();
   const match = list.find((c) => c.key === doc.counterpartyKey);
   if (match === undefined) throw new Error(`walkthrough fixture: no counterparty ${doc.counterpartyKey}`);
   return match.name;
@@ -73,9 +89,13 @@ export function buildSettlementLines(): SettlementLine[] {
   ];
 
   for (const { doc, kind } of documents) {
+    // An OPEN document is never paid inside the scenario — no bank line.
+    if (doc.tier === 'OPEN') continue;
     // Net of any note applied to it in its own month (Phase 26) — the one
     // month-4 invoice/bill pair with notes is settled for the net amount.
-    const totalCents = parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month);
+    // A customer deposit applied to it is netted the same way.
+    const totalCents =
+      parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month) - depositAppliedCents(doc.ref, doc.month);
     if (totalCents <= 0) {
       throw new Error(`walkthrough fixture: ${doc.ref} is fully credited, no settlement line`);
     }
@@ -206,7 +226,7 @@ export function verifyExpectedScores(anchor: AnchorMonth): { lineRef: string; ex
 
   for (const line of resolved) {
     const doc = byRef.get(line.documentRef);
-    if (doc === undefined) continue;
+    if (doc === undefined || doc.tier === 'OPEN') continue;
     const docDate = resolveDate(anchor, doc.month, doc.day);
 
     // Amount due at the moment this specific line is scored: the full total,
@@ -215,7 +235,8 @@ export function verifyExpectedScores(anchor: AnchorMonth): { lineRef: string; ex
     // the remainder line itself settles — computed directly rather than
     // re-deriving "already settled" generically, since there is exactly
     // one REVIEW_PARTIAL document in this dataset.
-    const totalCents = parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month);
+    const totalCents =
+      parseMoneyText(doc.total) - noteAppliedCents(doc.ref, doc.month) - depositAppliedCents(doc.ref, doc.month);
     const resolvedAmountDue = line.lineRef === `${doc.ref}-remainder` ? Math.abs(line.amountCents) : totalCents;
 
     const breakdown = scoreMatch(
@@ -224,7 +245,7 @@ export function verifyExpectedScores(anchor: AnchorMonth): { lineRef: string; ex
         documentAmountDueCents: resolvedAmountDue,
         documentDate: docDate,
         counterpartyName: counterpartyName(doc),
-        documentReference: doc.vendorReference ?? '',
+        documentReference: resolveTokens(anchor, doc.vendorReference ?? ''),
       },
     );
 
