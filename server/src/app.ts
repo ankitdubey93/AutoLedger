@@ -35,7 +35,7 @@ export function createApp(): Express {
   // `credentials: true` is required for the httpOnly refresh cookie in Phase 1,
   // and it forbids a wildcard origin, so FRONTEND_URL is mandatory.
   // `X-Request-Id` is exposed so the client can quote it when reporting a problem.
-  app.use(cors({ origin: env.FRONTEND_URL, credentials: true, exposedHeaders: ['X-Request-Id'] }));
+  app.use(cors({ origin: env.FRONTEND_URL, credentials: true, exposedHeaders: ['X-Request-Id', 'Content-Disposition'] }));
 
   // After CORS (which answers preflights), before any route that changes state.
   app.use(requireTrustedOrigin);

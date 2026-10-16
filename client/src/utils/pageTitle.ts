@@ -26,6 +26,16 @@ const EXACT_TITLES: Record<string, string> = {
   '/inventory/setup': 'Set up inventory',
   '/reports/profit-and-loss': 'Profit & loss',
   '/reports/balance-sheet': 'Balance sheet',
+  '/reports/cash-flow': 'Cash flow statement',
+  '/reports/account-transactions': 'Account transactions',
+  '/reports/exceptions': 'Ledger exceptions',
+  '/reports/aged-receivables': 'Aged receivables',
+  '/reports/aged-payables': 'Aged payables',
+  '/reports/tax-summary': 'Tax summary',
+  '/reports/sales-by-customer': 'Sales by customer',
+  '/reports/purchases-by-vendor': 'Purchases by vendor',
+  '/reports/sales-by-item': 'Sales by item',
+  '/reports/purchases-by-item': 'Purchases by item',
 };
 
 /** Aliases whose section lives under another path in the nav. */

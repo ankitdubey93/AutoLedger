@@ -70,6 +70,23 @@ A: `SET NULL` would null every referencing column, including `org_id`, which is 
 - What if the organization's time zone differs from UTC? (Document dates are already date-only strings chosen by the user; only "today" defaults are zone-sensitive. Quotes use the org zone via `Intl.DateTimeFormat`; invoices still default to UTC today.)
 - How would you add "2/10 Net 30" discount terms? (A second term kind and a GL posting for the discount; not date arithmetic.)
 
+## Phase 45 additions — comparative periods
+
+The P&L comparison picks prior periods by one of two rules. **Month-aligned** ranges (first to last day of a month or run of months) shift by whole months: "previous period" moves back `k × span` months, "same period last year" `12 × k`, and the end is re-clamped to the last day of the target month. A range that is not month-aligned shifts by its **day count**, so a 10-day window is compared with the 10 days before it. Shifting a month-aligned range by day count would compare 28 February days with 31 January days (a drift the labels would hide); shifting an arbitrary range by months would change its length.
+
+`addMonthsClamped('2026-03-31', -1)` is `2026-02-28`, and `'2024-02-29'` back twelve months is `2023-02-28`: the day is `min(day, lastDayOfMonth)`. Month arithmetic is done on an integer month index (`year*12 + month-1`) with `Math.floor` for negatives, avoiding `Date` setMonth rollover (`Jan 31 + 1 month` = `Mar 3`). The variance is `current − prior` in cents and, in basis points of `|prior|`, rounded half away from zero; `null` when prior is zero.
+
+### Interview Q&A (Phase 45)
+
+**Q: How do you shift 31 March back one month?**
+A: Clamp the day to the target month's length — 28 or 29 February. `Date.setMonth` would roll over into March, which is the bug to name.
+
+**Q: Why two shifting rules for comparison periods?**
+A: Month-aligned ranges mean "whole months", so shift by months; arbitrary ranges mean "this many days", so shift by days. Mixing them produces periods of different length.
+
+**Q: How do you express a percentage change when the base is zero?**
+A: Return null and display an em dash — it is undefined, not 0 or infinity.
+
 ## See also
 
 - [user-authored-templates-and-bearer-links.md](../security-auth/user-authored-templates-and-bearer-links.md) — the same client/server fixture-parity pattern

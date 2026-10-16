@@ -65,6 +65,36 @@ export function optionalText(req: Request, name: string, maxLength: number): str
   return trimmed;
 }
 
+/**
+ * `?name=a,b` → ['a','b'] (trimmed, empty items dropped, de-duplicated, order kept).
+ * Absent or empty → null. Any item failing `pattern`, or more than `maxItems` → ApiError(400, message).
+ * A repeated parameter (`?name=a&name=b`) is not a list and fails with the same message.
+ */
+export function optionalCsvList(
+  req: Request,
+  name: string,
+  pattern: RegExp,
+  maxItems: number,
+  message: string,
+): string[] | null {
+  const value = req.query[name];
+  if (value === undefined) return null;
+  if (typeof value !== 'string') throw new ApiError(400, message);
+  const items = [
+    ...new Set(
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter((item) => item !== ''),
+    ),
+  ];
+  if (items.length === 0) return null;
+  if (items.length > maxItems || items.some((item) => !pattern.test(item))) {
+    throw new ApiError(400, message);
+  }
+  return items;
+}
+
 export type SortDirection = 'asc' | 'desc';
 
 /**

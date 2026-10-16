@@ -5,10 +5,12 @@ import { ApiError } from '../../utils/apiError.js';
 import {
   isAccountType,
   isBankAccountKind,
+  isCashFlowCategory,
   type Account,
   type AccountNode,
   type AccountType,
   type BankAccountKind,
+  type CashFlowCategory,
 } from '../../types/accounting.js';
 
 /**
@@ -41,12 +43,20 @@ interface AccountRow {
   is_active: boolean;
   description: string | null;
   bank_account_kind: string | null;
+  cash_flow_category: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 const ACCOUNT_COLUMNS = `id, code, name, type, parent_id, is_postable, is_active,
-                         description, bank_account_kind, created_at, updated_at`;
+                         description, bank_account_kind, cash_flow_category, created_at, updated_at`;
+
+/** Only balance-sheet accounts carry a cash-flow category (Revenue/Expense flow through net income). */
+function assertCashFlowCategoryMatchesType(category: CashFlowCategory | null, type: AccountType): void {
+  if (category !== null && (type === 'Revenue' || type === 'Expense')) {
+    throw new ApiError(422, 'Only balance-sheet accounts have a cash flow category');
+  }
+}
 
 /** A bank flag must match the account's type (rule 12: the flag is not a type). */
 function assertBankKindMatchesType(kind: BankAccountKind | null, type: AccountType): void {
@@ -67,6 +77,9 @@ function toAccount(row: AccountRow): Account {
   if (row.bank_account_kind !== null && !isBankAccountKind(row.bank_account_kind)) {
     throw new Error(`Unknown bank account kind "${row.bank_account_kind}" on account ${row.id}`);
   }
+  if (row.cash_flow_category !== null && !isCashFlowCategory(row.cash_flow_category)) {
+    throw new Error(`Unknown cash flow category "${row.cash_flow_category}" on account ${row.id}`);
+  }
   return {
     id: row.id,
     code: row.code,
@@ -77,6 +90,7 @@ function toAccount(row: AccountRow): Account {
     isActive: row.is_active,
     description: row.description,
     bankAccountKind: row.bank_account_kind,
+    cashFlowCategory: row.cash_flow_category,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
   };
@@ -191,17 +205,19 @@ export async function createAccountOnClient(
     isPostable: boolean;
     description: string | null;
     bankAccountKind: BankAccountKind | null;
+    cashFlowCategory: CashFlowCategory | null;
   },
 ): Promise<Account> {
   assertBankKindMatchesType(input.bankAccountKind, input.type);
+  assertCashFlowCategoryMatchesType(input.cashFlowCategory, input.type);
   if (input.parentId !== null) {
     await assertParentIsValid(client, orgId, input.parentId, input.type);
   }
 
   try {
     const { rows } = await client.query<AccountRow>(
-      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by, bank_account_kind)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by, bank_account_kind, cash_flow_category)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING ${ACCOUNT_COLUMNS}`,
       [
         orgId,
@@ -213,6 +229,7 @@ export async function createAccountOnClient(
         input.description,
         createdBy,
         input.bankAccountKind,
+        input.cashFlowCategory,
       ],
     );
 
@@ -236,6 +253,7 @@ export async function createAccount(
     isPostable: boolean;
     description: string | null;
     bankAccountKind: BankAccountKind | null;
+    cashFlowCategory: CashFlowCategory | null;
   },
 ): Promise<Account> {
   return withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
@@ -289,12 +307,16 @@ export async function updateAccount(
     isActive?: boolean | undefined;
     parentId?: string | null | undefined;
     bankAccountKind?: BankAccountKind | null | undefined;
+    cashFlowCategory?: CashFlowCategory | null | undefined;
   },
 ): Promise<Account> {
   const existing = await getAccountById(orgId, id);
 
   if (input.bankAccountKind !== undefined) {
     assertBankKindMatchesType(input.bankAccountKind, existing.type);
+  }
+  if (input.cashFlowCategory !== undefined) {
+    assertCashFlowCategoryMatchesType(input.cashFlowCategory, existing.type);
   }
 
   if (input.parentId !== undefined && input.parentId !== null) {
@@ -313,6 +335,7 @@ export async function updateAccount(
     isActive: 'is_active',
     parentId: 'parent_id',
     bankAccountKind: 'bank_account_kind',
+    cashFlowCategory: 'cash_flow_category',
   } as const;
 
   const assignments: string[] = [];
@@ -351,6 +374,7 @@ interface SeedAccount {
   parent: string | null;
   postable: boolean;
   bankAccountKind?: BankAccountKind;
+  cashFlowCategory?: CashFlowCategory;
 }
 
 /**
@@ -379,7 +403,7 @@ export const DEFAULT_CHART: readonly SeedAccount[] = [
   { code: '1180', name: 'GST/VAT Input Credit', type: 'Asset', parent: '1100', postable: true },
   { code: '1400', name: 'Non-Current Assets', type: 'Asset', parent: '1000', postable: false },
   { code: '1500', name: 'Fixed Assets / Equipment', type: 'Asset', parent: '1400', postable: true },
-  { code: '1590', name: 'Accumulated Depreciation', type: 'Asset', parent: '1400', postable: true },
+  { code: '1590', name: 'Accumulated Depreciation', type: 'Asset', parent: '1400', postable: true, cashFlowCategory: 'OPERATING' },
 
   // Liabilities 2000–2999
   { code: '2000', name: 'Liabilities', type: 'Liability', parent: null, postable: false },
@@ -471,16 +495,17 @@ export async function seedDefaultChart(q: Queryable, orgId: string): Promise<num
 
   for (const level of chartByDepth()) {
     const { rowCount } = await q.query(
-      `INSERT INTO accounts (org_id, code, name, type, is_postable, parent_id, bank_account_kind)
+      `INSERT INTO accounts (org_id, code, name, type, is_postable, parent_id, bank_account_kind, cash_flow_category)
        SELECT $1,
               v.code,
               v.name,
               v.type,
               v.is_postable,
               (SELECT p.id FROM accounts p WHERE p.org_id = $1 AND p.code = v.parent_code),
-              v.bank_account_kind
-         FROM unnest($2::text[], $3::text[], $4::text[], $5::boolean[], $6::text[], $7::text[])
-              AS v(code, name, type, is_postable, parent_code, bank_account_kind)
+              v.bank_account_kind,
+              v.cash_flow_category
+         FROM unnest($2::text[], $3::text[], $4::text[], $5::boolean[], $6::text[], $7::text[], $8::text[])
+              AS v(code, name, type, is_postable, parent_code, bank_account_kind, cash_flow_category)
        ON CONFLICT (org_id, code) DO NOTHING`,
       [
         orgId,
@@ -490,6 +515,7 @@ export async function seedDefaultChart(q: Queryable, orgId: string): Promise<num
         level.map((a) => a.postable),
         level.map((a) => a.parent),
         level.map((a) => a.bankAccountKind ?? null),
+        level.map((a) => a.cashFlowCategory ?? null),
       ],
     );
     inserted += rowCount ?? 0;

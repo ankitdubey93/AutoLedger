@@ -46,6 +46,7 @@ export const PERMISSION_AREAS = [
 const DEFS = [
   // Reports
   { key: 'reports.view', area: 'Reports', label: 'View dashboard and reports', tier: 'V' },
+  { key: 'reports.review_exceptions', area: 'Reports', label: 'Mark ledger exceptions as reviewed', tier: 'A', requires: ['reports.view'] },
 
   // Sales
   { key: 'invoices.view', area: 'Sales', label: 'View invoices', tier: 'V', requires: ['customers.view'] },

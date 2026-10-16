@@ -38,7 +38,7 @@ export async function resetTables(): Promise<void> {
               credit_notes, credit_note_lines, credit_note_allocations,
               debit_notes, debit_note_lines, debit_note_allocations, fiscal_periods,
               bank_statement_imports, bank_transactions, bank_match_suggestions, bank_rules,
-              recurring_schedules, recurring_runs, manual_journals, manual_journal_lines,
+              recurring_schedules, recurring_runs, manual_journals, manual_journal_lines, gl_exception_reviews,
               outbox_events, webhook_endpoints, webhook_deliveries,
               audit_logs, onboarding_states, migration_imports, migration_import_rows,
               documents, document_links,

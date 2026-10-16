@@ -197,6 +197,12 @@ export default function AccountLedgerPage() {
             Clear
           </button>
         )}
+        <Link
+          to={`/reports/account-transactions?accountIds=${ledger.account.id}${from !== '' ? `&from=${from}` : ''}${to !== '' ? `&to=${to}` : ''}`}
+          className="text-sm"
+        >
+          Account transactions
+        </Link>
       </div>
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">

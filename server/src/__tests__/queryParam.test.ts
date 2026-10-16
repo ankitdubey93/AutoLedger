@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Request } from 'express';
-import { optionalIsoDate, optionalText, optionalUuid, readPagination } from '../utils/queryParam.js';
+import { optionalCsvList, optionalIsoDate, optionalText, optionalUuid, readPagination } from '../utils/queryParam.js';
 import { ApiError } from '../utils/apiError.js';
 
 /**
@@ -100,6 +100,45 @@ describe('optionalText', () => {
       expect(err).toBeInstanceOf(ApiError);
       expect((err as ApiError).status).toBe(400);
       expect((err as ApiError).message).toBe('q must be at most 200 characters');
+    }
+  });
+});
+
+describe('optionalCsvList', () => {
+  const LOWER = /^[a-z]+$/;
+
+  it('splits, trims, drops empty items and de-duplicates, keeping order', () => {
+    expect(optionalCsvList(fakeRequest({ names: 'a, b,,a' }), 'names', LOWER, 10, 'names is invalid')).toEqual([
+      'a',
+      'b',
+    ]);
+  });
+
+  it('returns null when the param is absent', () => {
+    expect(optionalCsvList(fakeRequest({}), 'names', LOWER, 10, 'names is invalid')).toBeNull();
+  });
+
+  it('rejects an item that fails the pattern with a 400 carrying the given message', () => {
+    const req = fakeRequest({ names: 'ok,x!' });
+    try {
+      optionalCsvList(req, 'names', LOWER, 10, 'names is invalid');
+      throw new Error('expected optionalCsvList to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).message).toBe('names is invalid');
+    }
+  });
+
+  it('rejects more than maxItems items', () => {
+    const req = fakeRequest({ names: 'a,b,c' });
+    try {
+      optionalCsvList(req, 'names', LOWER, 2, 'names is invalid');
+      throw new Error('expected optionalCsvList to throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ApiError);
+      expect((err as ApiError).status).toBe(400);
+      expect((err as ApiError).message).toBe('names is invalid');
     }
   });
 });

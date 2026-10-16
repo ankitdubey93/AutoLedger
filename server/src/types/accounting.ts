@@ -10,6 +10,7 @@
  * `utils/money.ts`.
  */
 
+import type { ComparisonMode, ComparisonPeriod } from '../utils/comparisonPeriods.js';
 import type { DateFormat } from '../utils/dateParse.js';
 import type { ImportCellType } from '../utils/importValues.js';
 import type {
@@ -69,6 +70,8 @@ export interface Account {
   description: string | null;
   /** Phase 44 — `BANK` (an Asset) or `CREDIT_CARD` (a Liability); null for every other account. */
   bankAccountKind: BankAccountKind | null;
+  /** Phase 45 — explicit cash-flow override; null = derived (balance-sheet accounts only). */
+  cashFlowCategory: CashFlowCategory | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -2201,6 +2204,14 @@ export interface AvailableCredits {
   credits: AvailableCredit[];
 }
 
+// ------------------------------- Phase 45 — cash flow category
+
+export const CASH_FLOW_CATEGORIES = ['CASH', 'OPERATING', 'INVESTING', 'FINANCING'] as const;
+export type CashFlowCategory = (typeof CASH_FLOW_CATEGORIES)[number];
+export function isCashFlowCategory(value: string): value is CashFlowCategory {
+  return (CASH_FLOW_CATEGORIES as readonly string[]).includes(value);
+}
+
 // ------------------------------- Phase 44 — manual journals
 
 export const BANK_ACCOUNT_KINDS = ['BANK', 'CREDIT_CARD'] as const;
@@ -2259,4 +2270,243 @@ export interface ManualJournalSummary {
 }
 export interface ManualJournal extends ManualJournalSummary {
   lines: ManualJournalLine[];
+}
+
+// ---- Phase 45 — reports
+
+export const ACCOUNT_TRANSACTION_GROUPINGS = ['account', 'month', 'sourceType', 'contact', 'none'] as const;
+export type AccountTransactionGrouping = (typeof ACCOUNT_TRANSACTION_GROUPINGS)[number];
+export const ACCOUNT_TRANSACTION_MODES = ['detail', 'summary'] as const;
+export type AccountTransactionMode = (typeof ACCOUNT_TRANSACTION_MODES)[number];
+export const ACCOUNT_TRANSACTION_COLUMNS = [
+  'date', 'source', 'reference', 'contact', 'description', 'account',
+  'debit', 'credit', 'net', 'runningBalance', 'currency', 'nativeAmount', 'fxRate', 'createdBy',
+] as const;
+export type AccountTransactionColumn = (typeof ACCOUNT_TRANSACTION_COLUMNS)[number];
+export const DEFAULT_ACCOUNT_TRANSACTION_COLUMNS: readonly AccountTransactionColumn[] =
+  ['date', 'source', 'reference', 'contact', 'description', 'debit', 'credit', 'runningBalance'];
+export const ACCOUNT_TRANSACTIONS_LINE_CAP = 20000;
+
+export const SOURCE_TYPE_LABELS: Readonly<Record<string, string>> = {
+  invoice: 'Invoice', bill: 'Expense', payment: 'Payment', credit_note: 'Credit note',
+  debit_note: 'Debit note', deposit_application: 'Deposit applied', manual: 'Manual journal',
+  recurring: 'Recurring journal', bank_line: 'Bank transaction', fx_revaluation: 'FX revaluation',
+  migration_import: 'Import', opening_balance: 'Opening balance', stock: 'Stock movement',
+  ap_flow: 'Captured bill',
+};
+/** Unknown types: underscores → spaces, first letter upper-cased ('foo_bar' → 'Foo bar'). */
+export function sourceTypeLabel(sourceType: string): string {
+  const spaced = sourceType.replace(/_/g, ' ');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+export interface AccountTransactionLine {
+  lineId: string;
+  entryId: string;
+  entryDate: string;
+  sourceType: string;
+  sourceId: string | null;
+  sourceLabel: string;
+  reference: string | null;
+  contactType: 'CUSTOMER' | 'VENDOR' | null;
+  contactId: string | null;
+  contactName: string | null;
+  /** Line description, falling back to the entry description. */
+  description: string | null;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  debitCents: number;
+  creditCents: number;
+  /** Type-aware: debit − credit for Asset/Expense, credit − debit otherwise. */
+  netCents: number;
+  /** Only when groupBy = 'account' and no sourceTypes filter; otherwise null. */
+  runningBalanceCents: number | null;
+  currencyCode: string;
+  nativeDebitCents: number;
+  nativeCreditCents: number;
+  /** Exact NUMERIC text, never a float. */
+  fxRate: string;
+  createdByName: string | null;
+}
+
+export interface AccountTransactionGroup {
+  key: string;
+  label: string;
+  /** Only for groupBy = 'account' without a sourceTypes filter; otherwise null. */
+  openingBalanceCents: number | null;
+  debitCents: number;
+  creditCents: number;
+  netCents: number;
+  closingBalanceCents: number | null;
+  lineCount: number;
+  /** Empty in summary mode. */
+  lines: AccountTransactionLine[];
+}
+
+export interface AccountTransactionsOptions {
+  accountIds: string[] | null;   // null = every postable account
+  from: string;
+  to: string;
+  sourceTypes: string[] | null;  // null = every source
+  groupBy: AccountTransactionGrouping;
+  mode: AccountTransactionMode;
+}
+
+export interface AccountTransactionsReport extends AccountTransactionsOptions {
+  groups: AccountTransactionGroup[];
+  totalDebitCents: number;
+  totalCreditCents: number;
+  lineCount: number;
+}
+
+export interface Variance {
+  cents: number;
+  bp: number | null;
+}
+
+export interface ComparisonStatementRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  amountsCents: number[];
+  variance: Variance;
+}
+
+export interface ComparisonSection {
+  rows: ComparisonStatementRow[];
+  totalsCents: number[];
+  variance: Variance;
+}
+
+export interface ProfitAndLossComparison {
+  mode: ComparisonMode;
+  /** [current, prior1, …] */
+  periods: ComparisonPeriod[];
+  revenue: ComparisonSection;
+  costOfSales: ComparisonSection;
+  grossProfitCents: number[];
+  grossProfitVariance: Variance;
+  operatingExpenses: ComparisonSection;
+  netIncomeCents: number[];
+  netIncomeVariance: Variance;
+}
+
+// ---- Phase 45 — GL exceptions
+
+export const GL_EXCEPTION_RULES = ['UNUSUAL_AMOUNT', 'UNEXPECTED_SIDE', 'NON_DEFAULT_TAX', 'POSSIBLE_DUPLICATE'] as const;
+export type GlExceptionRule = (typeof GL_EXCEPTION_RULES)[number];
+export const GL_EXCEPTION_SUBJECT_TYPES = ['LEDGER_LINE', 'JOURNAL_ENTRY', 'INVOICE_LINE', 'BILL_LINE'] as const;
+export type GlExceptionSubjectType = (typeof GL_EXCEPTION_SUBJECT_TYPES)[number];
+/** Which subject types each rule flags — mirrors chk_gl_exception_reviews_subject_matches_rule. */
+export const GL_EXCEPTION_RULE_SUBJECT: Readonly<Record<GlExceptionRule, readonly GlExceptionSubjectType[]>> = {
+  UNUSUAL_AMOUNT: ['LEDGER_LINE'], UNEXPECTED_SIDE: ['LEDGER_LINE'],
+  NON_DEFAULT_TAX: ['INVOICE_LINE', 'BILL_LINE'], POSSIBLE_DUPLICATE: ['JOURNAL_ENTRY'],
+};
+export const GL_EXCEPTION_RULE_LABELS: Readonly<Record<GlExceptionRule, string>> = {
+  UNUSUAL_AMOUNT: 'Unusual amount', UNEXPECTED_SIDE: 'Unexpected debit or credit',
+  NON_DEFAULT_TAX: 'Non-default tax rate', POSSIBLE_DUPLICATE: 'Possible duplicate',
+};
+export interface GlExceptionReview { id: string; note: string; reviewedAt: string; reviewedByName: string }
+export interface GlException {
+  rule: GlExceptionRule;
+  subjectType: GlExceptionSubjectType;
+  subjectId: string;
+  entryDate: string;
+  journalEntryId: string | null;
+  documentType: 'INVOICE' | 'BILL' | null;
+  documentId: string | null;
+  documentNumber: string | null;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  amountCents: number;
+  currencyCode: string;
+  expected: string;
+  actual: string;
+  reason: string;
+  review: GlExceptionReview | null;
+}
+export interface GlExceptionReport {
+  from: string;
+  to: string;
+  rules: GlExceptionRule[];
+  includeReviewed: boolean;
+  counts: Record<GlExceptionRule, { open: number; reviewed: number }>;
+  exceptions: GlException[];
+  /** Some rule hit GL_EXCEPTION_RESULT_CAP; narrow the range. */
+  truncated: boolean;
+}
+export interface CreateGlExceptionReviewInput { rule: GlExceptionRule; subjectType: GlExceptionSubjectType; subjectId: string; note: string }
+
+export interface TaxSummaryRow { rateBp: number; netCents: number; taxCents: number; documentCount: number }
+export interface TaxSummaryDirection { rows: TaxSummaryRow[]; netCents: number; taxCents: number }
+export interface TaxSummaryAccountCheck { account: { id: string; code: string; name: string } | null; glCents: number; differenceCents: number }
+export interface TaxSummary {
+  from: string; to: string;
+  output: TaxSummaryDirection;   // SALES
+  input: TaxSummaryDirection;    // PURCHASES
+  netTaxPayableCents: number;    // output.taxCents − input.taxCents
+  outputCheck: TaxSummaryAccountCheck;  // glCents = credits − debits on the output tax account in [from,to]
+  inputCheck: TaxSummaryAccountCheck;   // glCents = debits − credits on the input tax account in [from,to]
+}
+
+export const SALES_PURCHASES_REPORTS = ['sales-by-customer', 'purchases-by-vendor', 'sales-by-item', 'purchases-by-item'] as const;
+export type SalesPurchasesReportKind = (typeof SALES_PURCHASES_REPORTS)[number];
+export interface SalesPurchasesRow {
+  key: string;              // party id, item id, or 'none'
+  label: string;            // party name, item name, or 'No item'
+  code: string | null;      // item code; null for parties and 'none'
+  quantityMilli: number | null;  // item reports only
+  netCents: number;
+  taxCents: number;
+  grossCents: number;       // net + tax
+  documentCount: number;
+  comparisonNetCents: number | null;
+}
+export interface SalesPurchasesReport {
+  kind: SalesPurchasesReportKind;
+  from: string; to: string;
+  comparison: { from: string; to: string; label: string } | null;
+  rows: SalesPurchasesRow[];
+  totalNetCents: number; totalTaxCents: number; totalGrossCents: number;
+  totalComparisonNetCents: number | null;
+}
+
+// ---- Phase 45 — cash flow statement
+
+export interface CashFlowRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  category: 'OPERATING' | 'INVESTING' | 'FINANCING';
+  categorySource: 'OVERRIDE' | 'DERIVED';
+  /** Cash effect: credit − debit over the period (an asset increase is an outflow). */
+  amountCents: number;
+}
+export interface CashFlowSection {
+  rows: CashFlowRow[];
+  totalCents: number;
+}
+export interface CashFlowCashAccount {
+  accountId: string;
+  code: string;
+  name: string;
+  openingCents: number;
+  closingCents: number;
+}
+export interface CashFlowStatement {
+  from: string;
+  to: string;
+  netIncomeCents: number;
+  /** totalCents = netIncomeCents + Σ rows. */
+  operating: CashFlowSection;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+  netChangeCents: number;
+  openingCashCents: number;
+  closingCashCents: number;
+  cashAccounts: CashFlowCashAccount[];
 }

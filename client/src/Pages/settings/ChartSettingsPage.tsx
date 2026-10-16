@@ -7,9 +7,14 @@ import {
   type AccountNode,
   type AccountType,
   type BankAccountKind,
+  type CashFlowCategory,
 } from '../../services/fetchServices';
 import { TYPE_STYLES } from '../accounting/AccountsPage';
-import NewAccountForm, { ACCOUNT_TYPES } from '../accounting/NewAccountForm';
+import NewAccountForm, {
+  ACCOUNT_TYPES,
+  CASH_FLOW_OPTIONS,
+  hasCashFlowCategory,
+} from '../accounting/NewAccountForm';
 import SettingsTabs from './SettingsTabs';
 import PageHeader from '../../components/ui/PageHeader';
 import LoadingState from '../../components/ui/LoadingState';
@@ -40,12 +45,14 @@ function ChartRow({
   onRenamed,
   onToggleActive,
   onToggleBank,
+  onSetCashFlow,
 }: {
   node: AccountNode;
   depth: number;
   onRenamed: (id: string, name: string) => Promise<void>;
   onToggleActive: (node: AccountNode) => Promise<void>;
   onToggleBank: (node: AccountNode) => Promise<void>;
+  onSetCashFlow: (node: AccountNode, value: '' | CashFlowCategory) => Promise<void>;
 }) {
   const Icon = node.isPostable ? Landmark : Folder;
   const [editing, setEditing] = useState(false);
@@ -111,6 +118,19 @@ function ChartRow({
         ? 'Mark as bank'
         : 'Mark as credit card';
   const showBankToggle = node.isPostable && (node.type === 'Asset' || node.type === 'Liability');
+
+  // Phase 45 — the cash flow category sits beside the bank toggle, on balance-sheet accounts only.
+  async function handleCashFlowChange(value: '' | CashFlowCategory) {
+    setBusy(true);
+    setRowError(null);
+    try {
+      await onSetCashFlow(node, value);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not update the account');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <>
@@ -217,6 +237,22 @@ function ChartRow({
             {bankToggleLabel}
           </button>
         )}
+
+        {hasCashFlowCategory(node.type) && (
+          <select
+            value={node.cashFlowCategory ?? ''}
+            onChange={(e) => void handleCashFlowChange(e.target.value as '' | CashFlowCategory)}
+            disabled={busy}
+            aria-label={`Cash flow category ${node.code}`}
+            className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-xs text-[var(--text)] shrink-0"
+          >
+            {CASH_FLOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
       </li>
 
       {rowError !== null && (
@@ -233,6 +269,7 @@ function ChartRow({
           onRenamed={onRenamed}
           onToggleActive={onToggleActive}
           onToggleBank={onToggleBank}
+          onSetCashFlow={onSetCashFlow}
         />
       ))}
     </>
@@ -282,6 +319,11 @@ export default function ChartSettingsPage() {
     const kind: BankAccountKind | null =
       node.bankAccountKind !== null ? null : node.type === 'Asset' ? 'BANK' : 'CREDIT_CARD';
     await updateAccount(node.id, { bankAccountKind: kind });
+    setReloadToken((t) => t + 1);
+  }
+
+  async function handleSetCashFlow(node: AccountNode, value: '' | CashFlowCategory) {
+    await updateAccount(node.id, { cashFlowCategory: value === '' ? null : value });
     setReloadToken((t) => t + 1);
   }
 
@@ -348,6 +390,7 @@ export default function ChartSettingsPage() {
                       onRenamed={handleRenamed}
                       onToggleActive={handleToggleActive}
                       onToggleBank={handleToggleBank}
+                      onSetCashFlow={handleSetCashFlow}
                     />
                   ))}
                 </ul>

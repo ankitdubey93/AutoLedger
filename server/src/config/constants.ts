@@ -397,3 +397,26 @@ export const QUOTE_MAX_LINES = 200;
 export const QUOTE_ACCEPTANCE_CODE_TTL_MS = 10 * 60 * 1000;
 export const QUOTE_ACCEPTANCE_CODE_MAX_ATTEMPTS = 5;
 export const QUOTE_ACCEPTANCE_CODES_PER_HOUR = 5;
+
+// ---- Phase 45 — GL exception report
+
+/** Months of history the exception baselines are computed from, before `from`. */
+export const GL_EXCEPTION_BASELINE_MONTHS = 12;
+/** Fewest prior lines an account/side (or a tax account) needs before it is judged. */
+export const GL_EXCEPTION_MIN_HISTORY_LINES = 10;
+/** Modified z-score above which an amount is flagged (text, cast to numeric in SQL). */
+export const GL_EXCEPTION_MODIFIED_Z_THRESHOLD = '3.5';
+/** Share of an account's lines on the opposite side (basis points) that makes it a contra account. */
+export const GL_EXCEPTION_CONTRA_SHARE_BP = 8000;
+/** Fewest prior tax-rate lines an account needs before its usual rate is trusted. */
+export const GL_EXCEPTION_TAX_MIN_HISTORY_LINES = 5;
+/** Same-party, same-total window for POSSIBLE_DUPLICATE. */
+export const GL_EXCEPTION_DUPLICATE_WINDOW_DAYS = 14;
+/** Most exceptions one rule returns before the report is marked truncated. */
+export const GL_EXCEPTION_RESULT_CAP = 1000;
+/** Longest inclusive date range one exception report may cover. */
+export const GL_EXCEPTION_MAX_RANGE_DAYS = 366;
+/** Source types the side rule never judges (their sides are structural). */
+export const GL_EXCEPTION_SIDE_EXEMPT_SOURCES = ['credit_note', 'debit_note', 'fx_revaluation', 'stock', 'opening_balance', 'migration_import'] as const;
+/** Source types the amount rule never judges. */
+export const GL_EXCEPTION_AMOUNT_EXEMPT_SOURCES = ['opening_balance', 'migration_import', 'fx_revaluation'] as const;

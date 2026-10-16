@@ -106,3 +106,39 @@ export async function issueCreditNote(
   }
   return id;
 }
+
+/** Creates, submits and approves (posts) a one-line bill. The caller must be OWNER. */
+export async function postBill(agent: Agent, orgId: string, vendorId: string, opts: {
+  billDate: string; unitPriceCents: number; taxRateBp?: number; expenseCode?: string; vendorReference?: string; itemId?: string | null;
+}): Promise<{ id: string; journalEntryId: string; lineId: string }> {
+  const expenseAccountId = await accountId(orgId, opts.expenseCode ?? '6130');
+  const created = await agent.post('/api/v1/bills').send({
+    vendorId,
+    vendorReference: opts.vendorReference ?? `REF-${opts.billDate}-${opts.unitPriceCents}`,
+    billDate: opts.billDate,
+    dueDate: opts.billDate,
+    notes: null,
+    paymentTerms: null,
+    lines: [
+      {
+        description: 'x',
+        quantityMilli: 1000,
+        unitPriceCents: opts.unitPriceCents,
+        expenseAccountId,
+        taxRateBp: opts.taxRateBp ?? 0,
+        ...(opts.itemId === undefined ? {} : { itemId: opts.itemId }),
+      },
+    ],
+  });
+  if (created.status !== 201) throw new Error(`fixture: bill create failed ${created.status} ${JSON.stringify(created.body)}`);
+  const id = created.body.bill.id as string;
+  const submitted = await agent.post(`/api/v1/bills/${id}/submit`).send({});
+  if (submitted.status !== 200) throw new Error(`fixture: bill submit failed ${submitted.status} ${JSON.stringify(submitted.body)}`);
+  const approved = await agent.post(`/api/v1/bills/${id}/approve`).send({});
+  if (approved.status !== 200) throw new Error(`fixture: bill approve failed ${approved.status} ${JSON.stringify(approved.body)}`);
+  return {
+    id,
+    journalEntryId: approved.body.bill.journalEntryId as string,
+    lineId: approved.body.bill.lines[0].id as string,
+  };
+}

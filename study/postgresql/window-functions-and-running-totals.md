@@ -159,6 +159,23 @@ A: `NULL`s are treated as equal for partitioning, so all ungrouped rows become o
 
 - "Would an index help?" Not for this ordering: the sort key is a computed window value, so the planner must sort. An index on `(org_id, import_id, row_number)` helps the `WHERE` and the plain-order path only.
 
+## Phase 45 additions — `PARTITION BY account` across many accounts, and `unnest` as a period table
+
+**Running balances across many accounts.** The account transactions report returns lines for several accounts at once. The running balance is the same window as the single-account ledger with one addition, `SUM(net) OVER (PARTITION BY l.account_id ORDER BY e.entry_date, l.created_at, l.id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`. `PARTITION BY` restarts the frame for each account, so one pass produces every account's balance. The opening balance per account is added as a separate scalar, and the balance is only shown when the report is grouped by account with no source-type filter — a filtered set has holes, and a running balance over holes is a lie, so it is returned as `null`.
+
+**`unnest` of parallel arrays as a period table.** P&L comparison needs the same aggregate over N date ranges. Instead of N queries, the periods are passed as parameters, `FROM unnest($2::int[], $3::date[], $4::date[]) AS p(idx, from_date, to_date)`, joined to the ledger with `e.entry_date BETWEEN p.from_date AND p.to_date`, and aggregated `GROUP BY account, p.idx`. Multi-argument `unnest` zips the arrays by position (it is the `ROWS FROM` form), which is what makes it a parameterised, injection-safe VALUES list of any length. The alternative, a `generate_series` of months, cannot express a 4-week or irregular range.
+
+### Interview Q&A (Phase 45)
+
+**Q: How do you get a running balance per account for many accounts in one query?**
+A: `SUM(...) OVER (PARTITION BY account_id ORDER BY date, tiebreaker ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)`. The partition resets the frame per account; add each account's opening balance separately.
+
+**Q: Why null the running balance when a filter is applied?**
+A: The balance is a property of the whole ordered history. Over a filtered subset it would not equal the account balance at any point, so showing it would mislead.
+
+**Q: How do you aggregate over several arbitrary date ranges in one round trip?**
+A: Unnest parallel arrays into a derived table of ranges and join on `BETWEEN`; group by the range index.
+
 ## See also
 
 - [aggregating-a-ledger.md](aggregating-a-ledger.md) — the sibling technique for a snapshot total (`FILTER`), versus this note's per-row running total; also the shared "why does this project have no summary tables" reasoning

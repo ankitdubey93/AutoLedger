@@ -4,6 +4,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { getTrialBalance, type AccountType, type TrialBalanceRow } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
 import LoadingState from '../../components/ui/LoadingState';
+import ExportMenu from '../../components/ui/ExportMenu';
 
 /**
  * The trial balance — the report that proves the books balance.
@@ -84,6 +85,7 @@ export default function TrialBalancePage() {
         </div>
 
         <div className="flex items-end gap-4">
+          <ExportMenu path="/reports/trial-balance" params={{ asOf: asOf || null }} />
           <label className="flex items-center gap-2 text-sm text-[var(--muted)]">
             <input
               type="checkbox"

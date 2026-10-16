@@ -1,6 +1,6 @@
 # Database Schema
 
-**Applied: `001`–`075`.** Every phase's tables below are marked `— applied` except **Phase 17** (QuickBooks sync), which stays target state — deferred, unbuilt. This line was last correct at `026`; it drifted for a long stretch before an earlier pass caught it — the reminder to re-verify it against `server/src/db/migrations/` on every schema-touching change rather than trusting it by inertia, which is exactly why it's already been re-verified since. `033`–`047` are **retired** (Phase 29, migration `068`) — they stay applied and on disk under rule 13, but the 20 tables they built no longer exist. See [§ Phase 29 — five apps retired](#phase-29--five-apps-retired-platform--applied) below.
+**Applied: `001`–`099`.** Every phase's tables below are marked `— applied` except **Phase 17** (QuickBooks sync), which stays target state — deferred, unbuilt. This line was last correct at `026`; it drifted for a long stretch before an earlier pass caught it — the reminder to re-verify it against `server/src/db/migrations/` on every schema-touching change rather than trusting it by inertia, which is exactly why it's already been re-verified since. `033`–`047` are **retired** (Phase 29, migration `068`) — they stay applied and on disk under rule 13, but the 20 tables they built no longer exist. See [§ Phase 29 — five apps retired](#phase-29--five-apps-retired-platform--applied) below.
 
 Apply with `npm run migrate`; rebuild from scratch with `npm run db:reset`. The runner records a SHA-256 checksum per file and **refuses to run if an applied migration has been edited** — rule 13 is enforced by the tooling, not by memory.
 
@@ -935,6 +935,14 @@ Four additive, idempotent migrations in the order below. Money is `BIGINT` cents
 - Backfill (via a `TEMP TABLE ... ON COMMIT DROP` id map, idempotent by `NOT EXISTS`): every `manual` / `recurring` / `migration_import` entry that is not a reversal gets a `POSTED` document (or `VOIDED` when its reversal exists and is not a recurring auto-reversal), with its lines copied.
 
 Chart note: rows `1150` and `2130` are additions to the default-chart table below (that table predates several later additions and is a representative listing).
+
+**`098_ledger-core_gl_exception_reviews.sql`** (Phase 45)
+- Three unique indexes that the new composite FKs reference, each redundant with the primary key but required by FK syntax: **`ux_ledger_lines_org_id_id`**, **`ux_invoice_lines_org_id_id`**, **`ux_bill_lines_org_id_id`** on `(org_id, id)` (`CREATE UNIQUE INDEX IF NOT EXISTS`).
+- `gl_exception_reviews`: `id`, `org_id` (`RESTRICT`), `rule_code` (`UNUSUAL_AMOUNT`/`UNEXPECTED_SIDE`/`NON_DEFAULT_TAX`/`POSSIBLE_DUPLICATE`), four nullable subject columns `ledger_line_id`, `journal_entry_id`, `invoice_line_id`, `bill_line_id`, `note` (non-blank, <= 500), `reviewed_by` (`users`, `RESTRICT`), `reviewed_at`. **`chk_gl_exception_reviews_one_subject`** (`num_nonnulls(...) = 1`) and **`chk_gl_exception_reviews_subject_matches_rule`** (amount/side rules review a ledger line, duplicates a journal entry, tax a document line). Composite FKs **`fk_gl_exception_reviews_ledger_line`** / **`_journal_entry`** (`ON DELETE RESTRICT`: immutable rows) and **`_invoice_line`** / **`_bill_line`** (`ON DELETE CASCADE`: editable document lines). One partial unique index per subject column on `(org_id, rule_code, <subject>)` (`ux_gl_exception_reviews_ledger_line`/`_journal_entry`/`_invoice_line`/`_bill_line`), plus `idx_gl_exception_reviews_org` and `idx_gl_exception_reviews_reviewed_by`. Audit trigger `trg_gl_exception_reviews_audit`. "Reopen" deletes the row. No money column.
+
+**`099_ledger-core_account_cash_flow_category.sql`** (Phase 45)
+- `accounts.cash_flow_category` TEXT NULL with **`chk_accounts_cash_flow_category`** (`CASH`/`OPERATING`/`INVESTING`/`FINANCING`, only on `Asset`/`Liability`/`Equity`): an override, `NULL` = derive it. A report attribute, not a sixth account type (rule 12).
+- Backfill: `1590 Accumulated Depreciation` is set to `OPERATING` (a non-cash add-back) where still `NULL`.
 
 ## Phase 17 — target tables
 

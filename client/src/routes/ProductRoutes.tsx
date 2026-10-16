@@ -80,8 +80,14 @@ import StatementPrintPage from '../Pages/statements/StatementPrintPage';
 // Reports
 import ReportsPage from '../Pages/reports/ReportsPage';
 import ProfitAndLossPage from '../Pages/reports/ProfitAndLossPage';
+import AccountTransactionsPage from '../Pages/reports/AccountTransactionsPage';
+import ExceptionReportPage from '../Pages/reports/ExceptionReportPage';
 import BalanceSheetPage from '../Pages/reports/BalanceSheetPage';
 import TrialBalancePage from '../Pages/reports/TrialBalancePage';
+import AgingReportPage from '../Pages/reports/AgingReportPage';
+import TaxSummaryPage from '../Pages/reports/TaxSummaryPage';
+import SalesPurchasesReportPage from '../Pages/reports/SalesPurchasesReportPage';
+import CashFlowPage from '../Pages/reports/CashFlowPage';
 // Settings
 import OrganizationProfileSettingsPage from '../Pages/settings/OrganizationProfileSettingsPage';
 import MembersSettingsPage from '../Pages/settings/MembersSettingsPage';
@@ -238,6 +244,16 @@ export default function ProductRoutes() {
           <Route path="/reports" element={<ReportsPage />} />
           <Route path="/reports/profit-and-loss" element={<ProfitAndLossPage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
+          <Route path="/reports/cash-flow" element={<CashFlowPage />} />
+          <Route path="/reports/account-transactions" element={<AccountTransactionsPage />} />
+          <Route path="/reports/exceptions" element={<ExceptionReportPage />} />
+          <Route path="/reports/aged-receivables" element={<AgingReportPage kind="AR" />} />
+          <Route path="/reports/aged-payables" element={<AgingReportPage kind="AP" />} />
+          <Route path="/reports/tax-summary" element={<TaxSummaryPage />} />
+          <Route path="/reports/sales-by-customer" element={<SalesPurchasesReportPage kind="sales-by-customer" />} />
+          <Route path="/reports/purchases-by-vendor" element={<SalesPurchasesReportPage kind="purchases-by-vendor" />} />
+          <Route path="/reports/sales-by-item" element={<SalesPurchasesReportPage kind="sales-by-item" />} />
+          <Route path="/reports/purchases-by-item" element={<SalesPurchasesReportPage kind="purchases-by-item" />} />
           <Route path="/trial-balance" element={<TrialBalancePage />} />
           <Route path="/reports/general-journal" element={<JournalsPage />} />
 

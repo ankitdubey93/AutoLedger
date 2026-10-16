@@ -5,6 +5,7 @@ import {
   type AutoRefreshOptions,
 } from '../utils/fetchWithAutoRefresh';
 import type { PaymentTermRule } from '../utils/dueDate';
+import { saveBlob } from '../utils/saveBlob';
 
 /**
  * The single place the client talks to the API. Every page goes through here so
@@ -492,6 +493,9 @@ export type AccountType = 'Asset' | 'Liability' | 'Equity' | 'Revenue' | 'Expens
 export const BANK_ACCOUNT_KINDS = ['BANK', 'CREDIT_CARD'] as const;
 export type BankAccountKind = (typeof BANK_ACCOUNT_KINDS)[number];
 
+/** Phase 45. Mirrors server/src/types/accounting.ts's CashFlowCategory. */
+export type CashFlowCategory = 'CASH' | 'OPERATING' | 'INVESTING' | 'FINANCING';
+
 export interface Account {
   id: string;
   code: string;
@@ -503,6 +507,8 @@ export interface Account {
   description: string | null;
   /** Phase 44 — null unless the account is a bank (Asset) or credit card (Liability) account. */
   bankAccountKind: BankAccountKind | null;
+  /** Phase 45 — null means "derived from the account's type and code". Optional so pre-Phase-45 fixtures still typecheck. */
+  cashFlowCategory?: CashFlowCategory | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -585,6 +591,8 @@ export interface CreateAccountInput {
   description: string | null;
   /** Phase 44. */
   bankAccountKind?: BankAccountKind | null;
+  /** Phase 45. */
+  cashFlowCategory?: CashFlowCategory | null;
 }
 
 /**
@@ -612,6 +620,8 @@ export interface UpdateAccountInput {
   parentId?: string | null;
   /** Phase 44. */
   bankAccountKind?: BankAccountKind | null;
+  /** Phase 45. */
+  cashFlowCategory?: CashFlowCategory | null;
 }
 
 /** PATCH /accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
@@ -2791,6 +2801,113 @@ export async function getApAging(asOf: string | null = null, signal?: AbortSigna
   return report;
 }
 
+/* ------------------------------------------------------- accounting: tax summary */
+
+/** Mirrors server/src/types/accounting.ts's TaxSummaryRow. */
+export interface TaxSummaryRow {
+  rateBp: number;
+  netCents: number;
+  taxCents: number;
+  documentCount: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's TaxSummaryDirection. */
+export interface TaxSummaryDirection {
+  rows: TaxSummaryRow[];
+  netCents: number;
+  taxCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's TaxSummaryAccountCheck. */
+export interface TaxSummaryAccountCheck {
+  account: { id: string; code: string; name: string } | null;
+  glCents: number;
+  differenceCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's TaxSummary. */
+export interface TaxSummary {
+  from: string;
+  to: string;
+  output: TaxSummaryDirection;
+  input: TaxSummaryDirection;
+  netTaxPayableCents: number;
+  outputCheck: TaxSummaryAccountCheck;
+  inputCheck: TaxSummaryAccountCheck;
+}
+
+/** GET /reports/tax-summary?from=YYYY-MM-DD&to=YYYY-MM-DD */
+export async function getTaxSummary(from: string, to: string, signal?: AbortSignal): Promise<TaxSummary> {
+  const params = new URLSearchParams({ from, to });
+  const body = await apiFetch<{ success: boolean } & TaxSummary>(
+    `/reports/tax-summary?${params.toString()}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+/* ---------------------------------------------------- accounting: Phase 45 cash flow */
+
+/** Mirrors server/src/types/accounting.ts's CashFlowRow. */
+export interface CashFlowRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: AccountType;
+  category: 'OPERATING' | 'INVESTING' | 'FINANCING';
+  categorySource: 'OVERRIDE' | 'DERIVED';
+  /** Cash effect: credit − debit over the period. */
+  amountCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's CashFlowSection. */
+export interface CashFlowSection {
+  rows: CashFlowRow[];
+  totalCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's CashFlowCashAccount. */
+export interface CashFlowCashAccount {
+  accountId: string;
+  code: string;
+  name: string;
+  openingCents: number;
+  closingCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's CashFlowStatement. */
+export interface CashFlowStatement {
+  from: string;
+  to: string;
+  netIncomeCents: number;
+  /** totalCents = netIncomeCents + Σ rows. */
+  operating: CashFlowSection;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+  netChangeCents: number;
+  openingCashCents: number;
+  closingCashCents: number;
+  cashAccounts: CashFlowCashAccount[];
+}
+
+/** GET /reports/cash-flow?from=YYYY-MM-DD&to=YYYY-MM-DD */
+export async function getCashFlow(
+  from: string | null = null,
+  to: string | null = null,
+  signal?: AbortSignal,
+): Promise<CashFlowStatement> {
+  const params = new URLSearchParams();
+  if (from !== null) params.set('from', from);
+  if (to !== null) params.set('to', to);
+  const suffix = params.size === 0 ? '' : `?${params.toString()}`;
+  const body = await apiFetch<{ success: boolean } & CashFlowStatement>(`/reports/cash-flow${suffix}`, {
+    signal: signal ?? null,
+  });
+  const { success, ...report } = body;
+  return report;
+}
+
 /* ---------------------------------------------------- accounting: Phase 4 statements */
 
 export interface StatementRow {
@@ -2828,6 +2945,64 @@ export async function getProfitAndLoss(
   const suffix = params.size === 0 ? '' : `?${params.toString()}`;
   const body = await apiFetch<{ success: boolean } & ProfitAndLoss>(
     `/reports/profit-and-loss${suffix}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+// ---- Phase 45 — P&L comparison (mirrors server types/accounting.ts)
+
+export type ComparisonMode = 'previousPeriod' | 'samePeriodLastYear';
+export interface ComparisonPeriod {
+  from: string;
+  to: string;
+  label: string;
+}
+export interface Variance {
+  cents: number;
+  bp: number | null;
+}
+export interface ComparisonStatementRow {
+  accountId: string;
+  code: string;
+  name: string;
+  type: StatementRow['type'];
+  amountsCents: number[];
+  variance: Variance;
+}
+export interface ComparisonSection {
+  rows: ComparisonStatementRow[];
+  totalsCents: number[];
+  variance: Variance;
+}
+export interface ProfitAndLossComparison {
+  mode: ComparisonMode;
+  periods: ComparisonPeriod[];
+  revenue: ComparisonSection;
+  costOfSales: ComparisonSection;
+  grossProfitCents: number[];
+  grossProfitVariance: Variance;
+  operatingExpenses: ComparisonSection;
+  netIncomeCents: number[];
+  netIncomeVariance: Variance;
+}
+
+/** GET /reports/profit-and-loss/comparison?from&to&compare&periods */
+export async function getProfitAndLossComparison(
+  from: string | null,
+  to: string | null,
+  compare: ComparisonMode,
+  periods: number,
+  signal?: AbortSignal,
+): Promise<ProfitAndLossComparison> {
+  const params = new URLSearchParams();
+  if (from !== null) params.set('from', from);
+  if (to !== null) params.set('to', to);
+  params.set('compare', compare);
+  params.set('periods', String(periods));
+  const body = await apiFetch<{ success: boolean } & ProfitAndLossComparison>(
+    `/reports/profit-and-loss/comparison?${params.toString()}`,
     { signal: signal ?? null },
   );
   const { success, ...report } = body;
@@ -4198,6 +4373,207 @@ export async function apiDownloadBlob(path: string): Promise<{ blob: Blob; filen
   const filename = match?.[1] ?? 'download';
 
   return { blob: await response.blob(), filename };
+}
+
+// ---------------------------------------------------------- report export (Phase 45)
+
+export type ReportFormat = 'csv' | 'xlsx' | 'pdf';
+
+/**
+ * path like '/reports/trial-balance'; params with null values are omitted; adds format.
+ * The filename comes from the server's Content-Disposition; the fallback is the last path segment.
+ */
+export async function downloadReport(
+  path: string,
+  params: Record<string, string | null>,
+  format: ReportFormat,
+): Promise<void> {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null) search.set(key, value);
+  }
+  search.set('format', format);
+  const { blob, filename } = await apiDownloadBlob(`${path}?${search.toString()}`);
+  saveBlob(blob, filename !== 'download' ? filename : `${path.split('/').pop() ?? 'report'}.${format}`);
+}
+
+// ---------------------------------------------------------- account transactions (Phase 45)
+
+/** Mirrors server/src/types/accounting.ts's AccountTransactionGrouping. */
+export type AccountTransactionGrouping = 'account' | 'month' | 'sourceType' | 'contact' | 'none';
+export type AccountTransactionMode = 'detail' | 'summary';
+
+export interface AccountTransactionLine {
+  lineId: string;
+  entryId: string;
+  entryDate: string;
+  sourceType: string;
+  sourceId: string | null;
+  sourceLabel: string;
+  reference: string | null;
+  contactType: 'CUSTOMER' | 'VENDOR' | null;
+  contactId: string | null;
+  contactName: string | null;
+  description: string | null;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  debitCents: number;
+  creditCents: number;
+  netCents: number;
+  runningBalanceCents: number | null;
+  currencyCode: string;
+  nativeDebitCents: number;
+  nativeCreditCents: number;
+  /** Exact NUMERIC text, never a float. */
+  fxRate: string;
+  createdByName: string | null;
+}
+
+export interface AccountTransactionGroup {
+  key: string;
+  label: string;
+  openingBalanceCents: number | null;
+  debitCents: number;
+  creditCents: number;
+  netCents: number;
+  closingBalanceCents: number | null;
+  lineCount: number;
+  lines: AccountTransactionLine[];
+}
+
+export interface AccountTransactionsReport {
+  accountIds: string[] | null;
+  from: string;
+  to: string;
+  sourceTypes: string[] | null;
+  groupBy: AccountTransactionGrouping;
+  mode: AccountTransactionMode;
+  groups: AccountTransactionGroup[];
+  totalDebitCents: number;
+  totalCreditCents: number;
+  lineCount: number;
+}
+
+export interface AccountTransactionsParams {
+  accountIds: string[];
+  from: string;
+  to: string;
+  groupBy: AccountTransactionGrouping;
+  mode: AccountTransactionMode;
+  sourceTypes: string[];
+}
+
+/** GET /reports/account-transactions — empty accountIds / sourceTypes arrays are omitted; arrays join with ','. */
+export async function getAccountTransactions(
+  params: AccountTransactionsParams,
+  signal?: AbortSignal,
+): Promise<AccountTransactionsReport> {
+  const search = new URLSearchParams();
+  if (params.accountIds.length > 0) search.set('accountIds', params.accountIds.join(','));
+  search.set('from', params.from);
+  search.set('to', params.to);
+  search.set('groupBy', params.groupBy);
+  search.set('mode', params.mode);
+  if (params.sourceTypes.length > 0) search.set('sourceTypes', params.sourceTypes.join(','));
+  const body = await apiFetch<{ success: boolean } & AccountTransactionsReport>(
+    `/reports/account-transactions?${search.toString()}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+// ------------------------------------------------ GL exceptions (Phase 45)
+
+/** Mirrors server GL_EXCEPTION_RULES. */
+export type GlExceptionRule = 'UNUSUAL_AMOUNT' | 'UNEXPECTED_SIDE' | 'NON_DEFAULT_TAX' | 'POSSIBLE_DUPLICATE';
+export const GL_EXCEPTION_RULES: readonly GlExceptionRule[] = [
+  'UNUSUAL_AMOUNT',
+  'UNEXPECTED_SIDE',
+  'NON_DEFAULT_TAX',
+  'POSSIBLE_DUPLICATE',
+];
+export const GL_EXCEPTION_RULE_LABELS: Readonly<Record<GlExceptionRule, string>> = {
+  UNUSUAL_AMOUNT: 'Unusual amount',
+  UNEXPECTED_SIDE: 'Unexpected debit or credit',
+  NON_DEFAULT_TAX: 'Non-default tax rate',
+  POSSIBLE_DUPLICATE: 'Possible duplicate',
+};
+export type GlExceptionSubjectType = 'LEDGER_LINE' | 'JOURNAL_ENTRY' | 'INVOICE_LINE' | 'BILL_LINE';
+
+export interface GlExceptionReview {
+  id: string;
+  note: string;
+  reviewedAt: string;
+  reviewedByName: string;
+}
+
+export interface GlException {
+  rule: GlExceptionRule;
+  subjectType: GlExceptionSubjectType;
+  subjectId: string;
+  entryDate: string;
+  journalEntryId: string | null;
+  documentType: 'INVOICE' | 'BILL' | null;
+  documentId: string | null;
+  documentNumber: string | null;
+  accountId: string | null;
+  accountCode: string | null;
+  accountName: string | null;
+  amountCents: number;
+  currencyCode: string;
+  expected: string;
+  actual: string;
+  reason: string;
+  review: GlExceptionReview | null;
+}
+
+export interface GlExceptionReport {
+  from: string;
+  to: string;
+  rules: GlExceptionRule[];
+  includeReviewed: boolean;
+  counts: Record<GlExceptionRule, { open: number; reviewed: number }>;
+  exceptions: GlException[];
+  truncated: boolean;
+}
+
+/** GET /reports/exceptions */
+export async function getGlExceptions(
+  params: { from: string; to: string; rules: GlExceptionRule[]; includeReviewed: boolean },
+  signal?: AbortSignal,
+): Promise<GlExceptionReport> {
+  const search = new URLSearchParams();
+  search.set('from', params.from);
+  search.set('to', params.to);
+  search.set('rules', params.rules.join(','));
+  search.set('includeReviewed', String(params.includeReviewed));
+  const body = await apiFetch<{ success: boolean } & GlExceptionReport>(
+    `/reports/exceptions?${search.toString()}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
+}
+
+/** POST /reports/exceptions/reviews */
+export async function createGlExceptionReview(input: {
+  rule: GlExceptionRule;
+  subjectType: GlExceptionSubjectType;
+  subjectId: string;
+  note: string;
+}): Promise<GlExceptionReview> {
+  const body = await apiFetch<{ success: boolean; review: GlExceptionReview }>('/reports/exceptions/reviews', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return body.review;
+}
+
+/** DELETE /reports/exceptions/reviews/:id — reopens the flag. */
+export async function deleteGlExceptionReview(id: string): Promise<void> {
+  await apiFetch(`/reports/exceptions/reviews/${id}`, { method: 'DELETE' });
 }
 
 // ---------------------------------------------------------- capture (Phase 10)
@@ -6417,4 +6793,54 @@ export function rotateInboundMailAddress(): Promise<{ success: boolean } & Inbou
 /** GET /integrations/inbound-mail/messages?page= */
 export function listInboundMessages(params: { page: number }): Promise<InboundMailMessagesPage> {
   return apiFetch(`/integrations/inbound-mail/messages?page=${params.page}`);
+}
+
+// ---- Phase 45 — sales and purchases by customer, vendor and item (mirrors server types/accounting.ts)
+
+export type SalesPurchasesReportKind =
+  | 'sales-by-customer'
+  | 'purchases-by-vendor'
+  | 'sales-by-item'
+  | 'purchases-by-item';
+
+export interface SalesPurchasesRow {
+  key: string;
+  label: string;
+  code: string | null;
+  quantityMilli: number | null;
+  netCents: number;
+  taxCents: number;
+  grossCents: number;
+  documentCount: number;
+  comparisonNetCents: number | null;
+}
+
+export interface SalesPurchasesReport {
+  kind: SalesPurchasesReportKind;
+  from: string;
+  to: string;
+  comparison: ComparisonPeriod | null;
+  rows: SalesPurchasesRow[];
+  totalNetCents: number;
+  totalTaxCents: number;
+  totalGrossCents: number;
+  totalComparisonNetCents: number | null;
+}
+
+/** GET /reports/{kind}?from&to[&compare] */
+export async function getSalesPurchasesReport(
+  kind: SalesPurchasesReportKind,
+  from: string,
+  to: string,
+  compare: ComparisonMode | null,
+  signal?: AbortSignal,
+): Promise<SalesPurchasesReport> {
+  const params = new URLSearchParams({ from, to });
+  if (compare !== null) params.set('compare', compare);
+  const body = await apiFetch<{ success: boolean } & SalesPurchasesReport>(
+    `/reports/${kind}?${params.toString()}`,
+    { signal: signal ?? null },
+  );
+  const { success, ...report } = body;
+  return report;
 }

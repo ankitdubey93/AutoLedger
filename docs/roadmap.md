@@ -1653,6 +1653,28 @@ Built to `plans/walkthrough-months-5-6.md`. Extends the Phase 6.1 `walkthrough/`
 - **No new mechanism - no study note owed.**
 - **Deliberately not built:** fixed assets/depreciation, FX, year-end close and sales tax remain out of the scenario.
 
+## Phase 45, as delivered
+
+A direct feature request (2026-10-16), numbered like 24/30/32/34/39-44, built to `plans/phase-45-reports.md`: a reports suite.
+
+- **Migrations `098`, `099`:** `gl_exception_reviews` (four nullable subject FKs, one partial unique index each) and three `(org_id, id)` unique indexes; `accounts.cash_flow_category`.
+- **Server:** a hand-written ZIP and XLSX writer on `node:zlib` (no new dependency; `engines.node` is now `>=22.2` for `zlib.crc32`), CSV, and a pdfkit table renderer; `?format=csv|xlsx|pdf` on every report; P&L comparison (MoM/QoQ/YoY), account transactions, the GL exception report with remembered reviews, tax summary, four sales/purchases reports, a cash flow statement, and `Content-Disposition` exposed through CORS (a pre-existing defect: the client could never read a download's filename cross-origin). New permission `reports.review_exceptions`.
+- **Client:** an Export menu on every report page, the new report pages, a grouped reports index and sidebar entries, a cash flow category selector on the account form.
+- **Two bugs the tests caught:** the exception report's `round(double precision, integer)` (no such function; cast to `numeric`), and the depreciation override placed on `1500` instead of `1590` in the default chart.
+- **Plan amendments that changed what was built:** `BACKDATED` dropped (see below); `NON_DEFAULT_TAX` covers invoice and bill lines only; no FX-on-cash line; credit cards are operating, not cash; the new-account form sends `cashFlowCategory` only for balance-sheet types.
+- **Demo:** the exception report's `UNUSUAL_AMOUNT` baselines are thin on the six-month demo (an account needs 10 prior lines in the 12 months before the window), so it surfaces few flags; the demo has no tax rates, so the tax summary's differences are zero.
+- **Tests:** **2409 server (2 skipped) + 684 client** passing (up from 2302 / 664 after Phase 44). `verify:integrity` clean. A guardrail review found no violations. One existing client test (`navigation.test.tsx`) changed: the report card heading is now an `<h4>` under section `<h3>` headings. Study notes: three new (XLSX/ZIP by hand, robust outlier detection in SQL, the indirect cash flow statement) and three extended.
+
+**Deliberately not built (Phase 45):**
+- Push to Google Drive/Sheets (the .xlsx/.csv import into Sheets).
+- Scheduled or emailed reports, and queued export jobs.
+- Budgets vs actuals; tracking categories.
+- ZIP64; non-Latin PDF text.
+- The direct-method cash flow.
+- A `BACKDATED` exception check: `journal_entries.created_at` is immutable and `seed:demo` replays months of history, so every demo entry would be flagged.
+- Tax checks on credit and debit notes; item attribution on notes.
+- Deposits in the tax summary (GST on advances is still unbuilt).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

@@ -310,10 +310,11 @@ describe('Sidebar navigation', () => {
 
     // The card's accessible name also swallows its description paragraph, and
     // the sidebar has its own "Trial Balance" link — the <h3> is what
-    // uniquely identifies the report card.
+    // uniquely identifies the report card. Phase 45 groups the cards under
+    // <h3> section headings, so the card name is an <h4>.
     const trialBalanceHeading = await screen.findByRole('heading', {
       name: 'Trial balance',
-      level: 3,
+      level: 4,
     });
     const trialBalanceLink = trialBalanceHeading.closest('a');
     expect(trialBalanceLink).not.toBeNull();

@@ -213,6 +213,7 @@ export async function commitOnClient(
           isPostable: true,
           description: row.description,
           bankAccountKind: null,
+          cashFlowCategory: null,
         });
         resolvedIdByCode.set(code, account.id);
         created += 1;

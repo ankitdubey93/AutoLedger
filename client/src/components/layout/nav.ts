@@ -116,6 +116,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     items: [
       { to: '/reports', label: 'Reports', icon: FileBarChart, end: false, permission: 'reports.view' },
       { to: '/trial-balance', label: 'Trial balance', icon: Scale, end: false, permission: 'reports.view' },
+      { to: '/reports/account-transactions', label: 'Account transactions', icon: ListTree, end: false, permission: 'reports.view' },
+      { to: '/reports/exceptions', label: 'Ledger exceptions', icon: ListChecks, end: false, permission: 'reports.view' },
       { to: '/reports/general-journal', label: 'General journal', icon: BookOpen, end: false, permission: 'journals.view' },
     ],
   },

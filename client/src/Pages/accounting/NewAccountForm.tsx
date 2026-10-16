@@ -4,6 +4,7 @@ import {
   type Account,
   type AccountType,
   type BankAccountKind,
+  type CashFlowCategory,
 } from '../../services/fetchServices';
 
 /**
@@ -25,6 +26,23 @@ import {
 
 export const ACCOUNT_TYPES = ['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as const;
 
+/**
+ * Phase 45 — the cash flow category choices. `''` is "Automatic" (sent as null,
+ * derived from the account's type and code). Shared with ChartSettingsPage.
+ */
+export const CASH_FLOW_OPTIONS: { value: '' | CashFlowCategory; label: string }[] = [
+  { value: '', label: 'Automatic' },
+  { value: 'CASH', label: 'Cash' },
+  { value: 'OPERATING', label: 'Operating' },
+  { value: 'INVESTING', label: 'Investing' },
+  { value: 'FINANCING', label: 'Financing' },
+];
+
+/** Phase 45 — the cash flow category is offered only on balance-sheet accounts. */
+export function hasCashFlowCategory(type: AccountType): boolean {
+  return type === 'Asset' || type === 'Liability' || type === 'Equity';
+}
+
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
@@ -45,6 +63,8 @@ export default function NewAccountForm({
   const [parentId, setParentId] = useState('');
   // Phase 44 — a bank account is an Asset, a credit card account a Liability.
   const [bankAccountKind, setBankAccountKind] = useState<BankAccountKind | null>(null);
+  // Phase 45 — '' is Automatic.
+  const [cashFlowCategory, setCashFlowCategory] = useState<'' | CashFlowCategory>('');
   const [isPostable, setIsPostable] = useState(true);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
@@ -63,6 +83,10 @@ export default function NewAccountForm({
         type,
         parentId: parentId === '' ? null : parentId,
         bankAccountKind,
+        // Sent only when the field is shown; Revenue and Expense omit the key.
+        ...(hasCashFlowCategory(type)
+          ? { cashFlowCategory: cashFlowCategory === '' ? null : cashFlowCategory }
+          : {}),
         isPostable,
         description: description.trim() === '' ? null : description.trim(),
       });
@@ -116,6 +140,7 @@ export default function NewAccountForm({
               setType(e.target.value as AccountType);
               setParentId('');
               setBankAccountKind(null);
+              setCashFlowCategory('');
             }}
             className={inputClass}
           >
@@ -167,6 +192,23 @@ export default function NewAccountForm({
           >
             <option value="">None</option>
             <option value="CREDIT_CARD">Credit card</option>
+          </select>
+        </label>
+      )}
+
+      {hasCashFlowCategory(type) && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Cash flow category</span>
+          <select
+            value={cashFlowCategory}
+            onChange={(e) => setCashFlowCategory(e.target.value as '' | CashFlowCategory)}
+            className={inputClass}
+          >
+            {CASH_FLOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
           </select>
         </label>
       )}

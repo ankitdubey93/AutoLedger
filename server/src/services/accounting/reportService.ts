@@ -1,13 +1,18 @@
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
+import type { ReportContext } from '../../types/reportTable.js';
 import { parseCents } from '../../utils/money.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
+import { comparisonPeriods, variance, type ComparisonMode } from '../../utils/comparisonPeriods.js';
 import {
   isAccountType,
   type BalanceSheet,
   type BankReconciliationReport,
+  type ComparisonSection,
+  type ComparisonStatementRow,
   type ControlAccounts,
   type ProfitAndLoss,
+  type ProfitAndLossComparison,
   type StatementRow,
   type StatementSection,
   type TrialBalance,
@@ -506,3 +511,120 @@ export async function resolveControlAccounts(orgId: string): Promise<ControlAcco
   return { cashAccountId, receivableAccountId, payableAccountId };
 }
 
+/** Organization name and base currency for report titles and subtitles. */
+export async function loadReportContext(orgId: string): Promise<ReportContext> {
+  const { rows } = await pool.query<{ name: string; base_currency: string }>(
+    'SELECT name, base_currency FROM organizations WHERE id = $1',
+    [orgId],
+  );
+  const row = rows[0];
+  if (row === undefined) throw new ApiError(404, 'Organization not found');
+  return { organizationName: row.name, baseCurrency: row.base_currency.trim() };
+}
+
+interface ComparisonRowResult {
+  account_id: string;
+  code: string;
+  name: string;
+  type: string;
+  idx: number;
+  debit_cents: string;
+  credit_cents: string;
+}
+
+/**
+ * Phase 45 — the P&L over `count + 1` periods (current plus `count` prior),
+ * from one query: the periods are unnested as a parameterised table and each
+ * ledger line joins the period its entry date falls in. Sections split exactly
+ * as `profitAndLoss` does, so each column ties to the single-period report.
+ */
+export async function profitAndLossComparison(
+  orgId: string,
+  from: string | null,
+  to: string | null,
+  mode: ComparisonMode,
+  count: number,
+): Promise<ProfitAndLossComparison> {
+  const today = new Date().toISOString().slice(0, 10);
+  const resolvedTo = to ?? today;
+  const { month, day } = await fiscalYearStart(orgId);
+  const fy = fiscalYearBounds(month, day, resolvedTo);
+  const resolvedFrom = from ?? fy.startDate;
+
+  if (resolvedFrom > resolvedTo) throw new ApiError(422, 'from must not be after to');
+
+  const periods = comparisonPeriods(resolvedFrom, resolvedTo, mode, count);
+
+  const { rows } = await pool.query<ComparisonRowResult>(
+    `WITH periods AS (
+       SELECT * FROM unnest($2::int[], $3::date[], $4::date[]) AS p(idx, from_date, to_date)
+     )
+     SELECT a.id AS account_id, a.code, a.name, a.type, p.idx,
+            COALESCE(SUM(l.base_debit_cents), 0)::text AS debit_cents,
+            COALESCE(SUM(l.base_credit_cents), 0)::text AS credit_cents
+       FROM accounts a
+       JOIN ledger_lines l    ON l.account_id = a.id       AND l.org_id = a.org_id
+       JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = a.org_id
+       JOIN periods p         ON e.entry_date BETWEEN p.from_date AND p.to_date
+      WHERE a.org_id = $1 AND a.type IN ('Revenue', 'Expense')
+      GROUP BY a.id, a.code, a.name, a.type, p.idx
+      ORDER BY a.code ASC`,
+    [orgId, periods.map((_, i) => i), periods.map((p) => p.from), periods.map((p) => p.to)],
+  );
+
+  const byAccount = new Map<string, ComparisonStatementRow>();
+  for (const row of rows) {
+    if (!isAccountType(row.type)) {
+      throw new Error(`Unknown account type "${row.type}" on account ${row.account_id}`);
+    }
+    let entry = byAccount.get(row.account_id);
+    if (entry === undefined) {
+      entry = {
+        accountId: row.account_id,
+        code: row.code,
+        name: row.name,
+        type: row.type,
+        amountsCents: periods.map(() => 0),
+        variance: { cents: 0, bp: null },
+      };
+      byAccount.set(row.account_id, entry);
+    }
+    const debitCents = parseCents(row.debit_cents);
+    const creditCents = parseCents(row.credit_cents);
+    entry.amountsCents[row.idx] = row.type === 'Revenue' ? creditCents - debitCents : debitCents - creditCents;
+  }
+
+  const revenue: ComparisonStatementRow[] = [];
+  const costOfSales: ComparisonStatementRow[] = [];
+  const operatingExpenses: ComparisonStatementRow[] = [];
+  // Map preserves insertion order, which is the query's ORDER BY a.code.
+  for (const entry of byAccount.values()) {
+    entry.variance = variance(entry.amountsCents[0] ?? 0, entry.amountsCents[1] ?? 0);
+    if (entry.type === 'Revenue') revenue.push(entry);
+    else if (entry.code.startsWith('5')) costOfSales.push(entry);
+    else operatingExpenses.push(entry);
+  }
+
+  function section(sectionRows: ComparisonStatementRow[]): ComparisonSection {
+    const totalsCents = periods.map((_, i) => sectionRows.reduce((sum, r) => sum + (r.amountsCents[i] ?? 0), 0));
+    return { rows: sectionRows, totalsCents, variance: variance(totalsCents[0] ?? 0, totalsCents[1] ?? 0) };
+  }
+
+  const revenueSection = section(revenue);
+  const costOfSalesSection = section(costOfSales);
+  const operatingExpensesSection = section(operatingExpenses);
+  const grossProfitCents = periods.map((_, i) => (revenueSection.totalsCents[i] ?? 0) - (costOfSalesSection.totalsCents[i] ?? 0));
+  const netIncomeCents = periods.map((_, i) => (grossProfitCents[i] ?? 0) - (operatingExpensesSection.totalsCents[i] ?? 0));
+
+  return {
+    mode,
+    periods,
+    revenue: revenueSection,
+    costOfSales: costOfSalesSection,
+    grossProfitCents,
+    grossProfitVariance: variance(grossProfitCents[0] ?? 0, grossProfitCents[1] ?? 0),
+    operatingExpenses: operatingExpensesSection,
+    netIncomeCents,
+    netIncomeVariance: variance(netIncomeCents[0] ?? 0, netIncomeCents[1] ?? 0),
+  };
+}

@@ -610,6 +610,21 @@ Manual journals are Xero-style documents at `/manual-journals` (the all-postings
 - **Import:** `JOURNALS` CSV imports create `IMPORT` manual journals (narrations fill placeholders; `[[Month]]` escapes).
 - `POST /journals/:id/reverse` voids a manual-journal-owned entry and refuses document-owned entries (previously it could reverse an invoice's posting and bypass its void).
 
+### Phase 45 — Reports suite ✅ shipped
+
+Every report is computed from raw ledger lines or document events on each request (no summary table), in base currency, and every one downloads as CSV, XLSX or PDF (`?format=`, see [api.md](api.md)).
+
+- **P&L comparison** (`/reports/profit-and-loss/comparison`): the current period plus up to 11 prior ones, previous-period or same-period-last-year. Month-aligned ranges shift by whole months with the day clamped to the month end; any other range shifts by its day count. Variance is `current − prior` in cents and in basis points of `|prior|` (null when prior is 0).
+- **Account transactions** (`/reports/account-transactions`): lines for chosen accounts grouped by account, month, source type, contact or none, in detail or summary mode, with selectable columns; contact and reference come from attributing a line through its document's `journal_entry_id`/`void_journal_entry_id`. The running balance appears only when grouped by account with no source-type filter. Detail refuses over 20,000 lines.
+- **Ledger exceptions** (`/reports/exceptions`, at most 366 days): `UNUSUAL_AMOUNT` (modified z-score above 3.5 on median/MAD, against the prior 12 months, needing 10 prior lines; MAD 0 falls back to > 2 × median), `UNEXPECTED_SIDE` (a revenue/expense line on the side its account rarely uses; contra accounts, i.e. 80% opposite-side history, are expected), `NON_DEFAULT_TAX` (an invoice/bill line whose rate differs from the account's usual one) and `POSSIBLE_DUPLICATE` (same party and total within 14 days). A reviewer's dismissal, with a note, is remembered in `gl_exception_reviews`; "Reopen" deletes it. **Not checked:** `BACKDATED` (dropped: `created_at` is immutable and `seed:demo` replays history, so every demo entry would be flagged); tax on credit/debit notes. **Thin baselines:** an account with fewer than 10 prior lines is not judged, so the demo (six months of history) yields few amount flags. That is honest, not a defect.
+- **Aged receivables/payables** pages over the existing `/ar-aging` and `/ap-aging`.
+- **Tax summary** (`/reports/tax-summary`): output tax from invoices less credit notes, input tax from bills less debit notes, by rate, each reconciled to the GL tax accounts with the difference shown. Posted by document date through the journal entry, voids included. Deposits are excluded (GST on advances is unbuilt).
+- **Sales/purchases** by customer, vendor and item over a period with an optional comparison. Credit/debit notes net against their party; item attribution on notes is unbuilt (notes have no item), so item reports show notes as one unattributed line.
+- **Cash flow statement** (`/reports/cash-flow`), indirect method: net income plus the cash effect of every non-cash Asset/Liability/Equity account, classified by `accounts.cash_flow_category` or derived (`BANK` accounts and the cash control account are cash; assets under 1400 investing; liabilities under 2500 and equity financing; everything else, credit cards included, operating). The net change must equal the movement of the cash accounts or the request fails. No FX-on-cash line (always zero) and no direct method.
+- **Limits:** PDF text is Latin only; XLSX is hand-written (no ZIP64); Google Sheets is served by importing the .xlsx/.csv.
+
+Full detail: [roadmap.md § Phase 45, as delivered](roadmap.md#phase-45-as-delivered), [api.md](api.md), [schema.md](schema.md).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

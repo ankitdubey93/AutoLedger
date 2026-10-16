@@ -5,6 +5,7 @@ import { getBalanceSheet, type BalanceSheet, type StatementRow } from '../../ser
 import { formatCents } from '../../utils/money';
 import BackLink from '../../components/BackLink';
 import LoadingState from '../../components/ui/LoadingState';
+import ExportMenu from '../../components/ui/ExportMenu';
 
 /**
  * Balance sheet — Assets = Liabilities + Equity as at a chosen date.
@@ -99,15 +100,18 @@ export default function BalanceSheetPage() {
           </p>
         </div>
 
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-[var(--muted)]">As at</span>
-          <input
-            type="date"
-            value={asOf}
-            onChange={(e) => setAsOf(e.target.value)}
-            className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]"
-          />
-        </label>
+        <div className="flex items-end gap-4">
+          <ExportMenu path="/reports/balance-sheet" params={{ asOf: asOf || null }} />
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">As at</span>
+            <input
+              type="date"
+              value={asOf}
+              onChange={(e) => setAsOf(e.target.value)}
+              className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)]"
+            />
+          </label>
+        </div>
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}

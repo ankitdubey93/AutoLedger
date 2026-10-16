@@ -12,6 +12,15 @@ import type { ProfitAndLoss, BalanceSheet } from '../services/fetchServices';
  * bare MemoryRouter with the route useAppBasePath needs.
  */
 
+// Phase 45: ProfitAndLossPage reads the fiscal-year settings for its YoY shortcut.
+vi.mock('../context/LedgerSettingsContext', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../context/LedgerSettingsContext')>()),
+  useLedgerSettings: () => ({
+    status: 'ready',
+    settings: { fiscalYearStartMonth: 1, fiscalYearStartDay: 1 },
+  }),
+}));
+
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }

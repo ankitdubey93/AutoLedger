@@ -127,6 +127,23 @@ A: The composite FK `(org_id, purchase_order_id) -> orders (org_id, id)` enforce
 
 ---
 
+## Phase 45 additions — exclusive nullable FKs instead of a polymorphic subject
+
+`gl_exception_reviews` records that a human reviewed one flag, and the flagged thing is one of four kinds: a ledger line, a journal entry, an invoice line or a bill line. The common design is `(subject_type TEXT, subject_id UUID)`, which cannot carry a foreign key — the database cannot know which table `subject_id` points at, so orphan reviews and cross-tenant references are possible. We used **four nullable columns, each with its own composite FK** `(org_id, x_id) REFERENCES x (org_id, id)`, and `CHECK (num_nonnulls(ledger_line_id, journal_entry_id, invoice_line_id, bill_line_id) = 1)` so exactly one is set. A second CHECK ties the rule to the allowed subject kinds. Uniqueness (one review per rule and subject) is a **partial unique index per column** (`WHERE ledger_line_id IS NOT NULL`), since a single unique index across nullable columns would treat NULLs as distinct.
+
+The composite FKs needed a `UNIQUE (org_id, id)` target on each referenced table; `ledger_lines`, `invoice_lines` and `bill_lines` had none, so migration 098 adds `ux_*_org_id_id` indexes first (`CREATE UNIQUE INDEX IF NOT EXISTS`, idempotent). They are redundant with the primary key for uniqueness but required by the FK syntax. `ON DELETE`: `RESTRICT` for immutable ledger rows, `CASCADE` for draft-editable document lines, where deleting a line should delete its review.
+
+### Interview Q&A (Phase 45)
+
+**Q: Polymorphic `(type, id)` or exclusive nullable FKs?**
+A: Nullable FKs plus `num_nonnulls = 1` keep real referential integrity and tenant-safety, at the cost of a wider table and a column per kind. The polymorphic pair is flexible but unenforceable by the database; use it only if the set of kinds is open-ended.
+
+**Q: Why partial unique indexes?**
+A: `UNIQUE` treats NULLs as distinct, so one index over four nullable columns would not forbid duplicates. A partial index per column, filtered `IS NOT NULL`, does.
+
+**Q: Why add a unique index on a table whose `id` is already the primary key?**
+A: A foreign key must reference a unique constraint on exactly the referenced column list; `(org_id, id)` is a different list from `(id)`.
+
 ## See also
 
 - [../architecture/multi-tenancy-row-level-scoping.md](../architecture/multi-tenancy-row-level-scoping.md) — the broader tenancy model this FK is one piece of; RLS as a backstop, and why `user_id` was the wrong boundary
