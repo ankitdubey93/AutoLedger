@@ -1675,6 +1675,32 @@ A direct feature request (2026-10-16), numbered like 24/30/32/34/39-44, built to
 - Tax checks on credit and debit notes; item attribution on notes.
 - Deposits in the tax summary (GST on advances is still unbuilt).
 
+## Phase 46, as delivered
+
+A direct feature request (2026-10-16), numbered like 24/30/32/34/39-45, built to `plans/phase-46-system-accounts-history.md` in five slices, one commit each: 46a `c04a03e`, 46b `f746efd`, 46c `1087e7d`, 46d `c796fbb`, 46e `6f8d437`.
+
+- **46a - system accounts:** a lock layer. The 16 roles in `config/systemAccounts.ts` are derived (settings column, else default code), never stored, and proven against the six posting resolvers by a parity test. A system account cannot be retired or flagged as a bank/credit card account; settings refuse a retired account; `GET /accounts/system`; badges and a System accounts panel. A seeded `6830 Rounding` account (migration `100`); nothing posts to it yet.
+- **46b - placeholder previews (client only):** every placeholder field previews its output, pickers show resolved values, bank-line journal memos get a picker, and a recurring schedule shows what its next run will read.
+- **46c - History & notes:** an insert-only `document_history` table (migration `101`) written by each owning service in the same transaction, a Xero-style timeline with notes on documents, payments, contacts and bank lines.
+- **46d - sign-in history:** `login_events` (migration `102`), written outside the rolled-back login transaction on failure; your own events, plus per-member activity for managers and actor filters on the audit log.
+- **46e - bank line delete/restore:** a soft `DELETED` status (migration `103`) through the FSM, restore, statement-level delete, the dedupe hash still blocking re-import (`previouslyDeletedCount`), `deletedCount` on the reconciliation report, and a reconciliation history.
+- **Migrations `100`-`103`.**
+- **Tests:** **2457 server (2 skipped) + 706 client** passing (up from 2409 / 684 after Phase 45). A guardrail review per slice found zero violations. Study notes: four new (derived system-account roles, polymorphic references and history tables, recording failed logins, soft delete under an immutability trigger).
+
+**Deliberately not built (Phase 46):**
+- Automatic postings to Rounding.
+- Deposit applications and online payments on document timelines.
+- History backfill beyond CREATED/IMPORTED.
+- A payment detail page (its history is API-only).
+- Sign-in lockout and alerting; `login_events` retention.
+- Hard deletion of a statement import.
+- Editing or deleting notes.
+
+**Known gaps found while building (Phase 46):**
+- The append-only `document_history` trigger also refuses FK actions, so hard-deleting an organization or user that has history fails (cascade and `SET NULL`). No production path does that; a future account-deletion feature must anonymise or carve out an exception.
+- `bank_transactions.deleted_by` is `ON DELETE SET NULL` but `chk_bank_txn_deleted_fields` requires it when the status is `DELETED`, so hard-deleting a user who deleted a line fails the CHECK (same class, same caveat).
+- A `DELETED` bank line's match/post attempt returns the `409` "ignored - un-ignore it first" wording; the status is right, the message is slightly off.
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.
