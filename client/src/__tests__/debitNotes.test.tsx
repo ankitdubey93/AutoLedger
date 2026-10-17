@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DebitNotesPage from '../Pages/purchases/DebitNotesPage';
 import NewDebitNotePage from '../Pages/purchases/NewDebitNotePage';
 import DebitNoteDetailPage from '../Pages/purchases/DebitNoteDetailPage';
+import { AuthProvider } from '../context/AuthContext';
 import type { Account, Bill, DebitNote } from '../services/fetchServices';
 
 /**
@@ -257,9 +258,11 @@ describe('DebitNoteDetailPage', () => {
 
     render(
       <MemoryRouter initialEntries={['/debit-notes/dn-1']}>
-        <Routes>
-          <Route path="/debit-notes/:noteId" element={<DebitNoteDetailPage />} />
-        </Routes>
+        <AuthProvider>
+          <Routes>
+            <Route path="/debit-notes/:noteId" element={<DebitNoteDetailPage />} />
+          </Routes>
+        </AuthProvider>
       </MemoryRouter>,
     );
 

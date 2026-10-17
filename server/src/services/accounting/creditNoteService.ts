@@ -7,6 +7,7 @@ import { computeLineTotals, type LineTotal as DocumentLineTotal } from '../../ut
 import { convertToBase } from '../../utils/fxRate.js';
 import * as journalService from './journalService.js';
 import * as invoiceService from './invoiceService.js';
+import * as historyService from '../historyService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { settledCentsOnClient } from './settlementSql.js';
 import { fillNoteTextOnClient } from './notePlaceholders.js';
@@ -518,6 +519,44 @@ function mapWriteError(err: unknown): unknown {
   return err;
 }
 
+/**
+ * Phase 46c — one pair of timeline events per credit_note_allocations row
+ * inserted: one on the credit note, one on the invoice it was applied to.
+ */
+async function recordCreditAppliedOnClient(
+  client: PoolClient,
+  orgId: string,
+  noteId: string,
+  invoiceId: string,
+  amountCents: number,
+  currencyCode: string,
+): Promise<void> {
+  const { rows } = await client.query<{ credit_note_number: string | null; invoice_number: string | null }>(
+    `SELECT n.credit_note_number, i.invoice_number
+       FROM credit_notes n
+       JOIN invoices i ON i.id = $3 AND i.org_id = n.org_id
+      WHERE n.id = $1 AND n.org_id = $2`,
+    [noteId, orgId, invoiceId],
+  );
+  const noteNumber = rows[0]?.credit_note_number ?? noteId;
+  const invoiceNumber = rows[0]?.invoice_number ?? invoiceId;
+  const money = historyService.formatMoney(amountCents, currencyCode);
+  await historyService.recordEventsOnClient(client, orgId, [
+    {
+      entityType: 'CREDIT_NOTE',
+      entityId: noteId,
+      action: 'CREDIT_APPLIED',
+      summary: `Applied ${money} to invoice ${invoiceNumber}`,
+    },
+    {
+      entityType: 'INVOICE',
+      entityId: invoiceId,
+      action: 'CREDIT_APPLIED',
+      summary: `Credit note ${noteNumber} applied: ${money}`,
+    },
+  ]);
+}
+
 export async function createCreditNote(
   orgId: string,
   createdBy: string,
@@ -577,6 +616,13 @@ export async function createCreditNote(
     if (noteId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
     await insertLines(client, orgId, noteId, totals);
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'CREDIT_NOTE',
+      entityId: noteId,
+      action: 'CREATED',
+      summary: 'Draft created',
+    });
 
     await client.query('COMMIT');
     return await getCreditNoteById(orgId, noteId);
@@ -654,6 +700,13 @@ export async function updateCreditNote(
     );
 
     await insertLines(client, orgId, id, totals);
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'CREDIT_NOTE',
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
 
     await client.query('COMMIT');
     return await getCreditNoteById(orgId, id);
@@ -834,6 +887,17 @@ export async function issueCreditNote(
       );
     }
 
+    // After the status flip so the number is readable; the auto-apply pair follows the ISSUED event.
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'CREDIT_NOTE',
+      entityId: id,
+      action: 'ISSUED',
+      summary: `Issued as ${number} for ${historyService.formatMoney(totalCents, currencyCode)}`,
+    });
+    if (applyCents > 0) {
+      await recordCreditAppliedOnClient(client, orgId, id, invoice.id, applyCents, currencyCode);
+    }
+
     // COMMIT runs the deferred cap and allocation-limit triggers.
     await client.query('COMMIT');
     return await getCreditNoteById(orgId, id);
@@ -894,6 +958,13 @@ export async function voidCreditNote(
         [id, orgId],
       );
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'CREDIT_NOTE',
+      entityId: id,
+      action: 'VOIDED',
+      summary: 'Voided',
+    });
 
     await client.query('COMMIT');
     return await getCreditNoteById(orgId, id);
@@ -977,6 +1048,8 @@ export async function applyCreditNoteOnClient(
       userId,
     ],
   );
+
+  await recordCreditAppliedOnClient(client, orgId, id, invoice.id, input.amountCents, currencyCode);
 }
 
 /**

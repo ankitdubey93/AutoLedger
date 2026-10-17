@@ -32,6 +32,7 @@ import type { ApplyCredit } from '../../components/ApplyCreditsDialog';
 import PaymentDialog from './PaymentDialog';
 import InvoiceDocument from './InvoiceDocument';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
+import HistoryAndNotes from '../../components/history/HistoryAndNotes';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 import { formatDate } from '../../utils/date';
 
@@ -489,6 +490,7 @@ export default function InvoiceDetailPage() {
 
       <div className="no-print">
         <AttachmentsPanel module="ledger-core" entityType="invoice" entityId={invoice.id} />
+        <HistoryAndNotes basePath="/invoices" entityId={invoice.id} notePermission="invoices.edit" reloadKey={reloadToken} />
       </div>
 
       {confirmAction === 'issue' && (

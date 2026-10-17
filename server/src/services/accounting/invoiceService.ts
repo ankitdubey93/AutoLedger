@@ -17,6 +17,7 @@ import * as inventoryAccountingService from './inventoryAccountingService.js';
 import * as documentStockService from '../inventory/documentStockService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as fxRateService from './fxRateService.js';
+import * as historyService from '../historyService.js';
 import * as paymentTermService from './paymentTermService.js';
 import { assertOrderLineLinksOnClient, assertOrderReferenceOnClient } from './orderLineLinks.js';
 import * as documentService from '../documentService.js';
@@ -766,6 +767,13 @@ export async function createInvoiceOnClient(
     });
   }
 
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'INVOICE',
+    entityId: invoiceId,
+    action: 'CREATED',
+    summary: 'Draft created',
+  });
+
   return invoiceId;
 }
 
@@ -939,6 +947,13 @@ export async function updateInvoice(
         entityId: id,
       });
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'INVOICE',
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
 
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);
@@ -1266,6 +1281,13 @@ export async function issueInvoiceOnClient(
       [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId, notes, notesTemplate],
     );
 
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'INVOICE',
+      entityId: id,
+      action: 'ISSUED',
+      summary: `Issued as ${invoiceNumber} for ${historyService.formatMoney(totalCents, documentCurrency)}`,
+    });
+
     await emitEvent(client, orgId, MODULE_TAGS.accounting, 'invoice.issued', {
       invoiceId: invoiceRow.id,
       invoiceNumber,
@@ -1416,6 +1438,13 @@ export async function voidInvoice(
         [id, orgId],
       );
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'INVOICE',
+      entityId: id,
+      action: 'VOIDED',
+      summary: 'Voided',
+    });
 
     await client.query('COMMIT');
     return await getInvoiceById(orgId, id);

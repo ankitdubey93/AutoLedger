@@ -20,6 +20,7 @@ import BackLink from '../../components/BackLink';
 import MetricTile from '../../components/ui/MetricTile';
 import { formatDate } from '../../utils/date';
 import Pagination from '../../components/ui/Pagination';
+import HistoryAndNotes from '../../components/history/HistoryAndNotes';
 
 /**
  * A customer's or vendor's account (Phase 25) — the party's subsidiary ledger
@@ -389,6 +390,14 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
             View {ledger.controlAccount.code} {ledger.controlAccount.name} in the general ledger
           </Link>
         </p>
+      )}
+
+      {partyId !== undefined && (
+        <HistoryAndNotes
+          basePath={kind === 'CUSTOMER' ? '/customers' : '/vendors'}
+          entityId={partyId}
+          notePermission={kind === 'CUSTOMER' ? 'customers.manage' : 'vendors.manage'}
+        />
       )}
     </section>
   );

@@ -15,6 +15,7 @@ import { formatDate } from '../../utils/date';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
+import HistoryAndNotes from '../../components/history/HistoryAndNotes';
 import { useCan } from '../../context/AuthContext';
 
 /**
@@ -382,6 +383,8 @@ export default function ManualJournalDetailPage() {
           onCancel={() => setConfirmingVoid(false)}
         />
       )}
+
+      <HistoryAndNotes basePath="/manual-journals" entityId={journal.id} notePermission="journals.create" />
 
       {showMakeRecurring && journalEntryId !== null && (
         <MakeRecurringDialog

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CreditNotesPage from '../Pages/sales/CreditNotesPage';
 import NewCreditNotePage from '../Pages/sales/NewCreditNotePage';
 import CreditNoteDetailPage from '../Pages/sales/CreditNoteDetailPage';
+import { AuthProvider } from '../context/AuthContext';
 import type { Account, CreditNote, Invoice } from '../services/fetchServices';
 
 /**
@@ -254,9 +255,11 @@ describe('NewCreditNotePage', () => {
 function renderDetail() {
   return render(
     <MemoryRouter initialEntries={['/credit-notes/cn-1']}>
-      <Routes>
-        <Route path="/credit-notes/:noteId" element={<CreditNoteDetailPage />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/credit-notes/:noteId" element={<CreditNoteDetailPage />} />
+        </Routes>
+      </AuthProvider>
     </MemoryRouter>,
   );
 }

@@ -7,6 +7,7 @@ import { computeLineTotals, type LineTotal as DocumentLineTotal } from '../../ut
 import { convertToBase } from '../../utils/fxRate.js';
 import * as journalService from './journalService.js';
 import * as billService from './billService.js';
+import * as historyService from '../historyService.js';
 import { resolveApPostingAccountsOnClient } from './settingsService.js';
 import { resolveInventoryControlAccountIdsOnClient } from './itemService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
@@ -538,6 +539,44 @@ function mapWriteError(err: unknown): unknown {
   return err;
 }
 
+/**
+ * Phase 46c — one pair of timeline events per debit_note_allocations row
+ * inserted: one on the debit note, one on the bill it was applied to.
+ */
+async function recordCreditAppliedOnClient(
+  client: PoolClient,
+  orgId: string,
+  noteId: string,
+  billId: string,
+  amountCents: number,
+  currencyCode: string,
+): Promise<void> {
+  const { rows } = await client.query<{ debit_note_number: string | null; vendor_reference: string | null }>(
+    `SELECT n.debit_note_number, b.vendor_reference
+       FROM debit_notes n
+       JOIN bills b ON b.id = $3 AND b.org_id = n.org_id
+      WHERE n.id = $1 AND n.org_id = $2`,
+    [noteId, orgId, billId],
+  );
+  const noteNumber = rows[0]?.debit_note_number ?? noteId;
+  const billRef = rows[0]?.vendor_reference ?? billId;
+  const money = historyService.formatMoney(amountCents, currencyCode);
+  await historyService.recordEventsOnClient(client, orgId, [
+    {
+      entityType: 'DEBIT_NOTE',
+      entityId: noteId,
+      action: 'CREDIT_APPLIED',
+      summary: `Applied ${money} to bill ${billRef}`,
+    },
+    {
+      entityType: 'BILL',
+      entityId: billId,
+      action: 'CREDIT_APPLIED',
+      summary: `Debit note ${noteNumber} applied: ${money}`,
+    },
+  ]);
+}
+
 export async function createDebitNote(
   orgId: string,
   createdBy: string,
@@ -599,6 +638,13 @@ export async function createDebitNote(
     if (noteId === undefined) throw new Error('INSERT ... RETURNING produced no row');
 
     await insertLines(client, orgId, noteId, totals);
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'DEBIT_NOTE',
+      entityId: noteId,
+      action: 'CREATED',
+      summary: 'Draft created',
+    });
 
     await client.query('COMMIT');
     return await getDebitNoteById(orgId, noteId);
@@ -679,6 +725,13 @@ export async function updateDebitNote(
     );
 
     await insertLines(client, orgId, id, totals);
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'DEBIT_NOTE',
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
 
     await client.query('COMMIT');
     return await getDebitNoteById(orgId, id);
@@ -855,6 +908,17 @@ export async function issueDebitNote(
       );
     }
 
+    // After the status flip so the number is readable; the auto-apply pair follows the ISSUED event.
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'DEBIT_NOTE',
+      entityId: id,
+      action: 'ISSUED',
+      summary: `Issued as ${number} for ${historyService.formatMoney(totalCents, currencyCode)}`,
+    });
+    if (applyCents > 0) {
+      await recordCreditAppliedOnClient(client, orgId, id, bill.id, applyCents, currencyCode);
+    }
+
     // COMMIT runs the deferred cap and allocation-limit triggers.
     await client.query('COMMIT');
     return await getDebitNoteById(orgId, id);
@@ -915,6 +979,13 @@ export async function voidDebitNote(
         [id, orgId],
       );
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'DEBIT_NOTE',
+      entityId: id,
+      action: 'VOIDED',
+      summary: 'Voided',
+    });
 
     await client.query('COMMIT');
     return await getDebitNoteById(orgId, id);
@@ -998,6 +1069,8 @@ export async function applyDebitNoteOnClient(
       userId,
     ],
   );
+
+  await recordCreditAppliedOnClient(client, orgId, id, bill.id, input.amountCents, currencyCode);
 }
 
 /**

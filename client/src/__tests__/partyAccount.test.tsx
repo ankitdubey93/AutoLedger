@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import PartyAccountPage from '../Pages/sales/PartyAccountPage';
 import CustomersPage from '../Pages/sales/CustomersPage';
+import { AuthProvider } from '../context/AuthContext';
 import type { Customer, PartyLedger, PartyOpenItems } from '../services/fetchServices';
 
 /**
@@ -109,10 +110,12 @@ afterEach(() => {
 function renderParty(kind: 'CUSTOMER' | 'VENDOR', path: string) {
   return render(
     <MemoryRouter initialEntries={[path]}>
-      <Routes>
-        <Route path="/customers/:partyId" element={<PartyAccountPage kind="CUSTOMER" />} />
-        <Route path="/vendors/:partyId" element={<PartyAccountPage kind={kind} />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/customers/:partyId" element={<PartyAccountPage kind="CUSTOMER" />} />
+          <Route path="/vendors/:partyId" element={<PartyAccountPage kind={kind} />} />
+        </Routes>
+      </AuthProvider>
     </MemoryRouter>,
   );
 }

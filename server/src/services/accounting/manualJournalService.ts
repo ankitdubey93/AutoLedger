@@ -13,6 +13,7 @@ import {
   type ManualJournalSummary,
 } from '../../types/accounting.js';
 import * as journalService from './journalService.js';
+import * as historyService from '../historyService.js';
 
 /**
  * Manual journals — Phase 44.
@@ -406,6 +407,12 @@ async function insertHeaderOnClient(
   );
   const id = rows[0]?.id;
   if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'MANUAL_JOURNAL',
+    entityId: id,
+    action: 'CREATED',
+    summary: status === 'TEMPLATE' ? 'Repeating template created' : 'Draft created',
+  });
   return id;
 }
 
@@ -480,6 +487,12 @@ export async function updateManualJournal(
         id,
       ]);
       await insertLinesOnClient(client, orgId, id, input.lines);
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: 'MANUAL_JOURNAL',
+        entityId: id,
+        action: 'UPDATED',
+        summary: locked.status === 'TEMPLATE' ? 'Template edited' : 'Draft edited',
+      });
     }),
   );
   return getManualJournalById(orgId, id);
@@ -553,6 +566,12 @@ async function postDraftOnClient(
       WHERE id = $1 AND org_id = $2`,
     [id, orgId, entryId, filled.description ?? locked.narration, filled.descriptionTemplate ?? null],
   );
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'MANUAL_JOURNAL',
+    entityId: id,
+    action: 'POSTED',
+    summary: 'Posted',
+  });
   return entryId;
 }
 
@@ -641,6 +660,12 @@ async function voidOnClient(
       WHERE id = $1 AND org_id = $2`,
     [id, orgId, reversalId],
   );
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'MANUAL_JOURNAL',
+    entityId: id,
+    action: 'VOIDED',
+    summary: 'Voided',
+  });
   return reversalId;
 }
 

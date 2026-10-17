@@ -2,6 +2,7 @@ import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import * as paymentTermService from './paymentTermService.js';
+import * as historyService from '../historyService.js';
 import type { Customer } from '../../types/accounting.js';
 
 /**
@@ -140,6 +141,15 @@ export async function createCustomer(
         defaultTermId,
       ],
     );
+    const created = result.rows[0];
+    if (created !== undefined) {
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: 'CUSTOMER',
+        entityId: created.id,
+        action: 'CREATED',
+        summary: 'Contact created',
+      });
+    }
     return result.rows;
   }).catch(mapTermFkViolation);
 
@@ -189,6 +199,15 @@ export async function updateCustomer(
         RETURNING ${CUSTOMER_COLUMNS}`,
       values,
     );
+    const updated = result.rows[0];
+    if (updated !== undefined) {
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: 'CUSTOMER',
+        entityId: updated.id,
+        action: 'UPDATED',
+        summary: 'Details edited',
+      });
+    }
     return result.rows;
   }).catch(mapTermFkViolation);
 

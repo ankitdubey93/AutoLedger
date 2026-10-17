@@ -1,5 +1,7 @@
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
+import * as historyService from '../historyService.js';
+import type { HistoryAction } from '../../types/history.js';
 import { canTransitionQuote, isQuoteStatus, type QuoteStatus } from '../../types/accounting.js';
 
 /**
@@ -37,11 +39,12 @@ export async function transitionQuoteOnClient(
   to: Exclude<QuoteStatus, 'DRAFT' | 'SENT'>,
   extras: TransitionExtras = {},
 ): Promise<QuoteStatus> {
-  const { rows } = await client.query<{ status: string }>(
-    'SELECT status FROM quotes WHERE id = $1 AND org_id = $2 FOR UPDATE',
+  const { rows } = await client.query<{ status: string; direction: string }>(
+    'SELECT status, direction FROM quotes WHERE id = $1 AND org_id = $2 FOR UPDATE',
     [quoteId, orgId],
   );
   const current = rows[0]?.status;
+  const direction = rows[0]?.direction;
   if (current === undefined) throw new ApiError(404, 'Quote not found');
   if (!isQuoteStatus(current)) throw new Error(`Unknown quote status "${current}" on quote ${quoteId}`);
   if (!canTransitionQuote(current, to)) {
@@ -102,6 +105,26 @@ export async function transitionQuoteOnClient(
       break;
     }
   }
+
+  // Phase 46c — the timeline entry. No actor on the public accept/decline
+  // flow or the expiry sweep: historyService reads the request context only.
+  const actions = {
+    ACCEPTED: 'ACCEPTED',
+    DECLINED: 'DECLINED',
+    EXPIRED: 'EXPIRED',
+    VOID: 'VOIDED',
+    SUPERSEDED: 'SUPERSEDED',
+    CONVERTED: 'CONVERTED',
+  } as const satisfies Record<typeof to, Exclude<HistoryAction, 'NOTE'>>;
+  let summary = `Marked ${to.toLowerCase()}`;
+  if (current === 'CONVERTED') summary = 'Conversion undone';
+  else if (to === 'VOID' && extras.reason !== undefined) summary = `Voided: ${extras.reason}`;
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: direction === 'SALES' ? 'QUOTE' : 'PURCHASE_QUOTE',
+    entityId: quoteId,
+    action: actions[to],
+    summary,
+  });
 
   return current;
 }

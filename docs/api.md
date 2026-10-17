@@ -1158,6 +1158,31 @@ Customer and vendor statements are a **read** over the Phase 25 subledger, with 
 - `502` — Stripe refused or was unreachable; the online payment goes to `FAILED`.
 - `503` — Stripe is not configured (webhook).
 
+### History & notes — Phase 46c ✅
+
+Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.
+
+| Prefix | Entity type | View permission | Add-note permission |
+|---|---|---|---|
+| `/invoices` | `INVOICE` | `invoices.view` | `invoices.edit` |
+| `/bills` | `BILL` | `bills.view` | `bills.edit` |
+| `/credit-notes` | `CREDIT_NOTE` | `credit_notes.view` | `credit_notes.edit` |
+| `/debit-notes` | `DEBIT_NOTE` | `debit_notes.view` | `debit_notes.edit` |
+| `/quotes` | `QUOTE` | `quotes.view` | `quotes.edit` |
+| `/purchase-quotes` | `PURCHASE_QUOTE` | `purchase_quotes.view` | `purchase_quotes.edit` |
+| `/orders` | `SALES_ORDER` | `sales_orders.view` | `sales_orders.edit` |
+| `/purchase-orders` | `PURCHASE_ORDER` | `purchase_orders.view` | `purchase_orders.edit` |
+| `/payments` | `PAYMENT` | `payments.view` | `payments.create` |
+| `/manual-journals` | `MANUAL_JOURNAL` | `journals.view` | `journals.create` |
+| `/customers` | `CUSTOMER` | `customers.view` | `customers.manage` |
+| `/vendors` | `VENDOR` | `vendors.view` | `vendors.manage` |
+| `/bank-transactions` | `BANK_TRANSACTION` | `bank.view` | `bank.reconcile` |
+
+- `GET <prefix>/:id/history` -> `200 { success, count, history: HistoryEntry[] }`, newest first, capped at 500. `HistoryEntry` is `{id, kind: 'EVENT'|'NOTE', action, summary, details, actorUserId, actorName, createdAt}`; `actorName` is `users.name`, else `users.email`, `null` for a system action or a deleted user.
+- `POST <prefix>/:id/notes` with `{ text }` -> `201 { success, entry }`. `text` is trimmed, 1 to 1000 characters, and the body is `.strict()`: `400` otherwise.
+- An unknown id, or another organization's id, is `404` with the entity's own message (`Invoice not found`, `Bill not found`, `Credit note not found`, `Debit note not found`, `Quote not found`, `Order not found`, `Payment not found`, `Manual journal not found`, `Customer not found`, `Vendor not found`, `Bank transaction not found`). Sales and purchase quotes/orders share a table, so the direction is part of the existence check.
+- Notes are insert-only: there is no edit or delete route.
+
 ### Documents — `/api/v1/documents` — Phase 9.5
 
 Platform-level (rule 16): accounting attaching a PDF to an invoice and capture attaching a source image (Phase 10) are both modules talking to the platform, never to each other. Full spec: [accounting.md](accounting.md) is silent on this — see [roadmap.md](roadmap.md#phase-95-as-delivered) instead.

@@ -25,6 +25,7 @@ import ApplyCreditsDialog from '../../components/ApplyCreditsDialog';
 import type { ApplyCredit } from '../../components/ApplyCreditsDialog';
 import PaymentDialog from '../sales/PaymentDialog';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
+import HistoryAndNotes from '../../components/history/HistoryAndNotes';
 import MakeRecurringDialog from '../../components/MakeRecurringDialog';
 import { formatDate } from '../../utils/date';
 import { useCan } from '../../context/AuthContext';
@@ -575,6 +576,7 @@ export default function BillDetailPage() {
       )}
 
       <AttachmentsPanel module="ledger-core" entityType="bill" entityId={bill.id} />
+      <HistoryAndNotes basePath="/bills" entityId={bill.id} notePermission="bills.edit" reloadKey={reloadToken} />
 
       {confirmAction === 'approve' && (
         <ConfirmDialog

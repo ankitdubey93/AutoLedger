@@ -642,6 +642,18 @@ Some accounts exist so the system can post to them or reason about them. Each is
 
 "Remappable" means a settings page can point the role at another account. `PAYABLE` and `TAX_INPUT` have no API path to remap, so their default codes are fixed in practice.
 
+### History & notes (Phase 46c) ✅ shipped
+
+A Xero-style timeline under every document, payment, contact and bank line: what happened, when, and who did it, plus free-text notes from users.
+
+- **Entity types:** `INVOICE`, `BILL`, `CREDIT_NOTE`, `DEBIT_NOTE`, `QUOTE`, `PURCHASE_QUOTE`, `SALES_ORDER`, `PURCHASE_ORDER`, `PAYMENT`, `MANUAL_JOURNAL`, `CUSTOMER`, `VENDOR`, `BANK_TRANSACTION`. Routes: [api.md § History & notes](api.md#history--notes--phase-46c-).
+- **Actions** (closed set in `types/history.ts`): `CREATED`, `UPDATED`, `SUBMITTED`, `APPROVED`, `ISSUED`, `POSTED`, `VOIDED`, `SENT`, `REVISED`, `ACCEPTED`, `DECLINED`, `EXPIRED`, `SUPERSEDED`, `CONVERTED`, `CONFIRMED`, `CLOSED`, `REOPENED`, `CANCELLED`, `PAYMENT_RECEIVED`, `PAYMENT_MADE`, `PAYMENT_VOIDED`, `CREDIT_APPLIED`, `IMPORTED`, `MATCHED`, `UNMATCHED`, `IGNORED`, `UNIGNORED`, `DELETED`, `RESTORED`, and `NOTE` (the only `kind = 'NOTE'` action).
+- **Written by the owning service, in the same transaction.** Each document's service calls `historyService.recordEventOnClient` on its own transaction client, so a rollback takes the event with it and a committed change always has its event. It is not derived from `audit_logs`, which stays the raw CDC trail. Quote and order events are written inside their central transition helpers. Bank-line events other than the backfilled `IMPORTED` one (and user notes) are not written yet; they arrive with the bank-line slice.
+- **Actor rule.** The actor is the signed-in user from the request context, never a request field. A background sweep (a recurring run creating a document) has no request context and writes a `NULL` actor, shown as `System`. A deleted user also reads as `NULL` (`ON DELETE SET NULL`).
+- **Insert-only.** A database trigger refuses `UPDATE` and `DELETE`; a correction is a new row. Existing rows were backfilled with one `CREATED` (or `IMPORTED`) event each.
+- **UI: fetch on expand.** `components/history/HistoryAndNotes.tsx` is collapsed by default and requests the timeline only when opened, so a page that never opens it makes no extra request. The note box shows only to a user holding the resource's note permission (`useCan`).
+- **Not built:** edit/delete of a note, attachments on a note, per-field change diffs, an organization-wide activity feed page (the audit log with actor filters remains the cross-cutting view).
+
 ### Phase 45 — Reports suite ✅ shipped
 
 Every report is computed from raw ledger lines or document events on each request (no summary table), in base currency, and every one downloads as CSV, XLSX or PDF (`?format=`, see [api.md](api.md)).

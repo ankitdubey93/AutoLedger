@@ -17,6 +17,7 @@ import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import { applyCreditsOnClient, type ApplyCreditInput } from './availableCreditsService.js';
 import * as fxRateService from './fxRateService.js';
+import * as historyService from '../historyService.js';
 import * as paymentTermService from './paymentTermService.js';
 import { assertOrderLineLinksOnClient, assertOrderReferenceOnClient } from './orderLineLinks.js';
 import * as documentService from '../documentService.js';
@@ -913,6 +914,13 @@ export async function createBillOnClient(
     });
   }
 
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'BILL',
+    entityId: billId,
+    action: 'CREATED',
+    summary: 'Draft created',
+  });
+
   return billId;
 }
 
@@ -1023,7 +1031,7 @@ export async function createCapturedBillOnClient(
     lines: totals.map((t) => t.input),
   });
 
-  return insertBillOnClient(
+  const billId = await insertBillOnClient(
     client,
     orgId,
     createdBy,
@@ -1039,6 +1047,13 @@ export async function createCapturedBillOnClient(
     },
     totals,
   );
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'BILL',
+    entityId: billId,
+    action: 'CREATED',
+    summary: 'Created from the bill inbox',
+  });
+  return billId;
 }
 
 /** A draft/in-review edit replaces the whole document — the document is small and the client carries no line identity to diff against. */
@@ -1163,6 +1178,13 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
       });
     }
 
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BILL',
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
+
     await client.query('COMMIT');
     return await getBillById(orgId, id);
   } catch (err) {
@@ -1237,6 +1259,13 @@ export async function submitBill(orgId: string, id: string, submittedBy: string 
     // Phase 38b — ask the approvers, on this transaction (platform email
     // outbox; rule 5).
     await notifyBillAwaitingApprovalOnClient(client, orgId, id, submittedBy);
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BILL',
+      entityId: id,
+      action: 'SUBMITTED',
+      summary: 'Submitted for approval',
+    });
 
     await client.query('COMMIT');
     return await getBillById(orgId, id);
@@ -1532,6 +1561,13 @@ export async function approveBillOnClient(
     ],
   );
 
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'BILL',
+    entityId: id,
+    action: 'APPROVED',
+    summary: `Approved for ${historyService.formatMoney(totalCents, documentCurrency)}`,
+  });
+
   await emitEvent(client, orgId, MODULE_TAGS.accounting, 'bill.approved', {
     billId: billRow.id,
     vendorId: billRow.vendor_id,
@@ -1734,6 +1770,13 @@ export async function voidBill(
         [id, orgId],
       );
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BILL',
+      entityId: id,
+      action: 'VOIDED',
+      summary: 'Voided',
+    });
 
     await client.query('COMMIT');
     return await getBillById(orgId, id);

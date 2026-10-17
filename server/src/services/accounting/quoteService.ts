@@ -16,6 +16,7 @@ import { notifyQuoteRespondedOnClient } from '../mail/notificationService.js';
 import { prepareStockLinesOnClient } from './documentStockLines.js';
 import * as invoiceService from './invoiceService.js';
 import * as billService from './billService.js';
+import * as historyService from '../historyService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import { createOrderFromQuoteOnClient } from './orderService.js';
 import * as fxRateService from './fxRateService.js';
@@ -824,6 +825,12 @@ export async function createQuote(
       ],
     );
     await insertLinesOnClient(client, orgId, quoteId, prepared.totals);
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: direction === 'SALES' ? 'QUOTE' : 'PURCHASE_QUOTE',
+      entityId: quoteId,
+      action: 'CREATED',
+      summary: 'Draft created',
+    });
     return quoteId;
   });
   return getQuoteById(orgId, direction, id);
@@ -950,6 +957,12 @@ export async function updateQuote(
       ],
     );
     await insertLinesOnClient(client, orgId, id, prepared.totals);
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: direction === 'SALES' ? 'QUOTE' : 'PURCHASE_QUOTE',
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
   });
   return getQuoteById(orgId, direction, id);
 }
@@ -1199,6 +1212,13 @@ export async function sendQuote(
         link: publicLinkFor(token),
       });
     }
+
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: direction === 'SALES' ? 'QUOTE' : 'PURCHASE_QUOTE',
+      entityId: id,
+      action: 'SENT',
+      summary: input.delivery === 'EMAIL' && input.toEmail !== null ? `Sent to ${input.toEmail.toLowerCase()}` : 'Marked as sent',
+    });
   });
   return getQuoteById(orgId, direction, id);
 }
@@ -1348,6 +1368,12 @@ export async function reviseQuote(
          FROM quote_lines WHERE quote_id = $2 AND org_id = $3`,
       [quoteId, id, orgId],
     );
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: direction === 'SALES' ? 'QUOTE' : 'PURCHASE_QUOTE',
+      entityId: quoteId,
+      action: 'REVISED',
+      summary: `Revised (revision ${source.revision + 1})`,
+    });
     return quoteId;
   });
   return getQuoteById(orgId, direction, newId);

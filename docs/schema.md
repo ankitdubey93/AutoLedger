@@ -948,6 +948,12 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - Seeds `6830 Rounding` (Expense, postable, child of `6000`) into every organization that has a `6000` and no `6830` (`INSERT ... SELECT ... ON CONFLICT (org_id, code) DO NOTHING`). `accountService.DEFAULT_CHART` gains the same row.
 - No schema change beyond the seed. `config/systemAccounts.ts` tags it as the `ROUNDING` system role; nothing posts to it automatically yet, because `allocateCents` leaves no residue today.
 
+**`101_platform_document_history.sql`** (Phase 46c)
+- `document_history` — insert-only timeline behind "History & notes": `id`, `org_id` (`organizations`, `ON DELETE CASCADE`), `entity_type` (`INVOICE`/`BILL`/`CREDIT_NOTE`/`DEBIT_NOTE`/`QUOTE`/`PURCHASE_QUOTE`/`SALES_ORDER`/`PURCHASE_ORDER`/`PAYMENT`/`MANUAL_JOURNAL`/`CUSTOMER`/`VENDOR`/`BANK_TRANSACTION`, CHECK), `entity_id` UUID, `kind` (`EVENT`/`NOTE`), `action` (CHECK `^[A-Z_]{1,40}$`; the closed set lives in `types/history.ts`), `summary` (non-blank, <= 1000), `details` JSONB NULL, `actor_user_id` (`users`, `ON DELETE SET NULL`; NULL = system action or deleted user), `created_at` DEFAULT `clock_timestamp()` (not `now()`: two events in one transaction must not tie). `chk_document_history_note_action` ties `kind = 'NOTE'` to `action = 'NOTE'`. Indexes `idx_document_history_entity (org_id, entity_type, entity_id, created_at DESC, id DESC)` and `idx_document_history_actor`.
+- **Rule 8 exception, documented:** `entity_id` has **no `REFERENCES`**. It is polymorphic across 13 tables, like `audit_logs.row_id`; `historyService.assertEntityExistsOnClient` proves the entity exists in the caller's org (one literal query per type) before any read or note. Per-type tables or an exclusive arc of 13 nullable FKs were rejected (see the study note).
+- Append-only: `reject_document_history_mutation()` + `trg_document_history_immutable` (`BEFORE UPDATE OR DELETE`, `FOR EACH ROW`, SQLSTATE `0A000`). A row trigger does not fire on `TRUNCATE`; the test `resetTables()` relies on that.
+- Backfill (idempotent by `NOT EXISTS`): one `CREATED` event per existing invoice, bill, credit/debit note, payment, manual journal, customer, vendor, quote and order (quotes/orders split into the sales/purchase entity type by `direction`), and one `IMPORTED` event per existing bank line, dated from the row's own `created_at`.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

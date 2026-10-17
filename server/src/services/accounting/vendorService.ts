@@ -4,6 +4,7 @@ import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { normalizeForMatching } from '../../utils/matchScore.js';
 import * as paymentTermService from './paymentTermService.js';
+import * as historyService from '../historyService.js';
 import type { Vendor } from '../../types/accounting.js';
 
 /**
@@ -149,6 +150,15 @@ export async function createVendor(
         defaultTermId,
       ],
     );
+    const created = result.rows[0];
+    if (created !== undefined) {
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: 'VENDOR',
+        entityId: created.id,
+        action: 'CREATED',
+        summary: 'Contact created',
+      });
+    }
     return result.rows;
   }).catch(mapTermFkViolation);
 
@@ -199,6 +209,15 @@ export async function updateVendor(
         RETURNING ${VENDOR_COLUMNS}`,
       values,
     );
+    const updated = result.rows[0];
+    if (updated !== undefined) {
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: 'VENDOR',
+        entityId: updated.id,
+        action: 'UPDATED',
+        summary: 'Details edited',
+      });
+    }
     return result.rows;
   }).catch(mapTermFkViolation);
 
@@ -248,5 +267,11 @@ export async function findOrCreateVendorByNameOnClient(
   );
   const id = inserted[0]?.id;
   if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: 'VENDOR',
+    entityId: id,
+    action: 'CREATED',
+    summary: 'Contact created from the bill inbox',
+  });
   return id;
 }

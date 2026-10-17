@@ -6873,3 +6873,31 @@ export async function getSalesPurchasesReport(
   const { success, ...report } = body;
   return report;
 }
+
+/** Phase 46c — one row of a document's History & notes timeline. */
+export interface HistoryEntry {
+  id: string;
+  kind: 'EVENT' | 'NOTE';
+  action: string;
+  summary: string;
+  details: Record<string, unknown> | null;
+  actorUserId: string | null;
+  actorName: string | null;
+  createdAt: string;
+}
+
+export function listHistory(
+  basePath: string,
+  id: string,
+  signal?: AbortSignal,
+): Promise<{ success: boolean; count: number; history: HistoryEntry[] }> {
+  return apiFetch(`${basePath}/${id}/history`, { signal: signal ?? null });
+}
+
+export function addHistoryNote(
+  basePath: string,
+  id: string,
+  text: string,
+): Promise<{ success: boolean; entry: HistoryEntry }> {
+  return apiFetch(`${basePath}/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) });
+}

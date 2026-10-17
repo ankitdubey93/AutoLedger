@@ -9,6 +9,7 @@ import { REASON_LABELS, type NoteKindConfig, type NoteView, type OriginalView } 
 import { formatDate } from '../../../utils/date';
 import LoadingState from '../../../components/ui/LoadingState';
 import AttachmentsPanel from '../../../components/AttachmentsPanel';
+import HistoryAndNotes from '../../../components/history/HistoryAndNotes';
 
 /**
  * One credit or debit note (Phase 26). A DRAFT can be edited, deleted or
@@ -402,6 +403,11 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
         module="ledger-core"
         entityType={config.kind === 'DEBIT_NOTE' ? 'debit_note' : 'credit_note'}
         entityId={note.id}
+      />
+      <HistoryAndNotes
+        basePath={config.kind === 'CREDIT_NOTE' ? '/credit-notes' : '/debit-notes'}
+        entityId={note.id}
+        notePermission={config.kind === 'CREDIT_NOTE' ? 'credit_notes.edit' : 'debit_notes.edit'}
       />
 
       {confirmAction === 'void' && (

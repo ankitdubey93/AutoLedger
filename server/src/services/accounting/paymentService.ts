@@ -7,6 +7,8 @@ import { convertToBase, ONE_RATE } from '../../utils/fxRate.js';
 import { emitEvent } from '../outboxService.js';
 import * as journalService from './journalService.js';
 import * as fxRateService from './fxRateService.js';
+import * as historyService from '../historyService.js';
+import type { RecordHistoryInput } from '../../types/history.js';
 import { settledCentsOnClient } from './settlementSql.js';
 import {
   canTransitionPayment,
@@ -730,6 +732,37 @@ export async function createPaymentOnClient(
     ],
   );
 
+  // Phase 46c — one call fans the payment out to its own timeline and to
+  // every invoice/bill it settles. Same client, same transaction.
+  await historyService.recordEventsOnClient(client, orgId, [
+    {
+      entityType: 'PAYMENT',
+      entityId: paymentId,
+      action: 'CREATED',
+      summary: `${input.direction === 'RECEIVE' ? 'Payment received' : 'Payment made'}: ${historyService.formatMoney(input.amountCents, currencyCode)} on ${input.paymentDate}`,
+    },
+    ...input.allocations.flatMap((allocation): RecordHistoryInput[] => {
+      const money = historyService.formatMoney(allocation.amountCents, currencyCode);
+      if (allocation.invoiceId !== null) {
+        return [{
+          entityType: 'INVOICE',
+          entityId: allocation.invoiceId,
+          action: 'PAYMENT_RECEIVED',
+          summary: `Payment of ${money} received on ${input.paymentDate}`,
+        }];
+      }
+      if (allocation.billId !== null) {
+        return [{
+          entityType: 'BILL',
+          entityId: allocation.billId,
+          action: 'PAYMENT_MADE',
+          summary: `Payment of ${money} made on ${input.paymentDate}`,
+        }];
+      }
+      return [];
+    }),
+  ]);
+
   // Placed here, in the OnClient half, not in createPayment: a payment
   // created by a bank match (Phase 6 calls this half directly) must emit
   // the same event as one created through POST /payments.
@@ -833,8 +866,15 @@ export async function voidPaymentOnClient(
   id: string,
   entryDate: string | null,
 ): Promise<void> {
-  const { rows } = await client.query<{ id: string; status: string; journal_entry_id: string }>(
-    'SELECT id, status, journal_entry_id FROM payments WHERE id = $1 AND org_id = $2 FOR UPDATE',
+  const { rows } = await client.query<{
+    id: string;
+    status: string;
+    journal_entry_id: string;
+    payment_date: string;
+    currency_code: string;
+  }>(
+    `SELECT id, status, journal_entry_id, payment_date::text AS payment_date, currency_code
+       FROM payments WHERE id = $1 AND org_id = $2 FOR UPDATE`,
     [id, orgId],
   );
   const row = rows[0];
@@ -865,6 +905,31 @@ export async function voidPaymentOnClient(
       WHERE id = $2 AND org_id = $3`,
     [reversalId, id, orgId],
   );
+
+  // Phase 46c — the payment's own timeline plus every document it had settled.
+  const { rows: allocationRows } = await client.query<{
+    invoice_id: string | null;
+    bill_id: string | null;
+    amount_cents: string;
+  }>(
+    `SELECT invoice_id, bill_id, amount_cents::text AS amount_cents
+       FROM payment_allocations WHERE org_id = $1 AND payment_id = $2`,
+    [orgId, id],
+  );
+  const voidedCurrency = row.currency_code.trim();
+  await historyService.recordEventsOnClient(client, orgId, [
+    { entityType: 'PAYMENT', entityId: id, action: 'VOIDED', summary: 'Voided' },
+    ...allocationRows.flatMap((a): RecordHistoryInput[] => {
+      const summary = `Payment of ${historyService.formatMoney(parseCents(a.amount_cents), voidedCurrency)} on ${row.payment_date} voided`;
+      if (a.invoice_id !== null) {
+        return [{ entityType: 'INVOICE', entityId: a.invoice_id, action: 'PAYMENT_VOIDED', summary }];
+      }
+      if (a.bill_id !== null) {
+        return [{ entityType: 'BILL', entityId: a.bill_id, action: 'PAYMENT_VOIDED', summary }];
+      }
+      return [];
+    }),
+  ]);
 }
 
 export async function voidPayment(

@@ -22,6 +22,7 @@ import BackLink from '../../../components/BackLink';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import LoadingState from '../../../components/ui/LoadingState';
 import AttachmentsPanel from '../../../components/AttachmentsPanel';
+import HistoryAndNotes from '../../../components/history/HistoryAndNotes';
 import { OrderStatusPill, orderBillingLabel, orderLabel } from './OrderListPage';
 import type { OrderKindConfig } from './orderKinds';
 
@@ -546,6 +547,11 @@ export default function OrderDetailPage({ config }: { config: OrderKindConfig })
       )}
 
       <AttachmentsPanel module="ledger-core" entityType="order" entityId={order.id} />
+      <HistoryAndNotes
+        basePath={config.path === 'sales-orders' ? '/orders' : '/purchase-orders'}
+        entityId={order.id}
+        notePermission={config.permissions.edit}
+      />
     </section>
   );
 }

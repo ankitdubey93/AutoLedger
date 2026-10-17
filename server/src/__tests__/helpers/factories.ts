@@ -40,7 +40,7 @@ export async function resetTables(): Promise<void> {
               bank_statement_imports, bank_transactions, bank_match_suggestions, bank_rules,
               recurring_schedules, recurring_runs, manual_journals, manual_journal_lines, gl_exception_reviews,
               outbox_events, webhook_endpoints, webhook_deliveries,
-              audit_logs, onboarding_states, migration_imports, migration_import_rows,
+              audit_logs, document_history, onboarding_states, migration_imports, migration_import_rows,
               documents, document_links,
               ap_flow_documents, ap_flow_pages, ap_flow_extractions,
               ap_flow_line_items, ap_flow_vendor_account_map,

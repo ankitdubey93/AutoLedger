@@ -25,6 +25,7 @@ import { useOrganizationName } from '../../../context/OrgContext';
 import BackLink from '../../../components/BackLink';
 import ConfirmDialog from '../../../components/ConfirmDialog';
 import AttachmentsPanel from '../../../components/AttachmentsPanel';
+import HistoryAndNotes from '../../../components/history/HistoryAndNotes';
 import LoadingState from '../../../components/ui/LoadingState';
 import QuoteDocument, { QuoteStatusPill, quoteLabel, type QuoteDocumentData } from './QuoteDocument';
 import type { QuoteKindConfig } from './quoteKinds';
@@ -496,6 +497,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
 
       <div className="no-print">
         <AttachmentsPanel module="ledger-core" entityType="quote" entityId={quote.id} />
+        <HistoryAndNotes basePath={`/${config.path}`} entityId={quote.id} notePermission={config.permissions.edit} />
       </div>
 
       {dialog === 'send' && (

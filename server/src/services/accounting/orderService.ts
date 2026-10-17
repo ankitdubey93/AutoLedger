@@ -10,6 +10,8 @@ import { emitEvent } from '../outboxService.js';
 import { prepareStockLinesOnClient } from './documentStockLines.js';
 import * as invoiceService from './invoiceService.js';
 import * as billService from './billService.js';
+import * as historyService from '../historyService.js';
+import type { HistoryEntityType } from '../../types/history.js';
 import * as depositService from './depositService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
 import * as paymentTermService from './paymentTermService.js';
@@ -643,6 +645,11 @@ async function runOrderWrite<T>(fn: (client: PoolClient) => Promise<T>): Promise
   }
 }
 
+/** Phase 46c — the history entity type of an order in this direction. */
+function orderEntityType(direction: QuoteDirection): HistoryEntityType {
+  return direction === 'SALES' ? 'SALES_ORDER' : 'PURCHASE_ORDER';
+}
+
 export async function createOrder(
   orgId: string,
   userId: string,
@@ -683,6 +690,12 @@ export async function createOrder(
       ],
     );
     await insertLinesOnClient(client, orgId, orderId, prepared.totals);
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: orderEntityType(direction),
+      entityId: orderId,
+      action: 'CREATED',
+      summary: 'Draft created',
+    });
     return orderId;
   });
   return getOrderById(orgId, direction, id);
@@ -769,6 +782,12 @@ export async function updateOrder(
       ],
     );
     await insertLinesOnClient(client, orgId, id, prepared.totals);
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: orderEntityType(direction),
+      entityId: id,
+      action: 'UPDATED',
+      summary: 'Draft edited',
+    });
   });
   return getOrderById(orgId, direction, id);
 }
@@ -884,6 +903,21 @@ async function transitionOrderOnClient(
       break;
     }
   }
+
+  // Phase 46c — the timeline entry, on the same client as the status write.
+  const reopened = from === 'CLOSED' && to === 'CONFIRMED';
+  await historyService.recordEventOnClient(client, orgId, {
+    entityType: orderEntityType(direction),
+    entityId: id,
+    action: reopened ? 'REOPENED' : to === 'CONFIRMED' ? 'CONFIRMED' : to === 'CLOSED' ? 'CLOSED' : 'CANCELLED',
+    summary: reopened
+      ? 'Reopened'
+      : to === 'CONFIRMED'
+        ? 'Confirmed'
+        : to === 'CLOSED'
+          ? 'Closed'
+          : `Cancelled: ${extras.reason ?? ''}`,
+  });
   return from;
 }
 
@@ -1057,6 +1091,12 @@ export async function convertOrder(
           orderLineId: line.id,
         })),
       });
+      await historyService.recordEventOnClient(client, orgId, {
+        entityType: orderEntityType(direction),
+        entityId: id,
+        action: 'CONVERTED',
+        summary: 'Converted to a draft invoice',
+      });
       return { kind: 'INVOICE' as const, id: invoiceId };
     }
 
@@ -1092,6 +1132,12 @@ export async function convertOrder(
         stockLocationId: null,
         orderLineId: line.id,
       })),
+    });
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: orderEntityType(direction),
+      entityId: id,
+      action: 'CONVERTED',
+      summary: 'Converted to a draft bill',
     });
     return { kind: 'BILL' as const, id: billId };
   });
