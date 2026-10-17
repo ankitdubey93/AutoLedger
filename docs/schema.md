@@ -959,6 +959,13 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - Not in `audit_logs`: `users` and `refresh_tokens` are deliberately unaudited, and a `FAILED` row must outlive the login transaction's `ROLLBACK`, so it is written on the pool after it.
 - Append-only by an **UPDATE-only** row trigger (`reject_login_event_mutation()` + `trg_login_events_immutable`, SQLSTATE `0A000`). There is deliberately no `BEFORE DELETE` trigger: it would also block the `ON DELETE CASCADE` from `users`/`organizations`.
 
+**`103_ledger-core_bank_transaction_delete.sql`** (Phase 46e)
+- `bank_transactions` gains `deleted_at TIMESTAMPTZ`, `deleted_by UUID` (`fk_bank_txn_deleted_by` → `users`, `ON DELETE SET NULL`, indexed by `idx_bank_txn_deleted_by`) and `delete_reason TEXT`, all `NULL`.
+- The status CHECK is replaced (`bank_transactions_status_check` from 019 dropped, `chk_bank_txn_status` added) to admit `'DELETED'`. `chk_bank_txn_deleted_fields` ties it together: a line is `DELETED` exactly when `deleted_at` and `deleted_by` are set, and only a deleted line may carry a `delete_reason`.
+- `reject_bank_transaction_mutation()` is replaced with the 074 body; both `to_jsonb(...) - …` exempt lists gain `deleted_at`, `deleted_by`, `delete_reason`. The `DELETE` refusal is unchanged: deletion is a soft status, never a row removal.
+- `ux_bank_transactions_dedupe` is untouched, so a deleted line still blocks re-import of the same statement row.
+- Known edge: the CHECK requires `deleted_by` on a deleted row while the FK is `ON DELETE SET NULL`, so hard-deleting a user who deleted a bank line fails the CHECK (no production path deletes users).
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

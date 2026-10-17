@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
-import { beginTransaction } from '../../db/transaction.js';
+import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { parseCents, parseMoneyText } from '../../utils/money.js';
 import { parseCsv, type CsvTable } from '../../utils/csv.js';
@@ -10,6 +10,7 @@ import { AUTO_MATCH_THRESHOLD, normalizeForMatching } from '../../utils/matchSco
 import { emitEvent } from '../outboxService.js';
 import * as bankMatchService from './bankMatchService.js';
 import * as bankRuleService from './bankRuleService.js';
+import * as historyService from '../historyService.js';
 import type { BankStatementImport } from '../../types/accounting.js';
 import { MODULE_TAGS } from '../../config/modules.js';
 
@@ -310,6 +311,8 @@ export interface ImportStatementResult {
   autoMatchableCount: number;
   /** Newly inserted lines settled directly by a bank rule (Phase 34a) — never a line a document suggestion already claimed. */
   ruleMatchedCount: number;
+  /** The subset of duplicateCount whose existing line was soft-deleted (Phase 46e). */
+  previouslyDeletedCount: number;
 }
 
 export async function importStatement(
@@ -423,12 +426,30 @@ export async function importStatement(
     const importedCount = insertedRows.length;
     const duplicateCount = valid.length - importedCount;
 
+    const { rows: deletedRows } = await client.query<{ total: string }>(
+      `SELECT count(*) AS total FROM bank_transactions
+        WHERE org_id = $1 AND status = 'DELETED' AND dedupe_hash = ANY($2::text[])`,
+      [orgId, dedupeHashes],
+    );
+    const previouslyDeletedCount = Number(deletedRows[0]?.total ?? '0');
+
     await client.query(
       'UPDATE bank_statement_imports SET imported_count = $1, duplicate_count = $2 WHERE id = $3 AND org_id = $4',
       [importedCount, duplicateCount, importId, orgId],
     );
 
     const insertedIds = insertedRows.map((r) => r.id);
+    await historyService.recordEventsOnClient(
+      client,
+      orgId,
+      insertedIds.map((entityId) => ({
+        entityType: 'BANK_TRANSACTION' as const,
+        entityId,
+        action: 'IMPORTED' as const,
+        summary: `Imported from ${input.fileName}`,
+        details: { importId },
+      })),
+    );
     await bankMatchService.generateSuggestionsOnClient(client, orgId, insertedIds);
 
     // AUTO_MATCH_THRESHOLD is our own compile-time constant, not request
@@ -486,6 +507,7 @@ export async function importStatement(
       suggestedCount,
       autoMatchableCount,
       ruleMatchedCount: ruleSettledIds.length,
+      previouslyDeletedCount,
     };
   } catch (err) {
     await client.query('ROLLBACK');
@@ -500,4 +522,41 @@ export async function importStatement(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Phase 46e — soft-deletes every still-unreconciled line of one statement.
+ * A matched or ignored line blocks it (unmatch/unignore first). The import
+ * row itself is never deleted.
+ */
+export async function deleteImport(
+  orgId: string,
+  userId: string,
+  importId: string,
+  reason: string | null,
+): Promise<{ deletedCount: number }> {
+  const deletedCount = await withTransaction(async (client) => {
+    const { rows: importRows } = await client.query<{ id: string }>(
+      'SELECT id FROM bank_statement_imports WHERE id = $1 AND org_id = $2 FOR UPDATE',
+      [importId, orgId],
+    );
+    if (importRows[0] === undefined) throw new ApiError(404, 'Bank import not found');
+
+    const { rows } = await client.query<{ id: string; status: string }>(
+      `SELECT id, status FROM bank_transactions
+        WHERE org_id = $1 AND import_id = $2 AND status <> 'DELETED'`,
+      [orgId, importId],
+    );
+    if (rows.some((r) => r.status === 'MATCHED' || r.status === 'IGNORED')) {
+      throw new ApiError(409, 'This statement has reconciled or ignored lines — unmatch or unignore them first');
+    }
+    return bankMatchService.deleteTransactionsOnClient(
+      client,
+      orgId,
+      userId,
+      rows.map((r) => r.id),
+      reason,
+    );
+  });
+  return { deletedCount };
 }

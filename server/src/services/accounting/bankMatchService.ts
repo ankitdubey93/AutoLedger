@@ -13,6 +13,7 @@ import {
 import * as paymentService from './paymentService.js';
 import { settledCentsSubquery } from './settlementSql.js';
 import * as journalService from './journalService.js';
+import * as historyService from '../historyService.js';
 import {
   canTransitionBankTransaction,
   isBankTransactionStatus,
@@ -20,6 +21,7 @@ import {
   type BankTransaction,
   type BankTransactionStatus,
 } from '../../types/accounting.js';
+import type { HistoryAction, HistoryEntry } from '../../types/history.js';
 
 /**
  * Accounting bank-line matching: the 40/30/30 confidence engine's
@@ -301,6 +303,10 @@ interface BankTxnRow {
   matched_by_name: string | null;
   matched_rule_id: string | null;
   matched_rule_name: string | null;
+  deleted_at: Date | null;
+  deleted_by: string | null;
+  deleted_by_name: string | null;
+  delete_reason: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -309,10 +315,12 @@ const BANK_TXN_SELECT = `SELECT bt.id, bt.import_id, bt.account_id, a.code AS ac
                                  bt.txn_date, bt.description, bt.external_reference, bt.currency_code, bt.amount_cents,
                                  bt.status, bt.matched_payment_id, bt.matched_journal_entry_id, bt.matched_at, bt.matched_by,
                                  u.name AS matched_by_name, bt.matched_rule_id, r.name AS matched_rule_name,
+                                 bt.deleted_at, bt.deleted_by, du.name AS deleted_by_name, bt.delete_reason,
                                  bt.created_at, bt.updated_at
                             FROM bank_transactions bt
                             JOIN accounts a ON a.id = bt.account_id AND a.org_id = bt.org_id
                             LEFT JOIN users u ON u.id = bt.matched_by
+                            LEFT JOIN users du ON du.id = bt.deleted_by
                             LEFT JOIN bank_rules r ON r.org_id = bt.org_id AND r.id = bt.matched_rule_id`;
 
 interface SuggestionRow {
@@ -410,6 +418,10 @@ function toBankTransaction(row: BankTxnRow, suggestions: BankMatchSuggestion[]):
     matchedByName: row.matched_by_name,
     matchedRuleId: row.matched_rule_id,
     matchedRuleName: row.matched_rule_name,
+    deletedAt: row.deleted_at === null ? null : row.deleted_at.toISOString(),
+    deletedBy: row.deleted_by,
+    deletedByName: row.deleted_by_name,
+    deleteReason: row.delete_reason,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     suggestions,
@@ -458,6 +470,8 @@ function buildFilters(
   if (options.accountId !== null) add((p) => `bt.account_id = ${p}::uuid`, options.accountId);
   if (options.importId !== null) add((p) => `bt.import_id = ${p}::uuid`, options.importId);
   if (options.status !== null) add((p) => `bt.status = ${p}`, options.status);
+  // Phase 46e — the default list hides soft-deleted lines; status=DELETED shows them.
+  else clauses.push("bt.status <> 'DELETED'");
   if (options.from !== null) add((p) => `bt.txn_date >= ${p}::date`, options.from);
   if (options.to !== null) add((p) => `bt.txn_date <= ${p}::date`, options.to);
   if (options.q !== null) {
@@ -607,6 +621,7 @@ export async function matchTransaction(
     let counterpartyId: string;
     let invoiceId: string | null = null;
     let billId: string | null = null;
+    let docLabel = '';
 
     if (amountCents > 0) {
       const invId = resolved.invoiceId;
@@ -616,9 +631,10 @@ export async function matchTransaction(
         customer_id: string;
         total_cents: string;
         currency_code: string;
+        doc_number: string | null;
         amount_due_cents: string;
       }>(
-        `SELECT i.status, i.customer_id, i.total_cents, i.currency_code,
+        `SELECT i.status, i.customer_id, i.total_cents, i.currency_code, i.invoice_number AS doc_number,
                 (i.total_cents - ${settledCentsSubquery('i', 'invoice_id')}::bigint) AS amount_due_cents
            FROM invoices i WHERE i.id = $1 AND i.org_id = $2 FOR UPDATE`,
         [invId, orgId],
@@ -640,6 +656,7 @@ export async function matchTransaction(
       }
       counterpartyId = doc.customer_id;
       invoiceId = invId;
+      docLabel = `invoice ${doc.doc_number ?? invId}`;
     } else {
       const bId = resolved.billId;
       if (bId === null) throw new ApiError(422, 'A withdrawal can only be matched to a bill');
@@ -648,9 +665,10 @@ export async function matchTransaction(
         vendor_id: string;
         total_cents: string;
         currency_code: string;
+        doc_number: string | null;
         amount_due_cents: string;
       }>(
-        `SELECT b.status, b.vendor_id, b.total_cents, b.currency_code,
+        `SELECT b.status, b.vendor_id, b.total_cents, b.currency_code, b.vendor_reference AS doc_number,
                 (b.total_cents - ${settledCentsSubquery('b', 'bill_id')}::bigint) AS amount_due_cents
            FROM bills b WHERE b.id = $1 AND b.org_id = $2 FOR UPDATE`,
         [bId, orgId],
@@ -668,6 +686,7 @@ export async function matchTransaction(
       }
       counterpartyId = doc.vendor_id;
       billId = bId;
+      docLabel = `bill ${doc.doc_number ?? bId}`;
     }
 
     const absAmount = Math.abs(amountCents);
@@ -692,6 +711,13 @@ export async function matchTransaction(
         WHERE id = $3 AND org_id = $4`,
       [paymentId, userId, id, orgId],
     );
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: 'MATCHED',
+      summary: `Reconciled to ${docLabel}: ${historyService.formatMoney(absAmount, line.currency_code.trim())}`,
+      details: { paymentId },
+    });
 
     // Spent suggestions are derived data and are not kept.
     await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = $2', [
@@ -848,6 +874,33 @@ export async function postJournalForTransactionOnClient(
     [entryId, userId, ruleId, id, orgId],
   );
 
+  if (ruleId !== null) {
+    const { rows: ruleRows } = await client.query<{ name: string }>(
+      'SELECT name FROM bank_rules WHERE id = $1 AND org_id = $2',
+      [ruleId, orgId],
+    );
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: 'MATCHED',
+      summary: `Reconciled by bank rule "${ruleRows[0]?.name ?? ruleId}"`,
+      details: { journalEntryId: entryId, ruleId },
+    });
+  } else {
+    const { rows: targetRows } = await client.query<{ code: string; name: string }>(
+      'SELECT code, name FROM accounts WHERE id = $1 AND org_id = $2',
+      [input.accountId, orgId],
+    );
+    const target = targetRows[0];
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: 'MATCHED',
+      summary: `Reconciled by journal to ${target === undefined ? input.accountId : `${target.code} ${target.name}`}`,
+      details: { journalEntryId: entryId },
+    });
+  }
+
   // Spent suggestions are derived data and are not kept.
   await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = $2', [
     orgId,
@@ -865,8 +918,9 @@ export async function unmatchTransaction(orgId: string, userId: string, id: stri
       status: string;
       matched_payment_id: string | null;
       matched_journal_entry_id: string | null;
+      matched_rule_id: string | null;
     }>(
-      `SELECT id, status, matched_payment_id, matched_journal_entry_id
+      `SELECT id, status, matched_payment_id, matched_journal_entry_id, matched_rule_id
          FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE`,
       [id, orgId],
     );
@@ -906,6 +960,17 @@ export async function unmatchTransaction(orgId: string, userId: string, id: stri
         WHERE id = $1 AND org_id = $2`,
       [id, orgId],
     );
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: 'UNMATCHED',
+      summary: row.matched_payment_id !== null ? 'Unreconciled — payment voided' : 'Unreconciled — journal reversed',
+      details: {
+        previousPaymentId: row.matched_payment_id,
+        previousJournalEntryId: row.matched_journal_entry_id,
+        previousRuleId: row.matched_rule_id,
+      },
+    });
 
     await generateSuggestionsOnClient(client, orgId, [id]);
 
@@ -939,14 +1004,198 @@ export async function setIgnored(orgId: string, id: string, ignored: boolean): P
     if (!canTransitionBankTransaction(row.status, target)) {
       throw new ApiError(409, 'This bank line is matched — unmatch it first');
     }
+    // The FSM also allows DELETED -> UNMATCHED (that is restore's job), so
+    // unignore layers its own narrower rule on top of it.
+    if (!ignored && row.status !== 'IGNORED') throw new ApiError(409, 'This bank line is not ignored');
     await client.query('UPDATE bank_transactions SET status = $1 WHERE id = $2 AND org_id = $3', [
       target,
       id,
       orgId,
     ]);
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: ignored ? 'IGNORED' : 'UNIGNORED',
+      summary: ignored ? 'Ignored' : 'Unignored',
+    });
     if (!ignored) {
       await generateSuggestionsOnClient(client, orgId, [id]);
     }
   });
   return getTransactionById(orgId, id);
+}
+
+// ------------------------------------------------------- delete / restore (46e)
+
+/**
+ * The transaction core of deleteTransactions and bankImportService.deleteImport.
+ * Soft delete only (status = 'DELETED'); the row stays, and its dedupe hash
+ * keeps blocking a re-import. Locks in id order so concurrent deletes cannot
+ * deadlock. Runs no BEGIN/COMMIT — the caller owns the transaction.
+ */
+export async function deleteTransactionsOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  ids: string[],
+  reason: string | null,
+): Promise<number> {
+  const distinctIds = [...new Set(ids)];
+  if (distinctIds.length === 0) return 0;
+
+  const { rows } = await client.query<{ id: string; status: string }>(
+    `SELECT id, status FROM bank_transactions
+      WHERE org_id = $1 AND id = ANY($2::uuid[])
+      ORDER BY id
+        FOR UPDATE`,
+    [orgId, distinctIds],
+  );
+  if (rows.length < distinctIds.length) throw new ApiError(404, 'Bank transaction not found');
+  for (const row of rows) {
+    if (!isBankTransactionStatus(row.status)) {
+      throw new Error(`Unknown bank transaction status "${row.status}" on transaction ${row.id}`);
+    }
+    if (!canTransitionBankTransaction(row.status, 'DELETED')) {
+      throw new ApiError(409, 'Only unreconciled lines can be deleted — unmatch or unignore first');
+    }
+  }
+
+  await client.query(
+    `UPDATE bank_transactions
+        SET status = 'DELETED', deleted_at = now(), deleted_by = $3, delete_reason = $4
+      WHERE org_id = $1 AND id = ANY($2::uuid[])`,
+    [orgId, distinctIds, userId, reason],
+  );
+  await historyService.recordEventsOnClient(
+    client,
+    orgId,
+    distinctIds.map((entityId) => ({
+      entityType: 'BANK_TRANSACTION' as const,
+      entityId,
+      action: 'DELETED' as const,
+      summary: reason === null || reason === '' ? 'Deleted' : `Deleted: ${reason}`,
+    })),
+  );
+  // Suggestions are derived data, as in postJournalForTransactionOnClient.
+  await client.query('DELETE FROM bank_match_suggestions WHERE org_id = $1 AND bank_transaction_id = ANY($2::uuid[])', [
+    orgId,
+    distinctIds,
+  ]);
+  return distinctIds.length;
+}
+
+export async function deleteTransactions(
+  orgId: string,
+  userId: string,
+  ids: string[],
+  reason: string | null,
+): Promise<{ deletedCount: number }> {
+  const deletedCount = await withTransaction((client) =>
+    deleteTransactionsOnClient(client, orgId, userId, ids, reason),
+  );
+  return { deletedCount };
+}
+
+export async function restoreTransaction(orgId: string, id: string): Promise<BankTransaction> {
+  await withTransaction(async (client) => {
+    const { rows } = await client.query<{ id: string; status: string }>(
+      'SELECT id, status FROM bank_transactions WHERE id = $1 AND org_id = $2 FOR UPDATE',
+      [id, orgId],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new ApiError(404, 'Bank transaction not found');
+    if (!isBankTransactionStatus(row.status)) {
+      throw new Error(`Unknown bank transaction status "${row.status}" on transaction ${id}`);
+    }
+    if (!canTransitionBankTransaction(row.status, 'UNMATCHED')) {
+      throw new ApiError(409, 'This bank line is not deleted');
+    }
+    if (row.status !== 'DELETED') throw new ApiError(409, 'This bank line is not deleted');
+    await client.query(
+      `UPDATE bank_transactions
+          SET status = 'UNMATCHED', deleted_at = NULL, deleted_by = NULL, delete_reason = NULL
+        WHERE id = $1 AND org_id = $2`,
+      [id, orgId],
+    );
+    await historyService.recordEventOnClient(client, orgId, {
+      entityType: 'BANK_TRANSACTION',
+      entityId: id,
+      action: 'RESTORED',
+      summary: 'Restored',
+    });
+    await generateSuggestionsOnClient(client, orgId, [id]);
+  });
+  return getTransactionById(orgId, id);
+}
+
+// ---------------------------------------------------- reconciliation history
+
+export interface BankHistoryEntry extends HistoryEntry {
+  bankTransactionId: string;
+  txnDate: string;
+  description: string;
+  amountCents: number;
+  currencyCode: string;
+}
+
+interface BankHistoryRow {
+  id: string;
+  kind: 'EVENT' | 'NOTE';
+  action: string;
+  summary: string;
+  details: Record<string, unknown> | null;
+  actor_user_id: string | null;
+  actor_name: string | null;
+  created_at: Date;
+  bank_transaction_id: string;
+  txn_date: string;
+  description: string;
+  amount_cents: string;
+  currency_code: string;
+}
+
+/** Actions taken on bank lines (never the import event), newest first, optionally for one bank account. */
+export async function listBankHistory(
+  orgId: string,
+  options: { accountId: string | null; page: number; limit: number },
+): Promise<{ entries: BankHistoryEntry[]; totalCount: number }> {
+  const filter = `FROM document_history h
+       JOIN bank_transactions bt ON bt.id = h.entity_id AND bt.org_id = h.org_id
+       LEFT JOIN users u ON u.id = h.actor_user_id
+      WHERE h.org_id = $1 AND h.entity_type = 'BANK_TRANSACTION'
+        AND h.action <> 'IMPORTED'
+        AND ($2::uuid IS NULL OR bt.account_id = $2)`;
+  const { rows: countRows } = await pool.query<{ total: string }>(`SELECT count(*) AS total ${filter}`, [
+    orgId,
+    options.accountId,
+  ]);
+  const totalCount = Number(countRows[0]?.total ?? '0');
+
+  const { rows } = await pool.query<BankHistoryRow>(
+    `SELECT h.id, h.kind, h.action, h.summary, h.details, h.actor_user_id,
+            COALESCE(u.name, u.email) AS actor_name, h.created_at,
+            bt.id AS bank_transaction_id, bt.txn_date, bt.description, bt.amount_cents, bt.currency_code
+       ${filter}
+      ORDER BY h.created_at DESC, h.id DESC
+      LIMIT $3 OFFSET $4`,
+    [orgId, options.accountId, options.limit, (options.page - 1) * options.limit],
+  );
+  return {
+    totalCount,
+    entries: rows.map((row) => ({
+      id: row.id,
+      kind: row.kind,
+      action: row.action as HistoryAction,
+      summary: row.summary,
+      details: row.details,
+      actorUserId: row.actor_user_id,
+      actorName: row.actor_name,
+      createdAt: row.created_at.toISOString(),
+      bankTransactionId: row.bank_transaction_id,
+      txnDate: row.txn_date,
+      description: row.description,
+      amountCents: parseCents(row.amount_cents),
+      currencyCode: row.currency_code.trim(),
+    })),
+  };
 }

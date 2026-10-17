@@ -3246,7 +3246,7 @@ export function getAuditLogDetail(
 
 // ------------------------------------------------- Phase 6 — bank reconciliation
 
-export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'IGNORED';
+export type BankTransactionStatus = 'UNMATCHED' | 'MATCHED' | 'IGNORED' | 'DELETED';
 export type DateFormat = 'ISO' | 'DMY' | 'MDY';
 
 /** Mirrors server/src/types/accounting.ts's BankStatementImport. */
@@ -3324,6 +3324,10 @@ export interface BankTransaction {
   matchedByName: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Phase 46e — set only while status is DELETED. */
+  deletedAt: string | null;
+  deletedByName: string | null;
+  deleteReason: string | null;
   suggestions: BankMatchSuggestion[];
 }
 
@@ -3374,6 +3378,8 @@ export function importBankStatement(body: ImportStatementInput): Promise<{
   suggestedCount: number;
   autoMatchableCount: number;
   ruleMatchedCount: number;
+  /** Phase 46e — duplicates whose existing line was soft-deleted. */
+  previouslyDeletedCount: number;
 }> {
   return apiFetch('/bank-imports', { method: 'POST', body: JSON.stringify(body) });
 }
@@ -3494,6 +3500,53 @@ export function ignoreBankTransaction(id: string): Promise<{ success: boolean; t
 /** POST /bank-transactions/:id/unignore */
 export function unignoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
   return apiFetch(`/bank-transactions/${id}/unignore`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /bank-transactions/delete — Phase 46e. Soft-deletes unreconciled lines. */
+export function deleteBankTransactions(
+  ids: string[],
+  reason: string | null,
+): Promise<{ success: boolean; deletedCount: number }> {
+  return apiFetch('/bank-transactions/delete', { method: 'POST', body: JSON.stringify({ ids, reason }) });
+}
+
+/** POST /bank-transactions/:id/restore — Phase 46e. DELETED → UNMATCHED. */
+export function restoreBankTransaction(id: string): Promise<{ success: boolean; transaction: BankTransaction }> {
+  return apiFetch(`/bank-transactions/${id}/restore`, { method: 'POST', body: JSON.stringify({}) });
+}
+
+/** POST /bank-imports/:id/delete — Phase 46e. Soft-deletes the statement's unreconciled lines. */
+export function deleteBankImport(id: string, reason: string | null): Promise<{ success: boolean; deletedCount: number }> {
+  return apiFetch(`/bank-imports/${id}/delete`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+
+/** Phase 46e — mirrors server/src/services/accounting/bankMatchService.ts's BankHistoryEntry. */
+export interface BankHistoryEntry extends HistoryEntry {
+  bankTransactionId: string;
+  txnDate: string;
+  description: string;
+  amountCents: number;
+  currencyCode: string;
+}
+
+/** GET /bank-transactions/history — Phase 46e. Optionally filtered by one bank account. */
+export function listBankHistory(
+  params: { accountId?: string; page?: number } = {},
+  signal?: AbortSignal,
+): Promise<{
+  success: boolean;
+  count: number;
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+  entries: BankHistoryEntry[];
+}> {
+  const query = new URLSearchParams();
+  if (params.page !== undefined) query.set('page', String(params.page));
+  if (params.accountId !== undefined && params.accountId !== '') query.set('accountId', params.accountId);
+  const suffix = query.size > 0 ? `?${query.toString()}` : '';
+
+  return apiFetch(`/bank-transactions/history${suffix}`, { signal: signal ?? null });
 }
 
 /**

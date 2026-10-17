@@ -415,14 +415,16 @@ export async function bankReconciliation(
     unmatched_count: string;
     unmatched_cents: string;
     ignored_count: string;
+    deleted_count: string;
   }>(
     `SELECT
-       COALESCE(SUM(amount_cents) FILTER (WHERE status <> 'IGNORED'), 0)::text AS statement_balance,
+       COALESCE(SUM(amount_cents) FILTER (WHERE status NOT IN ('IGNORED', 'DELETED')), 0)::text AS statement_balance,
        COUNT(*) FILTER (WHERE status = 'MATCHED')::text AS matched_count,
        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'MATCHED'), 0)::text AS matched_cents,
        COUNT(*) FILTER (WHERE status = 'UNMATCHED')::text AS unmatched_count,
        COALESCE(SUM(amount_cents) FILTER (WHERE status = 'UNMATCHED'), 0)::text AS unmatched_cents,
-       COUNT(*) FILTER (WHERE status = 'IGNORED')::text AS ignored_count
+       COUNT(*) FILTER (WHERE status = 'IGNORED')::text AS ignored_count,
+       COUNT(*) FILTER (WHERE status = 'DELETED')::text AS deleted_count
      FROM bank_transactions
     WHERE org_id = $1 AND account_id = $2 AND txn_date <= $3::date`,
     [orgId, accountId, asOf],
@@ -466,6 +468,7 @@ export async function bankReconciliation(
     unmatchedCount: Number(sr?.unmatched_count ?? '0'),
     unmatchedCents: parseCents(sr?.unmatched_cents ?? '0'),
     ignoredCount: Number(sr?.ignored_count ?? '0'),
+    deletedCount: Number(sr?.deleted_count ?? '0'),
     statedClosingBalanceCents,
     statedClosingBalanceOn,
     statedClosingDifferenceCents:

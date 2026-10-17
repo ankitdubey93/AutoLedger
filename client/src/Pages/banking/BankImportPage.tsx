@@ -1,8 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listAccounts, importBankStatement, type Account, type DateFormat } from '../../services/fetchServices';
+import {
+  listAccounts,
+  importBankStatement,
+  listBankImports,
+  deleteBankImport,
+  type Account,
+  type BankStatementImport,
+  type DateFormat,
+} from '../../services/fetchServices';
 import BackLink from '../../components/BackLink';
+import ConfirmDialog from '../../components/ConfirmDialog';
 import { parseCentsInput } from '../../utils/money';
+import { formatDate } from '../../utils/date';
 
 /**
  * Upload a bank statement CSV. The file's text goes straight into the JSON
@@ -22,6 +32,7 @@ interface ImportSummary {
   suggestedCount: number;
   autoMatchableCount: number;
   ruleMatchedCount: number;
+  previouslyDeletedCount: number;
 }
 
 export default function BankImportPage() {
@@ -45,6 +56,12 @@ export default function BankImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [summary, setSummary] = useState<ImportSummary | null>(null);
+  const [imports, setImports] = useState<BankStatementImport[]>([]);
+  const [importsError, setImportsError] = useState<string | null>(null);
+  const [importsToken, setImportsToken] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<BankStatementImport | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let ignore = false;
@@ -60,6 +77,37 @@ export default function BankImportPage() {
       ignore = true;
     };
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    listBankImports({ limit: 20 })
+      .then((res) => {
+        if (ignore) return;
+        setImports(res.imports);
+        setImportsError(null);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setImportsError(err instanceof Error ? err.message : 'Could not load statements');
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [importsToken]);
+
+  async function submitDeleteImport(target: BankStatementImport): Promise<void> {
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteBankImport(target.id, null);
+      setDeleteTarget(null);
+      setImportsToken((t) => t + 1);
+    } catch (err: unknown) {
+      setDeleteTarget(null);
+      setDeleteError(err instanceof Error ? err.message : 'Could not delete that statement');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   function handleFile(file: File) {
     setError(null);
@@ -133,7 +181,9 @@ export default function BankImportPage() {
         suggestedCount: res.suggestedCount,
         autoMatchableCount: res.autoMatchableCount,
         ruleMatchedCount: res.ruleMatchedCount,
+        previouslyDeletedCount: res.previouslyDeletedCount,
       });
+      setImportsToken((t) => t + 1);
       setContent('');
       setFileName('');
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -301,6 +351,11 @@ export default function BankImportPage() {
               {summary.autoMatchableCount} ready for one-click accept.
               {summary.ruleMatchedCount > 0 && ` ${summary.ruleMatchedCount} settled by bank rules.`}
             </p>
+            {summary.previouslyDeletedCount > 0 && (
+              <p className="text-sm m-0 mt-2">
+                {summary.previouslyDeletedCount} previously deleted lines were skipped — restore them from the Deleted tab
+              </p>
+            )}
             <Link to="/bank" className="text-sm mt-2 inline-block">
               Review the approval queue →
             </Link>
@@ -317,6 +372,49 @@ export default function BankImportPage() {
           </button>
         </div>
       </form>
+
+      <section className="flex flex-col gap-3">
+        <h3 className="text-base font-semibold m-0">Recent statements</h3>
+        {importsError !== null && <p className="status status--bad">{importsError}</p>}
+        {deleteError !== null && <p className="status status--bad">{deleteError}</p>}
+        {imports.length === 0 && importsError === null && (
+          <p className="text-sm text-[var(--muted)] m-0">No statements imported yet.</p>
+        )}
+        {imports.map((imp) => (
+          <div
+            key={imp.id}
+            className="flex items-center gap-3 flex-wrap rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3"
+          >
+            <span className="text-sm flex-1 min-w-40">
+              {imp.fileName} · {imp.accountCode} {imp.accountName}
+            </span>
+            <span className="text-sm text-[var(--muted)] tabular-nums">{formatDate(imp.createdAt.slice(0, 10))}</span>
+            <span className="text-sm text-[var(--muted)]">
+              {imp.importedCount} imported · {imp.duplicateCount} duplicate{imp.duplicateCount === 1 ? '' : 's'}
+            </span>
+            <button
+              type="button"
+              disabled={deleteBusy}
+              onClick={() => setDeleteTarget(imp)}
+              className="btn btn--ghost"
+            >
+              Delete statement
+            </button>
+          </div>
+        ))}
+      </section>
+
+      {deleteTarget !== null && (
+        <ConfirmDialog
+          title="Delete this statement?"
+          body="Its unreconciled lines leave the approval queue and can be restored from the Deleted tab. The import record itself is kept."
+          confirmLabel="Delete"
+          tone="danger"
+          busy={deleteBusy}
+          onConfirm={() => void submitDeleteImport(deleteTarget)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </section>
   );
 }

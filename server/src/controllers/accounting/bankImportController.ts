@@ -1,6 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as bankImportService from '../../services/accounting/bankImportService.js';
-import { importStatementSchema } from '../../schemas/accounting/bankSchema.js';
+import { deleteBankImportSchema, importStatementSchema } from '../../schemas/accounting/bankSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -42,4 +42,17 @@ export const getOne: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const bankImport = await bankImportService.getImportById(user.orgId, requireParam(req, 'id'));
   res.json({ success: true, import: bankImport });
+};
+
+/** POST /bank-imports/:id/delete — Phase 46e. Soft-deletes the statement's unreconciled lines; the import row stays. */
+export const remove: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(deleteBankImportSchema, req.body);
+  const result = await bankImportService.deleteImport(
+    user.orgId,
+    user.id,
+    requireParam(req, 'id'),
+    input.reason,
+  );
+  res.json({ success: true, deletedCount: result.deletedCount });
 };

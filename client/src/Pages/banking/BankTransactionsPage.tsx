@@ -8,8 +8,12 @@ import {
   unignoreBankTransaction,
   rescoreBankTransaction,
   postBankLineJournal,
+  deleteBankTransactions,
+  restoreBankTransaction,
+  listBankHistory,
   listAccounts,
   type Account,
+  type BankHistoryEntry,
   type BankTransaction,
   type BankTransactionStatus,
 } from '../../services/fetchServices';
@@ -40,11 +44,16 @@ import { useOrganizationName } from '../../context/OrgContext';
 const PAGE_LIMIT = 50;
 const AUTO_MATCH_THRESHOLD = 85;
 
-const TABS: Array<{ label: string; value: BankTransactionStatus | '' }> = [
+/** `HISTORY` is client-only: it renders the history list instead of lines. */
+type TabValue = BankTransactionStatus | '' | 'HISTORY';
+
+const TABS: Array<{ label: string; value: TabValue }> = [
   { label: 'All', value: '' },
-  { label: 'Unmatched', value: 'UNMATCHED' },
-  { label: 'Matched', value: 'MATCHED' },
+  { label: 'Unreconciled', value: 'UNMATCHED' },
+  { label: 'Reconciled', value: 'MATCHED' },
   { label: 'Ignored', value: 'IGNORED' },
+  { label: 'Deleted', value: 'DELETED' },
+  { label: 'History', value: 'HISTORY' },
 ];
 
 interface PendingConfirm {
@@ -72,13 +81,23 @@ export default function BankTransactionsPage() {
   const [postJournalSuccess, setPostJournalSuccess] = useState<{ lineId: string; accountId: string; description: string; amountCents: number } | null>(null);
   const placeholderTarget = usePlaceholderTarget('postJournalDescription');
   const organisationName = useOrganizationName();
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteReason, setDeleteReason] = useState('');
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [historyEntries, setHistoryEntries] = useState<BankHistoryEntry[]>([]);
 
-  const status = (params.get('status') ?? '') as BankTransactionStatus | '';
+  const status = (params.get('status') ?? '') as TabValue;
+  const isHistory = status === 'HISTORY';
+  // Read from the URL only (no picker): a link like /bank?status=HISTORY&accountId=… scopes the history.
+  const accountIdParam = params.get('accountId') ?? '';
   const q = params.get('q') ?? '';
   const [qDraft, setQDraft] = useDebouncedInput(q, (v) => setFilter('q', v));
   const page = Number(params.get('page') ?? '1');
 
   useEffect(() => {
+    if (isHistory) return;
     let ignore = false;
     setError(null);
 
@@ -92,6 +111,7 @@ export default function BankTransactionsPage() {
         setTransactions(res.transactions);
         setTotalCount(res.totalCount);
         setTotalPages(res.totalPages);
+        setSelectedIds(new Set());
         setLoaded(true);
       })
       .catch((err: unknown) => {
@@ -101,7 +121,56 @@ export default function BankTransactionsPage() {
     return () => {
       ignore = true;
     };
-  }, [status, q, page, reloadToken]);
+  }, [status, q, page, reloadToken, isHistory]);
+
+  useEffect(() => {
+    if (!isHistory) return;
+    let ignore = false;
+    setError(null);
+
+    listBankHistory(accountIdParam === '' ? { page } : { page, accountId: accountIdParam })
+      .then((res) => {
+        if (ignore) return;
+        setHistoryEntries(res.entries);
+        setTotalCount(res.totalCount);
+        setTotalPages(res.totalPages);
+        setLoaded(true);
+      })
+      .catch((err: unknown) => {
+        if (!ignore) setError(err instanceof Error ? err.message : 'Could not load bank line history');
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [isHistory, page, accountIdParam, reloadToken]);
+
+  function toggleSelected(id: string) {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function submitDelete(): Promise<void> {
+    const ids = [...selectedIds];
+    const reason = deleteReason.trim();
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      await deleteBankTransactions(ids, reason === '' ? null : reason);
+      setDeleteOpen(false);
+      setDeleteReason('');
+      setSelectedIds(new Set());
+      setReloadToken((t) => t + 1);
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : 'Could not delete those lines');
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   useEffect(() => {
     listAccounts()
@@ -239,7 +308,42 @@ export default function BankTransactionsPage() {
 
       {loaded && (
         <>
-          {totalCount === 0 ? (
+          {!isHistory && selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 flex-wrap">
+              <span className="text-sm text-[var(--muted)]">{selectedIds.size} selected</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setDeleteOpen(true);
+                }}
+                className="btn btn--ghost"
+              >
+                Delete selected
+              </button>
+            </div>
+          )}
+
+          {isHistory ? (
+            historyEntries.length === 0 ? (
+              <p className="muted">No bank line activity yet.</p>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {historyEntries.map((entry) => (
+                  <div key={entry.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 flex flex-col gap-1">
+                    <div className="flex items-center gap-3 flex-wrap text-sm">
+                      <span className="tabular-nums whitespace-nowrap">{formatDate(entry.createdAt.slice(0, 10))}</span>
+                      <span className="text-[var(--muted)]">{entry.actorName ?? 'System'}</span>
+                      <span className="flex-1 min-w-40">{entry.summary}</span>
+                    </div>
+                    <p className="text-xs text-[var(--muted)] m-0">
+                      {formatDate(entry.txnDate)} · {entry.description} · {formatCents(entry.amountCents)}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )
+          ) : totalCount === 0 ? (
             <p className="muted">
               No bank lines yet. <Link to="/bank/import">Import a statement</Link> to get started.
             </p>
@@ -251,6 +355,14 @@ export default function BankTransactionsPage() {
                 return (
                   <div key={txn.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)]">
                     <div className="flex items-center gap-3 p-3 flex-wrap">
+                      {txn.status === 'UNMATCHED' && (
+                        <input
+                          type="checkbox"
+                          aria-label={`Select ${txn.description}`}
+                          checked={selectedIds.has(txn.id)}
+                          onChange={() => toggleSelected(txn.id)}
+                        />
+                      )}
                       <span className="tabular-nums text-sm whitespace-nowrap">{formatDate(txn.txnDate)}</span>
                       <span className="text-sm flex-1 min-w-40">{txn.description}</span>
                       <span
@@ -300,6 +412,22 @@ export default function BankTransactionsPage() {
                             className="btn btn--ghost"
                           >
                             Un-ignore
+                          </button>
+                        )}
+                        {txn.status === 'DELETED' && (
+                          <span className="text-sm text-[var(--muted)]">
+                            Deleted by {txn.deletedByName ?? 'unknown'}
+                            {txn.deleteReason !== null && ` · ${txn.deleteReason}`}
+                          </span>
+                        )}
+                        {txn.status === 'DELETED' && (
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => void runAction(txn.id, () => restoreBankTransaction(txn.id))}
+                            className="btn btn--ghost"
+                          >
+                            Restore
                           </button>
                         )}
                         {txn.status === 'MATCHED' && txn.matchedJournalEntryId !== null && (
@@ -452,13 +580,46 @@ export default function BankTransactionsPage() {
             <Pagination
               page={page}
               totalPages={totalPages}
-              shownCount={transactions.length}
+              shownCount={isHistory ? historyEntries.length : transactions.length}
               totalCount={totalCount}
-              noun="bank lines"
+              noun={isHistory ? 'events' : 'bank lines'}
               onPageChange={goToPage}
             />
           )}
         </>
+      )}
+
+      {deleteOpen && (
+        <ConfirmDialog
+          title={`Delete ${selectedIds.size} bank line${selectedIds.size === 1 ? '' : 's'}?`}
+          body={
+            <div className="flex flex-col gap-2">
+              <p className="m-0">
+                Deleted lines leave the approval queue. Restore them from the Deleted tab. Re-importing the same
+                statement will not bring them back on its own.
+              </p>
+              <label className="flex flex-col gap-1">
+                <span>Reason (optional)</span>
+                <input
+                  type="text"
+                  value={deleteReason}
+                  maxLength={200}
+                  onChange={(e) => setDeleteReason(e.target.value)}
+                  className={inputClass}
+                />
+              </label>
+              {deleteError !== null && <p className="status status--bad m-0">{deleteError}</p>}
+            </div>
+          }
+          confirmLabel="Delete"
+          tone="danger"
+          busy={deleteBusy}
+          onConfirm={() => void submitDelete()}
+          onCancel={() => {
+            setDeleteOpen(false);
+            setDeleteError(null);
+          }}
+        />
       )}
 
       {confirm !== null && confirm.kind === 'match' && (

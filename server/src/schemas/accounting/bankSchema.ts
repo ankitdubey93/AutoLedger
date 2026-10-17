@@ -63,3 +63,16 @@ export const postBankLineJournalSchema = z.object({
   accountId: z.uuid(),
   description: z.string().trim().min(1).max(500).nullable().default(null),
 });
+
+/**
+ * Phase 46e — soft-deleting unreconciled bank lines. `reason` is an optional
+ * free-text note recorded on the line and in its history entry.
+ */
+export const deleteBankTransactionsSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, 'Choose at least one line').max(500, 'Delete at most 500 lines at once'),
+  reason: z.string().trim().max(200, 'A reason can be at most 200 characters').nullable().default(null),
+}).strict();
+
+export const deleteBankImportSchema = z.object({
+  reason: z.string().trim().max(200, 'A reason can be at most 200 characters').nullable().default(null),
+}).strict();

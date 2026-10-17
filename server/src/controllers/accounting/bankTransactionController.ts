@@ -1,6 +1,10 @@
 import type { Request, RequestHandler } from 'express';
 import * as bankMatchService from '../../services/accounting/bankMatchService.js';
-import { matchBankTransactionSchema, postBankLineJournalSchema } from '../../schemas/accounting/bankSchema.js';
+import {
+  deleteBankTransactionsSchema,
+  matchBankTransactionSchema,
+  postBankLineJournalSchema,
+} from '../../schemas/accounting/bankSchema.js';
 import { parseBody } from '../../utils/parseBody.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { requireParam } from '../../utils/routeParam.js';
@@ -11,16 +15,17 @@ import { isBankTransactionStatus, type BankTransactionStatus } from '../../types
 /**
  * Thin adapters over bankMatchService. Zero SQL (guardrails rule 2).
  *
- * There is no PATCH and no DELETE — a bank line's match state changes only
- * through match/unmatch/ignore/unignore, and unmatch corrects a posted
- * payment by voiding it, never by editing it (guardrails rule 6).
+ * There is no PATCH and no DELETE verb — deletion is a soft status (Phase 46e).
+ * A bank line's match state changes only through match/unmatch/ignore/unignore,
+ * and unmatch corrects a posted payment by voiding it, never by editing it
+ * (guardrails rule 6).
  */
 
 function optionalStatus(req: Request): BankTransactionStatus | null {
   const raw = optionalText(req, 'status', 20);
   if (raw === null) return null;
   if (!isBankTransactionStatus(raw)) {
-    throw new ApiError(400, 'status must be UNMATCHED, MATCHED or IGNORED');
+    throw new ApiError(400, 'status must be UNMATCHED, MATCHED, IGNORED or DELETED');
   }
   return raw;
 }
@@ -115,5 +120,41 @@ export const unignore: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const id = requireParam(req, 'id');
   const transaction = await bankMatchService.setIgnored(user.orgId, id, false);
+  res.json({ success: true, transaction });
+};
+
+/** GET /bank-transactions/history — Phase 46e. Actions taken on lines, optionally for one bank account. */
+export const history: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const { page, limit } = readPagination(req.query);
+
+  const { entries, totalCount } = await bankMatchService.listBankHistory(user.orgId, {
+    accountId: optionalUuid(req, 'accountId'),
+    page,
+    limit,
+  });
+
+  res.json({
+    success: true,
+    count: entries.length,
+    totalCount,
+    currentPage: page,
+    totalPages: Math.max(1, Math.ceil(totalCount / limit)),
+    entries,
+  });
+};
+
+/** POST /bank-transactions/delete — Phase 46e. Soft-deletes unreconciled lines. */
+export const remove: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const input = parseBody(deleteBankTransactionsSchema, req.body);
+  const result = await bankMatchService.deleteTransactions(user.orgId, user.id, input.ids, input.reason);
+  res.json({ success: true, deletedCount: result.deletedCount });
+};
+
+/** POST /bank-transactions/:id/restore — Phase 46e. DELETED → UNMATCHED. */
+export const restore: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const transaction = await bankMatchService.restoreTransaction(user.orgId, requireParam(req, 'id'));
   res.json({ success: true, transaction });
 };

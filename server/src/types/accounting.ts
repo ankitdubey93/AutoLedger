@@ -1090,7 +1090,7 @@ export interface BalanceSheet {
 
 // ---------------------------------------------- Phase 6 — bank reconciliation
 
-export const BANK_TRANSACTION_STATUSES = ['UNMATCHED', 'MATCHED', 'IGNORED'] as const;
+export const BANK_TRANSACTION_STATUSES = ['UNMATCHED', 'MATCHED', 'IGNORED', 'DELETED'] as const;
 export type BankTransactionStatus = (typeof BANK_TRANSACTION_STATUSES)[number];
 
 export function isBankTransactionStatus(value: string): value is BankTransactionStatus {
@@ -1102,11 +1102,14 @@ export function isBankTransactionStatus(value: string): value is BankTransaction
  * Unlike VOID on an invoice or LOCKED on a period, MATCHED is NOT terminal —
  * it is reversible, and the reverse edge has a GL side effect: unmatching
  * voids the payment the match posted.
+ *
+ * DELETED (Phase 46e) is a soft delete of an unreconciled line; DELETED → UNMATCHED is "restore". A matched line must be unmatched first.
  */
 export const BANK_TRANSACTION_TRANSITIONS = {
-  UNMATCHED: ['MATCHED', 'IGNORED'],
+  UNMATCHED: ['MATCHED', 'IGNORED', 'DELETED'],
   MATCHED: ['UNMATCHED'],
   IGNORED: ['UNMATCHED'],
+  DELETED: ['UNMATCHED'],
 } as const satisfies Record<BankTransactionStatus, readonly BankTransactionStatus[]>;
 
 export function canTransitionBankTransaction(
@@ -1178,6 +1181,10 @@ export interface BankTransaction {
   matchedByName: string | null;
   createdAt: string;
   updatedAt: string;
+  deletedAt: string | null;
+  deletedBy: string | null;
+  deletedByName: string | null;
+  deleteReason: string | null;
   /** Empty for a MATCHED or IGNORED line. Ordered score DESC. */
   suggestions: BankMatchSuggestion[];
 }
@@ -1230,6 +1237,8 @@ export interface BankReconciliationReport {
   unmatchedCount: number;
   unmatchedCents: number;
   ignoredCount: number;
+  /** Soft-deleted lines (Phase 46e) — excluded from the statement balance. */
+  deletedCount: number;
   /** From the latest import carrying one, on or before asOf. Null when none does. */
   statedClosingBalanceCents: number | null;
   statedClosingBalanceOn: string | null;

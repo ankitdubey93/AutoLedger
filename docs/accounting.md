@@ -302,6 +302,14 @@ LedgerCore's way in for a business moving off another system. The platform half 
 
 **Acceptance ✅ — verified.** A withdrawal posted through `/post-journal` debits the chosen account and credits the bank account, in a balanced entry (`bankLineJournal.test.ts`). Unmatching after a journal post reverses the entry and zeroes the GL balance it moved. Six new raw-SQL cases in `bankConstraints.test.ts` prove the XOR constraint holds regardless of what wrote the row. See [Phase 6.1, as delivered](roadmap.md#phase-61-as-delivered) in the roadmap for full detail.
 
+### Phase 46e — deleting bank lines and reconciliation history ✅ shipped
+
+- [x] An unreconciled (`UNMATCHED`) bank line, or all unreconciled lines of a statement import, can be **deleted** with an optional reason: a soft `DELETED` status (migration 103), never a row removal. A `MATCHED` or `IGNORED` line must be unmatched or unignored first.
+- [x] **Restore** returns a deleted line to `UNMATCHED` and regenerates its suggestions. Deleted lines are hidden from the default list, shown under the Deleted tab, and excluded from the reconciliation report (reported as `deletedCount`).
+- [x] The dedupe constraint stays whole, so re-importing a statement skips deleted lines; the import reports them as `previouslyDeletedCount`.
+- [x] Every match-state change (matched, unmatched, ignored, unignored, deleted, restored, imported) writes a `document_history` event on the same transaction; `GET /bank-transactions/history` is the per-account reconciliation history.
+- Not built: hard deletion of a statement import, bulk restore.
+
 ### Phase 24 — payment terms, item catalogue, party import ✅ shipped
 
 A direct feature request, not part of the strategic-plan sequence that named Phases 20–23 — see [roadmap.md](roadmap.md#phase-24-as-delivered) for why this is Phase 24.
