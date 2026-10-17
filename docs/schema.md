@@ -966,9 +966,13 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - `ux_bank_transactions_dedupe` is untouched, so a deleted line still blocks re-import of the same statement row.
 - Known edge: the CHECK requires `deleted_by` on a deleted row while the FK is `ON DELETE SET NULL`, so hard-deleting a user who deleted a bank line fails the CHECK (no production path deletes users).
 
+**`104_ledger-core_account_balance_sheet_class.sql`** (Phase 47)
+- `accounts.balance_sheet_class` TEXT NULL with **`chk_accounts_balance_sheet_class`** (`CURRENT`/`NON_CURRENT`, only on `Asset`/`Liability`): an override, `NULL` = derive it from the chart tree (`utils/balanceSheetClass.ts`: under `1400` / `2500` is non-current, otherwise current). A report attribute, not a sixth account type (rule 12). No backfill, no index.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.
+
 
 **`quickbooks_connections`** (Phase 17) — `id` · `org_id` UNIQUE · `realm_id` TEXT · `access_token_encrypted` · `refresh_token_encrypted` · `expires_at` · `connected_by` · `last_synced_at`. Tokens are encrypted at rest, never logged (rule 11).
 

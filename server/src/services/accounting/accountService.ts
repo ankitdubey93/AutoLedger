@@ -4,11 +4,13 @@ import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import {
   isAccountType,
+  isBalanceSheetClass,
   isBankAccountKind,
   isCashFlowCategory,
   type Account,
   type AccountNode,
   type AccountType,
+  type BalanceSheetClass,
   type BankAccountKind,
   type CashFlowCategory,
 } from '../../types/accounting.js';
@@ -45,17 +47,25 @@ interface AccountRow {
   description: string | null;
   bank_account_kind: string | null;
   cash_flow_category: string | null;
+  balance_sheet_class: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 const ACCOUNT_COLUMNS = `id, code, name, type, parent_id, is_postable, is_active,
-                         description, bank_account_kind, cash_flow_category, created_at, updated_at`;
+                         description, bank_account_kind, cash_flow_category, balance_sheet_class, created_at, updated_at`;
 
 /** Only balance-sheet accounts carry a cash-flow category (Revenue/Expense flow through net income). */
 function assertCashFlowCategoryMatchesType(category: CashFlowCategory | null, type: AccountType): void {
   if (category !== null && (type === 'Revenue' || type === 'Expense')) {
     throw new ApiError(422, 'Only balance-sheet accounts have a cash flow category');
+  }
+}
+
+/** Phase 47 — only Asset and Liability accounts have a current/non-current class. */
+function assertBalanceSheetClassMatchesType(value: BalanceSheetClass | null, type: AccountType): void {
+  if (value !== null && type !== 'Asset' && type !== 'Liability') {
+    throw new ApiError(422, 'Only asset and liability accounts have a balance sheet class');
   }
 }
 
@@ -81,6 +91,9 @@ function toAccount(row: AccountRow): Account {
   if (row.cash_flow_category !== null && !isCashFlowCategory(row.cash_flow_category)) {
     throw new Error(`Unknown cash flow category "${row.cash_flow_category}" on account ${row.id}`);
   }
+  if (row.balance_sheet_class !== null && !isBalanceSheetClass(row.balance_sheet_class)) {
+    throw new Error(`Unknown balance sheet class "${row.balance_sheet_class}" on account ${row.id}`);
+  }
   return {
     id: row.id,
     code: row.code,
@@ -92,6 +105,7 @@ function toAccount(row: AccountRow): Account {
     description: row.description,
     bankAccountKind: row.bank_account_kind,
     cashFlowCategory: row.cash_flow_category,
+    balanceSheetClass: row.balance_sheet_class,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
     systemRoles: [],
@@ -215,18 +229,20 @@ export async function createAccountOnClient(
     description: string | null;
     bankAccountKind: BankAccountKind | null;
     cashFlowCategory: CashFlowCategory | null;
+    balanceSheetClass: BalanceSheetClass | null;
   },
 ): Promise<Account> {
   assertBankKindMatchesType(input.bankAccountKind, input.type);
   assertCashFlowCategoryMatchesType(input.cashFlowCategory, input.type);
+  assertBalanceSheetClassMatchesType(input.balanceSheetClass, input.type);
   if (input.parentId !== null) {
     await assertParentIsValid(client, orgId, input.parentId, input.type);
   }
 
   try {
     const { rows } = await client.query<AccountRow>(
-      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by, bank_account_kind, cash_flow_category)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO accounts (org_id, code, name, type, parent_id, is_postable, description, created_by, bank_account_kind, cash_flow_category, balance_sheet_class)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING ${ACCOUNT_COLUMNS}`,
       [
         orgId,
@@ -239,6 +255,7 @@ export async function createAccountOnClient(
         createdBy,
         input.bankAccountKind,
         input.cashFlowCategory,
+        input.balanceSheetClass,
       ],
     );
 
@@ -263,6 +280,7 @@ export async function createAccount(
     description: string | null;
     bankAccountKind: BankAccountKind | null;
     cashFlowCategory: CashFlowCategory | null;
+    balanceSheetClass: BalanceSheetClass | null;
   },
 ): Promise<Account> {
   const created = await withTransaction((client) => createAccountOnClient(client, orgId, createdBy, input));
@@ -319,6 +337,7 @@ export async function updateAccount(
     parentId?: string | null | undefined;
     bankAccountKind?: BankAccountKind | null | undefined;
     cashFlowCategory?: CashFlowCategory | null | undefined;
+    balanceSheetClass?: BalanceSheetClass | null | undefined;
   },
 ): Promise<Account> {
   const existing = await getAccountById(orgId, id);
@@ -341,6 +360,9 @@ export async function updateAccount(
   if (input.cashFlowCategory !== undefined) {
     assertCashFlowCategoryMatchesType(input.cashFlowCategory, existing.type);
   }
+  if (input.balanceSheetClass !== undefined) {
+    assertBalanceSheetClassMatchesType(input.balanceSheetClass, existing.type);
+  }
 
   if (input.parentId !== undefined && input.parentId !== null) {
     if (input.parentId === id) throw new ApiError(422, 'Re-parenting would create a cycle');
@@ -359,6 +381,7 @@ export async function updateAccount(
     parentId: 'parent_id',
     bankAccountKind: 'bank_account_kind',
     cashFlowCategory: 'cash_flow_category',
+    balanceSheetClass: 'balance_sheet_class',
   } as const;
 
   const assignments: string[] = [];

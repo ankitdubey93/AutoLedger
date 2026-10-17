@@ -3,6 +3,7 @@ import {
   createAccount,
   type Account,
   type AccountType,
+  type BalanceSheetClass,
   type BankAccountKind,
   type CashFlowCategory,
 } from '../../services/fetchServices';
@@ -43,6 +44,17 @@ export function hasCashFlowCategory(type: AccountType): boolean {
   return type === 'Asset' || type === 'Liability' || type === 'Equity';
 }
 
+/** Phase 47 — current/non-current; '' is "Automatic" (sent as null, derived from the chart tree). */
+export const BALANCE_SHEET_CLASS_OPTIONS: { value: '' | BalanceSheetClass; label: string }[] = [
+  { value: '', label: 'Automatic' },
+  { value: 'CURRENT', label: 'Current' },
+  { value: 'NON_CURRENT', label: 'Non-current' },
+];
+
+export function hasBalanceSheetClass(type: AccountType): boolean {
+  return type === 'Asset' || type === 'Liability';
+}
+
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
@@ -65,6 +77,8 @@ export default function NewAccountForm({
   const [bankAccountKind, setBankAccountKind] = useState<BankAccountKind | null>(null);
   // Phase 45 — '' is Automatic.
   const [cashFlowCategory, setCashFlowCategory] = useState<'' | CashFlowCategory>('');
+  // Phase 47 — '' is Automatic.
+  const [balanceSheetClass, setBalanceSheetClass] = useState<'' | BalanceSheetClass>('');
   const [isPostable, setIsPostable] = useState(true);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
@@ -86,6 +100,9 @@ export default function NewAccountForm({
         // Sent only when the field is shown; Revenue and Expense omit the key.
         ...(hasCashFlowCategory(type)
           ? { cashFlowCategory: cashFlowCategory === '' ? null : cashFlowCategory }
+          : {}),
+        ...(hasBalanceSheetClass(type)
+          ? { balanceSheetClass: balanceSheetClass === '' ? null : balanceSheetClass }
           : {}),
         isPostable,
         description: description.trim() === '' ? null : description.trim(),
@@ -141,6 +158,7 @@ export default function NewAccountForm({
               setParentId('');
               setBankAccountKind(null);
               setCashFlowCategory('');
+              setBalanceSheetClass('');
             }}
             className={inputClass}
           >
@@ -205,6 +223,23 @@ export default function NewAccountForm({
             className={inputClass}
           >
             {CASH_FLOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {hasBalanceSheetClass(type) && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Balance sheet class</span>
+          <select
+            value={balanceSheetClass}
+            onChange={(e) => setBalanceSheetClass(e.target.value as '' | BalanceSheetClass)}
+            className={inputClass}
+          >
+            {BALANCE_SHEET_CLASS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>

@@ -27,6 +27,7 @@ import TrendChart from '../../components/TrendChart';
 import InventoryOverview from '../inventory/InventoryOverview';
 import InboxSummaryCard from './InboxSummaryCard';
 import SetupChecklist from './SetupChecklist';
+import BusinessHealthTiles from './BusinessHealthTiles';
 import MetricTile from '../../components/ui/MetricTile';
 import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';
@@ -223,6 +224,8 @@ function FullDashboard() {
           }
         />
       </div>
+
+      <BusinessHealthTiles />
 
       <div className="card">
         <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Scale size={14} aria-hidden="true" className="text-[var(--muted)]" /> Accounting equation</p>

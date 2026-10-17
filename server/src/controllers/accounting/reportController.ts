@@ -7,6 +7,7 @@ import * as accountTransactionsService from '../../services/accounting/accountTr
 import * as taxSummaryService from '../../services/accounting/taxSummaryService.js';
 import * as salesPurchasesReportService from '../../services/accounting/salesPurchasesReportService.js';
 import * as cashFlowService from '../../services/accounting/cashFlowService.js';
+import * as businessSnapshotService from '../../services/accounting/businessSnapshotService.js';
 import { requireUser } from '../../utils/requireUser.js';
 import { optionalCsvList, optionalIsoDate, optionalUuid } from '../../utils/queryParam.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -23,6 +24,7 @@ import {
   accountTransactionsTable,
   agingTable,
   balanceSheetTable,
+  businessSnapshotTable,
   cashFlowTable,
   profitAndLossComparisonTable,
   profitAndLossTable,
@@ -161,6 +163,22 @@ export const cashFlow: RequestHandler = async (req, res) => {
   if (format !== null) {
     const ctx = await reportService.loadReportContext(user.orgId);
     await sendReportFile(res, cashFlowTable(ctx, report), format);
+    return;
+  }
+  res.json({ success: true, ...report });
+};
+
+/** GET /reports/business-snapshot?from=YYYY-MM-DD&to=YYYY-MM-DD (defaults as the P&L) */
+export const businessSnapshot: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const from = optionalIsoDate(req, 'from');
+  const to = optionalIsoDate(req, 'to');
+  const format = readReportFormat(req);
+
+  const report = await businessSnapshotService.businessSnapshot(user.orgId, from, to);
+  if (format !== null) {
+    const ctx = await reportService.loadReportContext(user.orgId);
+    await sendReportFile(res, businessSnapshotTable(ctx, report), format);
     return;
   }
   res.json({ success: true, ...report });

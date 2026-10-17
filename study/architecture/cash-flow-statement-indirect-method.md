@@ -36,6 +36,12 @@ A credit card is a short-term liability, so it is operating (card spending is an
 
 An "effect of FX on cash" line: FX revaluation restates open AR/AP only, and every cash line is base currency, so the line would always be zero. The direct method is not built.
 
+## A second derived-with-override attribute (Phase 47)
+
+Phase 47's business snapshot needs current vs non-current for Asset and Liability accounts. It reuses this note's pattern: a nullable `accounts.balance_sheet_class` (CHECK: Asset/Liability only, migration `104`) overrides a classification derived from the chart tree (an Asset under `1400` and a Liability under `2500` are NON_CURRENT; the rest CURRENT; `utils/balanceSheetClass.ts`). Same reasons: rule 12, a report attribute is not a type, and a customised chart can be corrected without code.
+
+The ancestry recursive CTE was **copied** into `businessSnapshotService.ts` (anchored to Asset/Liability) rather than factored out of `cashFlowService.ts`. The decision: leave a tested statement untouched this phase. The cost is two copies of one query shape; a shared helper is the follow-up if a third consumer appears. See [financial-ratios-in-integer-basis-points.md](financial-ratios-in-integer-basis-points.md).
+
 ## Why we chose it here
 
 | Option | Trade-off | Verdict |

@@ -114,7 +114,7 @@ The client receives `permissions` in the session body. `useCan()` (on `AuthConte
 
 ## Repository layout
 
-### Current (verified 2026-10-17, after Phase 46; migrations and tree top level re-checked)
+### Current (verified 2026-10-17, after Phase 47; migrations and tree top level re-checked)
 
 ```text
 .github/workflows/ci.yml   typecheck + lint + tests (real Postgres/Redis services) + image builds
@@ -125,7 +125,7 @@ server/
   src/
     app.ts index.ts worker.ts
     config/                env, constants, modules.ts (provenance tags), industry profiles, AI pricing
-    db/                    connect, transaction, integrity, migrate, reset + migrations/ (001–103)
+    db/                    connect, transaction, integrity, migrate, reset + migrations/ (001–104)
     middleware/            auth, rbac, rateLimit, requestContext (request ids), originCheck, upload, errorHandler
     routes/ controllers/ schemas/ services/
                            each: platform files at the root, then accounting/, capture/,
@@ -141,7 +141,7 @@ client/
   src/
     App.tsx main.tsx
     routes/                ProductRoutes, SetupGate, InventoryGate, WorkspaceLayout, LegacyAppRedirect
-    components/            layout/ (shell, sidebar, nav.ts, top bar), ui/ (shared primitives),
+    components/            layout/ (shell, sidebar, nav.ts, top bar), ui/ (shared primitives), charts/ (Recharts, Phase 47),
                            BrandMark, DocumentTitle, ConfirmDialog, BackLink, …
     context/               Auth, Org, LedgerSettings, Theme
     Pages/                 one folder per sidebar section: home, sales, purchases, inbox,

@@ -19,6 +19,16 @@ interface ReportSection {
 
 const SECTIONS: ReportSection[] = [
   {
+    heading: 'Overview',
+    reports: [
+      {
+        name: 'Business snapshot',
+        description: 'Gross margin, cost of sales, key ratios, aging and a 12-month trend, with charts.',
+        path: 'reports/business-snapshot',
+      },
+    ],
+  },
+  {
     heading: 'Financial statements',
     reports: [
       {

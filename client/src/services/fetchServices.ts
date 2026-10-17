@@ -539,6 +539,9 @@ export type BankAccountKind = (typeof BANK_ACCOUNT_KINDS)[number];
 /** Phase 45. Mirrors server/src/types/accounting.ts's CashFlowCategory. */
 export type CashFlowCategory = 'CASH' | 'OPERATING' | 'INVESTING' | 'FINANCING';
 
+/** Phase 47. */
+export type BalanceSheetClass = 'CURRENT' | 'NON_CURRENT';
+
 export interface Account {
   id: string;
   code: string;
@@ -552,6 +555,8 @@ export interface Account {
   bankAccountKind: BankAccountKind | null;
   /** Phase 45 — null means "derived from the account's type and code". Optional so pre-Phase-45 fixtures still typecheck. */
   cashFlowCategory?: CashFlowCategory | null;
+  /** Phase 47. */
+  balanceSheetClass?: BalanceSheetClass | null;
   /** Phase 46a — the system roles this account holds. Optional so pre-46a fixtures still typecheck. */
   systemRoles?: SystemRoleRef[];
   createdAt: string;
@@ -665,6 +670,8 @@ export interface CreateAccountInput {
   bankAccountKind?: BankAccountKind | null;
   /** Phase 45. */
   cashFlowCategory?: CashFlowCategory | null;
+  /** Phase 47. */
+  balanceSheetClass?: BalanceSheetClass | null;
 }
 
 /**
@@ -694,6 +701,8 @@ export interface UpdateAccountInput {
   bankAccountKind?: BankAccountKind | null;
   /** Phase 45. */
   cashFlowCategory?: CashFlowCategory | null;
+  /** Phase 47. */
+  balanceSheetClass?: BalanceSheetClass | null;
 }
 
 /** PATCH /accounts/:id — OWNER, ADMIN or ACCOUNTANT. */
@@ -2974,6 +2983,113 @@ export async function getCashFlow(
   if (to !== null) params.set('to', to);
   const suffix = params.size === 0 ? '' : `?${params.toString()}`;
   const body = await apiFetch<{ success: boolean } & CashFlowStatement>(`/reports/cash-flow${suffix}`, {
+    signal: signal ?? null,
+  });
+  const { success, ...report } = body;
+  return report;
+}
+
+/* ---------------------------------------------------- accounting: Phase 47 business snapshot */
+
+/** Mirrors server/src/types/accounting.ts's SNAPSHOT_RATIO_KEYS. */
+export type SnapshotRatioKey =
+  | 'GROSS_MARGIN'
+  | 'CURRENT_RATIO'
+  | 'DEBT_RATIO'
+  | 'DEBT_TO_EQUITY'
+  | 'WORKING_CAPITAL_TO_TOTAL_ASSETS'
+  | 'FIXED_ASSETS_TO_NET_WORTH'
+  | 'CURRENT_LIABILITIES_TO_NET_WORTH';
+
+/** Mirrors server/src/types/accounting.ts's SnapshotRatioValue. */
+export interface SnapshotRatioValue {
+  /** null when the denominator is ≤ 0. */
+  valueBp: number | null;
+  reason: 'DENOMINATOR_ZERO' | 'DENOMINATOR_NEGATIVE' | null;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotRatio. */
+export interface SnapshotRatio {
+  key: SnapshotRatioKey;
+  label: string;
+  kind: 'PERCENT' | 'TIMES';
+  current: SnapshotRatioValue;
+  prior: SnapshotRatioValue;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotPeriod. */
+export interface SnapshotPeriod {
+  from: string;
+  to: string;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotPerformance. */
+export interface SnapshotPerformance {
+  revenueCents: number;
+  costOfSalesCents: number;
+  grossProfitCents: number;
+  operatingExpensesCents: number;
+  netIncomeCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotPosition. */
+export interface SnapshotPosition {
+  asOf: string;
+  currentAssetsCents: number;
+  nonCurrentAssetsCents: number;
+  totalAssetsCents: number;
+  currentLiabilitiesCents: number;
+  nonCurrentLiabilitiesCents: number;
+  totalLiabilitiesCents: number;
+  netWorthCents: number;
+  workingCapitalCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotAging. */
+export interface SnapshotAging {
+  asOf: string;
+  buckets: AgingBucketAmount[];
+  totalOutstandingCents: number;
+  totalOverdueCents: number;
+}
+
+/** Mirrors server/src/types/accounting.ts's SnapshotTrendPoint. */
+export interface SnapshotTrendPoint {
+  /** YYYY-MM */
+  month: string;
+  asOf: string;
+  revenueCents: number;
+  costOfSalesCents: number;
+  grossProfitCents: number;
+  grossMarginBp: number | null;
+  currentRatioBp: number | null;
+  debtRatioBp: number | null;
+  debtToEquityBp: number | null;
+}
+
+/** Mirrors server/src/types/accounting.ts's BusinessSnapshot. */
+export interface BusinessSnapshot {
+  period: SnapshotPeriod;
+  priorPeriod: SnapshotPeriod;
+  performance: { current: SnapshotPerformance; prior: SnapshotPerformance };
+  position: { current: SnapshotPosition; prior: SnapshotPosition };
+  ratios: SnapshotRatio[];
+  receivables: SnapshotAging;
+  payables: SnapshotAging;
+  trend: SnapshotTrendPoint[];
+}
+
+/** GET /reports/business-snapshot?from=YYYY-MM-DD&to=YYYY-MM-DD */
+export async function getBusinessSnapshot(
+  from: string | null = null,
+  to: string | null = null,
+  signal?: AbortSignal,
+): Promise<BusinessSnapshot> {
+  const params = new URLSearchParams();
+  if (from !== null) params.set('from', from);
+  if (to !== null) params.set('to', to);
+  const suffix = params.size === 0 ? '' : `?${params.toString()}`;
+  const body = await apiFetch<{ success: boolean } & BusinessSnapshot>(`/reports/business-snapshot${suffix}`, {
     signal: signal ?? null,
   });
   const { success, ...report } = body;

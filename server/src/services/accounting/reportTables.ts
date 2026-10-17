@@ -7,6 +7,7 @@ import {
   type AgingBucket,
   type AgingReport,
   type BalanceSheet,
+  type BusinessSnapshot,
   type CashFlowStatement,
   type ComparisonSection,
   type GlExceptionReport,
@@ -14,6 +15,7 @@ import {
   type ProfitAndLossComparison,
   type SalesPurchasesReport,
   type SalesPurchasesReportKind,
+  type SnapshotRatioValue,
   type Variance,
   type StatementSection,
   type TaxSummary,
@@ -671,5 +673,105 @@ export function cashFlowTable(ctx: ReportContext, report: CashFlowStatement): Re
     rows,
     footnotes: ['Indirect method. Override an account’s category in Chart of accounts.'],
     filenameStem: `cash-flow-${report.from}-${report.to}`,
+  };
+}
+
+/** Phase 47 — a ratio cell: PERCENT as a percent cell, TIMES as display text (never fed back into money). */
+function ratioCell(kind: 'PERCENT' | 'TIMES', value: SnapshotRatioValue): ReportCell {
+  if (value.valueBp === null) return EMPTY;
+  if (kind === 'PERCENT') return { kind: 'percent', bp: value.valueBp };
+  return text(`${(value.valueBp / 10000).toFixed(2)}×`);
+}
+
+/** Phase 47 — business snapshot: performance, position, ratios, aging and the 12-month trend. */
+export function businessSnapshotTable(ctx: ReportContext, report: BusinessSnapshot): ReportTable {
+  const { performance, position } = report;
+  const pair = (
+    label: string,
+    current: number,
+    prior: number,
+    style: ReportRow['style'] = 'detail',
+  ): ReportRow => ({
+    style,
+    indent: 1,
+    cells: { item: text(label), current: money(current), prior: money(prior) },
+  });
+  const heading = (label: string): ReportRow => ({ style: 'heading', indent: 0, cells: { item: text(label) } });
+
+  const agingRows = (heading_: string, aging: BusinessSnapshot['receivables']): ReportRow[] => [
+    heading(heading_),
+    ...aging.buckets.map(
+      (bucket): ReportRow => ({
+        style: 'detail',
+        indent: 1,
+        cells: { item: text(bucket.label), current: money(bucket.amountCents), prior: EMPTY },
+      }),
+    ),
+    {
+      style: 'subtotal',
+      indent: 1,
+      cells: { item: text('Total outstanding'), current: money(aging.totalOutstandingCents), prior: EMPTY },
+    },
+  ];
+
+  const rows: ReportRow[] = [
+    heading('Performance'),
+    pair('Revenue', performance.current.revenueCents, performance.prior.revenueCents),
+    pair('Cost of sales', performance.current.costOfSalesCents, performance.prior.costOfSalesCents),
+    pair('Gross profit', performance.current.grossProfitCents, performance.prior.grossProfitCents),
+    pair('Operating expenses', performance.current.operatingExpensesCents, performance.prior.operatingExpensesCents),
+    pair('Net income', performance.current.netIncomeCents, performance.prior.netIncomeCents),
+    heading('Financial position'),
+    pair('Current assets', position.current.currentAssetsCents, position.prior.currentAssetsCents),
+    pair('Non-current assets', position.current.nonCurrentAssetsCents, position.prior.nonCurrentAssetsCents),
+    pair('Total assets', position.current.totalAssetsCents, position.prior.totalAssetsCents, 'subtotal'),
+    pair('Current liabilities', position.current.currentLiabilitiesCents, position.prior.currentLiabilitiesCents),
+    pair(
+      'Non-current liabilities',
+      position.current.nonCurrentLiabilitiesCents,
+      position.prior.nonCurrentLiabilitiesCents,
+    ),
+    pair('Total liabilities', position.current.totalLiabilitiesCents, position.prior.totalLiabilitiesCents, 'subtotal'),
+    pair('Net worth', position.current.netWorthCents, position.prior.netWorthCents, 'total'),
+    pair('Working capital', position.current.workingCapitalCents, position.prior.workingCapitalCents),
+    heading('Ratios'),
+    ...report.ratios.map(
+      (ratio): ReportRow => ({
+        style: 'detail',
+        indent: 1,
+        cells: {
+          item: text(ratio.label),
+          current: ratioCell(ratio.kind, ratio.current),
+          prior: ratioCell(ratio.kind, ratio.prior),
+        },
+      }),
+    ),
+    ...agingRows('Aged receivables', report.receivables),
+    ...agingRows('Aged payables', report.payables),
+    heading('12-month trend'),
+    ...report.trend.map(
+      (point): ReportRow => ({
+        style: 'detail',
+        indent: 1,
+        cells: { item: text(point.month), current: money(point.revenueCents), prior: money(point.grossProfitCents) },
+      }),
+    ),
+  ];
+
+  return {
+    title: 'Business snapshot',
+    subtitle: `${ctx.organizationName} · ${dateLabel(report.period.from)} – ${dateLabel(report.period.to)} · ${ctx.baseCurrency}`,
+    columns: [
+      { key: 'item', label: 'Item', align: 'left', widthChars: 36 },
+      { key: 'current', label: 'Current', align: 'right', widthChars: 16 },
+      { key: 'prior', label: 'Prior period', align: 'right', widthChars: 16 },
+    ],
+    rows,
+    footnotes: [
+      `Prior period: ${dateLabel(report.priorPeriod.from)} – ${dateLabel(report.priorPeriod.to)}.`,
+      '12-month trend rows: Current = revenue, Prior period = gross profit.',
+      'Fixed assets are non-current assets. A blank ratio has a zero or negative denominator.',
+    ],
+    filenameStem: `business-snapshot-${report.period.from}-${report.period.to}`,
   };
 }

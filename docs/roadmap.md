@@ -48,6 +48,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **38a ✅ done** | Platform — user settings vs organization settings: `/account` becomes user-only (profile, change password, sessions with sign-out-others, your organizations), organization profile and members move under `/settings`; session id across rotation and revocation tombstones; migrations `080`, `081` — see [Phase 38a, as delivered](#phase-38a-as-delivered) below. 38b (email via Brevo) and 38c (custom roles and permissions) follow | Needs 37 |
 | **38b ✅ done** | Platform — real email through Brevo (free, `fetch`, no SDK) via a transactional outbox drained by the worker: invitations, password reset, email verification, change of sign-in email, organization sender name and reply-to, and per-user notification preferences (bill awaiting approval, invitation accepted); Mailpit for local inboxes; migration `082` — see [Phase 38b, as delivered](#phase-38b-as-delivered) below | Needs 7, 37, 38a |
 | **38c ✅ done** | Platform, all modules — custom roles: a ~60-key `area.action` permission catalogue with tiers from which the four built-in roles are derived; every authenticated route gated by `requirePermission`/`allowAnyMember` (proven route-for-route equivalent for built-ins), resolved from the database per request; org-defined roles with a checkbox editor; no-escalation rules; permission-aware navigation; migration `083` — see [Phase 38c, as delivered](#phase-38c-as-delivered) below | Needs 37, 38a |
+| **47 ✅ done** | Accounting — business snapshot: `GET /reports/business-snapshot` (performance, position, seven integer-bp ratios against the prior period, AR/AP aging, 12-month trend; CSV/XLSX/PDF export), a Recharts report page and four dashboard health tiles, and an optional `accounts.balance_sheet_class` override (migration `104`). Phases 39–46 have their own "as delivered" sections below. |
 
 **Phase 18 is numbered after 17 but applied before it** — 17 stays deferred; migration numbers and phase numbers both simply follow build order from here, not a fixed sequence decided in advance. This is the first phase of the suite's second stage — showcase, integrate, guide, automate — laid out in full in the strategic plan that opened it. Phase 19 delivered the AP-Flow slice of that plan's "multi-provider AI layer" theme; Phase 19.1 (AI usage metering), 19.2 (Google Drive intake), 19.3 (that intake promoted to the platform) and 19.4 (duplicate-content capture, a bug found through 19.3's own real-world use) delivered the rest of the "automations" theme's AP-Flow slice, as half-steps rather than a renumbering. Phases 20–23 (a verification sweep, app enablement and cross-app connections, an in-app help center, and the remainder of the automations theme beyond AP-Flow) **keep their reserved names and stay unstarted** — Phase 24 is a direct feature request (payment terms, an item catalogue, a party importer, UI corrections), outside that strategic sequence, and takes the next free number rather than colliding with 20–23, the same reasoning that let Phase 18 jump ahead of 17.
 
@@ -1700,6 +1701,27 @@ A direct feature request (2026-10-16), numbered like 24/30/32/34/39-45, built to
 - The append-only `document_history` trigger also refuses FK actions, so hard-deleting an organization or user that has history fails (cascade and `SET NULL`). No production path does that; a future account-deletion feature must anonymise or carve out an exception.
 - `bank_transactions.deleted_by` is `ON DELETE SET NULL` but `chk_bank_txn_deleted_fields` requires it when the status is `DELETED`, so hard-deleting a user who deleted a line fails the CHECK (same class, same caveat).
 - A `DELETED` bank line's match/post attempt returns the `409` "ignored - un-ignore it first" wording; the status is right, the message is slightly off.
+
+## Phase 47, as delivered
+
+A direct feature request (2026-10-17), numbered like 24/30/32/34/39-46, built to `plans/phase-47-business-snapshot.md` in three slices.
+
+- **47a - server:** `GET /api/v1/reports/business-snapshot` (`reports.view`): performance and position for the period and the prior period, seven ratios in integer basis points (`null` + reason on a denominator <= 0), AR/AP aging summaries, a 12-month trend, and CSV/XLSX/PDF export through the existing report-table pipeline (no new cell kind). Migration `104` adds `accounts.balance_sheet_class` (optional current/non-current override; derived from the chart tree otherwise); `balanceSheetClass` is accepted on account create/update. Balances at 13 dates come from one `unnest(date[]) WITH ORDINALITY` query.
+- **47b - client:** a Business snapshot page with four Recharts charts (position, profitability, aging, ratio trend), four Business health tiles on the dashboard, and a balance-sheet-class select on the account form and chart settings. `recharts@3.10.1` and `react-is@19.2.8` are the only dependencies added; the four hand-rolled SVG charts were not migrated.
+- **47c - docs and review.**
+- **Dependency audit (same change):** `npm audit` fixes within existing ranges — client `nanoid` 3.3.20, `source-map-js` 1.2.2, `undici` 7.30.1 (0 remaining); server `proxy-addr` 2.0.8 (critical), `multer` 2.4.0, `sharp` 0.35.5, `qs` 6.16.1, `ip-address` 10.7.4, `nanoid`, `source-map-js`. The unused `pptxgenjs` (orphaned by Phase 29, see its follow-up) was removed, clearing the `image-size` advisory. One moderate dev-only advisory remains (`@vitest/mocker` ≤ 4.1.10): `npm audit fix` and `npm update vitest` both crash inside npm 10.9.8's arborist (`Cannot read properties of null (reading 'edgesOut')`), so it waits on a vitest bump.
+- **Plan corrections found while building:** `comparisonPeriods(..., 'previousPeriod', 1)` returns `[current, prior]`, not just the prior (two integration cases caught the destructuring; fixed to `const [, prior]`); the ratio trend chart first plotted the debt ratio (a percentage) on the multiples axis and now gives it its own right-hand axis.
+- **Tests:** **2489 server (2 skipped) + 713 client** passing (up from 2457 / 706 after Phase 46). `verify:integrity` clean. A guardrail review found zero violations. Study notes: two new (financial ratios in integer basis points; charts with Recharts) and the cash-flow note extended.
+
+**Deliberately not built (Phase 47):**
+- Budgets and benchmarks.
+- Charts in PDF exports.
+- DSO/DPO and inventory turnover.
+- Scheduled or emailed snapshots.
+- `balance_sheet_class` in the chart CSV import.
+- A current/non-current grouped balance sheet statement.
+
+**Known trade-off (Phase 47):** the as-at balances query joins ledger lines once per date (13 times); fine at demo scale, a large organization would want a cumulative window sum over per-month totals. The ancestry CTE is copied from `cashFlowService.ts` rather than shared.
 
 ## Cross-cutting infrastructure
 

@@ -73,6 +73,8 @@ export interface Account {
   bankAccountKind: BankAccountKind | null;
   /** Phase 45 — explicit cash-flow override; null = derived (balance-sheet accounts only). */
   cashFlowCategory: CashFlowCategory | null;
+  /** Phase 47 — explicit current/non-current override; null = derived (Asset/Liability only). */
+  balanceSheetClass: BalanceSheetClass | null;
   createdAt: string;
   updatedAt: string;
   systemRoles: SystemRoleRef[];
@@ -2240,6 +2242,106 @@ export const CASH_FLOW_CATEGORIES = ['CASH', 'OPERATING', 'INVESTING', 'FINANCIN
 export type CashFlowCategory = (typeof CASH_FLOW_CATEGORIES)[number];
 export function isCashFlowCategory(value: string): value is CashFlowCategory {
   return (CASH_FLOW_CATEGORIES as readonly string[]).includes(value);
+}
+
+/** Phase 47 — current vs non-current, a report attribute of Asset/Liability accounts (rule 12: not a type). */
+export const BALANCE_SHEET_CLASSES = ['CURRENT', 'NON_CURRENT'] as const;
+export type BalanceSheetClass = (typeof BALANCE_SHEET_CLASSES)[number];
+export function isBalanceSheetClass(value: string): value is BalanceSheetClass {
+  return (BALANCE_SHEET_CLASSES as readonly string[]).includes(value);
+}
+
+/** Phase 47 — business snapshot. Every amount is base-currency integer cents; every ratio integer bp. */
+export const SNAPSHOT_RATIO_KEYS = [
+  'GROSS_MARGIN',
+  'CURRENT_RATIO',
+  'DEBT_RATIO',
+  'DEBT_TO_EQUITY',
+  'WORKING_CAPITAL_TO_TOTAL_ASSETS',
+  'FIXED_ASSETS_TO_NET_WORTH',
+  'CURRENT_LIABILITIES_TO_NET_WORTH',
+] as const;
+export type SnapshotRatioKey = (typeof SNAPSHOT_RATIO_KEYS)[number];
+/** PERCENT displays bp as "12.50%"; TIMES displays bp as "1.25×". */
+export type SnapshotRatioKind = 'PERCENT' | 'TIMES';
+export type SnapshotRatioUnavailableReason = 'DENOMINATOR_ZERO' | 'DENOMINATOR_NEGATIVE';
+
+export interface SnapshotPeriod {
+  from: string;
+  to: string;
+}
+
+export interface SnapshotPerformance {
+  revenueCents: number;
+  costOfSalesCents: number;
+  grossProfitCents: number;
+  operatingExpensesCents: number;
+  netIncomeCents: number;
+}
+
+export interface SnapshotPosition {
+  asOf: string;
+  currentAssetsCents: number;
+  /** Net of contra accounts such as 1590 Accumulated Depreciation. Also "fixed assets". */
+  nonCurrentAssetsCents: number;
+  totalAssetsCents: number;
+  currentLiabilitiesCents: number;
+  nonCurrentLiabilitiesCents: number;
+  totalLiabilitiesCents: number;
+  /** totalAssets − totalLiabilities; equals the balance sheet's equity total. */
+  netWorthCents: number;
+  /** currentAssets − currentLiabilities. */
+  workingCapitalCents: number;
+}
+
+export interface SnapshotRatioValue {
+  /** null when the denominator is ≤ 0. */
+  valueBp: number | null;
+  reason: SnapshotRatioUnavailableReason | null;
+}
+
+export interface SnapshotRatio {
+  key: SnapshotRatioKey;
+  label: string;
+  kind: SnapshotRatioKind;
+  current: SnapshotRatioValue;
+  prior: SnapshotRatioValue;
+}
+
+export interface SnapshotAging {
+  asOf: string;
+  /** Exactly 5 entries, in AGING_BUCKETS order. */
+  buckets: AgingBucketAmount[];
+  totalOutstandingCents: number;
+  totalOverdueCents: number;
+}
+
+export interface SnapshotTrendPoint {
+  /** YYYY-MM */
+  month: string;
+  /** The month's last day, or the period's `to` for the final point. */
+  asOf: string;
+  revenueCents: number;
+  costOfSalesCents: number;
+  grossProfitCents: number;
+  grossMarginBp: number | null;
+  currentRatioBp: number | null;
+  debtRatioBp: number | null;
+  debtToEquityBp: number | null;
+}
+
+export interface BusinessSnapshot {
+  period: SnapshotPeriod;
+  priorPeriod: SnapshotPeriod;
+  performance: { current: SnapshotPerformance; prior: SnapshotPerformance };
+  /** current is as at period.to; prior is as at priorPeriod.to. */
+  position: { current: SnapshotPosition; prior: SnapshotPosition };
+  /** SNAPSHOT_RATIO_KEYS order. */
+  ratios: SnapshotRatio[];
+  receivables: SnapshotAging;
+  payables: SnapshotAging;
+  /** Exactly 12 points, oldest first; the last point's asOf is period.to. */
+  trend: SnapshotTrendPoint[];
 }
 
 // ------------------------------- Phase 44 — manual journals

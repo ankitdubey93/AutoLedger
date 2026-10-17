@@ -6,13 +6,16 @@ import {
   type Account,
   type AccountNode,
   type AccountType,
+  type BalanceSheetClass,
   type BankAccountKind,
   type CashFlowCategory,
 } from '../../services/fetchServices';
 import { TYPE_STYLES } from '../accounting/AccountsPage';
 import NewAccountForm, {
   ACCOUNT_TYPES,
+  BALANCE_SHEET_CLASS_OPTIONS,
   CASH_FLOW_OPTIONS,
+  hasBalanceSheetClass,
   hasCashFlowCategory,
 } from '../accounting/NewAccountForm';
 import SettingsTabs from './SettingsTabs';
@@ -47,6 +50,7 @@ function ChartRow({
   onToggleActive,
   onToggleBank,
   onSetCashFlow,
+  onSetBalanceSheetClass,
 }: {
   node: AccountNode;
   depth: number;
@@ -54,6 +58,7 @@ function ChartRow({
   onToggleActive: (node: AccountNode) => Promise<void>;
   onToggleBank: (node: AccountNode) => Promise<void>;
   onSetCashFlow: (node: AccountNode, value: '' | CashFlowCategory) => Promise<void>;
+  onSetBalanceSheetClass: (node: AccountNode, value: '' | BalanceSheetClass) => Promise<void>;
 }) {
   const Icon = node.isPostable ? Landmark : Folder;
   const [editing, setEditing] = useState(false);
@@ -124,6 +129,19 @@ function ChartRow({
   // Only an ACTIVE system account blocks the Retire button: a legacy retired one must stay reactivatable.
   const isSystem = (node.systemRoles ?? []).length > 0;
   const systemLockTitle = 'System accounts cannot be retired or flagged as bank accounts';
+
+  // Phase 47 — the balance sheet class sits beside the cash flow category, on Asset and Liability accounts.
+  async function handleBalanceSheetClassChange(value: '' | BalanceSheetClass) {
+    setBusy(true);
+    setRowError(null);
+    try {
+      await onSetBalanceSheetClass(node, value);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not update the account');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // Phase 45 — the cash flow category sits beside the bank toggle, on balance-sheet accounts only.
   async function handleCashFlowChange(value: '' | CashFlowCategory) {
@@ -247,6 +265,22 @@ function ChartRow({
           </button>
         )}
 
+        {hasBalanceSheetClass(node.type) && (
+          <select
+            value={node.balanceSheetClass ?? ''}
+            onChange={(e) => void handleBalanceSheetClassChange(e.target.value as '' | BalanceSheetClass)}
+            disabled={busy}
+            aria-label={`Balance sheet class ${node.code}`}
+            className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-xs text-[var(--text)] shrink-0"
+          >
+            {BALANCE_SHEET_CLASS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
+
         {hasCashFlowCategory(node.type) && (
           <select
             value={node.cashFlowCategory ?? ''}
@@ -279,6 +313,7 @@ function ChartRow({
           onToggleActive={onToggleActive}
           onToggleBank={onToggleBank}
           onSetCashFlow={onSetCashFlow}
+          onSetBalanceSheetClass={onSetBalanceSheetClass}
         />
       ))}
     </>
@@ -333,6 +368,11 @@ export default function ChartSettingsPage() {
 
   async function handleSetCashFlow(node: AccountNode, value: '' | CashFlowCategory) {
     await updateAccount(node.id, { cashFlowCategory: value === '' ? null : value });
+    setReloadToken((t) => t + 1);
+  }
+
+  async function handleSetBalanceSheetClass(node: AccountNode, value: '' | BalanceSheetClass) {
+    await updateAccount(node.id, { balanceSheetClass: value === '' ? null : value });
     setReloadToken((t) => t + 1);
   }
 
@@ -400,6 +440,7 @@ export default function ChartSettingsPage() {
                       onToggleActive={handleToggleActive}
                       onToggleBank={handleToggleBank}
                       onSetCashFlow={handleSetCashFlow}
+                      onSetBalanceSheetClass={handleSetBalanceSheetClass}
                     />
                   ))}
                 </ul>

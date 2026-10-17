@@ -677,6 +677,38 @@ Every report is computed from raw ledger lines or document events on each reques
 
 Full detail: [roadmap.md § Phase 45, as delivered](roadmap.md#phase-45-as-delivered), [api.md](api.md), [schema.md](schema.md).
 
+### Phase 47 — Business snapshot ✅ shipped
+
+`GET /reports/business-snapshot` (page `/reports/business-snapshot`, tiles on the dashboard) shows performance, position, seven ratios and a 12-month trend, each KPI against the prior period (the same length, immediately before). Everything is computed on each request from the ledger (no stored snapshot); amounts are base-currency integer cents, ratios integer basis points.
+
+| Figure | Definition |
+|---|---|
+| CA / NCA | Current / non-current assets as at the period's `to`. NCA is net of contra accounts such as `1590 Accumulated Depreciation` |
+| TA | CA + NCA |
+| CL / NCL | Current / non-current liabilities |
+| TL | CL + NCL |
+| Net worth | TA − TL. Equals `balanceSheet().equity.totalCents` (it includes derived retained and current earnings); a test asserts the identity |
+| Working capital | CA − CL |
+
+**Fixed assets = non-current assets.** The default chart has nothing non-current except fixed assets (`1500`, `1590`), so the fixed-assets-to-net-worth ratio uses NCA.
+
+**Classification.** An Asset under ancestor `1400` or a Liability under `2500` is non-current, every other Asset/Liability is current; Equity, Revenue and Expense have no class. The nullable `accounts.balance_sheet_class` overrides this (set on the account form or in Settings → Chart of accounts). A chart that keeps fixed assets or long-term debt elsewhere gets them classed current until the override is set.
+
+| Ratio | Formula | Display |
+|---|---|---|
+| Gross margin | gross profit / revenue | % |
+| Current ratio | CA / CL | × |
+| Debt ratio | TL / TA | % |
+| Debt to equity | TL / net worth | × |
+| Working capital to total assets | working capital / TA | % |
+| Fixed assets to net worth | NCA / net worth | × |
+| Current liabilities to net worth | CL / net worth | % |
+
+A ratio is stored as integer bp (5.8333× is `58333`), rounded half away from zero in BigInt, and is `null` with a `reason` (`DENOMINATOR_ZERO` or `DENOMINATOR_NEGATIVE`) when its denominator is ≤ 0; the UI shows "—". Performance comes from `profitAndLoss` (cost of sales is the `5xxx` range), so it matches the P&L exactly. Exports (CSV/XLSX/PDF) render a `TIMES` ratio as a text cell such as `5.83×`; charts are not in the exports.
+
+Full detail: [roadmap.md § Phase 47, as delivered](roadmap.md#phase-47-as-delivered).
+
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

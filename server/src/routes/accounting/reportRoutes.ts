@@ -23,6 +23,7 @@ router.get(
 );
 router.get('/balance-sheet', authenticate, requirePermission('reports.view'), reportController.balanceSheet);
 router.get('/cash-flow', authenticate, requirePermission('reports.view'), reportController.cashFlow);
+router.get('/business-snapshot', authenticate, requirePermission('reports.view'), reportController.businessSnapshot);
 router.get('/dashboard', authenticate, requirePermission('reports.view'), reportController.dashboard);
 router.get('/ar-aging', authenticate, requirePermission('reports.view'), reportController.arAging);
 router.get('/ap-aging', authenticate, requirePermission('reports.view'), reportController.apAging);

@@ -214,6 +214,7 @@ export async function commitOnClient(
           description: row.description,
           bankAccountKind: null,
           cashFlowCategory: null,
+          balanceSheetClass: null,
         });
         resolvedIdByCode.set(code, account.id);
         created += 1;

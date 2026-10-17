@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import CashFlowPage from '../Pages/reports/CashFlowPage';
@@ -123,5 +123,34 @@ describe('NewAccountForm cash flow category', () => {
 
     render(<NewAccountForm accounts={[]} initialType="Asset" onCreated={() => {}} onCancel={() => {}} />);
     expect(screen.getByText('Cash flow category')).toBeTruthy();
+  });
+});
+
+describe('NewAccountForm balance sheet class', () => {
+  it('account form sends balanceSheetClass for an asset', async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input.toString();
+      if (url.includes('/accounts')) return Promise.resolve(jsonResponse(200, { success: true, account: {} }));
+      return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
+    });
+    const onCreated = vi.fn();
+
+    const { unmount } = render(
+      <NewAccountForm accounts={[]} initialType="Asset" onCreated={onCreated} onCancel={() => {}} />,
+    );
+    fireEvent.change(screen.getByPlaceholderText('6130'), { target: { value: '1450' } });
+    fireEvent.change(screen.getByPlaceholderText('Marketing & Advertising'), { target: { value: 'Vehicles' } });
+    fireEvent.change(screen.getByLabelText('Balance sheet class'), { target: { value: 'NON_CURRENT' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account' }));
+
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalled();
+    });
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toMatchObject({ balanceSheetClass: 'NON_CURRENT' });
+    unmount();
+
+    render(<NewAccountForm accounts={[]} initialType="Revenue" onCreated={() => {}} onCancel={() => {}} />);
+    expect(screen.queryByLabelText('Balance sheet class')).toBeNull();
   });
 });

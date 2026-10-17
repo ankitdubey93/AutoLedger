@@ -88,6 +88,7 @@ import AgingReportPage from '../Pages/reports/AgingReportPage';
 import TaxSummaryPage from '../Pages/reports/TaxSummaryPage';
 import SalesPurchasesReportPage from '../Pages/reports/SalesPurchasesReportPage';
 import CashFlowPage from '../Pages/reports/CashFlowPage';
+import BusinessSnapshotPage from '../Pages/reports/BusinessSnapshotPage';
 // Settings
 import OrganizationProfileSettingsPage from '../Pages/settings/OrganizationProfileSettingsPage';
 import MembersSettingsPage from '../Pages/settings/MembersSettingsPage';
@@ -243,6 +244,7 @@ export default function ProductRoutes() {
 
           {/* Reports */}
           <Route path="/reports" element={<ReportsPage />} />
+          <Route path="/reports/business-snapshot" element={<BusinessSnapshotPage />} />
           <Route path="/reports/profit-and-loss" element={<ProfitAndLossPage />} />
           <Route path="/reports/balance-sheet" element={<BalanceSheetPage />} />
           <Route path="/reports/cash-flow" element={<CashFlowPage />} />

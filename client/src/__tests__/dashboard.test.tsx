@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AuthProvider } from '../context/AuthContext';
 import { OrgProvider } from '../context/OrgContext';
 import DashboardPage from '../Pages/home/DashboardPage';
-import type { DashboardSummary } from '../services/fetchServices';
+import type { BusinessSnapshot, DashboardSummary } from '../services/fetchServices';
 import { permissionsFor } from './helpers/permissions';
 
 /**
@@ -91,6 +91,52 @@ function emptyBuckets(): DashboardSummary['receivables']['buckets'] {
   ];
 }
 
+/** Phase 47 — a minimal business snapshot; the tiles read the current ratios and working capital. */
+const businessSnapshot: BusinessSnapshot = {
+  period: { from: '2026-01-01', to: '2026-06-01' },
+  priorPeriod: { from: '2025-07-02', to: '2025-12-31' },
+  performance: {
+    current: { revenueCents: 300000, costOfSalesCents: 120000, grossProfitCents: 180000, operatingExpensesCents: 100000, netIncomeCents: 80000 },
+    prior: { revenueCents: 0, costOfSalesCents: 0, grossProfitCents: 0, operatingExpensesCents: 0, netIncomeCents: 0 },
+  },
+  position: {
+    current: {
+      asOf: '2026-06-01',
+      currentAssetsCents: 700000,
+      nonCurrentAssetsCents: 500000,
+      totalAssetsCents: 1200000,
+      currentLiabilitiesCents: 120000,
+      nonCurrentLiabilitiesCents: 400000,
+      totalLiabilitiesCents: 520000,
+      netWorthCents: 680000,
+      workingCapitalCents: 580000,
+    },
+    prior: {
+      asOf: '2025-12-31',
+      currentAssetsCents: 0,
+      nonCurrentAssetsCents: 0,
+      totalAssetsCents: 0,
+      currentLiabilitiesCents: 0,
+      nonCurrentLiabilitiesCents: 0,
+      totalLiabilitiesCents: 0,
+      netWorthCents: 0,
+      workingCapitalCents: 0,
+    },
+  },
+  ratios: [
+    { key: 'GROSS_MARGIN', label: 'Gross margin', kind: 'PERCENT', current: { valueBp: 6000, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'CURRENT_RATIO', label: 'Current ratio', kind: 'TIMES', current: { valueBp: 58333, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'DEBT_RATIO', label: 'Debt ratio', kind: 'PERCENT', current: { valueBp: 4333, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'DEBT_TO_EQUITY', label: 'Debt to equity', kind: 'TIMES', current: { valueBp: 7647, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'WORKING_CAPITAL_TO_TOTAL_ASSETS', label: 'Working capital to total assets', kind: 'PERCENT', current: { valueBp: 4833, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'FIXED_ASSETS_TO_NET_WORTH', label: 'Fixed assets to net worth', kind: 'TIMES', current: { valueBp: 7353, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+    { key: 'CURRENT_LIABILITIES_TO_NET_WORTH', label: 'Current liabilities to net worth', kind: 'PERCENT', current: { valueBp: 1765, reason: null }, prior: { valueBp: null, reason: 'DENOMINATOR_ZERO' } },
+  ],
+  receivables: { asOf: '2026-06-01', buckets: emptyBuckets(), totalOutstandingCents: 0, totalOverdueCents: 0 },
+  payables: { asOf: '2026-06-01', buckets: emptyBuckets(), totalOutstandingCents: 0, totalOverdueCents: 0 },
+  trend: [],
+};
+
 let fetchMock: ReturnType<typeof vi.fn>;
 
 function mockRoutes(dashboard: DashboardSummary, extra: (url: string) => Response | undefined = () => undefined) {
@@ -101,6 +147,9 @@ function mockRoutes(dashboard: DashboardSummary, extra: (url: string) => Respons
     if (url.includes('/auth/check')) return Promise.resolve(jsonResponse(200, session));
     if (url.includes('/api/v1/reports/dashboard')) {
       return Promise.resolve(jsonResponse(200, { success: true, ...dashboard }));
+    }
+    if (url.includes('/api/v1/reports/business-snapshot')) {
+      return Promise.resolve(jsonResponse(200, { success: true, ...businessSnapshot }));
     }
     return Promise.resolve(jsonResponse(404, { success: false, error: `unhandled in test: ${url}` }));
   });
@@ -265,5 +314,19 @@ describe('DashboardPage — one home for the whole product', () => {
     expect(screen.getByRole('link', { name: 'Stock on hand' })).toHaveAttribute('href', '/inventory/items');
     expect(screen.queryByText('Keep stock? Set up inventory')).not.toBeInTheDocument();
     expect(await screen.findByText(/Nothing waiting for review/)).toBeInTheDocument();
+  });
+});
+
+describe('DashboardPage — business health', () => {
+  it('shows business health tiles', async () => {
+    mockRoutes(baseDashboard());
+    renderDashboard();
+
+    expect(await screen.findByText('Business health')).toBeInTheDocument();
+    expect(screen.getByText('5.83×')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /View business snapshot/ })).toHaveAttribute(
+      'href',
+      '/reports/business-snapshot',
+    );
   });
 });
