@@ -954,6 +954,11 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - Append-only: `reject_document_history_mutation()` + `trg_document_history_immutable` (`BEFORE UPDATE OR DELETE`, `FOR EACH ROW`, SQLSTATE `0A000`). A row trigger does not fire on `TRUNCATE`; the test `resetTables()` relies on that.
 - Backfill (idempotent by `NOT EXISTS`): one `CREATED` event per existing invoice, bill, credit/debit note, payment, manual journal, customer, vendor, quote and order (quotes/orders split into the sales/purchase entity type by `direction`), and one `IMPORTED` event per existing bank line, dated from the row's own `created_at`.
 
+**`102_platform_login_events.sql`** (Phase 46d)
+- `login_events` — sign-in history: `id`, `user_id` (`users`, `ON DELETE CASCADE`, NULL for an unknown email), `org_id` (`organizations`, `ON DELETE CASCADE`, NULL for events that precede an organization: a failed sign-in, password change/reset, session revoke), `email` (CHECK lowercased and <= 320, rule 9), `outcome` (CHECK `SUCCESS`/`FAILED`/`LOGOUT`/`PASSWORD_CHANGED`/`PASSWORD_RESET`/`SESSION_REVOKED`), `ip` (<= 45), `user_agent` (<= 500), `created_at` DEFAULT `clock_timestamp()`. Never holds a token or password. Indexes `idx_login_events_user (user_id, created_at DESC)` and `idx_login_events_org (org_id, created_at DESC)`.
+- Not in `audit_logs`: `users` and `refresh_tokens` are deliberately unaudited, and a `FAILED` row must outlive the login transaction's `ROLLBACK`, so it is written on the pool after it.
+- Append-only by an **UPDATE-only** row trigger (`reject_login_event_mutation()` + `trg_login_events_immutable`, SQLSTATE `0A000`). There is deliberately no `BEFORE DELETE` trigger: it would also block the `ON DELETE CASCADE` from `users`/`organizations`.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

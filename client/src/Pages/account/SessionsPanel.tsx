@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { listSessions, revokeOtherSessions, revokeSession, type ActiveSession } from '../../services/fetchServices';
+import {
+  listMyLoginEvents,
+  listSessions,
+  revokeOtherSessions,
+  revokeSession,
+  type ActiveSession,
+  type LoginEvent,
+  type LoginOutcome,
+} from '../../services/fetchServices';
 import { useAuth, useAuthActions } from '../../context/AuthContext';
 import LoadingState from '../../components/ui/LoadingState';
 import { secondaryButtonClass } from '../../components/ui/formClasses';
@@ -8,6 +16,15 @@ import { describeUserAgent } from '../../utils/describeUserAgent';
 function formatWhen(iso: string): string {
   return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 }
+
+const OUTCOME_LABELS: Record<LoginOutcome, string> = {
+  SUCCESS: 'Signed in',
+  FAILED: 'Failed sign-in',
+  LOGOUT: 'Signed out',
+  PASSWORD_CHANGED: 'Password changed',
+  PASSWORD_RESET: 'Password reset',
+  SESSION_REVOKED: 'Session revoked',
+};
 
 /** Formats the remaining access-token lifetime as m:ss, or "expired". */
 function useCountdown(isoTarget: string): string {
@@ -61,6 +78,17 @@ export default function SessionsPanel() {
 
   const others = sessions?.filter((s) => !s.current).length ?? 0;
 
+  const [events, setEvents] = useState<LoginEvent[] | null>(null);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+
+  useEffect(() => {
+    listMyLoginEvents()
+      .then((res) => setEvents(res.events))
+      .catch((err: unknown) => {
+        setEventsError(err instanceof Error ? err.message : 'Could not load your sign-in history');
+      });
+  }, []);
+
   return (
     <>
       <section className="card">
@@ -107,6 +135,31 @@ export default function SessionsPanel() {
                     Sign out
                   </button>
                 )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+      <section className="card">
+        <h2 className="m-0">Recent sign-ins</h2>
+        {eventsError !== null && (
+          <p className="status status--bad" role="alert">
+            {eventsError}
+          </p>
+        )}
+        {events === null && eventsError === null && <LoadingState />}
+        {events !== null && events.length === 0 && <p className="muted text-sm">No sign-in activity yet.</p>}
+        {events !== null && events.length > 0 && (
+          <ul className="mt-3 flex flex-col divide-y divide-[var(--border)] p-0 m-0 list-none">
+            {events.map((e) => (
+              <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+                <div>
+                  <div className="font-medium">{OUTCOME_LABELS[e.outcome]}</div>
+                  <div className="muted text-sm">
+                    {formatWhen(e.createdAt)} · {e.ip ?? 'Unknown IP'}
+                    {e.userAgent !== null && ` · ${describeUserAgent(e.userAgent)}`}
+                  </div>
+                </div>
               </li>
             ))}
           </ul>

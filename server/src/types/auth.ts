@@ -131,3 +131,34 @@ export interface ActiveSession {
   organizationName: string | null;
   current: boolean;
 }
+
+/** Phase 46d — what a sign-in history row records (login_events.outcome). */
+export const LOGIN_OUTCOMES = [
+  'SUCCESS',
+  'FAILED',
+  'LOGOUT',
+  'PASSWORD_CHANGED',
+  'PASSWORD_RESET',
+  'SESSION_REVOKED',
+] as const;
+export type LoginOutcome = (typeof LOGIN_OUTCOMES)[number];
+
+/** Phase 46d — one row of the caller's own sign-in history. */
+export interface LoginEvent {
+  id: string;
+  outcome: LoginOutcome;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+/** Phase 46d — one member's activity summary, for managers. */
+export interface MemberActivity {
+  userId: string;
+  name: string | null;
+  email: string;
+  role: string;
+  lastSignInAt: string | null;
+  failedSignInsLast30Days: number;
+  changesLast30Days: number;
+}

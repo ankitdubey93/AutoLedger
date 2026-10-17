@@ -240,6 +240,26 @@ export function listMembers(signal?: AbortSignal): Promise<{
   return apiFetch('/organizations/members', { signal: signal ?? null });
 }
 
+/** Phase 46d — one member's sign-in and change counts (server: loginEventService.listMemberActivity). */
+export interface MemberActivity {
+  userId: string;
+  name: string | null;
+  email: string;
+  role: string;
+  lastSignInAt: string | null;
+  failedSignInsLast30Days: number;
+  changesLast30Days: number;
+}
+
+/** GET /organizations/members/activity — requires audit.view (OWNER, ADMIN). */
+export function listMemberActivity(signal?: AbortSignal): Promise<{
+  success: boolean;
+  count: number;
+  members: MemberActivity[];
+}> {
+  return apiFetch('/organizations/members/activity', { signal: signal ?? null });
+}
+
 /* ------------------------------------------- Phase 38a — user settings */
 
 /** One signed-in browser. `id` survives token rotation; `current` is this one. */
@@ -282,6 +302,29 @@ export function revokeSession(id: string): Promise<{ success: boolean }> {
 /** POST /auth/sessions/revoke-others — sign out everywhere except here. */
 export function revokeOtherSessions(): Promise<{ success: boolean; signedOutSessions: number }> {
   return apiFetch('/auth/sessions/revoke-others', { method: 'POST' });
+}
+
+/** Phase 46d — what a sign-in history row records (server: LOGIN_OUTCOMES). */
+export type LoginOutcome =
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'LOGOUT'
+  | 'PASSWORD_CHANGED'
+  | 'PASSWORD_RESET'
+  | 'SESSION_REVOKED';
+
+/** Phase 46d — one row of the caller's own sign-in history. */
+export interface LoginEvent {
+  id: string;
+  outcome: LoginOutcome;
+  ip: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+/** GET /auth/login-events — the caller's own sign-in history, newest first. */
+export function listMyLoginEvents(): Promise<{ success: boolean; count: number; events: LoginEvent[] }> {
+  return apiFetch('/auth/login-events');
 }
 
 /* ------------------------------------------------ Phase 38b — email */
@@ -3157,6 +3200,10 @@ export interface AuditLogFilters {
   module?: string;
   tableName?: string;
   operation?: AuditOperation;
+  /** Phase 46d — only changes made by this user (a member's id). */
+  actorUserId?: string;
+  /** Phase 46d — only changes to this row (a UUID). */
+  rowId?: string;
 }
 
 /**
@@ -3182,6 +3229,8 @@ export function getAuditLogs(
   if (params.module !== undefined && params.module !== '') query.set('module', params.module);
   if (params.tableName !== undefined && params.tableName !== '') query.set('tableName', params.tableName);
   if (params.operation !== undefined) query.set('operation', params.operation);
+  if (params.actorUserId !== undefined && params.actorUserId !== '') query.set('actorUserId', params.actorUserId);
+  if (params.rowId !== undefined && params.rowId !== '') query.set('rowId', params.rowId);
   const suffix = query.size > 0 ? `?${query.toString()}` : '';
 
   return apiFetch(`/audit-logs${suffix}`, { signal: signal ?? null });

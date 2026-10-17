@@ -113,6 +113,7 @@ import ConnectionsPage from '../Pages/settings/ConnectionsPage';
 import WebhooksPage from '../Pages/settings/WebhooksPage';
 import WebhookDeliveriesPage from '../Pages/settings/WebhookDeliveriesPage';
 import AuditLogPage from '../Pages/settings/AuditLogPage';
+import UserActivityPage from '../Pages/settings/UserActivityPage';
 
 
 /**
@@ -281,6 +282,7 @@ export default function ProductRoutes() {
           <Route path="/settings/webhooks" element={<WebhooksPage />} />
           <Route path="/settings/webhooks/deliveries" element={<WebhookDeliveriesPage />} />
           <Route path="/settings/audit" element={<AuditLogPage />} />
+          <Route path="/settings/user-activity" element={<UserActivityPage />} />
 
           {/* Routes retired in Phase 33 */}
           <Route path="/welcome" element={<Navigate to="/" replace />} />

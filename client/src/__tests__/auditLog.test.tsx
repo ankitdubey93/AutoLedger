@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import AuditLogPage from '../Pages/settings/AuditLogPage';
@@ -84,7 +85,11 @@ describe('AuditLogPage', () => {
       entry({ id: '2', tableName: 'invoices', createdAt: '2026-09-04T11:00:00.000Z' }),
       entry({ id: '1', tableName: 'customers', createdAt: '2026-09-04T10:00:00.000Z' }),
     ]);
-    render(<AuditLogPage />);
+    render(
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>,
+    );
 
     const rows = await screen.findAllByRole('row');
     // rows[0] is the header row.
@@ -94,7 +99,11 @@ describe('AuditLogPage', () => {
 
   it('renders an em dash when there are no changed keys', async () => {
     mockListRoute([entry({ changedKeys: null })]);
-    render(<AuditLogPage />);
+    render(
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>,
+    );
 
     await screen.findByText('customers');
     const row = screen.getByText('customers').closest('tr');
@@ -104,7 +113,11 @@ describe('AuditLogPage', () => {
   it('filtering by operation refetches with the parameter', async () => {
     mockListRoute([entry()]);
     const user = userEvent.setup();
-    render(<AuditLogPage />);
+    render(
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>,
+    );
 
     await screen.findByText('customers');
 
@@ -124,7 +137,11 @@ describe('AuditLogPage', () => {
   it('expanding a row fetches and shows the before/after diff', async () => {
     mockListRoute([entry({ id: '5' })]);
     const user = userEvent.setup();
-    render(<AuditLogPage />);
+    render(
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>,
+    );
 
     const row = await screen.findByText('customers');
     await user.click(row);
@@ -144,7 +161,11 @@ describe('AuditLogPage', () => {
 
   it('shows a permission message on 403', async () => {
     mockListRoute([], 403);
-    render(<AuditLogPage />);
+    render(
+      <MemoryRouter>
+        <AuditLogPage />
+      </MemoryRouter>,
+    );
 
     expect(
       await screen.findByText('Only an owner or admin can view the audit trail.'),

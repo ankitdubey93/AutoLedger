@@ -68,6 +68,8 @@ The alternative — checking membership on every request — puts a query in fro
 
 **Two settings areas (Phase 38a).** `/account` is user-level only: profile, password, sessions, your organizations, service status. Organization-level settings live under `/settings` (the hub). Profile and members moved there (`/settings/profile`, `/settings/members`), and the old `/account?tab=` URLs redirect.
 
+**Sign-in history (Phase 46d).** `login_events` records sign-ins, failures, logouts, password changes/resets and session revocations. A failed sign-in is written on the pool *after* the login transaction's `ROLLBACK`, otherwise the rollback would erase it; the write swallows its own errors so a logging fault can never turn a `401` into a `500`. The success event is written on the transaction's client, so it commits with the session. The table is append-only by an UPDATE-only trigger (a `BEFORE DELETE` trigger would block the cascades from `users`/`organizations`). A user reads their own events at `GET /auth/login-events`; a manager with `audit.view` reads per-member summaries at `GET /organizations/members/activity`.
+
 ### Email — Phase 38b
 
 Every email is a row in `email_outbox`, written by `enqueueEmailOnClient` **on the transaction of the change it is about**: the reset token, the invitation, the submitted bill, the accepted invitation. A rollback therefore takes the email with it, and a commit guarantees an attempt (rule 5: no post-COMMIT work). The worker's `email-drain` job runs every 5 seconds:

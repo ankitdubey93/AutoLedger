@@ -1,11 +1,14 @@
 import { Fragment, useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   ApiRequestError,
   getAuditLogDetail,
   getAuditLogs,
+  listMembers,
   type AuditLogDetail,
   type AuditLogEntry,
   type AuditOperation,
+  type OrganizationMember,
 } from '../../services/fetchServices';
 import { MODULE_LABELS, moduleLabel } from '../../utils/moduleLabels';
 import Pagination from '../../components/ui/Pagination';
@@ -93,12 +96,26 @@ export default function AuditLogPage() {
   const [module, setModule] = useState('');
   const [tableName, setTableName] = useState('');
   const [operation, setOperation] = useState<AuditOperation | ''>('');
+  // Phase 46d — deep links from User activity (?actor=<userId>) and from a
+  // record's history (?rowId=<uuid>) filter the trail by the URL.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const actor = searchParams.get('actor') ?? '';
+  const rowId = searchParams.get('rowId') ?? '';
+  const [members, setMembers] = useState<OrganizationMember[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState(false);
 
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<AuditLogDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+
+  useEffect(() => {
+    // The member picker is best-effort: a non-manager gets a 403 here and
+    // simply sees the list empty, with the filter still usable by URL.
+    listMembers()
+      .then((res) => setMembers(res.members))
+      .catch(() => setMembers([]));
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -112,6 +129,8 @@ export default function AuditLogPage() {
         ...(module === '' ? {} : { module }),
         ...(tableName === '' ? {} : { tableName }),
         ...(operation === '' ? {} : { operation }),
+        ...(actor === '' ? {} : { actorUserId: actor }),
+        ...(rowId === '' ? {} : { rowId }),
       },
       controller.signal,
     )
@@ -128,7 +147,22 @@ export default function AuditLogPage() {
       });
 
     return () => controller.abort();
-  }, [page, module, tableName, operation]);
+  }, [page, module, tableName, operation, actor, rowId]);
+
+  function setActor(userId: string) {
+    setPage(1);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (userId === '') next.delete('actor');
+      else next.set('actor', userId);
+      return next;
+    });
+  }
+
+  function clearUrlFilters() {
+    setPage(1);
+    setSearchParams(new URLSearchParams());
+  }
 
   function toggleRow(id: string) {
     if (expandedId === id) {
@@ -204,6 +238,22 @@ export default function AuditLogPage() {
         </label>
 
         <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
+          Member
+          <select
+            value={actor}
+            onChange={(e) => setActor(e.target.value)}
+            className="px-2 py-1.5 rounded-md border border-[var(--border)] bg-[var(--panel)] text-sm text-[var(--text)]"
+          >
+            <option value="">All members</option>
+            {members.map((m) => (
+              <option key={m.userId} value={m.userId}>
+                {m.name ?? m.email}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1 text-xs text-[var(--muted)]">
           Operation
           <select
             value={operation}
@@ -216,6 +266,14 @@ export default function AuditLogPage() {
             <option value="DELETE">DELETE</option>
           </select>
         </label>
+
+        <button
+          type="button"
+          className="px-3 py-1.5 rounded-md border border-[var(--border)] text-sm text-[var(--text)] hover:bg-[var(--bg)]"
+          onClick={clearUrlFilters}
+        >
+          Clear
+        </button>
       </div>
 
       {error !== null && <p className="status status--bad">{error}</p>}

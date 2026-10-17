@@ -1,5 +1,6 @@
 import type { RequestHandler } from 'express';
 import * as invitationService from '../services/invitationService.js';
+import * as loginEventService from '../services/loginEventService.js';
 import * as emailSettingsService from '../services/mail/organizationEmailSettingsService.js';
 import * as organizationService from '../services/organizationService.js';
 import * as roleService from '../services/roleService.js';
@@ -36,6 +37,13 @@ export const getActiveOrganization: RequestHandler = async (req, res) => {
 export const listMembers: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const members = await organizationService.listMembers(user.orgId);
+  res.json({ success: true, count: members.length, members });
+};
+
+/** GET /organizations/members/activity — per-member sign-in and change counts (Phase 46d). */
+export const memberActivity: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const members = await loginEventService.listMemberActivity(user.orgId);
   res.json({ success: true, count: members.length, members });
 };
 

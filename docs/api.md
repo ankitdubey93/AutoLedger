@@ -97,6 +97,7 @@ The check runs a real query rather than a TCP connect, so a reachable port with 
 | GET | `/sessions` | access cookie | Phase 38a. `{ sessions: [{ id, startedAt, lastActiveAt, userAgent, ip, organizationName, current }] }` — your live, unrevoked sessions, newest activity first. `id` is the session id carried across token rotation |
 | DELETE | `/sessions/:id` | access cookie | Phase 38a. Sign one other browser out. Another user's or an unknown id is `404`; the current session is `422` (use `/logout`) |
 | POST | `/sessions/revoke-others` | access cookie | Phase 38a. Sign out everywhere except here → `{ signedOutSessions }` |
+| GET | `/login-events` | access cookie | Phase 46d. `{ success, count, events: [{ id, outcome, ip, userAgent, createdAt }] }` — your own last 20 sign-in events, newest first (`SUCCESS`, `FAILED`, `LOGOUT`, `PASSWORD_CHANGED`, `PASSWORD_RESET`, `SESSION_REVOKED`). Self-scoped by the token's user id, across all your organizations |
 | POST | `/verify-email` | none | Phase 38b. `{ token }` → `200`. Marks the address verified if it is still the account's address (a link minted before an email change cannot verify the new one). `400` invalid, used, expired or stale. Rate limited |
 | POST | `/verify-email/resend` | access cookie | Phase 38b. → `202`; a fresh link, the old one stops working. `409` already verified, `429` within a minute of the last one. Rate limited |
 | POST | `/me/email` | access cookie | Phase 38b. `{ newEmail, currentPassword }` → `202`. Emails a confirmation link to the **new** address; nothing changes until it is opened. `400` wrong password or same address; `409` the address has an account (a stated trade-off: a signed-in, rate-limited caller learns that an address is registered). Rate limited |
@@ -169,6 +170,7 @@ Mitigated by three things together: `SameSite=Lax` (blocks cross-site POSTs), a 
 |---|---|---|---|
 | GET | `/` | any member | The caller's active organization |
 | GET | `/members` | `OWNER`, `ADMIN` | Everyone in the active organization |
+| GET | `/members/activity` | `audit.view` | Phase 46d. `{ success, count, members: [{ userId, name, email, role, lastSignInAt, failedSignInsLast30Days, changesLast30Days }] }`, ordered by email. `lastSignInAt` counts only sign-ins into **this** organization; `changesLast30Days` counts this organization's audit rows by that actor; `failedSignInsLast30Days` counts failed sign-ins against the member's account (they carry no organization). Registered before `/members/:userId`. Client: `/settings/user-activity`, each row linking to `/settings/audit?actor=<userId>` |
 | PATCH | `/` | `OWNER`, `ADMIN` | Edit the organization's name, base currency, and/or tax identifiers |
 | GET | `/profile` | any member | The organization's postal identity — address, contact details, logo — Phase 30 |
 | PATCH | `/profile` | `OWNER`, `ADMIN` | Edit the organization's postal identity; creates the row on first write — Phase 30 |

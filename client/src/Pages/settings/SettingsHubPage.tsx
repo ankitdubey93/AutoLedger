@@ -94,7 +94,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     title: 'Audit',
     description: 'Every change to financial data, who made it and when.',
     icon: History,
-    links: [{ to: '/settings/audit', label: 'Audit trail' }],
+    links: [
+      { to: '/settings/audit', label: 'Audit trail' },
+      { to: '/settings/user-activity', label: 'User activity' },
+    ],
   },
 ];
 

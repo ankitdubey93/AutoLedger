@@ -25,6 +25,7 @@ import {
 import { env } from '../config/env.js';
 import { getRequestContext } from '../utils/requestContext.js';
 import { enqueueEmailOnClient } from './mail/emailOutboxService.js';
+import { recordLoginEvent, recordLoginEventOnClient } from './loginEventService.js';
 import {
   isRole,
   type ActiveSession,
@@ -391,6 +392,8 @@ export async function register(input: RegisterInput): Promise<PublicUser> {
 
 export async function login(email: string, password: string): Promise<IssuedSession> {
   const client = await pool.connect();
+  // Phase 46d — set before the 401 so the FAILED event can name the account.
+  let failedUserId: string | null = null;
 
   try {
     await beginTransaction(client);
@@ -407,6 +410,7 @@ export async function login(email: string, password: string): Promise<IssuedSess
     // Always run a comparison, even with no user, so both paths cost the same.
     const matches = await bcrypt.compare(password, row?.password ?? DUMMY_PASSWORD_HASH);
     if (row === undefined || !matches) {
+      failedUserId = row?.id ?? null;
       // One message for both causes — saying which was wrong confirms whether
       // an account exists.
       throw new ApiError(401, 'Invalid email or password');
@@ -419,10 +423,15 @@ export async function login(email: string, password: string): Promise<IssuedSess
     const { orgId, role } = resolveActiveOrg(memberships, row.last_active_org_id);
 
     const issued = await issueSession(client, row.id, orgId, role);
+    await recordLoginEventOnClient(client, { userId: row.id, orgId, email, outcome: 'SUCCESS' });
     await client.query('COMMIT');
     return issued;
   } catch (err) {
     await client.query('ROLLBACK');
+    // Written after the ROLLBACK, on the pool, so the failed attempt survives it.
+    if (err instanceof ApiError && err.status === 401) {
+      await recordLoginEvent({ userId: failedUserId, orgId: null, email, outcome: 'FAILED' });
+    }
     throw err;
   } finally {
     client.release();
@@ -669,9 +678,18 @@ export async function leaveOrganization(
  */
 export async function logout(refreshToken: string | null): Promise<void> {
   if (refreshToken === null) return;
-  await pool.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [
-    hashRefreshToken(refreshToken),
-  ]);
+  const { rows } = await pool.query<{ user_id: string; org_id: string | null }>(
+    'DELETE FROM refresh_tokens WHERE token_hash = $1 RETURNING user_id, org_id',
+    [hashRefreshToken(refreshToken)],
+  );
+  const gone = rows[0];
+  if (gone === undefined) return;
+  // Phase 46d — user-scoped (the identity precedes every organization).
+  const user = await pool.query<{ email: string }>('SELECT email FROM users WHERE id = $1', [gone.user_id]);
+  const email = user.rows[0]?.email;
+  if (email !== undefined) {
+    await recordLoginEvent({ userId: gone.user_id, orgId: gone.org_id, email, outcome: 'LOGOUT' });
+  }
 }
 
 /** GET /auth/check — the session as the client sees it. */
@@ -716,7 +734,10 @@ export async function changePassword(
   currentPassword: string,
   newPassword: string,
 ): Promise<{ signedOutSessions: number }> {
-  const { rows } = await pool.query<{ password: string }>('SELECT password FROM users WHERE id = $1', [userId]);
+  const { rows } = await pool.query<{ password: string; email: string }>(
+    'SELECT password, email FROM users WHERE id = $1',
+    [userId],
+  );
   const row = rows[0];
   if (row === undefined) throw new ApiError(401, 'User no longer exists');
   if (!(await bcrypt.compare(currentPassword, row.password))) {
@@ -737,6 +758,7 @@ export async function changePassword(
         WHERE user_id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR token_hash <> $2)`,
       [userId, currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken)],
     );
+    await recordLoginEventOnClient(client, { userId, orgId: null, email: row.email, outcome: 'PASSWORD_CHANGED' });
     await client.query('COMMIT');
     return { signedOutSessions: rowCount ?? 0 };
   } catch (err) {
@@ -807,6 +829,16 @@ export async function revokeSession(
     userId,
     sessionId,
   ]);
+  await recordSessionRevoked(userId);
+}
+
+/** Phase 46d — looks the email up by user id (identity-scoped) and records SESSION_REVOKED. */
+async function recordSessionRevoked(userId: string): Promise<void> {
+  const { rows } = await pool.query<{ email: string }>('SELECT email FROM users WHERE id = $1', [userId]);
+  const email = rows[0]?.email;
+  if (email !== undefined) {
+    await recordLoginEvent({ userId, orgId: null, email, outcome: 'SESSION_REVOKED' });
+  }
 }
 
 /** POST /auth/sessions/revoke-others — sign out everywhere except here. */
@@ -819,6 +851,7 @@ export async function revokeOtherSessions(
       WHERE user_id = $1 AND revoked_at IS NULL AND ($2::text IS NULL OR token_hash <> $2)`,
     [userId, currentRefreshToken === null ? null : hashRefreshToken(currentRefreshToken)],
   );
+  if ((rowCount ?? 0) > 0) await recordSessionRevoked(userId);
   return { signedOutSessions: rowCount ?? 0 };
 }
 
@@ -1129,6 +1162,11 @@ export async function resetPassword(token: string, newPassword: string): Promise
       await client.query('UPDATE users SET password = $2 WHERE id = $1', [row.user_id, passwordHash]);
       await client.query('DELETE FROM password_reset_tokens WHERE user_id = $1', [row.user_id]);
       await client.query('DELETE FROM refresh_tokens WHERE user_id = $1', [row.user_id]);
+      const who = await client.query<{ email: string }>('SELECT email FROM users WHERE id = $1', [row.user_id]);
+      const whoEmail = who.rows[0]?.email;
+      if (whoEmail !== undefined) {
+        await recordLoginEventOnClient(client, { userId: row.user_id, orgId: null, email: whoEmail, outcome: 'PASSWORD_RESET' });
+      }
       outcome = 'reset';
     }
     await client.query('COMMIT');

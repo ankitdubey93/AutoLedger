@@ -50,6 +50,8 @@ router.post('/change-password', authLimiter, authenticate, authController.change
 router.get('/sessions', authenticate, authController.listSessions);
 router.post('/sessions/revoke-others', authenticate, authController.revokeOtherSessions);
 router.delete('/sessions/:id', authenticate, authController.revokeSession);
+// Phase 46d — the caller's own sign-in history. Self-scoped, so no org gate.
+router.get('/login-events', authenticate, authController.listLoginEvents);
 
 // Phase 38b — the email address. The two public token routes are throttled
 // like reset-password; the two that send an email are throttled like login.

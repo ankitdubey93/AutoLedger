@@ -7,6 +7,7 @@ import { parseBody } from '../utils/parseBody.js';
 import { createOrganizationSchema, notificationPreferencesSchema } from '../schemas/organizationSchema.js';
 import * as notificationService from '../services/mail/notificationService.js';
 import * as invitationService from '../services/invitationService.js';
+import * as loginEventService from '../services/loginEventService.js';
 import { ApiError } from '../utils/apiError.js';
 import {
   optionalString,
@@ -230,6 +231,13 @@ export const revokeOtherSessions: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const result = await authService.revokeOtherSessions(user.id, readRefreshCookie(req.cookies));
   res.json({ success: true, ...result });
+};
+
+/** GET /auth/login-events — the caller's own sign-in history (Phase 46d). */
+export const listLoginEvents: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const events = await loginEventService.listMyLoginEvents(user.id);
+  res.json({ success: true, count: events.length, events });
 };
 
 /* ------------------------------------------------------------- Phase 38b

@@ -28,6 +28,15 @@ router.get(
 // tier as the member list.
 router.patch('/', authenticate, requirePermission('settings.manage'), organizationController.update);
 
+// Phase 46d — per-member sign-in and change activity. Declared before
+// '/members/:userId' so the literal path is never read as a userId.
+router.get(
+  '/members/activity',
+  authenticate,
+  requirePermission('audit.view'),
+  organizationController.memberActivity,
+);
+
 // Phase 30 — the organization's postal identity. Any member may read it: the
 // invoice document renders it, and a VIEWER can open an invoice.
 router.get('/profile', authenticate, allowAnyMember, organizationProfileController.get);
