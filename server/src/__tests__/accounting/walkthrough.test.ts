@@ -3,10 +3,10 @@ import { createApp } from '../../app.js';
 import { closePool } from '../../db/connect.js';
 import { createUserWithOrg, loginAgent, resetTables } from '../helpers/factories.js';
 import { parseCsv } from '../../utils/csv.js';
-import { parseMoneyText } from '../../utils/money.js';
+import { cents, parseMoneyText, scaleCents } from '../../utils/money.js';
 import { parseFlexibleDate } from '../../utils/dateParse.js';
 import { scoreMatch } from '../../utils/matchScore.js';
-import { WALKTHROUGH_DATASET, documentLines, type DatasetDocument } from '../../scripts/walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, allCustomers, documentLines, type DatasetDocument } from '../../scripts/walkthroughDataset.js';
 import { createWalkthroughReplay, type ReplayClient, type WalkthroughReplay } from '../../scripts/walkthroughReplay.js';
 import { resolveSettlementLines, verifyExpectedScores } from '../../scripts/walkthroughTiers.js';
 import { computeExpectedResults } from '../../scripts/walkthroughExpected.js';
@@ -36,7 +36,7 @@ import {
 const app = createApp();
 // April 2026 start: the recurring schedules and the auto-reversing accrual only
 // generate occurrences dated on or before today, so every scenario date must be past.
-const ANCHOR: AnchorMonth = { year: 2026, month: 4 };
+const ANCHOR: AnchorMonth = { year: 2026, month: 3 };
 
 const CUSTOMERS = '/api/v1/customers';
 const BANK_TRANSACTIONS = '/api/v1/bank-transactions';
@@ -50,7 +50,7 @@ describe('walkthrough dataset — internal checks', () => {
     const usedVendorKeys = new Set(WALKTHROUGH_DATASET.bills.map((b) => b.counterpartyKey));
     const usedCustomerKeys = new Set(WALKTHROUGH_DATASET.invoices.map((i) => i.counterpartyKey));
     for (const v of WALKTHROUGH_DATASET.vendors) expect(usedVendorKeys.has(v.key)).toBe(true);
-    for (const c of WALKTHROUGH_DATASET.customers) expect(usedCustomerKeys.has(c.key)).toBe(true);
+    for (const c of allCustomers()) expect(usedCustomerKeys.has(c.key)).toBe(true);
   });
 
   it('every revenue and expense account named in a master record is posted to at least once', () => {
@@ -82,7 +82,7 @@ describe('walkthrough dataset — internal checks', () => {
 
   it('every month is internally balanced: trial balance, balance sheet and reconciliation', () => {
     const months = computeExpectedResults(ANCHOR);
-    expect(months).toHaveLength(6);
+    expect(months).toHaveLength(WALKTHROUGH_MONTHS.length);
     for (const m of months) {
       expect(m.trialBalance.isBalanced).toBe(true);
       expect(m.balanceSheet.balances).toBe(true);
@@ -116,7 +116,10 @@ describe('walkthrough dataset — internal checks', () => {
   it("every multi-line document's lines sum to its total", () => {
     for (const doc of [...WALKTHROUGH_DATASET.invoices, ...WALKTHROUGH_DATASET.bills]) {
       if (doc.entry === 'DEPOSIT') continue;
-      const sum = documentLines(doc).reduce((acc, l) => acc + Math.round(Number(l.quantity) * parseMoneyText(l.unitPrice)), 0);
+      const sum = documentLines(doc).reduce((acc, l) => {
+        const net = Math.round(Number(l.quantity) * parseMoneyText(l.unitPrice));
+        return acc + net + scaleCents(cents(net), l.taxRateBp ?? 0, 10_000);
+      }, 0);
       expect(sum, doc.ref).toBe(parseMoneyText(doc.total));
     }
   });
@@ -142,6 +145,50 @@ describe('walkthrough dataset — internal checks', () => {
     expect(month6.apAging.reduce((sum, b) => sum + b.amountCents, 0)).toBe(0);
     expect(month6.arAging.find((b) => b.bucket === 'CURRENT')?.amountCents).toBe(477000);
     expect(month6.profitAndLoss.costOfSales.find((r) => r.code === '5050')?.amountCents).toBe(652000);
+  });
+
+  it("month 7 (currency, tax and journals) matches the plan's hand-checked figures", () => {
+    const months = computeExpectedResults(ANCHOR);
+    const month6 = months.find((m) => m.month === 6);
+    const month7 = months.find((m) => m.month === 7);
+    if (month6 === undefined || month7 === undefined) throw new Error('no month 6 or 7');
+    // Net income for month 7 alone (P&L is cumulative).
+    expect(month7.profitAndLoss.netIncomeCents - month6.profitAndLoss.netIncomeCents).toBe(2_223_660);
+    const bs = (code: string) =>
+      [...month7.balanceSheet.assets, ...month7.balanceSheet.liabilities, ...month7.balanceSheet.equityRows].find((r) => r.code === code)?.amountCents ?? 0;
+    expect(bs('1115')).toBe(1_100_000);
+    expect(bs('1120')).toBe(1_185_500);
+    expect(bs('1130')).toBe(120_000);
+    expect(bs('1180')).toBe(24_000);
+    expect(bs('1500')).toBe(600_000);
+    expect(bs('2120')).toBe(0);
+    expect(bs('2140')).toBe(79_500);
+    expect(bs('3100')).toBe(8_100_000);
+    const tb = (code: string) => month7.trialBalance.rows.find((r) => r.code === code);
+    expect(tb('4910')?.creditCents).toBe(20_000);
+    expect(tb('6820')?.debitCents).toBe(6_500);
+    expect(month7.arAging.find((b) => b.bucket === 'CURRENT')?.amountCents).toBe(715_000);
+    expect(month7.arAging.find((b) => b.bucket === 'D1_30')?.amountCents).toBe(477_000);
+    expect(month7.arControlCents).toBe(1_185_500);
+    expect(month7.taxSummary).toEqual({ outputTaxCents: 79_500, inputTaxCents: 24_000, netTaxPayableCents: 55_500 });
+    expect(month7.cashFlowNetChangeCents).toBe(1_365_660);
+    expect(month7.fxRevaluationDeltaCents).toBe(-6_500);
+    expect(month7.bankReconciliation.ignoredCount).toBe(7);
+  });
+
+  it('dates of fx rates and the fx receipt are inside month 7', () => {
+    for (const r of WALKTHROUGH_DATASET.fxRates) {
+      expect(r.month).toBe(7);
+      if (r.day !== 'LAST') {
+        expect(r.day).toBeGreaterThanOrEqual(1);
+        expect(r.day).toBeLessThanOrEqual(28);
+      }
+    }
+    for (const p of WALKTHROUGH_DATASET.fxPayments) {
+      expect(p.month).toBe(7);
+      expect(p.day).toBeGreaterThanOrEqual(1);
+      expect(p.day).toBeLessThanOrEqual(28);
+    }
   });
 
   it('regenerating the answer key with the same anchor is deterministic', () => {
@@ -245,6 +292,7 @@ function replayClient(a: Agent): ReplayClient {
   return {
     get: async (path) => await a.get(path),
     post: async (path, body) => await a.post(path).send((body ?? {}) as object),
+    delete: async (path) => await a.delete(path),
   };
 }
 
@@ -258,7 +306,7 @@ beforeEach(async () => {
 afterAll(closePool);
 
 describe('walkthrough — end-to-end replay through the real API', () => {
-  it('reproduces the computed answer key for all six months, cent for cent', async () => {
+  it('reproduces the computed answer key for all seven months, cent for cent', async () => {
     await replay.completeSetup('Harbor Point Fabrication');
     await replay.importAccounts();
     await replay.createVendorsAndCustomers();
@@ -350,6 +398,59 @@ describe('walkthrough — end-to-end replay through the real API', () => {
       expect(brRes.body.unmatchedCount).toBe(0);
       expect(brRes.body.ignoredCount).toBe(monthExpected.bankReconciliation.ignoredCount);
 
+      // ---- tax summary (this month's documents alone), reconciled to the GL ----
+      const monthFirstDay = resolveDate(ANCHOR, month, 1);
+      const taxRes = await agent.get(`${REPORTS}/tax-summary?from=${monthFirstDay}&to=${monthExpected.asOf}`);
+      expect(taxRes.status, taxRes.text).toBe(200);
+      expect(taxRes.body.output.taxCents).toBe(monthExpected.taxSummary.outputTaxCents);
+      expect(taxRes.body.input.taxCents).toBe(monthExpected.taxSummary.inputTaxCents);
+      expect(taxRes.body.netTaxPayableCents).toBe(monthExpected.taxSummary.netTaxPayableCents);
+      expect(taxRes.body.outputCheck.differenceCents).toBe(0);
+      expect(taxRes.body.inputCheck.differenceCents).toBe(0);
+
+      // ---- cash flow statement: net change of the cash accounts ----
+      const cashFlowRes = await agent.get(`${REPORTS}/cash-flow?from=${monthFirstDay}&to=${monthExpected.asOf}`);
+      expect(cashFlowRes.status, cashFlowRes.text).toBe(200);
+      expect(cashFlowRes.body.netChangeCents).toBe(monthExpected.cashFlowNetChangeCents);
+
+      // ---- the AR control account on the aging report ----
+      expect(arRes.body.controlAccount.balanceCents).toBe(monthExpected.arControlCents);
+
+      if (month === 7) {
+        expect(cashFlowRes.body.operating.totalCents).toBe(1_365_660);
+        expect(cashFlowRes.body.investing.totalCents).toBe(-600_000);
+        expect(cashFlowRes.body.financing.totalCents).toBe(600_000);
+
+        const exposure = await agent.get(`${REPORTS}/fx-exposure?asOf=${monthExpected.asOf}`);
+        expect(exposure.status, exposure.text).toBe(200);
+        expect(exposure.body.exposure.alreadyRevalued).toBe(true);
+
+        const mjNarration = (ref: string): string => {
+          const j = WALKTHROUGH_DATASET.journals.find((x) => x.ref === ref);
+          if (j === undefined) throw new Error(`fixture: no journal ${ref}`);
+          return j.narration;
+        };
+        const voided = await agent.get('/api/v1/manual-journals?status=voided');
+        expect(voided.status, voided.text).toBe(200);
+        expect(voided.body.journals).toHaveLength(1);
+        expect(voided.body.journals[0].narration).toBe(mjNarration('MJ3'));
+        const drafts = await agent.get('/api/v1/manual-journals?status=draft');
+        expect(drafts.status, drafts.text).toBe(200);
+        expect((drafts.body.journals as Array<{ narration: string }>).some((j) => j.narration === mjNarration('MJ2'))).toBe(false);
+
+        // Period 6 is closed after month 7: a late posting into it is refused.
+        const late = await agent.post('/api/v1/manual-journals').send({
+          narration: 'Late adjustment into a closed period',
+          entryDate: resolveDate(ANCHOR, 6, 15),
+          lines: [
+            { accountId: await replay.accountId('6600'), debitCents: 1000, creditCents: 0 },
+            { accountId: await replay.accountId('3100'), debitCents: 0, creditCents: 1000 },
+          ],
+          action: 'post',
+        });
+        expect(late.status, late.text).toBe(422);
+      }
+
       if (month === 5) {
         // Months 1-4 are now closed: a late adjustment into one of them is refused.
         const late = await agent.post('/api/v1/manual-journals').send({
@@ -387,7 +488,7 @@ describe('walkthrough — end-to-end replay through the real API', () => {
     const cashAccountId = await replay.accountId('1110');
     const unmatchedRes = await agent.get(`${BANK_TRANSACTIONS}?accountId=${cashAccountId}&status=UNMATCHED&limit=100`);
     expect(unmatchedRes.body.transactions).toEqual([]);
-  }, 240_000);
+  }, 300_000);
 
   it("org B cannot see or match into org A's walkthrough bank lines (cross-tenant isolation)", async () => {
     await replay.completeSetup('Harbor Point Fabrication');

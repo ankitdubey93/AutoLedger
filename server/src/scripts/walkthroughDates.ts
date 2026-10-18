@@ -4,8 +4,8 @@
  * writing `statements/*.csv` can never drift from the date computed while
  * checking the same figure in `07-expected-results.md`.
  *
- * Anchor-relative, never absolute: `--anchor 2026-06` means month 1 is June
- * 2026, month 2 is July, month 3 is August, month 4 is September — resolved with `Date.UTC`
+ * Anchor-relative, never absolute: `--anchor 2026-03` means month 1 is March
+ * 2026, month 2 is April … month 7 is September — resolved with `Date.UTC`
  * integer arithmetic, never `new Date(dateString)` (see
  * `utils/dateParse.ts`'s header for why: JS's built-in parser is
  * inconsistent across engines and never fails cleanly).
@@ -13,11 +13,13 @@
 
 /**
  * Months of the walkthrough, relative to the anchor. Month 4 (Phase 26) is "Returns & adjustments".
- * Month 5: products, stock & orders; month 6: closing the quarter.
+ * Month 5: products, stock & orders; month 6: closing the quarter; month 7: currency, tax and journals.
  */
-export type WalkthroughMonth = 1 | 2 | 3 | 4 | 5 | 6;
+export type WalkthroughMonth = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
-export const WALKTHROUGH_MONTHS: readonly WalkthroughMonth[] = [1, 2, 3, 4, 5, 6];
+export type ScenarioMonth = WalkthroughMonth | 8 | 9;
+
+export const WALKTHROUGH_MONTHS: readonly WalkthroughMonth[] = [1, 2, 3, 4, 5, 6, 7];
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -45,10 +47,10 @@ export function parseAnchor(raw: string): AnchorMonth {
   return { year, month };
 }
 
-/** Six months back from today, 1st of the month — the no-argument default. */
+/** Seven months back from today, 1st of the month — the no-argument default. */
 export function defaultAnchor(): AnchorMonth {
   const now = new Date();
-  const totalMonths = now.getUTCFullYear() * 12 + now.getUTCMonth() - 6;
+  const totalMonths = now.getUTCFullYear() * 12 + now.getUTCMonth() - 7;
   return { year: Math.floor(totalMonths / 12), month: (totalMonths % 12) + 1 };
 }
 
@@ -56,8 +58,8 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-/** `walkthroughMonth` 1–6 (7 only for the auto-reversal after the scenario); `day` 1-28. Returns 'YYYY-MM-DD'. */
-export function resolveDate(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth | 7, day: number): string {
+/** `walkthroughMonth` 1–9 (beyond the scenario only for auto-reversals); `day` 1-28. Returns 'YYYY-MM-DD'. */
+export function resolveDate(anchor: AnchorMonth, walkthroughMonth: ScenarioMonth, day: number): string {
   if (day < 1 || day > 28) throw new Error(`walkthrough date day out of range: ${String(day)}`);
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (walkthroughMonth - 1);
   const year = Math.floor(totalMonths / 12);
@@ -66,7 +68,7 @@ export function resolveDate(anchor: AnchorMonth, walkthroughMonth: WalkthroughMo
 }
 
 /** The last calendar day of a walkthrough month, as 'YYYY-MM-DD'. */
-export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth: WalkthroughMonth | 7): string {
+export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth: ScenarioMonth): string {
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (walkthroughMonth - 1);
   const year = Math.floor(totalMonths / 12);
   const month = (totalMonths % 12) + 1;
@@ -77,13 +79,13 @@ export function lastDayOfWalkthroughMonth(anchor: AnchorMonth, walkthroughMonth:
 }
 
 /** English month name of a walkthrough month. */
-export function monthName(anchor: AnchorMonth, m: WalkthroughMonth | 7): string {
+export function monthName(anchor: AnchorMonth, m: ScenarioMonth): string {
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (m - 1);
   return MONTH_NAMES[totalMonths % 12] ?? '';
 }
 
 /** Calendar year of a walkthrough month. */
-export function calendarYear(anchor: AnchorMonth, m: WalkthroughMonth | 7): number {
+export function calendarYear(anchor: AnchorMonth, m: ScenarioMonth): number {
   const totalMonths = anchor.year * 12 + (anchor.month - 1) + (m - 1);
   return Math.floor(totalMonths / 12);
 }

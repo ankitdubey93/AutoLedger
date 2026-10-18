@@ -29,25 +29,32 @@
  * for cent — this file is an answer key that has been checked, not merely
  * asserted.
  */
-import { WALKTHROUGH_DATASET, documentLines, type DatasetDocument } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, documentDueDate, documentLines, type DatasetDocument } from './walkthroughDataset.js';
 import { depositAppliedCents, noteAppliedCents, resolveSettlementLines } from './walkthroughTiers.js';
-import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
+import type { AnchorMonth, ScenarioMonth, WalkthroughMonth } from './walkthroughDates.js';
 import { WALKTHROUGH_MONTHS, lastDayOfWalkthroughMonth, resolveDate } from './walkthroughDates.js';
-import { parseMoneyText } from '../utils/money.js';
+import { convertToBase } from '../utils/fxRate.js';
+import { cents, parseMoneyText, scaleCents } from '../utils/money.js';
 
 const ACCOUNT_NAMES: Record<string, string> = {
   '1110': 'Operating Cash',
+  '1115': 'EUR Receipts Account',
   '1120': 'Accounts Receivable',
+  '1130': 'Prepaid Expenses',
   '1140': 'Inventory',
+  '1180': 'GST/VAT Input Credit',
+  '1500': 'Fixed Assets / Equipment',
   '2100': 'Accounts Payable',
   '2120': 'Accrued Liabilities',
   '2130': 'Customer Deposits',
+  '2140': 'GST/VAT Output Payable',
   '2160': 'Payroll Liabilities',
   '3100': "Common Stock / Owner's Capital",
   '4100': 'Product Revenue',
   '4200': 'Service Revenue',
   '4300': 'Interest Income',
   '4800': 'Sales Returns & Allowances',
+  '4910': 'Realized FX Gain',
   '5050': 'Cost of Sales — Inventory',
   '5100': 'Direct Materials',
   '5200': 'Direct Labor',
@@ -55,9 +62,12 @@ const ACCOUNT_NAMES: Record<string, string> = {
   '6100': 'Salaries & Wages',
   '6110': 'Rent & Utilities',
   '6120': 'Software & IT Infrastructure',
+  '6150': 'Insurance',
   '6200': 'Professional Fees',
   '6400': 'Marketing & Advertising',
   '6600': 'Bank Fees',
+  '6810': 'Realized FX Loss',
+  '6820': 'Unrealized FX Gain/Loss',
 };
 
 function accountName(code: string): string {
@@ -68,8 +78,8 @@ function accountName(code: string): string {
 
 /** One simulated ledger_lines row: exactly one side populated, matching guardrails rule 7. */
 interface SimLine {
-  /** 7 = the month after the scenario (an auto-reversal); never inside a report. */
-  month: WalkthroughMonth | 7;
+  /** Months 8 and 9 are the months after the scenario (reversals, later occurrences); never inside a report. */
+  month: ScenarioMonth;
   code: string;
   debitCents: number;
   creditCents: number;
@@ -80,92 +90,205 @@ function lineCents(quantity: string, unitAmount: string): number {
   return Math.round(Number(quantity) * parseMoneyText(unitAmount));
 }
 
-function buildLedgerLines(): SimLine[] {
+/** Per-line tax, half-up — exactly as `computeLineTotals` does it. */
+function lineTaxCents(netCents: number, taxRateBp: number | undefined): number {
+  return scaleCents(cents(netCents), taxRateBp ?? 0, 10_000);
+}
+
+/** The latest FX rate entered on or before `date` (an ISO date). Throws when none exists. */
+function rateOn(anchor: AnchorMonth, date: string): string {
+  let best: { date: string; rate: string } | undefined;
+  for (const r of WALKTHROUGH_DATASET.fxRates) {
+    const rateDate = r.day === 'LAST' ? lastDayOfWalkthroughMonth(anchor, r.month) : resolveDate(anchor, r.month, r.day);
+    if (rateDate <= date && (best === undefined || rateDate >= best.date)) best = { date: rateDate, rate: r.rate };
+  }
+  if (best === undefined) throw new Error(`walkthrough fixture: no exchange rate on or before ${date}`);
+  return best.rate;
+}
+
+/** Native cents to base cents at the rate in force on the document's own date; USD is untouched. */
+function toBaseAtDocRate(anchor: AnchorMonth, doc: DatasetDocument, nativeCents: number): number {
+  if (doc.currency === undefined) return nativeCents;
+  return convertToBase(cents(nativeCents), rateOn(anchor, resolveDate(anchor, doc.month, doc.day)));
+}
+
+function paymentsAllocatedNative(ref: string, throughMonth: ScenarioMonth): number {
+  return WALKTHROUGH_DATASET.fxPayments
+    .filter((p) => p.documentRef === ref && p.month <= throughMonth)
+    .reduce((sum, p) => sum + parseMoneyText(p.amount), 0);
+}
+
+function buildLedgerLines(anchor: AnchorMonth): SimLine[] {
   const lines: SimLine[] = [];
   const stockItems = new Map(WALKTHROUGH_DATASET.stockItems.map((i) => [i.code, i]));
 
+  /** Appends one journal entry's lines after checking it balances. */
+  function emit(label: string, entry: SimLine[]): void {
+    const debit = entry.reduce((sum, l) => sum + l.debitCents, 0);
+    const credit = entry.reduce((sum, l) => sum + l.creditCents, 0);
+    if (debit !== credit) throw new Error(`walkthrough answer key: entry ${label} does not balance`);
+    lines.push(...entry);
+  }
+
   for (const doc of WALKTHROUGH_DATASET.invoices) {
-    const totalCents = parseMoneyText(doc.total);
-    lines.push({ month: doc.month, code: '1120', debitCents: totalCents, creditCents: 0 });
+    const entry: SimLine[] = [];
+    let totalCents = 0;
+    let taxTotalCents = 0;
     for (const line of documentLines(doc)) {
-      lines.push({ month: doc.month, code: line.accountCode, debitCents: 0, creditCents: lineCents(line.quantity, line.unitPrice) });
+      const netCents = toBaseAtDocRate(anchor, doc, lineCents(line.quantity, line.unitPrice));
+      const taxCents = doc.currency === undefined
+        ? lineTaxCents(netCents, line.taxRateBp)
+        : toBaseAtDocRate(anchor, doc, lineTaxCents(lineCents(line.quantity, line.unitPrice), line.taxRateBp));
+      totalCents += netCents + taxCents;
+      taxTotalCents += taxCents;
+      entry.push({ month: doc.month, code: line.accountCode, debitCents: 0, creditCents: netCents });
       // An invoice line for a stock item also relieves inventory at moving-average cost.
       const stock = line.itemCode === null ? undefined : stockItems.get(line.itemCode);
       if (stock !== undefined) {
         const costCents = lineCents(line.quantity, stock.unitCost);
-        lines.push({ month: doc.month, code: stock.cogsAccount, debitCents: costCents, creditCents: 0 });
-        lines.push({ month: doc.month, code: stock.assetAccount, debitCents: 0, creditCents: costCents });
+        entry.push({ month: doc.month, code: stock.cogsAccount, debitCents: costCents, creditCents: 0 });
+        entry.push({ month: doc.month, code: stock.assetAccount, debitCents: 0, creditCents: costCents });
       }
     }
+    if (taxTotalCents > 0) entry.push({ month: doc.month, code: '2140', debitCents: 0, creditCents: taxTotalCents });
+    entry.push({ month: doc.month, code: '1120', debitCents: totalCents, creditCents: 0 });
+    emit(`invoice ${doc.ref}`, entry);
   }
   for (const doc of WALKTHROUGH_DATASET.bills) {
-    const totalCents = parseMoneyText(doc.total);
+    const entry: SimLine[] = [];
+    let totalCents = 0;
+    let taxTotalCents = 0;
     for (const line of documentLines(doc)) {
-      lines.push({ month: doc.month, code: line.accountCode, debitCents: lineCents(line.quantity, line.unitPrice), creditCents: 0 });
+      const netCents = toBaseAtDocRate(anchor, doc, lineCents(line.quantity, line.unitPrice));
+      const taxCents = doc.currency === undefined
+        ? lineTaxCents(netCents, line.taxRateBp)
+        : toBaseAtDocRate(anchor, doc, lineTaxCents(lineCents(line.quantity, line.unitPrice), line.taxRateBp));
+      totalCents += netCents + taxCents;
+      taxTotalCents += taxCents;
+      entry.push({ month: doc.month, code: line.accountCode, debitCents: netCents, creditCents: 0 });
     }
-    lines.push({ month: doc.month, code: '2100', debitCents: 0, creditCents: totalCents });
+    if (taxTotalCents > 0) entry.push({ month: doc.month, code: '1180', debitCents: taxTotalCents, creditCents: 0 });
+    entry.push({ month: doc.month, code: '2100', debitCents: 0, creditCents: totalCents });
+    emit(`bill ${doc.ref}`, entry);
   }
   for (const application of WALKTHROUGH_DATASET.depositApplications) {
     const target = WALKTHROUGH_DATASET.invoices.find((d) => d.ref === application.documentRef);
     if (target === undefined) throw new Error(`walkthrough fixture: no document ${application.documentRef}`);
     const amountCents = parseMoneyText(application.amount);
-    lines.push({ month: target.month, code: '2130', debitCents: amountCents, creditCents: 0 });
-    lines.push({ month: target.month, code: '1120', debitCents: 0, creditCents: amountCents });
+    emit(`deposit application ${application.depositRef}`, [
+      { month: target.month, code: '2130', debitCents: amountCents, creditCents: 0 },
+      { month: target.month, code: '1120', debitCents: 0, creditCents: amountCents },
+    ]);
+  }
+  // A foreign-currency receipt: cash at the payment-day rate, AR relieved at the document's rate,
+  // the difference a realized gain (4910) or loss (6810).
+  for (const payment of WALKTHROUGH_DATASET.fxPayments) {
+    const doc = WALKTHROUGH_DATASET.invoices.find((d) => d.ref === payment.documentRef);
+    if (doc === undefined) throw new Error(`walkthrough fixture: no document ${payment.documentRef}`);
+    const nativeCents = parseMoneyText(payment.amount);
+    const cashCents = convertToBase(cents(nativeCents), rateOn(anchor, resolveDate(anchor, payment.month, payment.day)));
+    const arCents = toBaseAtDocRate(anchor, doc, nativeCents);
+    const entry: SimLine[] = [
+      { month: payment.month, code: payment.cashAccountCode, debitCents: cashCents, creditCents: 0 },
+      { month: payment.month, code: '1120', debitCents: 0, creditCents: arCents },
+    ];
+    if (cashCents > arCents) entry.push({ month: payment.month, code: '4910', debitCents: 0, creditCents: cashCents - arCents });
+    if (cashCents < arCents) entry.push({ month: payment.month, code: '6810', debitCents: arCents - cashCents, creditCents: 0 });
+    emit(`payment ${payment.ref}`, entry);
+  }
+  // Month-end revaluation of open foreign-currency invoices; the mirror lands in the next month.
+  for (const reval of WALKTHROUGH_DATASET.fxRevaluations) {
+    const lastDay = lastDayOfWalkthroughMonth(anchor, reval.month);
+    const entry: SimLine[] = [];
+    for (const doc of WALKTHROUGH_DATASET.invoices) {
+      if (doc.currency === undefined || doc.month > reval.month) continue;
+      const outstandingNative = parseMoneyText(doc.total) - paymentsAllocatedNative(doc.ref, reval.month);
+      if (outstandingNative <= 0) continue;
+      const delta =
+        convertToBase(cents(outstandingNative), rateOn(anchor, lastDay)) - toBaseAtDocRate(anchor, doc, outstandingNative);
+      if (delta === 0) continue;
+      const abs = Math.abs(delta);
+      entry.push({ month: reval.month, code: '6820', debitCents: delta < 0 ? abs : 0, creditCents: delta < 0 ? 0 : abs });
+      entry.push({ month: reval.month, code: '1120', debitCents: delta < 0 ? 0 : abs, creditCents: delta < 0 ? abs : 0 });
+    }
+    emit(`revaluation month ${String(reval.month)}`, entry);
+    emit(
+      `revaluation reversal month ${String(reval.month)}`,
+      entry.map((l) => ({ month: (reval.month + 1) as ScenarioMonth, code: l.code, debitCents: l.creditCents, creditCents: l.debitCents })),
+    );
   }
   for (const journal of WALKTHROUGH_DATASET.journals) {
+    if (journal.entry === 'DRAFT_DELETED') continue;
     const lastMonth = journal.repeat === null ? journal.month : journal.repeat.endMonth;
-    for (let m = journal.month; m <= lastMonth; m++) {
-      const month = m as WalkthroughMonth;
-      for (const line of journal.lines) {
-        lines.push({ month, code: line.accountCode, debitCents: parseMoneyText(line.debit), creditCents: parseMoneyText(line.credit) });
+    for (let m: number = journal.month; m <= lastMonth; m++) {
+      const month = m as ScenarioMonth;
+      const entry = journal.lines.map((line): SimLine => ({
+        month,
+        code: line.accountCode,
+        debitCents: parseMoneyText(line.debit),
+        creditCents: parseMoneyText(line.credit),
+      }));
+      emit(`journal ${journal.ref} month ${String(month)}`, entry);
+      if (journal.entry === 'POSTED_VOIDED') {
+        // The void reverses the entry on the same books: both sides appear on the trial balance.
+        emit(`journal ${journal.ref} void`, entry.map((l) => ({ ...l, debitCents: l.creditCents, creditCents: l.debitCents })));
       }
       if (journal.repeat?.autoReverse === true) {
-        // The mirror lands on day 1 of the following month (month 7 falls outside every report).
-        for (const line of journal.lines) {
-          lines.push({
-            month: (month + 1) as WalkthroughMonth | 7,
-            code: line.accountCode,
-            debitCents: parseMoneyText(line.credit),
-            creditCents: parseMoneyText(line.debit),
-          });
-        }
+        // The mirror lands on day 1 of the following month.
+        emit(
+          `journal ${journal.ref} reversal month ${String(month)}`,
+          entry.map((l) => ({ month: (month + 1) as ScenarioMonth, code: l.code, debitCents: l.creditCents, creditCents: l.debitCents })),
+        );
       }
     }
   }
   for (const settlement of resolveSettlementLines({ year: 2000, month: 1 })) {
     // The settlement's own accounting month, not calendar date, drives which
     // cumulative bucket it lands in — resolveSettlementLines's `month` field
-    // (1|2|3) already carries that, independent of the anchor passed in, so
+    // already carries that, independent of the anchor passed in, so
     // any anchor works here; only isoDate (unused below) depends on it.
     const abs = Math.abs(settlement.amountCents);
     if (settlement.kind === 'invoice') {
-      lines.push({ month: settlement.month, code: '1110', debitCents: abs, creditCents: 0 });
-      lines.push({ month: settlement.month, code: '1120', debitCents: 0, creditCents: abs });
+      emit(`settlement ${settlement.lineRef}`, [
+        { month: settlement.month, code: '1110', debitCents: abs, creditCents: 0 },
+        { month: settlement.month, code: '1120', debitCents: 0, creditCents: abs },
+      ]);
     } else {
-      lines.push({ month: settlement.month, code: '2100', debitCents: abs, creditCents: 0 });
-      lines.push({ month: settlement.month, code: '1110', debitCents: 0, creditCents: abs });
+      emit(`settlement ${settlement.lineRef}`, [
+        { month: settlement.month, code: '2100', debitCents: abs, creditCents: 0 },
+        { month: settlement.month, code: '1110', debitCents: 0, creditCents: abs },
+      ]);
     }
   }
   for (const note of WALKTHROUGH_DATASET.notes) {
     const totalCents = parseMoneyText(note.total);
     if (note.kind === 'CREDIT_NOTE') {
-      lines.push({ month: note.month, code: note.accountCode, debitCents: totalCents, creditCents: 0 });
-      lines.push({ month: note.month, code: '1120', debitCents: 0, creditCents: totalCents });
+      emit(`note ${note.ref}`, [
+        { month: note.month, code: note.accountCode, debitCents: totalCents, creditCents: 0 },
+        { month: note.month, code: '1120', debitCents: 0, creditCents: totalCents },
+      ]);
     } else {
-      lines.push({ month: note.month, code: '2100', debitCents: totalCents, creditCents: 0 });
-      lines.push({ month: note.month, code: note.accountCode, debitCents: 0, creditCents: totalCents });
+      emit(`note ${note.ref}`, [
+        { month: note.month, code: '2100', debitCents: totalCents, creditCents: 0 },
+        { month: note.month, code: note.accountCode, debitCents: 0, creditCents: totalCents },
+      ]);
     }
   }
   for (const noise of WALKTHROUGH_DATASET.noise) {
     if (noise.resolution.kind === 'IGNORE') continue;
     const amountCents = parseMoneyText(noise.amount); // signed
     const abs = Math.abs(amountCents);
+    const label = `bank line ${noise.description} month ${String(noise.month)}`;
     if (amountCents > 0) {
-      lines.push({ month: noise.month, code: '1110', debitCents: abs, creditCents: 0 });
-      lines.push({ month: noise.month, code: noise.resolution.accountCode, debitCents: 0, creditCents: abs });
+      emit(label, [
+        { month: noise.month, code: '1110', debitCents: abs, creditCents: 0 },
+        { month: noise.month, code: noise.resolution.accountCode, debitCents: 0, creditCents: abs },
+      ]);
     } else {
-      lines.push({ month: noise.month, code: noise.resolution.accountCode, debitCents: abs, creditCents: 0 });
-      lines.push({ month: noise.month, code: '1110', debitCents: 0, creditCents: abs });
+      emit(label, [
+        { month: noise.month, code: noise.resolution.accountCode, debitCents: abs, creditCents: 0 },
+        { month: noise.month, code: '1110', debitCents: 0, creditCents: abs },
+      ]);
     }
   }
 
@@ -240,6 +363,14 @@ export interface ExpectedMonth {
   arAging: ExpectedAgingBucket[];
   apAging: ExpectedAgingBucket[];
   bankReconciliation: ExpectedBankReconciliation;
+  /** Tax on invoices / bills dated in this month alone (base-currency cents). */
+  taxSummary: { outputTaxCents: number; inputTaxCents: number; netTaxPayableCents: number };
+  /** Net movement of the cash accounts (1110 + 1115) inside this month. */
+  cashFlowNetChangeCents: number;
+  /** Sum of the month-end revaluation deltas posted in this month (0 when none). */
+  fxRevaluationDeltaCents: number;
+  /** The 1120 Accounts Receivable balance at the month's end. */
+  arControlCents: number;
 }
 
 const AGING_BUCKET_LABELS = {
@@ -268,12 +399,6 @@ function shiftIso(iso: string, days: number): string {
   return new Date(t).toISOString().slice(0, 10);
 }
 
-/** A document's due date: its explicit `dueDate` when set, otherwise its own date plus `dueDays`. */
-function documentDueDate(anchor: AnchorMonth, doc: DatasetDocument): string {
-  if (doc.dueDate !== undefined) return resolveDate(anchor, doc.dueDate.month, doc.dueDate.day);
-  return resolveDate(anchor, doc.month, doc.day + doc.dueDays);
-}
-
 function emptyAgingBuckets(): ExpectedAgingBucket[] {
   return (Object.keys(AGING_BUCKET_LABELS) as (keyof typeof AGING_BUCKET_LABELS)[]).map((bucket) => ({
     bucket,
@@ -283,7 +408,7 @@ function emptyAgingBuckets(): ExpectedAgingBucket[] {
 }
 
 export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
-  const allLines = buildLedgerLines();
+  const allLines = buildLedgerLines(anchor);
   const settlements = resolveSettlementLines(anchor);
   return WALKTHROUGH_MONTHS.map((month): ExpectedMonth => {
     const asOf = lastDayOfWalkthroughMonth(anchor, month);
@@ -306,9 +431,12 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     // ---- P&L (cumulative from month 1 through this month's asOf) ----
     // 4800 is a Revenue account carrying a debit balance (sales returns), so
     // it lands here as a negative revenue row.
-    const revenueCodes = ['4100', '4200', '4300', '4800'];
-    const costOfSalesCodes = ['5050', '5100', '5200', '5300'];
-    const opexCodes = ['6100', '6110', '6120', '6200', '6400', '6600'];
+    // Classified by code prefix: 1 Asset, 2 Liability, 3 Equity, 4 Revenue,
+    // 5 cost of sales (Expense), 6 operating Expense.
+    const codesWithPrefix = (prefix: string): string[] => [...byAccount.keys()].filter((c) => c.startsWith(prefix)).sort();
+    const revenueCodes = codesWithPrefix('4');
+    const costOfSalesCodes = codesWithPrefix('5');
+    const opexCodes = codesWithPrefix('6');
 
     function netBalance(code: string, creditNormal: boolean): number {
       const sums = byAccount.get(code) ?? { debitCents: 0, creditCents: 0 };
@@ -331,9 +459,9 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     const netIncomeCents = grossProfitCents - operatingExpensesTotalCents;
 
     // ---- Balance sheet ----
-    const assetCodes = ['1110', '1120', '1140'];
-    const liabilityCodes = ['2100', '2120', '2130', '2160'];
-    const equityCodes = ['3100'];
+    const assetCodes = codesWithPrefix('1');
+    const liabilityCodes = codesWithPrefix('2');
+    const equityCodes = codesWithPrefix('3');
     const assetsRows = rowsFor(assetCodes, false);
     const liabilitiesRows = rowsFor(liabilityCodes, true);
     const equityRows = rowsFor(equityCodes, true);
@@ -345,18 +473,26 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
 
     // ---- AR/AP aging: an invoice/bill is open at asOf when its settlement(s)
     // through this month don't yet sum to its full total. ----
-    function outstandingCents(ref: string, total: string): number {
-      const totalCents = parseMoneyText(total);
+    // A foreign-currency document is paid in its own currency (`fxPayments`, native cents); aging
+    // values what is left at the document's own frozen rate, as agingService does (base_total_cents).
+    function outstandingCents(doc: DatasetDocument): number {
+      const totalCents = parseMoneyText(doc.total);
       const settledCents = settlements
-        .filter((s) => s.documentRef === ref && s.month <= month)
+        .filter((s) => s.documentRef === doc.ref && s.month <= month)
         .reduce((sum, s) => sum + Math.abs(s.amountCents), 0);
-      return totalCents - settledCents - noteAppliedCents(ref, month) - depositAppliedCents(ref, month);
+      const nativeLeft =
+        totalCents -
+        settledCents -
+        paymentsAllocatedNative(doc.ref, month) -
+        noteAppliedCents(doc.ref, month) -
+        depositAppliedCents(doc.ref, month);
+      return toBaseAtDocRate(anchor, doc, nativeLeft);
     }
 
     const arBuckets = emptyAgingBuckets();
     for (const doc of WALKTHROUGH_DATASET.invoices) {
       if (doc.month > month) continue;
-      const outstanding = outstandingCents(doc.ref, doc.total);
+      const outstanding = outstandingCents(doc);
       if (outstanding <= 0) continue;
       const dueDate = documentDueDate(anchor, doc);
       const bucket = agingBucket(dueDate, asOf);
@@ -367,7 +503,7 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     const apBuckets = emptyAgingBuckets();
     for (const doc of WALKTHROUGH_DATASET.bills) {
       if (doc.month > month) continue;
-      const outstanding = outstandingCents(doc.ref, doc.total);
+      const outstanding = outstandingCents(doc);
       if (outstanding <= 0) continue;
       const dueDate = documentDueDate(anchor, doc);
       const bucket = agingBucket(dueDate, asOf);
@@ -405,6 +541,26 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
     const matchedCount = settledThroughMonth.length + journaledNoiseCount;
     const ignoredCount = noiseThroughMonth.filter((n) => n.resolution.kind === 'IGNORE').length;
 
+    // ---- Tax summary: tax on documents dated in this month alone ----
+    const taxCentsOf = (doc: DatasetDocument): number =>
+      documentLines(doc).reduce((sum, line) => {
+        const nativeNet = lineCents(line.quantity, line.unitPrice);
+        return sum + toBaseAtDocRate(anchor, doc, lineTaxCents(nativeNet, line.taxRateBp));
+      }, 0);
+    const outputTaxCents = WALKTHROUGH_DATASET.invoices.filter((d) => d.month === month).reduce((sum, d) => sum + taxCentsOf(d), 0);
+    const inputTaxCents = WALKTHROUGH_DATASET.bills.filter((d) => d.month === month).reduce((sum, d) => sum + taxCentsOf(d), 0);
+
+    // ---- Cash flow: net movement of the cash accounts inside this month ----
+    const cashFlowNetChangeCents = allLines
+      .filter((l) => l.month === month && (l.code === '1110' || l.code === '1115'))
+      .reduce((sum, l) => sum + l.debitCents - l.creditCents, 0);
+
+    // ---- FX revaluation delta posted this month, and the AR control balance ----
+    const fxRevaluationDeltaCents = allLines
+      .filter((l) => l.month === month && l.code === '6820')
+      .reduce((sum, l) => sum + l.debitCents - l.creditCents, 0);
+    const arSums = byAccount.get('1120') ?? { debitCents: 0, creditCents: 0 };
+
     return {
       month,
       asOf,
@@ -440,6 +596,11 @@ export function computeExpectedResults(anchor: AnchorMonth): ExpectedMonth[] {
         unmatchedCount: 0,
         ignoredCount,
       },
+      taxSummary: { outputTaxCents, inputTaxCents, netTaxPayableCents: outputTaxCents - inputTaxCents },
+      cashFlowNetChangeCents,
+      // Debit-positive on 6820 is a loss; the key reports the signed delta to the receivable (a loss is negative).
+      fxRevaluationDeltaCents: -fxRevaluationDeltaCents,
+      arControlCents: arSums.debitCents - arSums.creditCents,
     };
   });
 }

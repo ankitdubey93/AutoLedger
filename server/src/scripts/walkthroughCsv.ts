@@ -1,4 +1,4 @@
-import { WALKTHROUGH_DATASET, allVendors, documentLines, resolveTokens } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, allVendors, documentDueDate, documentLines, resolveTokens } from './walkthroughDataset.js';
 import { resolveDate, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
 import { csvField, plainMoney } from './walkthroughStatements.js';
 import { parseMoneyText } from '../utils/money.js';
@@ -102,7 +102,7 @@ export function invoicesCsv(anchor: AnchorMonth, month: WalkthroughMonth): strin
   for (const doc of WALKTHROUGH_DATASET.invoices) {
     if (doc.entry !== 'IMPORT' || doc.month !== month) continue;
     const docDate = resolveDate(anchor, doc.month, doc.day);
-    const dueDate = doc.dueDate === undefined ? docDate : resolveDate(anchor, doc.dueDate.month, doc.dueDate.day);
+    const dueDate = documentDueDate(anchor, doc);
     for (const line of documentLines(doc)) {
       rows.push([
         requireCustomerName(doc.counterpartyKey),
@@ -128,7 +128,7 @@ export function billsCsv(anchor: AnchorMonth, month: WalkthroughMonth): string {
   for (const doc of WALKTHROUGH_DATASET.bills) {
     if (doc.entry !== 'IMPORT' || doc.month !== month) continue;
     const docDate = resolveDate(anchor, doc.month, doc.day);
-    const dueDate = doc.dueDate === undefined ? docDate : resolveDate(anchor, doc.dueDate.month, doc.dueDate.day);
+    const dueDate = documentDueDate(anchor, doc);
     const invoiceNumber = doc.vendorReference === null ? '' : resolveTokens(anchor, doc.vendorReference);
     for (const line of documentLines(doc)) {
       rows.push([

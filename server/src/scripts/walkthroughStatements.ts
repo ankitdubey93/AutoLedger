@@ -1,5 +1,5 @@
 /**
- * Renders the three bank statement CSVs from the resolved settlement
+ * Renders the seven bank statement CSVs from the resolved settlement
  * lines, in three different real-world bank export shapes. Shared between
  * `generateWalkthrough.ts` (which writes them to disk) and
  * `walkthrough.test.ts` (which feeds them straight to the real importer,
@@ -79,6 +79,11 @@ export function statement5(anchor: AnchorMonth, lines: ResolvedSettlementLine[])
 /** Statement 6 — Meridian Bank, DMY format again, for month 6. */
 export function statement6(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
   return dmyStatement(anchor, lines, 6);
+}
+
+/** Statement 7 — Northwind Bank, ISO format again, for month 7. */
+export function statement7(anchor: AnchorMonth, lines: ResolvedSettlementLine[]): string {
+  return isoStatement(anchor, lines, 7);
 }
 
 /** Northwind's format: comma-delimited, ISO dates, one signed Amount column, vendor reference in Reference. */

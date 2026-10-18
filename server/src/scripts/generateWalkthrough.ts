@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   WALKTHROUGH_DATASET,
-  allVendors,
+  documentDueDate,
   documentLines,
   resolveTokens,
   type DatasetDocument,
@@ -23,16 +23,19 @@ import {
   type AnchorMonth,
   type WalkthroughMonth,
 } from './walkthroughDates.js';
-import { money, statement1, statement2, statement3, statement4, statement5, statement6 } from './walkthroughStatements.js';
+import { money, statement1, statement2, statement3, statement4, statement5, statement6, statement7 } from './walkthroughStatements.js';
+import { accountName, customerName, vendorName } from './walkthroughNames.js';
+import { renderGuide } from './walkthroughGuide.js';
 import { vendorsCsv, customersCsv } from './walkthroughParties.js';
 import { accountsCsv, productsCsv, stockItemsCsv, invoicesCsv, billsCsv, payrollJournalCsv } from './walkthroughCsv.js';
-import { parseMoneyText } from '../utils/money.js';
+import { cents, parseMoneyText, scaleCents } from '../utils/money.js';
+import { convertToBase } from '../utils/fxRate.js';
 
 /**
  * `npm run walkthrough [-- --anchor YYYY-MM]` — writes `walkthrough/` at the
  * repo root: source documents an accountant would receive and enter by
  * hand, a vendor and a customer CSV imported through the Phase 24 party
- * importer, three bank statements in three different formats imported
+ * importer, seven bank statements in three bank formats imported
  * through the Phase 6 bank importer, and a computed, service-verified
  * answer key.
  *
@@ -58,47 +61,6 @@ function write(relativePath: string, content: string): void {
   console.log(`[walkthrough] wrote ${relativePath}`);
 }
 
-function customerName(key: string): string {
-  const c = WALKTHROUGH_DATASET.customers.find((x) => x.key === key);
-  if (c === undefined) throw new Error(`no customer ${key}`);
-  return c.name;
-}
-function vendorName(key: string): string {
-  const v = allVendors().find((x) => x.key === key);
-  if (v === undefined) throw new Error(`no vendor ${key}`);
-  return v.name;
-}
-function accountName(code: string): string {
-  const extra = WALKTHROUGH_DATASET.extraAccounts.find((a) => a.code === code);
-  if (extra !== undefined) return `${extra.code} ${extra.name}`;
-  const DEFAULT_NAMES: Record<string, string> = {
-    '4100': '4100 Product Revenue',
-    '4200': '4200 Service Revenue',
-    '4800': '4800 Sales Returns & Allowances',
-    '5100': '5100 Direct Materials',
-    '5300': '5300 Freight & Duty',
-    '6110': '6110 Rent & Utilities',
-    '6120': '6120 Software & IT Infrastructure',
-    '6200': '6200 Professional Fees',
-    '6400': '6400 Marketing & Advertising',
-    '6600': '6600 Bank Fees',
-    '3100': "3100 Common Stock / Owner's Capital",
-    '1110': '1110 Operating Cash',
-    '1120': '1120 Accounts Receivable',
-    '2100': '2100 Accounts Payable',
-    '1140': '1140 Inventory',
-    '2120': '2120 Accrued Liabilities',
-    '2130': '2130 Customer Deposits',
-    '2160': '2160 Payroll Liabilities',
-    '5050': '5050 Cost of Sales — Inventory',
-    '5200': '5200 Direct Labor',
-    '6100': '6100 Salaries & Wages',
-  };
-  const name = DEFAULT_NAMES[code];
-  if (name === undefined) throw new Error(`no display name for account ${code}`);
-  return name;
-}
-
 /** The bank, export format and file-name suffix of each month's statement. */
 const STATEMENT_FORMAT: Record<WalkthroughMonth, string> = {
   1: 'northwind-ISO',
@@ -107,6 +69,7 @@ const STATEMENT_FORMAT: Record<WalkthroughMonth, string> = {
   4: 'northwind-ISO',
   5: 'northwind-ISO',
   6: 'meridian-DMY',
+  7: 'northwind-ISO',
 };
 
 // ------------------------------------------------------------ markdown sheets
@@ -156,6 +119,54 @@ function provenanceLine(doc: DatasetDocument): string | null {
   }
 }
 
+/** The latest dataset exchange rate entered on or before `date` (an ISO date). */
+function fxRateOn(anchor: AnchorMonth, date: string): string {
+  let best: { date: string; rate: string } | undefined;
+  for (const r of WALKTHROUGH_DATASET.fxRates) {
+    const rateDate = r.day === 'LAST' ? lastDayOfWalkthroughMonth(anchor, r.month) : resolveDate(anchor, r.month, r.day);
+    if (rateDate <= date && (best === undefined || rateDate >= best.date)) best = { date: rateDate, rate: r.rate };
+  }
+  if (best === undefined) throw new Error(`walkthrough: no exchange rate on or before ${date}`);
+  return best.rate;
+}
+
+/** '1.08000000' -> '1.08', '1.10000000' -> '1.10': at least two decimals, trailing zeros trimmed. */
+function shortRate(rate: string): string {
+  const [whole = '0', frac = ''] = rate.split('.');
+  const trimmed = frac.replace(/0+$/, '').padEnd(2, '0');
+  return `${whole}.${trimmed}`;
+}
+
+/** A line's net, tax and gross in the document's own currency (tax per line, half-up, as the product does). */
+function lineAmounts(line: { quantity: string; unitPrice: string; taxRateBp?: number }): { net: number; tax: number; total: number } {
+  const net = Math.round(Number(line.quantity) * parseMoneyText(line.unitPrice));
+  const tax = scaleCents(cents(net), line.taxRateBp ?? 0, 10_000);
+  return { net, tax, total: net + tax };
+}
+
+/** A document's total in its own currency, computed from its lines; throws if it disagrees with the dataset's `total`. */
+function documentTotals(doc: DatasetDocument): { net: number; tax: number; total: number } {
+  let net = 0;
+  let tax = 0;
+  for (const l of documentLines(doc)) {
+    const a = lineAmounts(l);
+    net += a.net;
+    tax += a.tax;
+  }
+  if (net + tax !== parseMoneyText(doc.total)) {
+    throw new Error(`walkthrough: ${doc.ref} lines sum to ${String(net + tax)} cents, dataset total is ${doc.total}`);
+  }
+  return { net, tax, total: net + tax };
+}
+
+/** 'EUR 10,000.00 (USD 10,800.00 at 1.08)' for a foreign-currency document, plain 'USD 7,525.00' otherwise. */
+function totalWithCurrency(anchor: AnchorMonth, doc: DatasetDocument, nativeCents: number): string {
+  if (doc.currency === undefined) return `${WALKTHROUGH_DATASET.baseCurrency} ${money(nativeCents)}`;
+  const rate = fxRateOn(anchor, resolveDate(anchor, doc.month, doc.day));
+  const base = convertToBase(cents(nativeCents), rate);
+  return `${doc.currency} ${money(nativeCents)} (${WALKTHROUGH_DATASET.baseCurrency} ${money(base)} at ${shortRate(rate)})`;
+}
+
 function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'invoice' | 'bill'): string {
   // Calendar-order (January-first), indexed by the *absolute* month index
   // computed below — never by an offset from the anchor, which is what
@@ -173,7 +184,7 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
   const intro =
     kind === 'invoice'
       ? `# Invoices to raise\n\nRaise each of these against the customer named, in the order shown, then **Issue** it — the matcher only considers an invoice once it is \`ISSUED\`. AutoLedger assigns the invoice number itself from the numbering settings; there is no "their invoice number" field to fill in.\n\n`
-      : `# Bills received\n\nEnter each of these against the vendor named, in the order shown, then take it through **Submit for approval → Approve**. The matcher only considers a bill once it is \`POSTED\`.\n\n`;
+      : `# Bills received\n\nEnter each of these against the vendor named, in the order shown, then take it through **Submit for review → Approve**. The matcher only considers a bill once it is \`POSTED\`.\n\n`;
 
   let out = intro;
   let currentMonth = 0;
@@ -183,13 +194,10 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
       out += `${monthHeading(doc.month as WalkthroughMonth)}\n\n`;
     }
     const date = resolveDate(anchor, doc.month, doc.day);
-    const dueDate =
-      doc.dueDate !== undefined
-        ? resolveDate(anchor, doc.dueDate.month, doc.dueDate.day)
-        : resolveDate(anchor, doc.month, doc.day + doc.dueDays);
+    const dueDate = documentDueDate(anchor, doc);
     const termDays = daysBetweenIso(date, dueDate);
     const counterparty = kind === 'invoice' ? customerName(doc.counterpartyKey) : vendorName(doc.counterpartyKey);
-    const cents = parseMoneyText(doc.total);
+    const totals = documentTotals(doc);
     const lines = documentLines(doc);
     const hasItems = lines.some((l) => l.itemCode !== null);
     out += `### ${doc.ref} · ${counterparty}\n\n`;
@@ -199,22 +207,26 @@ function renderDocuments(anchor: AnchorMonth, docs: DatasetDocument[], kind: 'in
     if (kind === 'bill') out += `| **Their bill number** | \`${resolveTokens(anchor, doc.vendorReference ?? '')}\`  ← enter as the vendor reference |\n`;
     out += `| **${kind === 'invoice' ? 'Issue date' : 'Bill date'}** | ${date} |\n`;
     out += `| **Terms** | ${termDays === 0 ? 'Due on receipt' : `Net ${String(termDays)} days`} |\n`;
-    out += `| **Due date** | ${dueDate} |\n\n`;
+    out += `| **Due date** | ${dueDate} |\n`;
+    out += `| **Currency** | ${doc.currency ?? WALKTHROUGH_DATASET.baseCurrency} |\n\n`;
     out += hasItems
-      ? `| # | Item code | Description | Qty | Unit price | Account |\n|---|---|---|---|---|---|\n`
-      : `| # | Description | Qty | Unit price | Account |\n|---|---|---|---|---|\n`;
+      ? `| # | Item code | Description | Qty | Unit price | Tax % | Net | Tax | Total | Account |\n|---|---|---|---|---|---|---|---|---|---|\n`
+      : `| # | Description | Qty | Unit price | Tax % | Net | Tax | Total | Account |\n|---|---|---|---|---|---|---|---|---|\n`;
     lines.forEach((l, i) => {
       const desc = resolveTokens(anchor, l.description);
+      const a = lineAmounts(l);
+      const taxPercent = `${String((l.taxRateBp ?? 0) / 100)}%`;
+      const amounts = `${taxPercent} | ${money(a.net)} | ${money(a.tax)} | ${money(a.total)}`;
       const row = hasItems
-        ? `| ${String(i + 1)} | ${l.itemCode === null ? '—' : `\`${l.itemCode}\``} | ${desc} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${accountName(l.accountCode)} |`
-        : `| ${String(i + 1)} | ${desc} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${accountName(l.accountCode)} |`;
+        ? `| ${String(i + 1)} | ${l.itemCode === null ? '—' : `\`${l.itemCode}\``} | ${desc} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${amounts} | ${accountName(l.accountCode)} |`
+        : `| ${String(i + 1)} | ${desc} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${amounts} | ${accountName(l.accountCode)} |`;
       out += `${row}\n`;
     });
-    out += `\n**Total: ${money(cents)}**\n\n`;
+    out += `\n**Total: ${totalWithCurrency(anchor, doc, totals.total)}**\n\n`;
     out +=
       kind === 'invoice'
         ? `> After saving, **Issue** the invoice — the matcher only considers an invoice once it is \`ISSUED\`.\n\n`
-        : `> After saving, take this bill through **Submit for approval → Approve**. The matcher only considers a bill once it is \`POSTED\`.\n\n`;
+        : `> After saving, take this bill through **Submit for review → Approve**. The matcher only considers a bill once it is \`POSTED\`.\n\n`;
   }
   return out;
 }
@@ -232,7 +244,7 @@ function renderBankStatements(anchor: AnchorMonth, resolved: ResolvedSettlementL
 
   let out =
     `# Bank statements\n\n` +
-    `Six months, three different banks, three different export formats (Northwind Bank for months 1, 4 and 5, ` +
+    `Seven months, three banks, three different export formats (Northwind Bank for months 1, 4, 5 and 7, ` +
     `Meridian Bank for months 2 and 6, Cascade Trust for month 3). Import each one against ` +
     `\`1110 Operating Cash\` **only after** that month's bills are approved and invoices are issued — ` +
     `suggestions are generated at import time against documents that are open at that moment.\n\n` +
@@ -262,7 +274,15 @@ function renderBankStatements(anchor: AnchorMonth, resolved: ResolvedSettlementL
     `## Statement 6 — Meridian Bank (\`statements/month-6-meridian-DMY.csv\`)\n\n` +
     `The same format as statement 2 — semicolon-delimited, day-first dates, separate \`Debit\`/\`Credit\` ` +
     `columns; pick **date format: DMY**. Import it after \`10-closing-the-quarter.md\`'s documents, the payroll ` +
-    `journal and the second invoice are in.\n\n---\n\n`;
+    `journal and the second invoice are in.\n\n` +
+    `## Statement 7 — Northwind Bank (\`statements/month-7-northwind-ISO.csv\`)\n\n` +
+    `The same format as statements 1 and 5 — comma-delimited, ISO dates, one signed \`Amount\` column; pick ` +
+    `**date format: ISO**. Import it after \`11-currency-tax-and-journals.md\`'s invoices and bills are in. ` +
+    `The service charge and the interest line are settled by your month 5 bank rules on import. The insurance ` +
+    `premium has no document behind it: **Post journal** → \`${accountName('1130')}\` (it is prepaid cover, an ` +
+    `asset, written off over the following months). The euro invoices have **no** line here — a euro receipt is ` +
+    `recorded from the invoice into \`${accountName('1115')}\`, and bank statements in this product are ` +
+    `base-currency only.\n\n---\n\n`;
 
   for (const m of WALKTHROUGH_MONTHS) {
     const monthLines = resolved.filter((l) => l.month === m).sort((a, b) => a.isoDate.localeCompare(b.isoDate));
@@ -298,7 +318,7 @@ function renderBankStatements(anchor: AnchorMonth, resolved: ResolvedSettlementL
     const closingBalance = monthResult?.bankReconciliation.statementBalanceCents ?? 0;
     out +=
       `\nClosing balance to type into the import form: **${money(closingBalance)}**, dated ${monthResult?.asOf ?? ''}.\n\n` +
-      `After resolving every line above, **Reports → Bank reconciliation** for \`1110 Operating Cash\` as of ` +
+      `After resolving every line above, **Banking → Reconciliation** for \`1110 Operating Cash\` as of ` +
       `\`${monthResult?.asOf ?? ''}\` must show **Difference = 0.00** and **Unmatched = 0**.\n\n---\n\n`;
   }
 
@@ -309,7 +329,7 @@ function renderMoneyRows(rows: ExpectedStatementRow[]): string {
   return rows.map((r) => `| ${r.code} ${r.name} | ${money(r.amountCents)} |`).join('\n');
 }
 
-function renderExpectedResults(expected: ExpectedMonth[]): string {
+function renderExpectedResults(anchor: AnchorMonth, expected: ExpectedMonth[]): string {
   let out =
     `# Expected results — the answer key\n\n` +
     `Computed from the same dataset the statements and source documents come from, and verified — in this ` +
@@ -348,9 +368,9 @@ function renderExpectedResults(expected: ExpectedMonth[]): string {
     out += `| **Total equity** | **${money(m.balanceSheet.equityTotalCents)}** |\n\n`;
     out += `Assets ${money(m.balanceSheet.assetsTotalCents)} = Liabilities ${money(m.balanceSheet.liabilitiesTotalCents)} + Equity ${money(m.balanceSheet.equityTotalCents)}\n\n`;
 
-    out += `### AR aging\n\n| Bucket | Amount |\n|---|---|\n`;
+    out += `### Aged receivables\n\n| Bucket | Amount |\n|---|---|\n`;
     for (const b of m.arAging) out += `| ${b.label} | ${money(b.amountCents)} |\n`;
-    out += `\n### AP aging\n\n| Bucket | Amount |\n|---|---|\n`;
+    out += `\n### Aged payables\n\n| Bucket | Amount |\n|---|---|\n`;
     for (const b of m.apAging) out += `| ${b.label} | ${money(b.amountCents)} |\n`;
 
     out += `\n### Bank reconciliation\n\n`;
@@ -360,7 +380,34 @@ function renderExpectedResults(expected: ExpectedMonth[]): string {
     out += `| **Difference** | **${money(m.bankReconciliation.differenceCents)}** |\n`;
     out += `| Matched | ${String(m.bankReconciliation.matchedCount)} |\n`;
     out += `| Unmatched | ${String(m.bankReconciliation.unmatchedCount)} |\n`;
-    out += `| Ignored | ${String(m.bankReconciliation.ignoredCount)} |\n\n---\n\n`;
+    out += `| Ignored | ${String(m.bankReconciliation.ignoredCount)} |\n\n`;
+
+    out += `### Tax summary\n\nOn documents dated in this month alone — **Reports → Tax summary**.\n\n`;
+    out += `| | Amount |\n|---|---|\n`;
+    out += `| Output tax (sales) | ${money(m.taxSummary.outputTaxCents)} |\n`;
+    out += `| Input tax (purchases) | ${money(m.taxSummary.inputTaxCents)} |\n`;
+    out += `| **Net tax payable** | **${money(m.taxSummary.netTaxPayableCents)}** |\n\n`;
+
+    out += `### Cash flow — net change\n\nThe movement of the cash accounts inside this month — **Reports → Cash flow ` +
+      `statement**, net change in cash: **${money(m.cashFlowNetChangeCents)}**.\n\n`;
+
+    if (m.month === 7) {
+      const invoice = WALKTHROUGH_DATASET.invoices.find((d) => d.currency !== undefined && d.ref === 'I22');
+      if (invoice === undefined) throw new Error('walkthrough: no euro invoice I22');
+      const native = parseMoneyText(invoice.total);
+      const atDocRate = convertToBase(cents(native), fxRateOn(anchor, resolveDate(anchor, invoice.month, invoice.day)));
+      const atMonthEnd = convertToBase(cents(native), fxRateOn(anchor, m.asOf));
+      const agingTotal = m.arAging.reduce((sum, b) => sum + b.amountCents, 0);
+      const gain = m.trialBalance.rows.find((r) => r.code === '4910')?.creditCents ?? 0;
+      out += `### Currency\n\n| | Amount |\n|---|---|\n`;
+      out += `| Realized FX gain on the euro receipt (\`4910\`) | ${money(gain)} |\n`;
+      out += `| Month-end revaluation (\`6820\`) | ${money(m.fxRevaluationDeltaCents)} |\n`;
+      out += `| ${invoice.ref} carried at | ${money(atDocRate)} → ${money(atMonthEnd)} |\n\n`;
+      out += `Aged receivables totals \`${money(agingTotal)}\` while \`1120\` is \`${money(m.arControlCents)}\`: aging values open ` +
+        `invoices at their own frozen rate; the \`${money(Math.abs(agingTotal - m.arControlCents))}\` gap is the month-end ` +
+        `revaluation, which reverses on ${resolveDate(anchor, 8, 1)}. This is expected.\n\n`;
+    }
+    out += `---\n\n`;
   }
 
   out += `If any figure above differs, see "If a number does not match" in \`README.md\`.\n`;
@@ -381,32 +428,43 @@ function renderTheBusiness(): string {
   return (
     `# Harbor Point Fabrication\n\n` +
     `${WALKTHROUGH_DATASET.businessDescription}\n\n` +
-    `**Period:** six consecutive months, entered one at a time — the fourth is about returns and ` +
-    `adjustments (credit and debit notes), and the fifth and sixth add stock, orders and deposits, a recurring ` +
-    `bill and an accrual, a payroll journal, and closing the periods. **Currency:** USD throughout.\n\n` +
+    `**Period:** seven consecutive months, entered one at a time — the fourth is about returns and ` +
+    `adjustments (credit and debit notes), the fifth and sixth add stock, orders and deposits, a recurring ` +
+    `bill and an accrual, a payroll journal, and closing the periods, and the seventh adds a euro customer, ` +
+    `sales tax and manual journals. **Currency:** USD, plus one euro customer in month 7.\n\n` +
     `**Scope.** Months 1–4 cover the accounts-receivable / accounts-payable / cash cycle — invoicing, billing, ` +
     `and bank reconciliation. Months 5–6 add stock items (moving-average cost of sales), purchase and sales ` +
     `orders with partial invoicing, a customer deposit, bank rules, a recurring rent bill, an accrual that ` +
-    `reverses itself, a payroll journal, and period close. It does not include fixed assets or depreciation, ` +
-    `foreign currency, a year-end close, or sales tax. One bank account, one currency.\n\n` +
+    `reverses itself, a payroll journal, and period close. Month 7 adds foreign currency (a euro customer, ` +
+    `exchange rates, a realized gain and a month-end revaluation), 7.5% sales tax on some documents, manual ` +
+    `journals (posted, deleted and voided), a repeating insurance journal, and the close of month 6. It does not ` +
+    `include fixed assets or depreciation, or a year-end close. One USD bank account and one euro receipts ` +
+    `account.\n\n` +
     `## Accounts this scenario touches\n\n` +
     `| Account | Why |\n|---|---|\n` +
     `| 1110 Operating Cash | Every deposit and withdrawal |\n` +
+    `| 1115 EUR Receipts Account | Where the euro receipt is recorded (month 7) |\n` +
     `| 1120 Accounts Receivable | What customers owe between invoice and payment |\n` +
+    `| 1130 Prepaid Expenses | Insurance paid in advance, amortised by a repeating journal (month 7) |\n` +
     `| 1140 Inventory | Stock on hand, valued at moving average (months 5–6) |\n` +
+    `| 1180 GST/VAT Input Credit | Tax paid on purchases (month 7) |\n` +
+    `| 1500 Fixed Assets / Equipment | The plasma cutter the owner contributes (month 7) |\n` +
     `| 2100 Accounts Payable | What's owed to vendors between bill approval and payment |\n` +
     `| 2120 Accrued Liabilities | The utilities accrual, reversed the following month (month 5) |\n` +
     `| 2130 Customer Deposits | A deposit received before the order is invoiced (month 5) |\n` +
+    `| 2140 GST/VAT Output Payable | Tax charged on sales (month 7) |\n` +
     `| 2160 Payroll Liabilities | Net pay owed to employees until the bank pays it out (month 6) |\n` +
     `| 3100 Common Stock / Owner's Capital | The founder's opening deposit |\n` +
     `| 4100 Product Revenue, 4200 Service Revenue | The two ways Harbor Point bills customers |\n` +
     `| 4300 Interest Income | Bank interest — the one account added to the default chart; it arrives through \`accounts.csv\` (or by hand), see 01-setup.md |\n` +
     `| 4800 Sales Returns & Allowances | Month 4's credit notes — a contra-revenue account |\n` +
+    `| 4910 Realized FX Gain, 6820 Unrealized FX Gain/Loss | Exchange differences on the euro invoices (month 7) |\n` +
     `| 5050 Cost of Sales — Inventory | What the stock sold to customers cost us (months 5–6) |\n` +
     `| 5100 Direct Materials, 5300 Freight & Duty | Cost of sales |\n` +
     `| 5200 Direct Labor | Shop-floor payroll (month 6) |\n` +
     `| 6100 Salaries & Wages | Office and salaried payroll (month 6) |\n` +
     `| 6110, 6120, 6200, 6400 | Rent, software, professional fees, marketing |\n` +
+    `| 6150 Insurance | The monthly amortisation of the prepaid premium (month 7), added by form |\n` +
     `| 6600 Bank Fees | Wire fees and monthly service charges |\n`
   );
 }
@@ -414,11 +472,12 @@ function renderTheBusiness(): string {
 function renderReadme(): string {
   return (
     `# Walkthrough: Harbor Point Fabrication\n\n` +
-    `A complete, six-month accounting scenario for AutoLedger — vendor, customer, product and stock-item CSVs to ` +
-    `import, source documents to enter by hand (or raise from quotes and orders), six bank statements to import, ` +
+    `A complete, seven-month accounting scenario for AutoLedger — vendor, customer, product and stock-item CSVs to ` +
+    `import, source documents to enter by hand (or raise from quotes and orders), seven bank statements to import, ` +
     `credit and debit notes in month 4, stock, a deposit, recurring bills and an accrual in month 5, a month-end ` +
-    `close in month 6, and a computed answer key — verified against the real application — to check your work ` +
-    `against. A separate, unscored feature tour covers what does not touch the ledger.\n\n` +
+    `close in month 6, currency, sales tax and manual journals in month 7, and a computed answer key — verified ` +
+    `against the real application — to check your work against. A separate, unscored test guide (\`guide/\`) ` +
+    `covers every other feature.\n\n` +
     `**Start with \`TUTORIAL.md\`** — it walks the whole thing start to finish with hints. The files below are ` +
     `its reference material, useful to come back to on their own:\n\n` +
     `- \`00-the-business.md\` — who Harbor Point Fabrication is\n` +
@@ -433,12 +492,15 @@ function renderReadme(): string {
     `quote → sales order → deposit → invoice, a recurring bill and a self-reversing accrual\n` +
     `- \`10-closing-the-quarter.md\` — month 6: the generated rent, imported invoices/bills/payroll, applying ` +
     `the deposit, closing a period\n` +
-    `- \`11-feature-tour.md\` — an optional, **unscored** tour of features that do not change the answer key\n` +
+    `- \`11-currency-tax-and-journals.md\` — month 7: two accounts by form, a euro customer, exchange rates, ` +
+    `manual journals (posted, deleted, voided), 7.5% sales tax, a euro receipt, a repeating journal, the ` +
+    `month-end revaluation and closing a period\n` +
+    `- \`guide/\` — the module-by-module test guide for every feature, unscored — start at \`guide/README.md\`\n` +
     `- \`vendors.csv\`, \`customers.csv\`, \`accounts.csv\`, \`products.csv\`, \`stock-items.csv\` — master data to ` +
     `import via **Accounting → Imports**\n` +
     `- \`invoices-month-6.csv\`, \`bills-month-6.csv\`, \`payroll-month-6.csv\` — month 6's document and journal ` +
     `imports\n` +
-    `- \`statements/\` — the six CSV files to import via **Banking → Import statement**\n\n` +
+    `- \`statements/\` — the seven CSV files to import via **Banking → Import statement**\n\n` +
     `**Run order:** import all 6 vendors and all 6 customers once, up front, via **Accounting → ` +
     `Imports** in the left sidebar (and \`accounts.csv\`, per \`01-setup.md\`). Then, one month at a time — enter that month's bills (submit + approve), enter that month's ` +
     `invoices (issue), import that month's statement, resolve every line, check the reconciliation report, ` +
@@ -447,9 +509,10 @@ function renderReadme(): string {
     `**before** importing its statement. ` +
     `Suggestions are generated at import time against documents that are open right then, so a month's ` +
     `documents must exist before its statement is imported.\n\n` +
-    `Months 5 and 6 are different in kind: follow \`09-products-orders-and-stock.md\` for month 5 and ` +
-    `\`10-closing-the-quarter.md\` for month 6 — they say what to do in what order (imports, bank rules, ` +
-    `orders, a deposit, a schedule), and the document sheets \`04\`/\`05\` then serve as reference. The ` +
+    `Months 5, 6 and 7 are different in kind: follow \`09-products-orders-and-stock.md\` for month 5, ` +
+    `\`10-closing-the-quarter.md\` for month 6 and \`11-currency-tax-and-journals.md\` for month 7 — they say ` +
+    `what to do in what order (imports, bank rules, orders, a deposit, a schedule, rates, journals), and the ` +
+    `document sheets \`04\`/\`05\` then serve as reference. The ` +
     `scenario's dates end in the past on purpose: a recurring schedule only creates occurrences up to today.\n\n` +
     `**Do not hand-edit anything in this folder.** It is generated output — change ` +
     `\`server/src/scripts/walkthroughDataset.ts\` and run \`npm run walkthrough\` again.\n\n` +
@@ -463,10 +526,10 @@ function renderReadme(): string {
   );
 }
 
-function renderTutorial(expected: ExpectedMonth[]): string {
+function renderTutorial(anchor: AnchorMonth, expected: ExpectedMonth[]): string {
   let out =
     `# Tutorial: run the whole scenario\n\n` +
-    `You are Harbor Point Fabrication's bookkeeper for six months. Everything you need to type is in this ` +
+    `You are Harbor Point Fabrication's bookkeeper for seven months. Everything you need to type is in this ` +
     `folder; everything you should end up seeing is in this file, month by month, with a hint at each step ` +
     `that tends to trip people up.\n\n` +
     `Read \`00-the-business.md\` first if you have not already — it is one page and tells you what the company ` +
@@ -485,7 +548,8 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     `shows \`6 will be created, 0 will be merged\`; Commit. Repeat with kind **Customers** and \`customers.csv\`. ` +
     `(The **Customers** and **Vendors** pages have an **Import** button that opens the same wizard.) ` +
     `Do this now, before entering any document — every one of the 12 is used at least once across the six ` +
-    `months. A thirteenth vendor, Lakeshore Power & Water, is added by hand in month 6.\n\n` +
+    `months. A thirteenth vendor, Lakeshore Power & Water, is added by hand in month 6, and a seventh customer, ` +
+    `Rheinwerk Maschinenbau GmbH (a euro customer), is added by form in month 7.\n\n` +
     `> **Hint:** payment terms for every vendor are "Due on receipt" — there's no net-30 anywhere in this ` +
     `scenario, which keeps every bank line's date close to its document's date.\n\n` +
     `> **Hint:** if a staged row comes back \`INVALID\`, the importer is telling you something is genuinely ` +
@@ -496,7 +560,21 @@ function renderTutorial(expected: ExpectedMonth[]): string {
     const monthResult = expected.find((e) => e.month === m);
     out +=
       `## Month ${String(m)}\n\n` +
-      (m === 5 || m === 6
+      (m === 7
+        ? `**Enter the documents.** Month 7 is different in kind again: it brings foreign currency, sales tax and ` +
+          `manual journals. \`11-currency-tax-and-journals.md\` walks through it **in the order to do things** — two ` +
+          `accounts and a customer by form, three exchange rates, the manual journals, the invoices and the euro ` +
+          `receipt, the bills, then the statement, the repeating insurance journal, the month-end revaluation and ` +
+          `closing a period (\`04-bills-received.md\` and \`05-invoices-to-raise.md\` list the same documents with their ` +
+          `figures).\n\n` +
+          `> **Hint:** enter the exchange rates **before** the euro invoices. An invoice dated before any rate is ` +
+          `refused with "No exchange rate for EUR to USD on or before <date>".\n\n` +
+          `> **Hint:** a euro receipt never appears as a bank-line suggestion — statements here are base-currency ` +
+          `only. Record it from the invoice with **Record payment**, paid into \`1115 EUR Receipts Account\`.\n\n` +
+          `> **Hint:** **Post revaluation** only once, at month end — after it, the FX exposure page reads "This date has already been revalued." and the button is gone.\n\n` +
+          `> **Hint:** **Delete** removes a draft manual journal; **Void** reverses a posted one — the void appears ` +
+          `on both sides of the trial balance, so its two lines cancel and the original stays visible.\n\n`
+        : m === 5 || m === 6
         ? `**Enter the documents.** This month's documents are not all typed in the same way — some are raised ` +
           `from orders, imported from files, or generated by a schedule. \`${m === 5 ? '09-products-orders-and-stock.md' : '10-closing-the-quarter.md'}\` ` +
           `walks through them **in the order to do them** (\`04-bills-received.md\` and \`05-invoices-to-raise.md\` ` +
@@ -515,7 +593,7 @@ function renderTutorial(expected: ExpectedMonth[]): string {
           `- after CN1 → invoice I15 shows amount due **10,200.00**\n` +
           `- after DN1 → expense B12 shows amount due **10,500.00**\n` +
           `- after CN2 → **Customers → Ferrous Works Ltd**'s open items show CN2 as its own line at ` +
-          `**−500.00** (unapplied credit) next to I16's 6,200.00, and **Reports → AR aging** still says it ` +
+          `**−500.00** (unapplied credit) next to I16's 6,200.00, and **Reports → Aged receivables** still says it ` +
           `reconciles\n` +
           `- after applying CN2 → invoice I16 shows amount due **5,700.00**\n\n` +
           `> **Hint:** issue the notes **before** importing the statement. Suggestions are scored at import time ` +
@@ -547,7 +625,7 @@ function renderTutorial(expected: ExpectedMonth[]): string {
       `in the reconciliation report — Ignore drops a line from the statement total entirely, Post journal ` +
       `moves the GL and counts it. Using the wrong one is the single most common way this month's Difference ` +
       `comes out non-zero.\n\n` +
-      `**Check the reconciliation.** Reports → Bank reconciliation, account \`1110 Operating Cash\`, as of ` +
+      `**Check the reconciliation.** Banking → Reconciliation, account \`1110 Operating Cash\`, as of ` +
       `\`${monthResult?.asOf ?? ''}\`. You should see:\n\n` +
       `- Difference: **0.00**\n` +
       `- Unmatched: **0**\n` +
@@ -566,8 +644,20 @@ function renderTutorial(expected: ExpectedMonth[]): string {
             .join('\n') +
           `\n| ${accountName('5050')} (cumulative) | ${money(monthResult.profitAndLoss.costOfSales.find((r) => r.code === '5050')?.amountCents ?? 0)} |\n\n`
         : '') +
+      (m === 7 && monthResult !== undefined
+        ? `Month 7 checkpoints (the hand-checked figures):\n\n` +
+          `| | |\n|---|---|\n` +
+          ['1115', '1120', '1130', '1180', '1500', '2140', '3100']
+            .map((code) => `| ${accountName(code)} | ${money(balanceCents(monthResult, code))} |`)
+            .join('\n') +
+          `\n| Net tax payable (output ${money(monthResult.taxSummary.outputTaxCents)} less input ${money(monthResult.taxSummary.inputTaxCents)}) | ${money(monthResult.taxSummary.netTaxPayableCents)} |\n` +
+          `| Net change in cash | ${money(monthResult.cashFlowNetChangeCents)} |\n` +
+          `| Month-end revaluation | ${money(monthResult.fxRevaluationDeltaCents)} |\n\n` +
+          `> **Hint:** aged receivables will not equal \`1120\` this month — the gap is the revaluation, which reverses ` +
+          `on ${resolveDate(anchor, 8, 1)}. \`07-expected-results.md\` explains it.\n\n`
+        : '') +
       `**Check the answer key.** Open \`07-expected-results.md\`'s "Month ${String(m)}" section and compare, ` +
-      `figure by figure: trial balance (Reports → Trial balance), P&L, balance sheet, and AR/AP aging. The ` +
+      `figure by figure: trial balance (Reports → Trial balance), P&L, balance sheet, aged receivables and aged payables. The ` +
       `headline numbers for this month:\n\n` +
       `| | |\n|---|---|\n` +
       `| Net income (cumulative) | ${money(monthResult?.profitAndLoss.netIncomeCents ?? 0)} |\n` +
@@ -582,12 +672,13 @@ function renderTutorial(expected: ExpectedMonth[]): string {
 
   out +=
     `## You're done\n\n` +
-    `Six months entered, six statements reconciled, six months of financial statements that tie back to ` +
+    `Seven months entered, seven statements reconciled, seven months of financial statements that tie back to ` +
     `a source document for every dollar — including three corrections made the way an auditor ` +
     `expects them, by separate documents that leave the originals untouched, stock bought and sold at moving ` +
-    `average, a deposit that became revenue, and an accrual that cancelled itself. \`11-feature-tour.md\` ` +
-    `is an optional extra: it exercises features that do not move the ledger. If you want to see the finished books ` +
-    `without typing them, \`npm run seed:demo\` (in \`server/\`) replays this exact scenario through the API into a ` +
+    `average, a deposit that became revenue, an accrual that cancelled itself, and a euro customer whose ` +
+    `exchange gain was realized and whose balance was revalued at month end. \`guide/README.md\` ` +
+    `is the optional extra: a module-by-module test guide that exercises every other feature, each section ` +
+    `ending in "Try to break it" checks. If you want to see the finished books without typing them, \`npm run seed:demo\` (in \`server/\`) replays this exact scenario through the API into a ` +
     `demo organization — see \`docs/development.md\`.\n`;
 
   return out;
@@ -721,7 +812,7 @@ function renderAdjustments(anchor: AnchorMonth): string {
     `| CN1 | Invoice I15 | Credits applied 1,800.00 · Amount due **10,200.00** |\n` +
     `| DN1 | Expense B12 | Debits applied 1,500.00 · Amount due **10,500.00** |\n` +
     `| CN2 (before applying) | Customers → Ferrous Works Ltd → open items | Two open items: I16 **6,200.00** and CN2 **−500.00** (unapplied credit) — balance 5,700.00 |\n` +
-    `| CN2 (before applying) | Reports → AR aging | Ferrous Works 5,700.00, and "Reconciles" still ✓ |\n` +
+    `| CN2 (before applying) | Reports → Aged receivables | Ferrous Works 5,700.00, and "Reconciles" still ✓ |\n` +
     `| CN2 applied | Invoice I16 | Credits applied 500.00 · Amount due **5,700.00** |\n` +
     `| Statement 4 imported | Bank lines | 10,200.00, −10,500.00 and 5,700.00 each suggest I15, B12 and I16 |\n\n` +
     `By month end every one of these is settled, so AR and AP are both **0.00** again — but the P&L now shows ` +
@@ -784,7 +875,7 @@ function expectedMonth(expected: ExpectedMonth[], month: WalkthroughMonth): Expe
 
 /** A balance-sheet account's balance in cents (0 when the account has no balance). */
 function balanceCents(m: ExpectedMonth, code: string): number {
-  return [...m.balanceSheet.assets, ...m.balanceSheet.liabilities].find((r) => r.code === code)?.amountCents ?? 0;
+  return [...m.balanceSheet.assets, ...m.balanceSheet.liabilities, ...m.balanceSheet.equityRows].find((r) => r.code === code)?.amountCents ?? 0;
 }
 
 function orderLinesTable(lines: DatasetOrder['lines']): string {
@@ -888,9 +979,9 @@ function renderProductsAndOrders(anchor: AnchorMonth): string {
     `Total ${money(po1Cents)}. **Save**, then **Confirm**. A purchase order is a *commitment*, not a debt: it ` +
     `posts **nothing**. Nothing is owed until the goods are invoiced.\n\n` +
     `When the supplier's invoice arrives, open the order and choose **Create bill**: bill date ` +
-    `${resolveDate(anchor, b13.month, b13.day)}, due date ${resolveDate(anchor, b13.month, b13.day + b13.dueDays)}, ` +
+    `${resolveDate(anchor, b13.month, b13.day)}, due date ${documentDueDate(anchor, b13)}, ` +
     `vendor's invoice no. \`${resolveTokens(anchor, b13.vendorReference ?? '')}\`, all lines at the ordered quantities. ` +
-    `Open the new draft expense (**Purchases → Expenses**) and take it through **Submit for approval → Approve**. ` +
+    `Open the new draft expense (**Purchases → Expenses**) and take it through **Submit for review → Approve**. ` +
     `This is **${b13.ref}** in \`04-bills-received.md\`.\n\n` +
     `Approving posts the bill — and, because both lines are stock items, it also **receives the stock**:\n\n` +
     postingTable([
@@ -920,7 +1011,7 @@ function renderProductsAndOrders(anchor: AnchorMonth): string {
     `record until goods ship or work is done). The order is **${so1.ref}**.\n\n` +
     `### The deposit — ${d1.ref}\n\n` +
     `Open ${so1.ref} → **Request deposit** → basis: **${String(depositPercent)}%** of the order, document date ` +
-    `${resolveDate(anchor, d1.month, d1.day)}, due date ${resolveDate(anchor, d1.month, d1.day + d1.dueDays)}. It ` +
+    `${resolveDate(anchor, d1.month, d1.day)}, due date ${documentDueDate(anchor, d1)}. It ` +
     `creates a draft deposit invoice for **${money(d1Cents)}**; **Issue** it. Posting:\n\n` +
     postingTable([
       { account: accountName('1120'), debitCents: d1Cents },
@@ -936,7 +1027,7 @@ function renderProductsAndOrders(anchor: AnchorMonth): string {
     `${stockLines.map((l) => `${l.itemCode ?? ''} **${l.quantity}**`).join(', ')}, and set the ` +
     `${so1.lines.filter((l) => !stockLines.some((s) => s.itemCode === l.itemCode)).map((l) => l.itemCode ?? '').join(', ')} line to **0** ` +
     `(it is billed with the second delivery). Document date ${resolveDate(anchor, i17.month, i17.day)}, due date ` +
-    `${resolveDate(anchor, i17.month, i17.day + i17.dueDays)}. Then open the draft invoice and **Issue** it. This is ` +
+    `${documentDueDate(anchor, i17)}. Then open the draft invoice and **Issue** it. This is ` +
     `**${i17.ref}** in \`05-invoices-to-raise.md\`. Issuing posts **two** things at once:\n\n` +
     `*The sale:*\n\n` +
     postingTable([
@@ -994,8 +1085,9 @@ function renderProductsAndOrders(anchor: AnchorMonth): string {
     `| ${resolveDate(anchor, acc1.repeat.endMonth, acc1.repeat.endDay)} | Accrue ${nextName}'s utilities | ${accountName('6110')} ${money(accrualCents)} | ${accountName('2120')} ${money(accrualCents)} |\n` +
     `| ${resolveDate(anchor, 7, 1)} | Reverse that one | ${accountName('2120')} ${money(accrualCents)} | ${accountName('6110')} ${money(accrualCents)} |\n\n` +
     `Only the first row belongs to month 5. The next two land in month 6 (don't worry that they appear already — ` +
-    `reports "as of" the end of month 5 ignore them), and the last is dated after the scenario ends, so ` +
-    `\`2120 Accrued Liabilities\` closes month 6 still holding ${money(accrualCents)}: ${nextName}'s estimate. In ` +
+    `reports "as of" the end of month 5 ignore them), and the last reversal lands on ${resolveDate(anchor, 7, 1)}, ` +
+    `the first day of month 7. So \`2120 Accrued Liabilities\` closes month 6 still holding ${money(accrualCents)}: ` +
+    `${nextName}'s estimate — and reads ${money(balanceCents(expectedMonth(expected, 7), '2120'))} once that reversal posts. In ` +
     `month 6 the supplier's real ${mName} bill arrives and is expensed again; the reversal cancels it out, so ` +
     `${mName}'s cost is counted once, in ${mName}.\n\n` +
     `> The estimate is a manual journal, which is why it works: AutoLedger refuses manual postings to the ` +
@@ -1012,7 +1104,7 @@ function renderProductsAndOrders(anchor: AnchorMonth): string {
     (closes === undefined
       ? ''
       : `Once ${mName} reconciles, **lock the books behind you**: **Accounting → Fiscal periods → Generate periods ` +
-        `for this fiscal year** (if your six months cross a fiscal-year boundary, generate for both years), ` +
+        `for this fiscal year** (if your seven months cross a fiscal-year boundary, generate for both years), ` +
         `then **Close** the periods for ${closes.closeMonths.map((m) => monthName(anchor, m)).join(', ')}. A closed ` +
         `period refuses new postings; it can be reopened, so closing is a safety catch rather than a lock. Month 6 ` +
         `shows what the refusal looks like.\n\n`) +
@@ -1065,7 +1157,7 @@ function renderClosingTheQuarter(anchor: AnchorMonth, expected: ExpectedMonth[])
   for (const l of i20Lines) revenueByAccount.set(l.accountCode, (revenueByAccount.get(l.accountCode) ?? 0) + lineCents(l));
   const appliedCents = parseMoneyText(application.amount);
   const i20Date = resolveDate(anchor, i20.month, i20.day);
-  const i20Due = i20.dueDate === undefined ? i20Date : resolveDate(anchor, i20.dueDate.month, i20.dueDate.day);
+  const i20Due = documentDueDate(anchor, i20);
   const payrollCredit = payroll.lines.reduce((sum, l) => sum + parseMoneyText(l.credit), 0);
   const netPayCents = Math.abs(parseMoneyText(netPay.amount));
   const lastDay = lastDayOfWalkthroughMonth(anchor, 6);
@@ -1102,7 +1194,7 @@ function renderClosingTheQuarter(anchor: AnchorMonth, expected: ExpectedMonth[])
     `- its vendor reference carries the run date (the schedule adds it to ${b14.ref}'s reference so the two bills ` +
     `cannot clash). Replace it with \`${resolveTokens(anchor, b15.vendorReference ?? '')}\`, the number on the landlord's ` +
     `${mName} invoice — it is a draft, so it is editable.\n\n` +
-    `**Submit for approval → Approve.** Now open the posted bill: the line reads **"Shop rent — ${mName}"**. ` +
+    `**Submit for review → Approve.** Now open the posted bill: the line reads **"Shop rent — ${mName}"**. ` +
     `\`[Month]\` was replaced with the month of the *document date* at the moment of approval — which is why a ` +
     `recurring bill can be written once and read correctly every month. Nothing is replaced in a draft, and ` +
     `nothing placeholder-shaped can reach a posted document.\n\n`;
@@ -1211,6 +1303,9 @@ function renderClosingTheQuarter(anchor: AnchorMonth, expected: ExpectedMonth[])
     `| ${accountName('1120')} (all of it ${i20.ref}) | ${money(ar)} |\n` +
     `| ${accountName('2100')} | ${money(balanceCents(m6, '2100'))} |\n` +
     `| ${accountName('5050')} (cumulative) | ${money(m6.profitAndLoss.costOfSales.find((r) => r.code === '5050')?.amountCents ?? 0)} |\n\n` +
+    `${accountName('2120')} reads ${money(balanceCents(m6, '2120'))} here because the utilities accrual's last ` +
+    `reversal lands on ${resolveDate(anchor, 7, 1)}, the first day of month 7; after it posts, the account is ` +
+    `${money(balanceCents(expectedMonth(expected, 7), '2120'))}.\n\n` +
     `Compare the rest with \`07-expected-results.md\` → Month 6.\n\n`;
 
   // 7. close
@@ -1224,138 +1319,385 @@ function renderClosingTheQuarter(anchor: AnchorMonth, expected: ExpectedMonth[])
     `late entry can no longer change a month you have already reported.) Nothing should be saved; if a draft ` +
     `is left behind, delete it. Closing is reversible — **Reopen** exists — whereas a *locked* period is not; this scenario ` +
     `only closes.\n\n` +
-    `That is the quarter: six months, every ledger figure agreeing with \`07-expected-results.md\`.\n`;
+    `That is the quarter: months 1–6, every ledger figure agreeing with \`07-expected-results.md\`. Month 7 ` +
+    `(\`11-currency-tax-and-journals.md\`) continues from here.\n`;
   return out;
 }
 
-// ---------------------------------------------------- 11: the feature tour
+// ------------------------------------- 11: currency, tax and journals (month 7)
+
+/** A document's posting in base-currency cents, aggregated by account (invoice: DR 1120; bill: CR 2100). */
+function documentPosting(
+  anchor: AnchorMonth,
+  doc: DatasetDocument,
+  kind: 'invoice' | 'bill',
+): { account: string; debitCents?: number; creditCents?: number }[] {
+  const rate = doc.currency === undefined ? null : fxRateOn(anchor, resolveDate(anchor, doc.month, doc.day));
+  const base = (nativeCents: number): number => (rate === null ? nativeCents : convertToBase(cents(nativeCents), rate));
+  const byAccount = new Map<string, number>();
+  let tax = 0;
+  for (const l of documentLines(doc)) {
+    const a = lineAmounts(l);
+    byAccount.set(l.accountCode, (byAccount.get(l.accountCode) ?? 0) + a.net);
+    tax += a.tax;
+  }
+  const totalCents = [...byAccount.values()].reduce((sum, v) => sum + base(v), 0) + base(tax);
+  const lines = [...byAccount.entries()].map(([code, net]) => ({ code, cents: base(net) }));
+  if (kind === 'invoice') {
+    return [
+      { account: accountName('1120'), debitCents: totalCents },
+      ...lines.map((l) => ({ account: accountName(l.code), creditCents: l.cents })),
+      ...(tax > 0 ? [{ account: accountName('2140'), creditCents: base(tax) }] : []),
+    ];
+  }
+  return [
+    ...lines.map((l) => ({ account: accountName(l.code), debitCents: l.cents })),
+    ...(tax > 0 ? [{ account: accountName('1180'), debitCents: base(tax) }] : []),
+    { account: accountName('2100'), creditCents: totalCents },
+  ];
+}
+
+/** The lines of a dataset journal as a posting table. */
+function journalPosting(j: { lines: { accountCode: string; debit: string; credit: string }[] }): string {
+  return postingTable(
+    j.lines.map((l) => {
+      const debit = parseMoneyText(l.debit);
+      const credit = parseMoneyText(l.credit);
+      return debit > 0
+        ? { account: accountName(l.accountCode), debitCents: debit }
+        : { account: accountName(l.accountCode), creditCents: credit };
+    }),
+  );
+}
+
+/** The same lines with debit and credit swapped — what a void (or an automatic reversal) posts. */
+function reversedJournalPosting(j: { lines: { accountCode: string; debit: string; credit: string }[] }): string {
+  return postingTable(
+    j.lines.map((l) => {
+      const debit = parseMoneyText(l.debit);
+      const credit = parseMoneyText(l.credit);
+      return debit > 0
+        ? { account: accountName(l.accountCode), creditCents: debit }
+        : { account: accountName(l.accountCode), debitCents: credit };
+    }),
+  );
+}
+
+function journalLinesTable(j: { lines: { accountCode: string; description: string | null; debit: string; credit: string }[] }): string {
+  const rows = j.lines
+    .map((l, i) => {
+      const debit = parseMoneyText(l.debit);
+      const credit = parseMoneyText(l.credit);
+      return `| ${String(i + 1)} | ${l.description ?? ''} | ${accountName(l.accountCode)} | ${debit > 0 ? money(debit) : ''} | ${credit > 0 ? money(credit) : ''} |`;
+    })
+    .join('\n');
+  return `| # | Description | Account | Debit | Credit |\n|---|---|---|---|---|\n${rows}\n\n`;
+}
+
+function datasetJournal(ref: string): (typeof WALKTHROUGH_DATASET.journals)[number] {
+  const j = WALKTHROUGH_DATASET.journals.find((x) => x.ref === ref);
+  if (j === undefined) throw new Error(`walkthrough: no journal ${ref}`);
+  return j;
+}
+
+function invoiceLinesTable(doc: DatasetDocument): string {
+  const hasItems = documentLines(doc).some((l) => l.itemCode !== null);
+  let out = hasItems
+    ? `| # | Item code | Description | Qty | Unit price | Tax % | Account |\n|---|---|---|---|---|---|---|\n`
+    : `| # | Description | Qty | Unit price | Tax % | Account |\n|---|---|---|---|---|---|\n`;
+  documentLines(doc).forEach((l, i) => {
+    const tax = `${String((l.taxRateBp ?? 0) / 100)}%`;
+    out += hasItems
+      ? `| ${String(i + 1)} | ${l.itemCode === null ? '—' : `\`${l.itemCode}\``} | ${l.description} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${tax} | ${accountName(l.accountCode)} |\n`
+      : `| ${String(i + 1)} | ${l.description} | ${l.quantity} | ${money(parseMoneyText(l.unitPrice))} | ${tax} | ${accountName(l.accountCode)} |\n`;
+  });
+  return `${out}\n`;
+}
 
 /**
- * `11-feature-tour.md` — an unscored tour of features that do not move the
- * ledger. Hand-written prose (no scenario figures live here except the few
- * read from the dataset); each nav path exists in `client/.../layout/nav.ts`
- * or the Settings hub.
+ * `11-currency-tax-and-journals.md` — month 7's explainer and entry sheet.
+ * Every figure comes from the dataset or the computed answer key.
  */
-function renderFeatureTour(): string {
-  const kestrel = customerName('kestrel-logistics');
-  const b18 = datasetDocByRef('B18');
-  const supplier = vendorName(b18.counterpartyKey);
-  return (
-    `# Feature tour (optional, unscored)\n\n` +
-    `Do this **after month 6**. Nothing here changes \`07-expected-results.md\` — **except** where a step is ` +
-    `flagged **⚠ changes the answer key**; those you either skip, undo, or do in the second organization from ` +
-    `section 11. Each section says what to do, what you should see, and — where it needs something outside the ` +
-    `app — what it needs. Sections marked *optional* need credentials or services you may not have.\n\n` +
-    `The sidebar groups are named as they appear in the app: Overview, Sales, Purchases, Products & inventory, ` +
-    `Banking, Accounting, Reports, Workspace. **Settings** (bottom of the sidebar) is a hub of cards; its card ` +
-    `names are used below.\n\n---\n\n` +
-    `## 1. Organization profile and logo\n\n` +
-    `**Do this:** **Settings → Organization → Profile**. Fill in the postal address and tax numbers and upload a ` +
-    `logo (any small PNG or JPEG).\n\n` +
-    `**You should see:** the details on the page after saving, and — in section 2 — the logo and address on the ` +
-    `invoice preview. The logo is stored in the Document Vault (**Workspace → Documents**).\n\n` +
-    `## 2. The invoice template\n\n` +
-    `**Do this:** **Settings → Sales → Invoice template**. Switch between **Classic**, **Modern** and ` +
-    `**Compact**; change the document title, font, density, accent colour, bank details and footer notes; try \`[Month]\` in the footer notes — placeholders in template text are filled as a document renders.\n\n` +
-    `**You should see:** a live preview beside the form that is the *same component* your real invoices print ` +
-    `with. Open any invoice (**Sales → Invoices**, e.g. one for ${kestrel}) and compare. Layouts are a fixed set of ` +
-    `three — there is no free-form template editor.\n\n` +
-    `## 3. Payment terms\n\n` +
-    `**Do this:** **Settings → Sales → Payment terms**. Add a term whose rule is **Day of month … of the ` +
-    `following month** with day **20** ("20th of next month"). Then **Settings → Accounting → Financial** and ` +
-    `choose it under **Default terms — sales** (or bills).\n\n` +
-    `**You should see:** a new draft invoice (**Sales → Invoices → New**) start with that term and compute the ` +
-    `due date for you — an invoice dated the 10th falls due the 20th of the *next* month. ` +
-    `**⚠ changes the answer key** only if you create and issue documents afterwards; a draft you never issue ` +
-    `changes nothing. Setting the default back afterwards is tidy.\n\n` +
-    `## 4. Quotes: settings, emails, PDF, public acceptance *(optional)*\n\n` +
-    `**Needs:** Mailpit, a local inbox. From the repo root \`docker compose --profile mail up -d mailpit\`, put ` +
-    `\`MAIL_TRANSPORT=mailpit\` in \`server/.env\`, restart the server **and the worker** (the worker sends), then ` +
-    `open http://localhost:8025.\n\n` +
-    `**Do this:** **Settings → Sales → Invoicing**: set the quote prefix, default validity and default terms. ` +
-    `**Settings → Sales → Quote emails**: edit the template. Create a quote (**Sales → Quotes → New**) for ` +
-    `${kestrel} with *your* email address, **Send → Email a review link**, then **Download PDF** from the quote ` +
-    `page.\n\n` +
-    `**You should see:** the email in Mailpit; open its link in a private window — the public \`/quote/…\` ` +
-    `page, no sign-in — type a name, tick the terms, **Accept**. Back in the app the quote shows the acceptance ` +
-    `with the time, IP and a content hash. With **Invoicing → require an emailed code** ticked, accepting also ` +
-    `asks for a 6-digit code mailed to the recipient. (That proves control of an email address — it is not a ` +
-    `qualified electronic signature.) A quote never posts; **⚠ converting it does create a draft** — delete it.\n\n` +
-    `## 5. A purchase quote becomes a bill\n\n` +
-    `**Do this:** **Purchases → Purchase quotes → New** for any vendor with one line; **Send → Mark as sent**, ` +
-    `**Record acceptance**, then **Convert to expense**.\n\n` +
-    `**You should see:** a *draft* expense in **Purchases → Expenses** — and nothing in the trial balance. ` +
-    `**⚠ changes the answer key if you approve it. Delete the draft afterwards.**\n\n` +
-    `## 6. Customer statements\n\n` +
-    `**Do this:** **Sales → Statements**. Open ${kestrel}: switch between **Outstanding** and **Activity**, ` +
-    `pick an "as at" date. Back on the list, tick several customers and use **Print** (bulk print) and **Email**. ` +
-    `Edit the layout under **Settings → Sales → Statement template** and the email wording under **Settings → ` +
-    `Sales → Statement emails**.\n\n` +
-    `**You should see:** Outstanding equals the customer's ledger balance on that date. With Mailpit running, the ` +
-    `email carries a **Review and pay** link to a public \`/statement/…\` page. *Optional:* with Stripe **test** ` +
-    `keys in \`server/.env\` (\`STRIPE_SECRET_KEY\`, \`STRIPE_PUBLISHABLE_KEY\`; the server refuses live keys ` +
-    `outside production) that page offers card payment — use Stripe's test card 4242 4242 4242 4242. ` +
-    `**⚠ a completed payment records a receipt and changes the answer key.** Stop at the form.\n\n` +
-    `## 7. Attachments\n\n` +
-    `**Do this:** upload a PDF or image under **Workspace → Documents**. Open the expense for ${supplier} (` +
-    `${b18.ref}, **Purchases → Expenses**) and, in its **Attachments** panel, attach it from the Vault. While ` +
-    `*drafting* a new bill or invoice you can attach files before it is saved.\n\n` +
-    `**You should see:** the file listed on the document, downloadable, with the Vault page showing where it is ` +
-    `used. Attaching changes no figure — it is a link, and posted documents stay immutable.\n\n` +
-    `## 8. Credits offered on approval\n\n` +
-    `**Do this:** you have already met it — issuing month 6's last invoice offered the customer's deposit. The ` +
-    `same dialog appears when you **Approve** a bill and the vendor has an open debit note or prepayment. To ` +
-    `see the purchase side without touching this organization, use the second organization from section 11: ` +
-    `approve and pay a bill, issue a debit note against it (the whole note becomes unapplied credit because the ` +
-    `bill is already paid), then approve a second bill for the same vendor.\n\n` +
-    `**You should see:** the dialog listing the credit with an amount to apply; applying it happens in the same ` +
-    `step as approval and reduces the new bill's amount due.\n\n` +
-    `## 9. Members, invitations and roles\n\n` +
-    `**Do this:** **Settings → Organization → Members & invitations → Invite someone**: an email address and a ` +
-    `role. The invitation is a **copyable link** (and, with Mailpit, an email). Then **Settings → Organization ` +
-    `→ Roles & permissions → New role**: build a read-only role from the \`… view\` permissions only. Invite a ` +
-    `second email with that role, open the link in a private window and sign in (or register) **as that exact ` +
-    `email** — accepting needs both the link and the matching signed-in email.\n\n` +
-    `**You should see:** the invitee's sidebar shrink to the pages their role can view, and the server refuse ` +
-    `anything else. Back as owner, change the invitee's role on the Members page — it applies on their next ` +
-    `request, no re-login. An organization can never be left without an owner.\n\n` +
-    `## 10. Email settings, notifications and sessions\n\n` +
-    `**Do this:** **Settings → Organization → Email**: the sender name and reply-to for mail the app sends. Then ` +
-    `the user menu (top right) → **Account settings**: the **Notifications** tab (a bill awaiting approval, an ` +
-    `invitation accepted), **Sessions** (every device you are signed in on; sign out the others), **Password**.\n\n` +
-    `**You should see:** preferences saved per user, not per organization; sessions listed with the current one ` +
-    `marked.\n\n` +
-    `## 11. A second organization\n\n` +
-    `**Do this:** the organization name in the top bar → **Add organization**. It has its own setup wizard and ` +
-    `its own chart of accounts. Switch between the two from the same menu; **Account settings → Organizations** ` +
-    `lists them and lets you leave one.\n\n` +
-    `**You should see:** complete separation — different data, different members, different numbering. This is ` +
-    `the same tenant boundary every query in the server is filtered by. Use this organization for anything flagged ` +
-    `**⚠** above.\n\n` +
-    `## 12. Bill inbox and email-in *(optional)*\n\n` +
-    `**Needs:** a vision-model key — \`ANTHROPIC_API_KEY\`, or \`CAPTURE_AI_PROVIDER=gemini\` plus ` +
-    `\`GEMINI_API_KEY\` — in \`server/.env\`. Email-in additionally needs \`INBOUND_MAIL=brevo\` and a Brevo ` +
-    `inbound domain (see \`docs/development.md\`); without it that card says so.\n\n` +
-    `**Do this:** **Purchases → Bill inbox**: upload a photo or PDF of a supplier bill. **Purchases → Review ` +
-    `queue** shows what needs a human. **Settings → Bill inbox** has auto-post and the email-in address; **AI ` +
-    `usage** shows tokens and cost per call.\n\n` +
-    `**You should see:** a draft expense with the extracted fields; faces and ID numbers are masked in the page ` +
-    `image *before* anything leaves your machine. **⚠ posting it changes the answer key** — leave it unposted ` +
-    `or use the second organization. Uploading the same file twice lands a visible duplicate that is not ` +
-    `re-extracted until you confirm.\n\n` +
-    `## 13. Inventory: labels, QR lookup, movements\n\n` +
-    `**Do this:** **Products & inventory → Stock movements** (the receipts and sales from months 5–6, with cost) ` +
-    `and **Stock on hand** (open an item for its history). **Labels**: pick an item and print its QR label. ` +
-    `**Lookup**: paste the QR's text, or scan it with a keyboard-wedge scanner.\n\n` +
-    `**You should see:** a label whose QR contains only a route and an id — nothing business-identifying — and ` +
-    `Lookup resolving it to the item.\n\n` +
-    `## 14. Reports, theme and the command palette\n\n` +
-    `**Do this:** **Reports → General journal** lists every posting from every source (invoices, bills, bank ` +
-    `lines, imports, the accrual) — the ledger as a journal; open any row to its source document. Use the theme ` +
-    `button in the top bar (light / dark / system). Press **⌘K** (Ctrl+K elsewhere) and type "trial".\n\n` +
-    `**You should see:** the journal reconcile to the trial balance, the theme switch without a flash, and the ` +
-    `palette jump straight to any page you have permission for.\n`
-  );
+function renderCurrencyTaxAndJournals(anchor: AnchorMonth, expected: ExpectedMonth[]): string {
+  const m6 = expectedMonth(expected, 6);
+  const m7 = expectedMonth(expected, 7);
+  const mName = monthName(anchor, 7);
+  const prevName = monthName(anchor, 6);
+  const day = (d: number): string => resolveDate(anchor, 7, d);
+  const lastDay = lastDayOfWalkthroughMonth(anchor, 7);
+  const reversalDay = resolveDate(anchor, 8, 1);
+  const data = WALKTHROUGH_DATASET;
+
+  const [cashAccount, expenseAccount] = data.formAccounts;
+  const rheinwerk = data.extraCustomers[0];
+  if (cashAccount === undefined || expenseAccount === undefined || rheinwerk === undefined) {
+    throw new Error('walkthrough: month 7 form accounts or customer missing');
+  }
+  const i21 = datasetDocByRef('I21');
+  const i22 = datasetDocByRef('I22');
+  const i23 = datasetDocByRef('I23');
+  const i24 = datasetDocByRef('I24');
+  const b19 = datasetDocByRef('B19');
+  const b20 = datasetDocByRef('B20');
+  const mj1 = datasetJournal('MJ1');
+  const mj2 = datasetJournal('MJ2');
+  const mj3 = datasetJournal('MJ3');
+  const ins1 = datasetJournal('INS1');
+  const payment = data.fxPayments[0];
+  if (payment === undefined || ins1.repeat === null || mj3.voidDay === undefined) throw new Error('walkthrough: month 7 data missing');
+  const premium = data.noise.find((n) => n.month === 7 && n.resolution.kind === 'POST_JOURNAL');
+  if (premium === undefined) throw new Error('walkthrough: no month 7 premium line');
+  const premiumCents = Math.abs(parseMoneyText(premium.amount));
+
+  const rateDocI21 = fxRateOn(anchor, resolveDate(anchor, i21.month, i21.day));
+  const rateReceipt = fxRateOn(anchor, day(payment.day));
+  const receiptNative = parseMoneyText(payment.amount);
+  const receiptBase = convertToBase(cents(receiptNative), rateReceipt);
+  const receivableBase = convertToBase(cents(receiptNative), rateDocI21);
+  const rateDocI22 = fxRateOn(anchor, resolveDate(anchor, i22.month, i22.day));
+  const rateMonthEnd = fxRateOn(anchor, lastDay);
+  const i22Native = parseMoneyText(i22.total);
+  const i22Carried = convertToBase(cents(i22Native), rateDocI22);
+  const i22Revalued = convertToBase(cents(i22Native), rateMonthEnd);
+  const accruals = ins1.repeat.endMonth - 7 + 1;
+  const contributionCents = mj1.lines.reduce((sum, l) => sum + parseMoneyText(l.debit), 0);
+  const netIncomeMonth = m7.profitAndLoss.netIncomeCents - m6.profitAndLoss.netIncomeCents;
+  const agingTotal = m7.arAging.reduce((sum, b) => sum + b.amountCents, 0);
+  const rateText = (rate: string): string => shortRate(rate);
+
+  let out =
+    `# Month 7 — currency, tax and journals\n\n` +
+    `## What month 7 is about\n\n` +
+    `Months 1–6 were in one currency and tax-free. ${mName} adds the three things a growing business meets next: ` +
+    `**a customer who pays in euros**, **sales tax** on some of what Harbor Point sells and buys, and **manual ` +
+    `journals** for entries that have no document behind them. It ends by revaluing the euro balance and closing ` +
+    `${prevName}.\n\n` +
+    `Do the sections in order — each builds on the one before. The statement is imported in section 8, after the ` +
+    `documents it matches.\n\n`;
+
+  // 1. accounts
+  out +=
+    `## 1. Two new accounts, by form\n\n` +
+    `**Accounting → Chart of accounts → New account**, then **Create account**. Two accounts the default chart ` +
+    `does not have:\n\n` +
+    `| Field | Account 1 | Account 2 |\n|---|---|---|\n` +
+    `| Code | \`${cashAccount.code}\` | \`${expenseAccount.code}\` |\n` +
+    `| Name | ${cashAccount.name} | ${expenseAccount.name} |\n` +
+    `| Type | ${cashAccount.type} | ${expenseAccount.type} |\n` +
+    `| Parent | \`1100 Current Assets\` | \`6000 Operating Expenses\` |\n` +
+    `| Bank account | **Bank account** | — |\n\n` +
+    `\`${cashAccount.code}\` is where euros will land, so it is a *bank account*; a bank account takes receipts ` +
+    `and payments, never a manual journal. \`${expenseAccount.code}\` is an ordinary expense account for the ` +
+    `insurance amortisation in section 9. Nothing posts: an account is a place, not a transaction.\n\n`;
+
+  // 2. customer
+  out +=
+    `## 2. A euro customer\n\n` +
+    `**Sales → Customers → New customer**, then **Create customer**:\n\n` +
+    `| Field | Value |\n|---|---|\n| Name | ${rheinwerk.name} |\n| Email | ${rheinwerk.email} |\n| Phone | ${rheinwerk.phone} |\n| Billing address | ${rheinwerk.address} |\n| Tax number | ${rheinwerk.taxNumber} |\n\n` +
+    `A customer has no currency of their own; the currency is chosen on each invoice (section 5).\n\n`;
+
+  // 3. rates
+  out +=
+    `## 3. Exchange rates\n\n` +
+    `**Accounting → Exchange rates → New rate**, then **Save rate**. Rates are always foreign → base, so **From ` +
+    `currency** is \`EUR\` and **To currency** is \`${data.baseCurrency}\` (fixed). Enter all three **before** any ` +
+    `euro invoice:\n\n` +
+    `| Rate date | Rate | Why |\n|---|---|---|\n` +
+    data.fxRates
+      .map((r) => {
+        const date = r.day === 'LAST' ? lastDay : day(r.day);
+        const why =
+          r.day === 1
+            ? 'the rate on the first euro invoice'
+            : r.day === 'LAST'
+              ? 'the month-end rate used for the revaluation'
+              : 'the rate when the euro receipt arrives and the second invoice is raised';
+        return `| ${date} | \`${r.rate}\` | ${why} |`;
+      })
+      .join('\n') +
+    `\n\n> **Hint:** a euro invoice or receipt uses the **latest rate on or before its own date**. Raise an invoice ` +
+    `dated before the first rate and AutoLedger refuses it with "No exchange rate for EUR to USD on or before ` +
+    `<date>".\n\n`;
+
+  // 4. manual journals
+  out +=
+    `## 4. Manual journals — post, delete, void\n\n` +
+    `A **manual journal** is a posting with no invoice or bill behind it. **Accounting → Manual journals → New ` +
+    `journal**; each has a date, a **Narration** and balanced lines (debits equal credits).\n\n` +
+    `### ${mj1.ref} — post it\n\n` +
+    `The owner contributes a plasma cutter. Date ${day(mj1.day)}, narration "${mj1.narration}":\n\n` +
+    journalLinesTable(mj1) +
+    `Click **Post**.\n\n` +
+    journalPosting(mj1) +
+    `Equipment in, owner's capital up — no cash moves.\n\n` +
+    `### ${mj2.ref} — save a draft, then delete it\n\n` +
+    `The same entry typed a second time by mistake. Date ${day(mj2.day)}, narration "${mj2.narration}", the same ` +
+    `two lines. Click **Save draft**, open the draft and click **Delete**, then **Delete draft** to confirm. A draft ` +
+    `posts nothing, so deleting it leaves no trace in the ledger; it is gone from the list.\n\n` +
+    `### ${mj3.ref} — post it, then void it\n\n` +
+    `A bonus accrual posted in error. Date ${day(mj3.day)}, narration "${mj3.narration}":\n\n` +
+    journalLinesTable(mj3) +
+    `**Post** it. Then open the posted journal and click **Void**; set **Void date** to ${day(mj3.voidDay)}, then ` +
+    `**Void journal**. A posted journal is never edited or deleted — a void posts the opposite entry:\n\n` +
+    `*On ${day(mj3.day)}:*\n\n` +
+    journalPosting(mj3) +
+    `*On ${day(mj3.voidDay)}:*\n\n` +
+    reversedJournalPosting(mj3) +
+    `Both entries stay in the ledger, so ${accountName('6100')} and ${accountName('2120')} each net to zero. The ` +
+    `journal now reads **Voided**.\n\n`;
+
+  // 5. invoices
+  out +=
+    `## 5. Invoices — a euro one, and tax\n\n` +
+    `**Sales → Invoices → New invoice**, **Save draft**, then **Issue** (confirm with **Issue invoice**). Enter ` +
+    `them in this order. The **Tax %** column on each line is new this month; every earlier invoice was 0%.\n\n`;
+  const invoiceBlocks: [DatasetDocument, string][] = [
+    [i21, `Raise it in **EUR**: set **Currency** to \`EUR\`; below the date the form shows the rate it will freeze ("1 EUR = ${rateDocI21} USD"), and the invoice stays in euros. Tax 0% — an export.`],
+    [i23, `A normal US invoice with **Tax %** \`7.5\` on both lines. Tax is worked out per line and rounded half-up.`],
+    [i24, `Tax **7.5%** on its single line.`],
+    [i22, `Another euro invoice. The rate in force on ${day(i22.day)} is the one entered for ${day(16)} — rates carry forward until a newer one is entered.`],
+  ];
+  for (const [doc, note] of invoiceBlocks) {
+    const totals = documentTotals(doc);
+    out +=
+      `### ${doc.ref} · ${customerName(doc.counterpartyKey)}\n\n` +
+      `Issue date ${day(doc.day)}, due ${documentDueDate(anchor, doc)}, currency ${doc.currency ?? data.baseCurrency}.\n\n` +
+      invoiceLinesTable(doc) +
+      `**Total: ${totalWithCurrency(anchor, doc, totals.total)}**${totals.tax > 0 ? ` — of which tax ${money(totals.tax)}` : ''}. ${note}\n\n` +
+      `Issuing posts (in ${data.baseCurrency}):\n\n` +
+      postingTable(documentPosting(anchor, doc, 'invoice'));
+  }
+  out +=
+    `> **Hint:** ${i21.ref} and ${i22.ref} keep their euro amounts on the invoice — the customer is asked for euros ` +
+    `— while the ledger holds the dollar value at the rate when each was issued.\n\n`;
+
+  // 6. receipt
+  out +=
+    `## 6. The euro receipt — ${payment.ref}\n\n` +
+    `On ${day(payment.day)} Rheinwerk pays ${i21.ref} in full. It arrives in a euro account, **not** in your dollar ` +
+    `bank statement, so there is no bank line to match: you record it from the invoice. Open ${i21.ref} → **Record ` +
+    `payment**. In the **Record a receipt** dialog:\n\n` +
+    `| Field | Value |\n|---|---|\n| Cash / bank account | \`${payment.cashAccountCode}\` · ${cashAccount.name} |\n| Date | ${day(payment.day)} |\n| Amount | ${money(receiptNative)} |\n| Reference | ${payment.ref} |\n\n` +
+    `The dialog estimates the exchange difference before you save ("Estimated realized gain: ${money(receiptBase - receivableBase)} ${data.baseCurrency} (at ${rateReceipt}, vs ${rateDocI21} when posted)"). Click **Record**:\n\n` +
+    postingTable([
+      { account: accountName(payment.cashAccountCode), debitCents: receiptBase },
+      { account: accountName('1120'), creditCents: receivableBase },
+      { account: accountName('4910'), creditCents: receiptBase - receivableBase },
+    ]) +
+    `€${money(receiptNative)} was worth ${data.baseCurrency} ${money(receivableBase)} when invoiced and ` +
+    `${data.baseCurrency} ${money(receiptBase)} when the money arrived. The difference, ${money(receiptBase - receivableBase)}, is a ` +
+    `**realized** gain: the exchange rate moved in your favour on money you have now actually received.\n\n`;
+
+  // 7. bills
+  out +=
+    `## 7. Two bills — one with tax\n\n` +
+    `**Purchases → Expenses → New expense**, **Save draft**, **Submit for review → Approve**, as in earlier months.\n\n`;
+  for (const doc of [b19, b20]) {
+    const totals = documentTotals(doc);
+    out +=
+      `### ${doc.ref} · ${vendorName(doc.counterpartyKey)}\n\n` +
+      `Bill date ${day(doc.day)}, their bill number \`${resolveTokens(anchor, doc.vendorReference ?? '')}\`, due on receipt.\n\n` +
+      invoiceLinesTable(doc) +
+      `**Total: ${money(totals.total)}**${totals.tax > 0 ? ` — of which tax ${money(totals.tax)}, which you can claim back` : ''}.` +
+      `${doc.ref === 'B20' ? ' Type `[Month]` literally in the description; it becomes the month name when you approve.' : ''}\n\n` +
+      `Approving posts:\n\n` +
+      postingTable(documentPosting(anchor, doc, 'bill'));
+  }
+  out +=
+    `Tax paid on a purchase is not an expense: it sits in \`${accountName('1180')}\`, an asset, until it is netted ` +
+    `against the tax you collected (section 12).\n\n`;
+
+  // 8. statement
+  out +=
+    `## 8. Import statement 7\n\n` +
+    `\`statements/month-7-northwind-ISO.csv\` (date format **ISO**) against \`1110 Operating Cash\` — see ` +
+    `\`06-bank-statements.md\` for every line. The service-charge and interest lines are settled by your month 5 ` +
+    `bank rules on import. The one line to post by hand is the insurance premium, \`${premium.description}\` ` +
+    `${money(parseMoneyText(premium.amount))}: **Post journal → ${accountName('1130')}**:\n\n` +
+    postingTable([
+      { account: accountName('1130'), debitCents: premiumCents },
+      { account: accountName('1110'), creditCents: premiumCents },
+    ]) +
+    `Insurance paid in advance is an asset, not this month's expense. The transfer to savings is **Ignore**, as in ` +
+    `every earlier month. Closing balance to enter: **${money(m7.bankReconciliation.statementBalanceCents)}**. Then ` +
+    `**Banking → Reconciliation** for \`1110 Operating Cash\` as of ${lastDay} must show Difference ` +
+    `**${money(m7.bankReconciliation.differenceCents)}** and Unmatched **${String(m7.bankReconciliation.unmatchedCount)}**.\n\n`;
+
+  // 9. repeating
+  out +=
+    `## 9. A repeating journal — insurance amortisation\n\n` +
+    `The premium covers several months, so each month a slice of the prepaid asset becomes an expense. ` +
+    `**Accounting → Manual journals → New repeating journal**, then **Save repeating journal**:\n\n` +
+    `| Field | Value |\n|---|---|\n| Name | Insurance amortisation |\n| Narration | ${ins1.narration} |\n| First date | ${day(ins1.day)} |\n| Repeats | Monthly |\n| Every (count) | 1 |\n| End date (optional) | ${resolveDate(anchor, ins1.repeat.endMonth, ins1.repeat.endDay)} |\n| Reverse on the 1st of the next month | unticked |\n\n` +
+    journalLinesTable(ins1) +
+    `Open it under **Accounting → Recurring** and click **Run now**. It creates every occurrence due up to ` +
+    `today. The first, dated ${day(ins1.day)}, belongs to month 7:\n\n` +
+    journalPosting(ins1) +
+    `\`[Month]\` in the narration is replaced as each journal posts. Later occurrences (${accruals - 1} more, one a ` +
+    `month up to ${resolveDate(anchor, ins1.repeat.endMonth, ins1.repeat.endDay)}) are created by the background ` +
+    `job once their dates have passed; the reports "as of" ${lastDay} ignore them.\n\n`;
+
+  // 10. revaluation
+  out +=
+    `## 10. Month-end revaluation\n\n` +
+    `${i21.ref} is settled. ${i22.ref} (€${money(i22Native)}) is still owed in euros, and the euro has moved since ` +
+    `it was raised. **Accounting → FX exposure**, set **As of** to ${lastDay}:\n\n` +
+    `| Invoice | Owed | Carried at | Revalued at | Difference |\n|---|---|---|---|---|\n` +
+    `| ${i22.ref} | €${money(i22Native)} | ${data.baseCurrency} ${money(i22Carried)} (${rateText(rateDocI22)}) | ${data.baseCurrency} ${money(i22Revalued)} (${rateText(rateMonthEnd)}) | ${money(m7.fxRevaluationDeltaCents)} |\n\n` +
+    `Click **Post revaluation** and confirm. It posts an **unrealized** loss on ${lastDay}:\n\n` +
+    postingTable([
+      { account: accountName('6820'), debitCents: Math.abs(m7.fxRevaluationDeltaCents) },
+      { account: accountName('1120'), creditCents: Math.abs(m7.fxRevaluationDeltaCents) },
+    ]) +
+    `and the opposite entry on ${reversalDay}, because nothing has been settled yet:\n\n` +
+    postingTable([
+      { account: accountName('1120'), debitCents: Math.abs(m7.fxRevaluationDeltaCents) },
+      { account: accountName('6820'), creditCents: Math.abs(m7.fxRevaluationDeltaCents) },
+    ]) +
+    `*Unrealized* means paper only: no euro has changed hands. It is reversed so that when ${i22.ref} is paid, the ` +
+    `realized difference is measured from its original rate. The page now reads "This date has already been ` +
+    `revalued." and the button is gone — post once, at month end.\n\n`;
+
+  // 11. close
+  out +=
+    `## 11. Close ${prevName}\n\n` +
+    `**Accounting → Fiscal periods**: if ${mName}'s period is not listed, **Generate periods for this fiscal ` +
+    `year**. Then **Close** the ${prevName} period. Try to break it: **Accounting → Manual journals → New journal** ` +
+    `dated ${resolveDate(anchor, 6, 15)}, any two balanced lines, **Post** — AutoLedger refuses, because the ` +
+    `period is closed. Nothing is saved (delete any draft left behind). **Reopen** undoes a close; a *locked* ` +
+    `period cannot be reopened, and this scenario only closes.\n\n`;
+
+  // 12. checkpoints
+  const bal = (code: string): string => money(balanceCents(m7, code));
+  out +=
+    `## 12. Checkpoints\n\n` +
+    `Compare with \`07-expected-results.md\` → Month 7. The hand-checked figures at ${lastDay}:\n\n` +
+    `| Account / report | Amount |\n|---|---|\n` +
+    `| ${accountName('1115')} | ${bal('1115')} |\n` +
+    `| ${accountName('1120')} | ${bal('1120')} |\n` +
+    `| ${accountName('1130')} | ${bal('1130')} |\n` +
+    `| ${accountName('1180')} | ${bal('1180')} |\n` +
+    `| ${accountName('1500')} | ${bal('1500')} |\n` +
+    `| ${accountName('2120')} | ${bal('2120')} |\n` +
+    `| ${accountName('2140')} | ${bal('2140')} |\n` +
+    `| ${accountName('3100')} | ${bal('3100')} |\n` +
+    `| ${accountName('4910')} (credit) | ${money(m7.trialBalance.rows.find((r) => r.code === '4910')?.creditCents ?? 0)} |\n` +
+    `| ${accountName('6820')} (debit) | ${money(m7.trialBalance.rows.find((r) => r.code === '6820')?.debitCents ?? 0)} |\n` +
+    `| Net income, month 7 alone | ${money(netIncomeMonth)} |\n\n` +
+    `**Tax summary.** *Reports → Tax summary*, from ${day(1)} to ${lastDay}: output tax ` +
+    `**${money(m7.taxSummary.outputTaxCents)}**, input tax **${money(m7.taxSummary.inputTaxCents)}**, net tax payable ` +
+    `**${money(m7.taxSummary.netTaxPayableCents)}**. The page also checks its own totals against the ledger; both ` +
+    `differences read 0.00.\n\n` +
+    `**Cash flow.** *Reports → Cash flow statement*, same dates: operating **${money(m7.cashFlowNetChangeCents)}**, ` +
+    `investing **${money(-contributionCents)}**, financing **${money(contributionCents)}**, net change in cash ` +
+    `**${money(m7.cashFlowNetChangeCents)}**. The plasma cutter (${mj1.ref}) moved no cash, but the statement shows ` +
+    `it as a purchase of equipment financed by the owner, and the two cancel.\n\n` +
+    `**Aged receivables versus the ledger.** *Reports → Aged receivables* totals ` +
+    `**${money(agingTotal)}** while \`1120\` is **${money(m7.arControlCents)}**. Aging values each open invoice at ` +
+    `its own frozen rate; the **${money(Math.abs(agingTotal - m7.arControlCents))}** gap is the month-end revaluation, ` +
+    `which reverses on ${reversalDay}. This is expected, not an error.\n`;
+  return out;
 }
 
 // ------------------------------------------------------------------ main
@@ -1369,7 +1711,7 @@ function main(): void {
   const expected = computeExpectedResults(anchor);
 
   write('README.md', renderReadme());
-  write('TUTORIAL.md', renderTutorial(expected));
+  write('TUTORIAL.md', renderTutorial(anchor, expected));
   write('00-the-business.md', renderTheBusiness());
   write('01-setup.md', renderSetup());
   write('02-vendors.md', renderVendors());
@@ -1379,11 +1721,11 @@ function main(): void {
   write('04-bills-received.md', renderDocuments(anchor, WALKTHROUGH_DATASET.bills, 'bill'));
   write('05-invoices-to-raise.md', renderDocuments(anchor, WALKTHROUGH_DATASET.invoices, 'invoice'));
   write('06-bank-statements.md', renderBankStatements(anchor, resolved));
-  write('07-expected-results.md', renderExpectedResults(expected));
+  write('07-expected-results.md', renderExpectedResults(anchor, expected));
   write('08-returns-and-adjustments.md', renderAdjustments(anchor));
   write('09-products-orders-and-stock.md', renderProductsAndOrders(anchor));
   write('10-closing-the-quarter.md', renderClosingTheQuarter(anchor, expected));
-  write('11-feature-tour.md', renderFeatureTour());
+  write('11-currency-tax-and-journals.md', renderCurrencyTaxAndJournals(anchor, expected));
   write('accounts.csv', accountsCsv());
   write('products.csv', productsCsv());
   write('stock-items.csv', stockItemsCsv());
@@ -1396,8 +1738,10 @@ function main(): void {
   write('statements/month-4-northwind-ISO.csv', statement4(anchor, resolved));
   write('statements/month-5-northwind-ISO.csv', statement5(anchor, resolved));
   write('statements/month-6-meridian-DMY.csv', statement6(anchor, resolved));
+  write('statements/month-7-northwind-ISO.csv', statement7(anchor, resolved));
+  for (const file of renderGuide(anchor)) write(file.path, file.content);
 
-  console.log(`[walkthrough] done — anchor ${String(anchor.year)}-${String(anchor.month).padStart(2, '0')}, ${String(lastDayOfWalkthroughMonth(anchor, 6))} last day`);
+  console.log(`[walkthrough] done — anchor ${String(anchor.year)}-${String(anchor.month).padStart(2, '0')}, last day of month 7 ${lastDayOfWalkthroughMonth(anchor, 7)}`);
 }
 
 main();

@@ -81,7 +81,7 @@ Open invoice I15 (Product sale — bracket kits, 20 × 600.00, 12,000.00) → **
 
 | | |
 |---|---|
-| **Date** | 2026-07-03 |
+| **Date** | 2026-06-03 |
 | **Reason** | RETURN |
 
 | # | Description | Qty | Unit price | Account |
@@ -98,7 +98,7 @@ Open bill B12 (their no. `INV-IC-9120`, 12,000.00) → **Create debit note**.
 
 | | |
 |---|---|
-| **Date** | 2026-07-05 |
+| **Date** | 2026-06-05 |
 | **Reason** | RETURN |
 | **Vendor's credit note no.** | `IC-CR-0231` |
 
@@ -116,7 +116,7 @@ Open invoice I13 (Fabrication — structural brace set, run 13, 12,100.00) → *
 
 | | |
 |---|---|
-| **Date** | 2026-07-06 |
+| **Date** | 2026-06-06 |
 | **Reason** | PRICE_ADJUSTMENT |
 
 | # | Description | Qty | Unit price | Account |
@@ -125,7 +125,7 @@ Open invoice I13 (Fabrication — structural brace set, run 13, 12,100.00) → *
 
 Replace the lines copied from the original with this one line, **Save**, then **Issue**.
 
-> I13 was already paid in full, so issuing applies **nothing** — the whole 500.00 becomes unapplied credit on Ferrous Works Ltd's account. Then, on the note, **Apply credit** → I16, amount 500.00, date 2026-07-10.
+> I13 was already paid in full, so issuing applies **nothing** — the whole 500.00 becomes unapplied credit on Ferrous Works Ltd's account. Then, on the note, **Apply credit** → I16, amount 500.00, date 2026-06-10.
 
 ## What to check
 
@@ -134,7 +134,7 @@ Replace the lines copied from the original with this one line, **Save**, then **
 | CN1 | Invoice I15 | Credits applied 1,800.00 · Amount due **10,200.00** |
 | DN1 | Expense B12 | Debits applied 1,500.00 · Amount due **10,500.00** |
 | CN2 (before applying) | Customers → Ferrous Works Ltd → open items | Two open items: I16 **6,200.00** and CN2 **−500.00** (unapplied credit) — balance 5,700.00 |
-| CN2 (before applying) | Reports → AR aging | Ferrous Works 5,700.00, and "Reconciles" still ✓ |
+| CN2 (before applying) | Reports → Aged receivables | Ferrous Works 5,700.00, and "Reconciles" still ✓ |
 | CN2 applied | Invoice I16 | Credits applied 500.00 · Amount due **5,700.00** |
 | Statement 4 imported | Bank lines | 10,200.00, −10,500.00 and 5,700.00 each suggest I15, B12 and I16 |
 

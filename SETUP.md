@@ -319,8 +319,9 @@ and you register fresh (§5.1).
 ## 7. Sample data
 
 **The walkthrough (Phase 6.1)** — `walkthrough/` at the repo root is a committed,
-hand-enterable three-month accounting scenario (Harbor Point Fabrication) with a
-tutorial and a computed answer key. Just open
+hand-enterable seven-month accounting scenario (Harbor Point Fabrication) with a
+tutorial, a computed answer key, and `walkthrough/guide/` — a module-by-module test guide
+for every feature. Just open
 [walkthrough/TUTORIAL.md](walkthrough/TUTORIAL.md) and type it into a fresh
 organization. `npm run walkthrough` regenerates the folder; it writes to no
 database.

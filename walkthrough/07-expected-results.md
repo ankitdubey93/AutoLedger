@@ -2,7 +2,7 @@
 
 Computed from the same dataset the statements and source documents come from, and verified — in this project's own test suite — against the real AutoLedger reports produced by replaying this exact scenario through the real API. If your numbers disagree with this file, your entries disagree with the scenario, not the other way around.
 
-## Month 1 — as of 2026-04-30
+## Month 1 — as of 2026-03-31
 
 ### Trial balance
 
@@ -42,7 +42,7 @@ Computed from the same dataset the statements and source documents come from, an
 | **Total operating expenses** | **18,263.00** |
 | **Net income** | **47,809.40** |
 
-### Balance sheet — as of 2026-04-30
+### Balance sheet — as of 2026-03-31
 
 | | Amount |
 |---|---|
@@ -57,7 +57,7 @@ Computed from the same dataset the statements and source documents come from, an
 
 Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -67,7 +67,7 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -88,9 +88,23 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 | Unmatched | 0 |
 | Ignored | 1 |
 
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **113,809.40**.
+
 ---
 
-## Month 2 — as of 2026-05-31
+## Month 2 — as of 2026-04-30
 
 ### Trial balance
 
@@ -132,7 +146,7 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 | **Total operating expenses** | **34,701.00** |
 | **Net income** | **69,285.50** |
 
-### Balance sheet — as of 2026-05-31
+### Balance sheet — as of 2026-04-30
 
 | | Amount |
 |---|---|
@@ -147,7 +161,7 @@ Assets 122,809.40 = Liabilities 0.00 + Equity 122,809.40
 
 Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -157,7 +171,7 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -178,9 +192,23 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 | Unmatched | 0 |
 | Ignored | 2 |
 
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **30,476.10**.
+
 ---
 
-## Month 3 — as of 2026-06-30
+## Month 3 — as of 2026-05-31
 
 ### Trial balance
 
@@ -222,7 +250,7 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 | **Total operating expenses** | **38,219.00** |
 | **Net income** | **98,783.30** |
 
-### Balance sheet — as of 2026-06-30
+### Balance sheet — as of 2026-05-31
 
 | | Amount |
 |---|---|
@@ -237,7 +265,7 @@ Assets 144,285.50 = Liabilities 0.00 + Equity 144,285.50
 
 Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -247,7 +275,7 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -268,9 +296,23 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 | Unmatched | 0 |
 | Ignored | 3 |
 
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **29,497.80**.
+
 ---
 
-## Month 4 — as of 2026-07-31
+## Month 4 — as of 2026-06-30
 
 ### Trial balance
 
@@ -314,7 +356,7 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 | **Total operating expenses** | **38,257.00** |
 | **Net income** | **104,161.50** |
 
-### Balance sheet — as of 2026-07-31
+### Balance sheet — as of 2026-06-30
 
 | | Amount |
 |---|---|
@@ -329,7 +371,7 @@ Assets 173,783.30 = Liabilities 0.00 + Equity 173,783.30
 
 Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -339,7 +381,7 @@ Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -360,9 +402,23 @@ Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 | Unmatched | 0 |
 | Ignored | 4 |
 
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **5,378.20**.
+
 ---
 
-## Month 5 — as of 2026-08-31
+## Month 5 — as of 2026-07-31
 
 ### Trial balance
 
@@ -411,7 +467,7 @@ Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 | **Total operating expenses** | **48,245.00** |
 | **Net income** | **98,430.80** |
 
-### Balance sheet — as of 2026-08-31
+### Balance sheet — as of 2026-07-31
 
 | | Amount |
 |---|---|
@@ -429,7 +485,7 @@ Assets 179,161.50 = Liabilities 0.00 + Equity 179,161.50
 
 Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -439,7 +495,7 @@ Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -460,9 +516,23 @@ Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
 | Unmatched | 0 |
 | Ignored | 5 |
 
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **-11,480.70**.
+
 ---
 
-## Month 6 — as of 2026-09-30
+## Month 6 — as of 2026-08-31
 
 ### Trial balance
 
@@ -516,7 +586,7 @@ Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
 | **Total operating expenses** | **64,913.00** |
 | **Net income** | **82,381.20** |
 
-### Balance sheet — as of 2026-09-30
+### Balance sheet — as of 2026-08-31
 
 | | Amount |
 |---|---|
@@ -535,7 +605,7 @@ Assets 178,370.80 = Liabilities 4,940.00 + Equity 173,430.80
 
 Assets 159,831.20 = Liabilities 2,450.00 + Equity 157,381.20
 
-### AR aging
+### Aged receivables
 
 | Bucket | Amount |
 |---|---|
@@ -545,7 +615,7 @@ Assets 159,831.20 = Liabilities 2,450.00 + Equity 157,381.20
 | 61–90 days | 0.00 |
 | 90+ days | 0.00 |
 
-### AP aging
+### Aged payables
 
 | Bucket | Amount |
 |---|---|
@@ -565,6 +635,166 @@ Assets 159,831.20 = Liabilities 2,450.00 + Equity 157,381.20
 | Matched | 54 |
 | Unmatched | 0 |
 | Ignored | 6 |
+
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 0.00 |
+| Input tax (purchases) | 0.00 |
+| **Net tax payable** | **0.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **-20,049.60**.
+
+---
+
+## Month 7 — as of 2026-09-30
+
+### Trial balance
+
+| Account | Debit | Credit |
+|---|---|---|
+| 1110 Operating Cash | 284,088.80 | 133,801.00 |
+| 1115 EUR Receipts Account | 11,000.00 |  |
+| 1120 Accounts Receivable | 238,085.00 | 226,230.00 |
+| 1130 Prepaid Expenses | 1,800.00 | 600.00 |
+| 1140 Inventory | 13,950.00 | 6,520.00 |
+| 1180 GST/VAT Input Credit | 240.00 |  |
+| 1500 Fixed Assets / Equipment | 6,000.00 |  |
+| 2100 Accounts Payable | 121,790.00 | 121,790.00 |
+| 2120 Accrued Liabilities | 2,900.00 | 2,900.00 |
+| 2130 Customer Deposits | 4,090.00 | 4,090.00 |
+| 2140 GST/VAT Output Payable |  | 795.00 |
+| 2160 Payroll Liabilities | 11,400.00 | 13,000.00 |
+| 3100 Common Stock / Owner's Capital |  | 81,000.00 |
+| 4100 Product Revenue |  | 82,350.00 |
+| 4200 Service Revenue |  | 150,850.00 |
+| 4300 Interest Income |  | 113.80 |
+| 4800 Sales Returns & Allowances | 2,300.00 |  |
+| 4910 Realized FX Gain |  | 200.00 |
+| 5050 Cost of Sales — Inventory | 6,520.00 |  |
+| 5100 Direct Materials | 36,850.00 | 1,500.00 |
+| 5200 Direct Labor | 9,800.00 |  |
+| 5300 Freight & Duty | 6,680.00 |  |
+| 6100 Salaries & Wages | 4,400.00 | 1,200.00 |
+| 6110 Rent & Utilities | 38,950.00 | 1,700.00 |
+| 6120 Software & IT Infrastructure | 13,920.00 |  |
+| 6150 Insurance | 600.00 |  |
+| 6200 Professional Fees | 8,800.00 |  |
+| 6400 Marketing & Advertising | 4,100.00 |  |
+| 6600 Bank Fees | 311.00 |  |
+| 6820 Unrealized FX Gain/Loss | 65.00 |  |
+| **Total** | **828,639.80** | **828,639.80** |
+
+### Profit & loss (cumulative from month 1)
+
+| | Amount |
+|---|---|
+| 4100 Product Revenue | 82,350.00 |
+| 4200 Service Revenue | 150,850.00 |
+| 4300 Interest Income | 113.80 |
+| 4800 Sales Returns & Allowances | -2,300.00 |
+| 4910 Realized FX Gain | 200.00 |
+| **Total revenue** | **231,213.80** |
+| 5050 Cost of Sales — Inventory | 6,520.00 |
+| 5100 Direct Materials | 35,350.00 |
+| 5200 Direct Labor | 9,800.00 |
+| 5300 Freight & Duty | 6,680.00 |
+| **Total cost of sales** | **58,350.00** |
+| **Gross profit** | **172,863.80** |
+| 6100 Salaries & Wages | 3,200.00 |
+| 6110 Rent & Utilities | 37,250.00 |
+| 6120 Software & IT Infrastructure | 13,920.00 |
+| 6150 Insurance | 600.00 |
+| 6200 Professional Fees | 8,800.00 |
+| 6400 Marketing & Advertising | 4,100.00 |
+| 6600 Bank Fees | 311.00 |
+| 6820 Unrealized FX Gain/Loss | 65.00 |
+| **Total operating expenses** | **68,246.00** |
+| **Net income** | **104,617.80** |
+
+### Balance sheet — as of 2026-09-30
+
+| | Amount |
+|---|---|
+| 1110 Operating Cash | 150,287.80 |
+| 1115 EUR Receipts Account | 11,000.00 |
+| 1120 Accounts Receivable | 11,855.00 |
+| 1130 Prepaid Expenses | 1,200.00 |
+| 1140 Inventory | 7,430.00 |
+| 1180 GST/VAT Input Credit | 240.00 |
+| 1500 Fixed Assets / Equipment | 6,000.00 |
+| **Total assets** | **188,012.80** |
+| 2100 Accounts Payable | 0.00 |
+| 2120 Accrued Liabilities | 0.00 |
+| 2130 Customer Deposits | 0.00 |
+| 2140 GST/VAT Output Payable | 795.00 |
+| 2160 Payroll Liabilities | 1,600.00 |
+| **Total liabilities** | **2,395.00** |
+| 3100 Common Stock / Owner's Capital | 81,000.00 |
+| Retained/current earnings (derived) | 104,617.80 |
+| **Total equity** | **185,617.80** |
+
+Assets 188,012.80 = Liabilities 2,395.00 + Equity 185,617.80
+
+### Aged receivables
+
+| Bucket | Amount |
+|---|---|
+| Current | 7,150.00 |
+| 1–30 days | 4,770.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### Aged payables
+
+| Bucket | Amount |
+|---|---|
+| Current | 0.00 |
+| 1–30 days | 0.00 |
+| 31–60 days | 0.00 |
+| 61–90 days | 0.00 |
+| 90+ days | 0.00 |
+
+### Bank reconciliation
+
+| | |
+|---|---|
+| GL balance | 150,287.80 |
+| Statement balance | 150,287.80 |
+| **Difference** | **0.00** |
+| Matched | 61 |
+| Unmatched | 0 |
+| Ignored | 7 |
+
+### Tax summary
+
+On documents dated in this month alone — **Reports → Tax summary**.
+
+| | Amount |
+|---|---|
+| Output tax (sales) | 795.00 |
+| Input tax (purchases) | 240.00 |
+| **Net tax payable** | **555.00** |
+
+### Cash flow — net change
+
+The movement of the cash accounts inside this month — **Reports → Cash flow statement**, net change in cash: **13,656.60**.
+
+### Currency
+
+| | Amount |
+|---|---|
+| Realized FX gain on the euro receipt (`4910`) | 200.00 |
+| Month-end revaluation (`6820`) | -65.00 |
+| I22 carried at | 7,150.00 → 7,085.00 |
+
+Aged receivables totals `11,920.00` while `1120` is `11,855.00`: aging values open invoices at their own frozen rate; the `65.00` gap is the month-end revaluation, which reverses on 2026-10-01. This is expected.
 
 ---
 

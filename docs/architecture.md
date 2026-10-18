@@ -149,7 +149,7 @@ client/
     services/fetchServices.ts   every API call
     utils/                 money, date, quantity, enumLabel, pageTitle, moduleLabels, …
     __tests__/
-walkthrough/               the hand-enterable four-month scenario (generated, committed)
+walkthrough/               the hand-enterable seven-month scenario and the test guide (generated, committed)
 docs/ study/
 ```
 

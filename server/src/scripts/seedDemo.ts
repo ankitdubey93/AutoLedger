@@ -4,6 +4,7 @@ import { createApp } from '../app.js';
 import { pool } from '../db/connect.js';
 import { createWalkthroughReplay, type ReplayClient, type ReplayResponse } from './walkthroughReplay.js';
 import { WALKTHROUGH_MONTHS, defaultAnchor, parseAnchor, resolveDate, shiftIsoDate } from './walkthroughDates.js';
+import { DEMO_DEFAULT_EMAIL, DEMO_DEFAULT_PASSWORD } from './walkthroughNames.js';
 
 /**
  * `npm run seed:demo [-- --anchor YYYY-MM]` — builds a populated demo
@@ -11,11 +12,11 @@ import { WALKTHROUGH_MONTHS, defaultAnchor, parseAnchor, resolveDate, shiftIsoDa
  * without typing six months of books in by hand.
  *
  * Layers, in order:
- *   1. the six walkthrough months (`walkthroughReplay.ts`) — the same replay
+ *   1. the seven walkthrough months (`walkthroughReplay.ts`) — the same replay
  *      `walkthrough.test.ts` proves equal to the computed answer key, cent
  *      for cent, now including products and stock, orders, a deposit, bank
- *      rules, recurring documents, imports and period close; month 6 lands
- *      on last month by default;
+ *      rules, recurring documents, imports and period close, then month 7's
+ *      currency, tax and journals; month 7 lands on last month by default;
  *   2. this month's open work: an overdue invoice, an open one, a draft, an
  *      approved bill, a bill awaiting approval — so the dashboard, aging and
  *      approval queues have something in them.
@@ -30,8 +31,8 @@ import { WALKTHROUGH_MONTHS, defaultAnchor, parseAnchor, resolveDate, shiftIsoDa
  * login page (VITE_DEMO_EMAIL / VITE_DEMO_PASSWORD).
  */
 
-const DEMO_EMAIL = (process.env.DEMO_EMAIL ?? 'demo@autoledger.dev').toLowerCase();
-const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? 'autoledger-demo';
+const DEMO_EMAIL = (process.env.DEMO_EMAIL ?? DEMO_DEFAULT_EMAIL).toLowerCase();
+const DEMO_PASSWORD = process.env.DEMO_PASSWORD ?? DEMO_DEFAULT_PASSWORD;
 const ORG_NAME = 'Harbor Point Fabrication';
 
 function anchorFromArgs() {
@@ -44,7 +45,7 @@ function anchorFromArgs() {
 function createFetchClient(baseUrl: string) {
   const cookies = new Map<string, string>();
 
-  async function send(method: 'GET' | 'POST', path: string, body?: unknown): Promise<ReplayResponse> {
+  async function send(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<ReplayResponse> {
     const headers: Record<string, string> = {};
     if (cookies.size > 0) headers.Cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
     if (method === 'POST') headers['Content-Type'] = 'application/json';
@@ -71,6 +72,7 @@ function createFetchClient(baseUrl: string) {
   return {
     get: (path) => send('GET', path),
     post: (path, body) => send('POST', path, body),
+    delete: (path) => send('DELETE', path),
   } satisfies ReplayClient;
 }
 
@@ -105,12 +107,12 @@ try {
   const replay = createWalkthroughReplay(api, anchor);
   await replay.completeSetup(ORG_NAME);
 
-  // ---- 1. six verified months ----
+  // ---- 1. seven verified months ----
   await replay.importAccounts();
   await replay.createVendorsAndCustomers();
   for (const month of WALKTHROUGH_MONTHS) {
     await replay.replayMonth(month);
-    console.log(`[seed:demo] month ${String(month)} of 6 replayed (${resolveDate(anchor, month, 1).slice(0, 7)})`);
+    console.log(`[seed:demo] month ${String(month)} of ${String(WALKTHROUGH_MONTHS.length)} replayed (${resolveDate(anchor, month, 1).slice(0, 7)})`);
   }
 
   // ---- 2. this month's open work ----

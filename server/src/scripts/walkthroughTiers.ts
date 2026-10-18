@@ -5,7 +5,7 @@
  * same scoring inputs `bankMatchService` builds, so a score computed here
  * is provably the score the real matcher will produce, not a guess.
  */
-import { WALKTHROUGH_DATASET, allVendors, resolveTokens, type DatasetDocument, type Tier } from './walkthroughDataset.js';
+import { WALKTHROUGH_DATASET, allCustomers, allVendors, resolveTokens, type DatasetDocument, type Tier } from './walkthroughDataset.js';
 import type { AnchorMonth, WalkthroughMonth } from './walkthroughDates.js';
 import { resolveDate } from './walkthroughDates.js';
 import { scoreMatch } from '../utils/matchScore.js';
@@ -68,7 +68,7 @@ const TIER_DATE_SHIFT: Partial<Record<Tier, number>> = {
 };
 
 function counterpartyName(doc: DatasetDocument): string {
-  const list = doc.vendorReference === null ? WALKTHROUGH_DATASET.customers : allVendors();
+  const list = doc.vendorReference === null ? allCustomers() : allVendors();
   const match = list.find((c) => c.key === doc.counterpartyKey);
   if (match === undefined) throw new Error(`walkthrough fixture: no counterparty ${doc.counterpartyKey}`);
   return match.name;
@@ -89,7 +89,7 @@ export function buildSettlementLines(): SettlementLine[] {
   ];
 
   for (const { doc, kind } of documents) {
-    // An OPEN document is never paid inside the scenario — no bank line.
+    // An OPEN document has no bank line (unpaid, or settled outside the bank statement).
     if (doc.tier === 'OPEN') continue;
     // Net of any note applied to it in its own month (Phase 26) — the one
     // month-4 invoice/bill pair with notes is settled for the net amount.

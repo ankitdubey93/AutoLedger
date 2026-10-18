@@ -387,7 +387,7 @@ Today, AI lives inside two apps by rule (rule 14), and each app wires its own mo
 
 ### Evals: the part most AI-finance products skip
 
-- **Golden datasets built from what already exists:** `walkthrough/` (4 months with a computed answer key) and the 24-month sandbox. Add real, consented, anonymised pilot data over time.
+- **Golden datasets built from what already exists:** `walkthrough/` (7 months with a computed answer key; the former 24-month sandbox was removed in Phase 29). Add real, consented, anonymised pilot data over time.
 - Per-agent metrics: precision/recall of matches, field-level extraction accuracy, false-auto-apply rate (the metric that matters most), and cost per outcome.
 - **CI gate:** a prompt or model change that lowers an agent's eval score below its threshold fails the build, the same way a test would.
 - **Publish the eval results.** This is a differentiator, and a strong showcase artifact (§10).
@@ -734,11 +734,11 @@ Every phase should be worth something twice: as product, and as proof of skill f
 | Ops Console | Service delivery economics | Work queues, SLAs, metering | Measuring touchless rate |
 
 ### Public artifacts to produce as you go
-1. **A public demo**: the deployed sandbox, one click, 24 months of data. It already exists locally.
+1. **A public demo**: the deployed sandbox, one click, seven months of data. Locally this is `npm run seed:demo` (the walkthrough replay; the old 24-month sandbox was removed in Phase 29).
 2. **Write-ups** (a blog, LinkedIn, or dev.to), one per hard problem: "Why our ledger can't be out of balance", "Integer-exact FIFO", "Reciprocal cost allocation without floats", "An eval harness for finance agents", "GSTR-2B reconciliation with a confidence engine". Each is adapted from its study note, so the writing is already half done.
 3. **Published agent evals**: accuracy and false-auto-apply rate per agent, versioned over time.
 4. **An open-source component**: extract something self-contained and useful (the integer money/FX utility, or the bank-matching scorer) into a small npm package. It's a credible signal for engineering roles.
-5. **The walkthrough as a course**: the 4-month Harbor Point scenario extended to inventory and GST is a teaching product, and could be a paid course or lead magnet for CA students.
+5. **The walkthrough as a course**: the 7-month Harbor Point scenario extended to inventory and GST is a teaching product, and could be a paid course or lead magnet for CA students.
 6. **Case studies** from design partners, with numbers: days to close before and after, touchless rate, and cost per outcome.
 
 ### The study-notes standing task continues

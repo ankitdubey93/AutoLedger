@@ -2,7 +2,7 @@
 
 ## What month 6 is about
 
-The last month finishes what month 5 started and then **closes the books**: the recurring rent arrives as a draft, the rest of August's order is invoiced with the customer's deposit applied, a new vendor is added by form, two files of bills and invoices and a payroll journal are *imported* instead of typed, and August is locked.
+The last month finishes what month 5 started and then **closes the books**: the recurring rent arrives as a draft, the rest of July's order is invoiced with the customer's deposit applied, a new vendor is added by form, two files of bills and invoices and a payroll journal are *imported* instead of typed, and July is locked.
 
 ## 1. A new vendor, by hand
 
@@ -20,13 +20,13 @@ Leave payment terms and notes blank — the bills below carry explicit due dates
 
 ## 2. Approve the generated rent — B15
 
-**Accounting → Recurring → Shop rent.** The schedule made in month 5 is due now. If the worker has not already created the draft, press **Run now** — it creates exactly one bill, dated 2026-09-01. Open it from the schedule's run list (or **Purchases → Expenses**) and check three things:
+**Accounting → Recurring → Shop rent.** The schedule made in month 5 is due now. If the worker has not already created the draft, press **Run now** — it creates exactly one bill, dated 2026-08-01. Open it from the schedule's run list (or **Purchases → Expenses**) and check three things:
 
 - the line reads "Shop rent — [Month]" — the placeholder is still there, because a draft keeps the text as written;
 - the amount is 9,100.00 to 6110 Rent & Utilities, due the same day;
-- its vendor reference carries the run date (the schedule adds it to B14's reference so the two bills cannot clash). Replace it with `NR-RENT-September`, the number on the landlord's September invoice — it is a draft, so it is editable.
+- its vendor reference carries the run date (the schedule adds it to B14's reference so the two bills cannot clash). Replace it with `NR-RENT-August`, the number on the landlord's August invoice — it is a draft, so it is editable.
 
-**Submit for approval → Approve.** Now open the posted bill: the line reads **"Shop rent — September"**. `[Month]` was replaced with the month of the *document date* at the moment of approval — which is why a recurring bill can be written once and read correctly every month. Nothing is replaced in a draft, and nothing placeholder-shaped can reach a posted document.
+**Submit for review → Approve.** Now open the posted bill: the line reads **"Shop rent — August"**. `[Month]` was replaced with the month of the *document date* at the moment of approval — which is why a recurring bill can be written once and read correctly every month. Nothing is replaced in a draft, and nothing placeholder-shaped can reach a posted document.
 
 ## 3. Import the documents — and the payroll journal
 
@@ -38,21 +38,21 @@ Creates and issues I18 and I19. Only the item code, description and quantity are
 
 ```csv
 *ContactName,*InvoiceDate,DueDate,ItemCode,*Description,Quantity,UnitAmount,AccountCode
-Brightline Analytics,2026-09-04,2026-09-04,SVC-DES,Design & drafting — conveyor retrofit,24,,
-Orchid Media Group,2026-09-11,2026-09-11,SVC-FAB,Fabrication labour — studio set build,40,,
+Brightline Analytics,2026-08-04,2026-08-04,SVC-DES,Design & drafting — conveyor retrofit,24,,
+Orchid Media Group,2026-08-11,2026-08-11,SVC-FAB,Fabrication labour — studio set build,40,,
 ```
 
 Expect I18 2,640.00 and I19 3,400.00.
 
 ### Expenses — `bills-month-6.csv` (kind **Expenses (bills)**)
 
-Creates and approves B16, B17, B18. Unlike the invoices these carry their own unit amount and account, because a supplier's bill has no catalogue price behind it. Text in an imported document is taken **literally** — the file already says "September" where the typed bills said `[Month]`; a placeholder in an imported file would not be replaced.
+Creates and approves B16, B17, B18. Unlike the invoices these carry their own unit amount and account, because a supplier's bill has no catalogue price behind it. Text in an imported document is taken **literally** — the file already says "August" where the typed bills said `[Month]`; a placeholder in an imported file would not be replaced.
 
 ```csv
 *ContactName,*InvoiceNumber,*InvoiceDate,DueDate,*Description,Quantity,UnitAmount,AccountCode
-Lakeshore Power & Water,LPW-88120,2026-09-08,2026-09-08,Electricity & water — August usage,1,850.00,6110
-Cloudspan Infrastructure,CS-46102,2026-09-10,2026-09-10,ERP hosting — September,1,3480.00,6120
-Crosswind Freight,CWF-1187,2026-09-15,2026-09-15,Outbound freight — September runs,1,1240.00,5300
+Lakeshore Power & Water,LPW-88120,2026-08-08,2026-08-08,Electricity & water — July usage,1,850.00,6110
+Cloudspan Infrastructure,CS-46102,2026-08-10,2026-08-10,ERP hosting — August,1,3480.00,6120
+Crosswind Freight,CWF-1187,2026-08-15,2026-08-15,Outbound freight — August runs,1,1240.00,5300
 ```
 
 ### Payroll — `payroll-month-6.csv` (kind **Journal entries**)
@@ -61,9 +61,9 @@ Three rows with the same journal number are **one** entry; it posts immediately 
 
 ```csv
 JournalNumber,*Date,*Narration,*AccountCode,Debit,Credit
-PR-M6,2026-09-25,Payroll — September 2026,5200,9800.00,
-PR-M6,2026-09-25,Payroll — September 2026,6100,3200.00,
-PR-M6,2026-09-25,Payroll — September 2026,2160,,13000.00
+PR-M6,2026-08-25,Payroll — August 2026,5200,9800.00,
+PR-M6,2026-08-25,Payroll — August 2026,6100,3200.00,
+PR-M6,2026-08-25,Payroll — August 2026,2160,,13000.00
 ```
 
 | Account | Debit | Credit |
@@ -76,7 +76,7 @@ The wages are expensed (shop-floor labour to cost of sales, the rest to operatin
 
 ## 4. Invoice the rest of the order — I20, with the deposit applied
 
-Open **Sales → Sales orders → SO1**: billing reads **Partly billed**. **Create invoice** — leave every quantity at what remains (CAST-6 60, HFK-12 40, SVC-FAB 16), document date 2026-09-22, due date **2026-10-22** (30 days). Open the draft and **Issue** it. Because Kestrel Logistics has an open deposit, the dialog **offers it**: choose D1 and apply **4,090.00**, then confirm. (If you issued without applying it, the invoice page has an **Apply deposit** button.)
+Open **Sales → Sales orders → SO1**: billing reads **Partly billed**. **Create invoice** — leave every quantity at what remains (CAST-6 60, HFK-12 40, SVC-FAB 16), document date 2026-08-22, due date **2026-09-21** (30 days). Open the draft and **Issue** it. Because Kestrel Logistics has an open deposit, the dialog **offers it**: choose D1 and apply **4,090.00**, then confirm. (If you issued without applying it, the invoice page has an **Apply deposit** button.)
 
 Issuing posts the sale and the cost of the stock sold, exactly as for I17:
 
@@ -98,7 +98,7 @@ Applying the deposit posts one more entry — the liability is settled against t
 | 2130 Customer Deposits | 4,090.00 |  |
 | 1120 Accounts Receivable |  | 4,090.00 |
 
-This is where the deposit *stops being a liability*: revenue is recognised on the invoice, for the full 8,860.00 above, and the 4,090.00 the customer already paid now settles that much of it. `2130 Customer Deposits` returns to zero, and the invoice shows amount due **4,770.00**. This invoice stays open: it is not paid inside the scenario, and it is not yet due (2026-10-22), so it sits in the **Current** aging bucket.
+This is where the deposit *stops being a liability*: revenue is recognised on the invoice, for the full 8,860.00 above, and the 4,090.00 the customer already paid now settles that much of it. `2130 Customer Deposits` returns to zero, and the invoice shows amount due **4,770.00**. This invoice stays open: it is not paid inside the scenario, and it is not yet due (2026-09-21), so it sits in the **Current** aging bucket.
 
 > **Hint:** the stock was already costed at the moving average when I17 was issued and nothing was bought since, so I20's cost of sales is the same unit costs again.
 
@@ -108,13 +108,13 @@ This is where the deposit *stops being a liability*: revenue is recognised on th
 
 ## 6. Check your work
 
-**Inventory.** *Products & inventory → Valuation*, as of 2026-09-30: the stock subledger and `1140 Inventory` both read **7,430.00**, the page says they tie out. Two different records — what the warehouse says it holds and what the ledger says it is worth — agreeing is the whole point of perpetual inventory.
+**Inventory.** *Products & inventory → Valuation*, as of 2026-08-31: the stock subledger and `1140 Inventory` both read **7,430.00**, the page says they tie out. Two different records — what the warehouse says it holds and what the ledger says it is worth — agreeing is the whole point of perpetual inventory.
 
-**The customer.** *Sales → Statements → Kestrel Logistics* → **Outstanding**, as at 2026-09-30: **4,770.00**, which is I20 (8,860.00) less the applied deposit (4,090.00).
+**The customer.** *Sales → Statements → Kestrel Logistics* → **Outstanding**, as at 2026-08-31: **4,770.00**, which is I20 (8,860.00) less the applied deposit (4,090.00).
 
 **The numbers the answer key insists on:**
 
-| Account / report | At 2026-09-30 |
+| Account / report | At 2026-08-31 |
 |---|---|
 | 1140 Inventory | 7,430.00 |
 | 2130 Customer Deposits | 0.00 |
@@ -124,10 +124,12 @@ This is where the deposit *stops being a liability*: revenue is recognised on th
 | 2100 Accounts Payable | 0.00 |
 | 5050 Cost of Sales — Inventory (cumulative) | 6,520.00 |
 
+2120 Accrued Liabilities reads 850.00 here because the utilities accrual's last reversal lands on 2026-09-01, the first day of month 7; after it posts, the account is 0.00.
+
 Compare the rest with `07-expected-results.md` → Month 6.
 
-## 7. Close August and try to break it
+## 7. Close July and try to break it
 
-**Accounting → Fiscal periods → Close** on the August period. Now try to post something into it: **Accounting → Manual journals → New**, dated 2026-08-15, any two balanced lines, **Post**. AutoLedger refuses — the period is closed. (The Reports are now stable too: a late entry can no longer change a month you have already reported.) Nothing should be saved; if a draft is left behind, delete it. Closing is reversible — **Reopen** exists — whereas a *locked* period is not; this scenario only closes.
+**Accounting → Fiscal periods → Close** on the July period. Now try to post something into it: **Accounting → Manual journals → New**, dated 2026-07-15, any two balanced lines, **Post**. AutoLedger refuses — the period is closed. (The Reports are now stable too: a late entry can no longer change a month you have already reported.) Nothing should be saved; if a draft is left behind, delete it. Closing is reversible — **Reopen** exists — whereas a *locked* period is not; this scenario only closes.
 
-That is the quarter: six months, every ledger figure agreeing with `07-expected-results.md`.
+That is the quarter: months 1–6, every ledger figure agreeing with `07-expected-results.md`. Month 7 (`11-currency-tax-and-journals.md`) continues from here.

@@ -106,7 +106,7 @@ server/     Express + TypeScript API — controllers / services / routes / middl
             module's code nests under accounting/, capture/ or inventory/ in every layer
 client/     React + Vite frontend — one shell, one route table (src/routes/),
             pages grouped by sidebar section under Pages/
-walkthrough/ Phase 6.1's demo scenario — human-readable CSV/markdown, manually enterable;
+walkthrough/ the seven-month demo scenario + guide/ (a test guide for every module) — human-readable CSV/markdown;
             replayed through the API by the answer-key test and by `npm run seed:demo`
 docs/       Architecture, schema, API, guardrails, roadmap
 study/      Interview-prep notes generated from this project's decisions

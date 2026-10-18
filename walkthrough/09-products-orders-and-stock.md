@@ -43,7 +43,7 @@ Create them **before** importing statement 5. Two things worth knowing: a rule n
 
 ## 3. Buy the stock — PO1 → B13
 
-**Purchases → Purchase orders → New.** Vendor **Ironclad Supply Co**, order date 2026-08-03. Pick each line from the item picker (type the code):
+**Purchases → Purchase orders → New.** Vendor **Ironclad Supply Co**, order date 2026-07-03. Pick each line from the item picker (type the code):
 
 | # | Item code | Description | Qty | Unit price | Account |
 |---|---|---|---|---|---|
@@ -52,7 +52,7 @@ Create them **before** importing statement 5. Two things worth knowing: a rule n
 
 Total 13,950.00. **Save**, then **Confirm**. A purchase order is a *commitment*, not a debt: it posts **nothing**. Nothing is owed until the goods are invoiced.
 
-When the supplier's invoice arrives, open the order and choose **Create bill**: bill date 2026-08-05, due date 2026-08-05, vendor's invoice no. `INV-IC-9455`, all lines at the ordered quantities. Open the new draft expense (**Purchases → Expenses**) and take it through **Submit for approval → Approve**. This is **B13** in `04-bills-received.md`.
+When the supplier's invoice arrives, open the order and choose **Create bill**: bill date 2026-07-05, due date 2026-07-05, vendor's invoice no. `INV-IC-9455`, all lines at the ordered quantities. Open the new draft expense (**Purchases → Expenses**) and take it through **Submit for review → Approve**. This is **B13** in `04-bills-received.md`.
 
 Approving posts the bill — and, because both lines are stock items, it also **receives the stock**:
 
@@ -65,7 +65,7 @@ The debit goes to `1140 Inventory` (an asset), not to an expense: buying stock i
 
 ## 4. Sell the stock — QU1 → SO1 → D1 → I17
 
-**Sales → Quotes → New.** Customer **Kestrel Logistics**, quote date 2026-08-06, **Valid until 2027-09-10**, title "Caster and fitting supply with installation". Lines:
+**Sales → Quotes → New.** Customer **Kestrel Logistics**, quote date 2026-07-06, **Valid until 2027-08-10**, title "Caster and fitting supply with installation". Lines:
 
 | # | Item code | Description | Qty | Unit price | Account |
 |---|---|---|---|---|---|
@@ -81,7 +81,7 @@ Save, then **Send** → choose **Mark as sent — I'll print or send it myself**
 
 ### The deposit — D1
 
-Open SO1 → **Request deposit** → basis: **25%** of the order, document date 2026-08-08, due date 2026-08-08. It creates a draft deposit invoice for **4,090.00**; **Issue** it. Posting:
+Open SO1 → **Request deposit** → basis: **25%** of the order, document date 2026-07-08, due date 2026-07-08. It creates a draft deposit invoice for **4,090.00**; **Issue** it. Posting:
 
 | Account | Debit | Credit |
 |---|---|---|
@@ -92,7 +92,7 @@ The credit is to a **liability**, `2130 Customer Deposits`, not to revenue. Mone
 
 ### The first delivery — I17
 
-Open SO1 → **Create invoice**. Bill only part of the order: CAST-6 **60**, HFK-12 **40**, and set the SVC-FAB line to **0** (it is billed with the second delivery). Document date 2026-08-12, due date 2026-08-12. Then open the draft invoice and **Issue** it. This is **I17** in `05-invoices-to-raise.md`. Issuing posts **two** things at once:
+Open SO1 → **Create invoice**. Bill only part of the order: CAST-6 **60**, HFK-12 **40**, and set the SVC-FAB line to **0** (it is billed with the second delivery). Document date 2026-07-12, due date 2026-07-12. Then open the draft invoice and **Issue** it. This is **I17** in `05-invoices-to-raise.md`. Issuing posts **two** things at once:
 
 *The sale:*
 
@@ -114,15 +114,15 @@ Open SO1 → **Create invoice**. Bill only part of the order: CAST-6 **60**, HFK
 
 ### Rent — B14, made recurring
 
-Enter B14 like any bill from `04-bills-received.md`: **Northgate Realty**, 2026-08-01, due the same day, vendor reference `NR-RENT-August`, one line "Shop rent — [Month]" 9,100.00 to 6110 Rent & Utilities. Note `[Month]` in the description: type it literally. A placeholder is replaced with the **document's month** when the bill is approved, so this one reads "Shop rent — August" and next month's copy will read "Shop rent — September". Submit and approve B14, then on its page choose **Make recurring**:
+Enter B14 like any bill from `04-bills-received.md`: **Northgate Realty**, 2026-07-01, due the same day, vendor reference `NR-RENT-July`, one line "Shop rent — [Month]" 9,100.00 to 6110 Rent & Utilities. Note `[Month]` in the description: type it literally. A placeholder is replaced with the **document's month** when the bill is approved, so this one reads "Shop rent — July" and next month's copy will read "Shop rent — August". Submit and approve B14, then on its page choose **Make recurring**:
 
 | Field | Value |
 |---|---|
 | Name | Shop rent |
 | Frequency | Monthly |
 | Every | 1 |
-| Start date | 2026-09-01 |
-| End date | 2026-09-01 |
+| Start date | 2026-08-01 |
+| End date | 2026-08-01 |
 | Mode | Draft |
 
 The end date equals the start date so the schedule makes exactly **one** more bill — month 6's rent — and stops. Mode **Draft** means each occurrence is created for you to approve, not posted by itself. Month 6 picks the draft up (`10-closing-the-quarter.md`).
@@ -131,7 +131,7 @@ The end date equals the start date so the schedule makes exactly **one** more bi
 
 ### Utilities — an accrual that reverses itself
 
-Harbor Point's electricity and water for August will not be invoiced until early September. Left alone, August's profit would be overstated and September's understated. Accrual accounting records the cost in the month it was **incurred**, so on the last working days of August you book an *estimate* — and cancel it the day after, so the real invoice does not count the cost twice.
+Harbor Point's electricity and water for July will not be invoiced until early August. Left alone, July's profit would be overstated and August's understated. Accrual accounting records the cost in the month it was **incurred**, so on the last working days of July you book an *estimate* — and cancel it the day after, so the real invoice does not count the cost twice.
 
 **Accounting → Manual journals → Repeating tab → New repeating journal:**
 
@@ -139,9 +139,9 @@ Harbor Point's electricity and water for August will not be invoiced until early
 |---|---|
 | Name | Utilities accrual |
 | Narration | Utilities accrual — [Month] |
-| First date | 2026-08-28 |
+| First date | 2026-07-28 |
 | Repeats | Monthly, every 1 |
-| End date | 2026-09-28 |
+| End date | 2026-08-28 |
 | Reverse on the 1st of the next month | **ticked** |
 
 | # | Account | Description | Debit | Credit |
@@ -153,12 +153,12 @@ Save it, then open it under **Accounting → Recurring** and press **Run now**. 
 
 | Date | What | Debit | Credit |
 |---|---|---|---|
+| 2026-07-28 | Accrue July's utilities | 6110 Rent & Utilities 850.00 | 2120 Accrued Liabilities 850.00 |
+| 2026-08-01 | Reverse it | 2120 Accrued Liabilities 850.00 | 6110 Rent & Utilities 850.00 |
 | 2026-08-28 | Accrue August's utilities | 6110 Rent & Utilities 850.00 | 2120 Accrued Liabilities 850.00 |
-| 2026-09-01 | Reverse it | 2120 Accrued Liabilities 850.00 | 6110 Rent & Utilities 850.00 |
-| 2026-09-28 | Accrue September's utilities | 6110 Rent & Utilities 850.00 | 2120 Accrued Liabilities 850.00 |
-| 2026-10-01 | Reverse that one | 2120 Accrued Liabilities 850.00 | 6110 Rent & Utilities 850.00 |
+| 2026-09-01 | Reverse that one | 2120 Accrued Liabilities 850.00 | 6110 Rent & Utilities 850.00 |
 
-Only the first row belongs to month 5. The next two land in month 6 (don't worry that they appear already — reports "as of" the end of month 5 ignore them), and the last is dated after the scenario ends, so `2120 Accrued Liabilities` closes month 6 still holding 850.00: September's estimate. In month 6 the supplier's real August bill arrives and is expensed again; the reversal cancels it out, so August's cost is counted once, in August.
+Only the first row belongs to month 5. The next two land in month 6 (don't worry that they appear already — reports "as of" the end of month 5 ignore them), and the last reversal lands on 2026-09-01, the first day of month 7. So `2120 Accrued Liabilities` closes month 6 still holding 850.00: August's estimate — and reads 0.00 once that reversal posts. In month 6 the supplier's real July bill arrives and is expensed again; the reversal cancels it out, so July's cost is counted once, in July.
 
 > The estimate is a manual journal, which is why it works: AutoLedger refuses manual postings to the receivable, payable, inventory, bank and credit-card accounts, but `2120 Accrued Liabilities` is an ordinary liability account.
 
@@ -166,7 +166,7 @@ Only the first row belongs to month 5. The next two land in month 6 (don't worry
 
 Now import `statements/month-5-northwind-ISO.csv` as in the tutorial (`06-bank-statements.md` lists every line). The service-charge and interest lines will already be **MATCHED** — your rules settled them on import; there is nothing to click. Resolve the rest as before.
 
-Once August reconciles, **lock the books behind you**: **Accounting → Fiscal periods → Generate periods for this fiscal year** (if your six months cross a fiscal-year boundary, generate for both years), then **Close** the periods for April, May, June, July. A closed period refuses new postings; it can be reopened, so closing is a safety catch rather than a lock. Month 6 shows what the refusal looks like.
+Once July reconciles, **lock the books behind you**: **Accounting → Fiscal periods → Generate periods for this fiscal year** (if your seven months cross a fiscal-year boundary, generate for both years), then **Close** the periods for March, April, May, June. A closed period refuses new postings; it can be reopened, so closing is a safety catch rather than a lock. Month 6 shows what the refusal looks like.
 
 ## What to check
 
@@ -175,8 +175,8 @@ Once August reconciles, **lock the books behind you**: **Accounting → Fiscal p
 | B13 approved | Products & inventory → Stock on hand | CAST-6 **200**, HFK-12 **300** |
 | I17 issued | Products & inventory → Stock on hand | CAST-6 **140**, HFK-12 **260** |
 | I17 issued | Products & inventory → Valuation | Subledger and `1140 Inventory` both **10,690.00**, ties out |
-| D1 issued | Reports → Trial balance (as of 2026-08-31) | `2130 Customer Deposits` **4,090.00** credit |
-| ACC1 run | Reports → Trial balance (as of 2026-08-31) | `2120 Accrued Liabilities` **850.00** credit |
+| D1 issued | Reports → Trial balance (as of 2026-07-31) | `2130 Customer Deposits` **4,090.00** credit |
+| ACC1 run | Reports → Trial balance (as of 2026-07-31) | `2120 Accrued Liabilities` **850.00** credit |
 | I17 issued | Sales → Sales orders → SO1 | Billing: **Partly billed** |
 | Statement 5 resolved | Banking → Reconciliation | Difference **0.00**, Unmatched **0**, Ignored **5** |
 

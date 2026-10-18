@@ -1,6 +1,7 @@
 import {
   WALKTHROUGH_DATASET,
   allVendors,
+  documentDueDate,
   documentLines,
   resolveTokens,
   type DatasetDocument,
@@ -9,10 +10,10 @@ import {
   type DatasetOrder,
 } from './walkthroughDataset.js';
 import { resolveSettlementLines } from './walkthroughTiers.js';
-import { statement1, statement2, statement3, statement4, statement5, statement6 } from './walkthroughStatements.js';
+import { statement1, statement2, statement3, statement4, statement5, statement6, statement7 } from './walkthroughStatements.js';
 import { vendorsCsv, customersCsv } from './walkthroughParties.js';
 import { accountsCsv, billsCsv, invoicesCsv, payrollJournalCsv, productsCsv, stockItemsCsv } from './walkthroughCsv.js';
-import { resolveDate, shiftIsoDate, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
+import { lastDayOfWalkthroughMonth, resolveDate, shiftIsoDate, type AnchorMonth, type ScenarioMonth, type WalkthroughMonth } from './walkthroughDates.js';
 import { parseMoneyText } from '../utils/money.js';
 
 /**
@@ -39,10 +40,11 @@ export interface ReplayResponse {
   text: string;
 }
 
-/** The two verbs the replay needs; a supertest agent or a fetch wrapper both fit. */
+/** The verbs the replay needs; a supertest agent or a fetch wrapper both fit. */
 export interface ReplayClient {
   get(path: string): Promise<ReplayResponse>;
   post(path: string, body?: unknown): Promise<ReplayResponse>;
+  delete(path: string): Promise<ReplayResponse>;
 }
 
 export interface ReplayHooks {
@@ -69,6 +71,9 @@ const QUOTES = '/api/v1/quotes';
 const RECURRING = '/api/v1/recurring-schedules';
 const MANUAL_JOURNALS = '/api/v1/manual-journals';
 const FISCAL_PERIODS = '/api/v1/fiscal-periods';
+const FX_RATES = '/api/v1/fx-rates';
+const FX_REVALUATIONS = '/api/v1/fx-revaluations';
+const PAYMENTS = '/api/v1/payments';
 
 export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) {
   const accountIdByCode = new Map<string, string>();
@@ -88,7 +93,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     if (!ok.includes(res.status)) throw new Error(`walkthrough: ${what} failed ${String(res.status)} ${res.text}`);
   }
 
-  function dateOf(month: WalkthroughMonth, day: number): string {
+  function dateOf(month: ScenarioMonth, day: number): string {
     return resolveDate(anchor, month, day);
   }
 
@@ -193,8 +198,15 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     return Math.round(Number(quantity) * 1000);
   }
 
-  function dueDateOf(doc: DatasetDocument, date: string): string {
-    return doc.dueDate === undefined ? date : resolveDate(anchor, doc.dueDate.month, doc.dueDate.day);
+  function dueDateOf(doc: DatasetDocument): string {
+    return documentDueDate(anchor, doc);
+  }
+
+  /** The issued/approved document total (native currency, tax included) must equal the dataset's. */
+  function expectTotal(actual: unknown, doc: DatasetDocument): void {
+    if (actual !== parseMoneyText(doc.total)) {
+      throw new Error(`walkthrough: ${doc.ref} total ${String(actual)}, expected ${String(parseMoneyText(doc.total))}`);
+    }
   }
 
   async function enterBill(doc: DatasetDocument): Promise<void> {
@@ -207,6 +219,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
         quantityMilli: toMilli(line.quantity),
         unitPriceCents: parseMoneyText(line.unitPrice),
         expenseAccountId: await accountId(line.accountCode),
+        taxRateBp: line.taxRateBp ?? 0,
         ...(itemId === undefined ? {} : { itemId }),
       });
     }
@@ -214,13 +227,16 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       vendorId: vendorId(doc.counterpartyKey),
       vendorReference: doc.vendorReference === null ? null : resolveTokens(anchor, doc.vendorReference),
       billDate: date,
-      dueDate: dueDateOf(doc, date),
+      dueDate: dueDateOf(doc),
+      ...(doc.currency === undefined ? {} : { currencyCode: doc.currency }),
       lines,
     });
     check(created, 201, `bill create ${doc.ref}`);
     const billId = created.body.bill.id as string;
     check(await api.post(`${BILLS}/${billId}/submit`, {}), 200, `bill submit ${doc.ref}`);
-    check(await api.post(`${BILLS}/${billId}/approve`, {}), 200, `bill approve ${doc.ref}`);
+    const approved = await api.post(`${BILLS}/${billId}/approve`, {});
+    check(approved, 200, `bill approve ${doc.ref}`);
+    expectTotal(approved.body.bill?.totalCents, doc);
     documentIdByRef.set(doc.ref, billId);
   }
 
@@ -234,18 +250,22 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
         quantityMilli: toMilli(line.quantity),
         unitPriceCents: parseMoneyText(line.unitPrice),
         revenueAccountId: await accountId(line.accountCode),
+        taxRateBp: line.taxRateBp ?? 0,
         ...(itemId === undefined ? {} : { itemId }),
       });
     }
     const created = await api.post(INVOICES, {
       customerId: customerId(doc.counterpartyKey),
       issueDate: date,
-      dueDate: dueDateOf(doc, date),
+      dueDate: dueDateOf(doc),
+      ...(doc.currency === undefined ? {} : { currencyCode: doc.currency }),
       lines,
     });
     check(created, 201, `invoice create ${doc.ref}`);
     const invoiceId = created.body.invoice.id as string;
-    check(await api.post(`${INVOICES}/${invoiceId}/issue`, {}), 200, `invoice issue ${doc.ref}`);
+    const issued = await api.post(`${INVOICES}/${invoiceId}/issue`, {});
+    check(issued, 200, `invoice issue ${doc.ref}`);
+    expectTotal(issued.body.invoice?.totalCents, doc);
     documentIdByRef.set(doc.ref, invoiceId);
   }
 
@@ -261,6 +281,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       4: { fileName: 'month-4.csv', content: statement4(anchor, resolved), dateFormat: 'ISO', columnMap: null },
       5: { fileName: 'month-5.csv', content: statement5(anchor, resolved), dateFormat: 'ISO', columnMap: null },
       6: { fileName: 'month-6.csv', content: statement6(anchor, resolved), dateFormat: 'DMY', columnMap: null },
+      7: { fileName: 'month-7.csv', content: statement7(anchor, resolved), dateFormat: 'ISO', columnMap: null },
     };
     const res = await api.post(BANK_IMPORTS, { accountId: cashAccountId, ...bodies[month] });
     check(res, 201, `bank statement import month ${String(month)}`);
@@ -490,7 +511,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     const date = dateOf(bill.month, bill.day);
     const converted = await api.post(`${PURCHASE_ORDERS}/${id}/convert`, {
       documentDate: date,
-      dueDate: dueDateOf(bill, date),
+      dueDate: dueDateOf(bill),
       vendorReference: bill.vendorReference === null ? null : resolveTokens(anchor, bill.vendorReference),
       lines: null,
     });
@@ -553,7 +574,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       percentBp: 2500,
       amountCents: null,
       documentDate: date,
-      dueDate: dueDateOf(doc, date),
+      dueDate: dueDateOf(doc),
       vendorReference: null,
     });
     check(created, 201, `deposit ${docRef} create`);
@@ -582,7 +603,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
           });
     const converted = await api.post(`${SALES_ORDERS}/${orderId}/convert`, {
       documentDate: date,
-      dueDate: doc.dueDate === undefined ? date : shiftIsoDate(date, 30),
+      dueDate: documentDueDate(anchor, doc),
       vendorReference: null,
       lines,
     });
@@ -645,8 +666,11 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     documentIdByRef.set(billRef, run.billId);
   }
 
-  /** ACC1: a repeating, auto-reversing utilities accrual; the sweep is run by hand. */
-  async function createRepeatingAccrual(journalRef: string): Promise<void> {
+  /** ACC1 / INS1: a repeating journal; the sweep is run by hand. */
+  async function createRepeatingJournal(
+    journalRef: string,
+    opts: { name: string; expectGenerated: number | 'atLeastOne' },
+  ): Promise<void> {
     const journal = WALKTHROUGH_DATASET.journals.find((j) => j.ref === journalRef);
     if (journal === undefined || journal.repeat === null) throw new Error(`walkthrough: no repeating journal ${journalRef}`);
     const lines = [];
@@ -663,7 +687,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       narration: journal.narration,
       entryDate: start,
       lines,
-      name: 'Utilities accrual',
+      name: opts.name,
       frequency: 'MONTHLY',
       intervalCount: 1,
       startDate: start,
@@ -674,8 +698,118 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     const scheduleId = created.body.schedule.id as string;
     const ran = await api.post(`${RECURRING}/${scheduleId}/run`, {});
     check(ran, 200, `repeating journal ${journalRef} run`);
-    if (ran.body.generated !== 2) {
-      throw new Error(`walkthrough: ${journalRef} generated ${String(ran.body.generated)} occurrences, expected 2: ${ran.text}`);
+    const generated = ran.body.generated as number;
+    const ok = opts.expectGenerated === 'atLeastOne' ? generated >= 1 : generated === opts.expectGenerated;
+    if (!ok) {
+      throw new Error(
+        `walkthrough: ${journalRef} generated ${String(generated)} occurrences, expected ${String(opts.expectGenerated)}: ${ran.text}`,
+      );
+    }
+  }
+
+  /** Month-7 accounts entered by form: 1115 (a bank account) and 6150. */
+  async function createFormAccounts(month: WalkthroughMonth): Promise<void> {
+    for (const a of WALKTHROUGH_DATASET.formAccounts.filter((x) => x.month === month)) {
+      const res = await api.post(ACCOUNTS, {
+        code: a.code,
+        name: a.name,
+        type: a.type,
+        parentId: await accountId(a.parent),
+        isPostable: true,
+        description: null,
+        bankAccountKind: a.bankAccountKind,
+        cashFlowCategory: null,
+        balanceSheetClass: null,
+      });
+      check(res, 201, `account ${a.code} create`);
+    }
+    accountIdByCode.clear();
+  }
+
+  /** Customers added by form (not by the CSV importer). */
+  async function createExtraCustomers(month: WalkthroughMonth): Promise<void> {
+    for (const c of WALKTHROUGH_DATASET.extraCustomers.filter((x) => x.month === month)) {
+      const res = await api.post(CUSTOMERS, {
+        name: c.name,
+        email: c.email,
+        phone: c.phone,
+        billingAddress: c.address,
+        taxNumber: c.taxNumber,
+        notes: null,
+        defaultPaymentTermId: null,
+      });
+      check(res, 201, `customer ${c.name} create`);
+      customerIdByKey.set(c.key, res.body.customer.id as string);
+    }
+  }
+
+  async function enterFxRates(month: WalkthroughMonth): Promise<void> {
+    for (const r of WALKTHROUGH_DATASET.fxRates.filter((x) => x.month === month)) {
+      const rateDate = r.day === 'LAST' ? lastDayOfWalkthroughMonth(anchor, month) : dateOf(month, r.day);
+      const res = await api.post(FX_RATES, { fromCode: r.fromCode, toCode: r.toCode, rateDate, rate: r.rate, source: 'MANUAL' });
+      check(res, 201, `fx rate ${r.fromCode}/${r.toCode} ${rateDate}`);
+    }
+  }
+
+  /** Posted, draft-then-deleted and posted-then-voided manual journals dated in `month`. */
+  async function enterManualJournals(month: WalkthroughMonth): Promise<void> {
+    for (const j of WALKTHROUGH_DATASET.journals.filter((x) => x.month === month)) {
+      if (j.entry !== 'POSTED' && j.entry !== 'DRAFT_DELETED' && j.entry !== 'POSTED_VOIDED') continue;
+      const lines = [];
+      for (const l of j.lines) {
+        lines.push({
+          accountId: await accountId(l.accountCode),
+          description: l.description,
+          debitCents: parseMoneyText(l.debit),
+          creditCents: parseMoneyText(l.credit),
+        });
+      }
+      const created = await api.post(MANUAL_JOURNALS, {
+        narration: j.narration,
+        entryDate: dateOf(j.month, j.day),
+        lines,
+        action: j.entry === 'DRAFT_DELETED' ? 'draft' : 'post',
+      });
+      check(created, 201, `manual journal ${j.ref} create`);
+      const id = created.body.journal.id as string;
+      if (j.entry === 'DRAFT_DELETED') {
+        check(await api.delete(`${MANUAL_JOURNALS}/${id}`), 204, `manual journal ${j.ref} delete`);
+      } else if (j.entry === 'POSTED_VOIDED') {
+        if (j.voidDay === undefined) throw new Error(`walkthrough: ${j.ref} has no voidDay`);
+        check(await api.post(`${MANUAL_JOURNALS}/${id}/void`, { voidDate: dateOf(j.month, j.voidDay) }), 200, `manual journal ${j.ref} void`);
+      }
+    }
+  }
+
+  /** RC1: a euro receipt recorded as a manual payment into the EUR account. */
+  async function recordFxPayment(ref: string): Promise<void> {
+    const p = WALKTHROUGH_DATASET.fxPayments.find((x) => x.ref === ref);
+    if (p === undefined) throw new Error(`walkthrough: no fx payment ${ref}`);
+    const doc = datasetDocument(p.documentRef);
+    const amountCents = parseMoneyText(p.amount);
+    const res = await api.post(PAYMENTS, {
+      direction: 'RECEIVE',
+      paymentDate: dateOf(p.month, p.day),
+      amountCents,
+      currencyCode: p.currency,
+      cashAccountId: await accountId(p.cashAccountCode),
+      customerId: customerId(doc.counterpartyKey),
+      vendorId: null,
+      method: null,
+      reference: ref,
+      notes: null,
+      allocations: [{ invoiceId: documentId(p.documentRef), billId: null, amountCents }],
+      entryDate: null,
+    });
+    check(res, 201, `payment ${ref}`);
+  }
+
+  /** Posts the month-end revaluation of open euro invoices (reverses on the next day). */
+  async function runRevaluation(month: WalkthroughMonth): Promise<void> {
+    const res = await api.post(FX_REVALUATIONS, { asOfDate: lastDayOfWalkthroughMonth(anchor, month) });
+    check(res, 201, `fx revaluation month ${String(month)}`);
+    if (res.body.revaluation.totalDeltaCents !== -6500 || res.body.revaluation.lineCount !== 1) {
+      throw new Error(`walkthrough: revaluation delta ${String(res.body.revaluation.totalDeltaCents)}, lines ${String(res.body.revaluation.lineCount)}; expected -6500, 1`);
     }
   }
 
@@ -741,7 +875,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
 
   /** Generates the fiscal periods, then closes the ones this point in the story closes. */
   async function closePeriods(afterMonth: WalkthroughMonth): Promise<void> {
-    for (const containingDate of [dateOf(1, 1), dateOf(6, 1)]) {
+    for (const containingDate of [dateOf(1, 1), dateOf(6, 1), dateOf(7, 1)]) {
       check(await api.post(`${FISCAL_PERIODS}/generate`, { containingDate }), [200, 201], 'fiscal period generate');
     }
     const listed = await api.get(FISCAL_PERIODS);
@@ -775,7 +909,7 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       await enterSalesQuoteToOrder('SO1');
       await raiseDeposit('D1');
       await invoiceFromOrder('I17');
-      await createRepeatingAccrual('ACC1');
+      await createRepeatingJournal('ACC1', { name: 'Utilities accrual', expectGenerated: 2 });
       await importStatement(5);
       await resolveMonth(5);
       await closePeriods(5);
@@ -791,6 +925,25 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
       await importStatement(6);
       await resolveMonth(6);
       await closePeriods(6);
+      return;
+    }
+    if (month === 7) {
+      await createFormAccounts(7);
+      await createExtraCustomers(7);
+      await enterFxRates(7);
+      await enterManualJournals(7);
+      await enterInvoice(datasetDocument('I21'));
+      await enterInvoice(datasetDocument('I23'));
+      await enterInvoice(datasetDocument('I24'));
+      await enterInvoice(datasetDocument('I22'));
+      await recordFxPayment('RC1');
+      await enterBill(datasetDocument('B19'));
+      await enterBill(datasetDocument('B20'));
+      await importStatement(7);
+      await resolveMonth(7);
+      await createRepeatingJournal('INS1', { name: 'Insurance amortisation', expectGenerated: 'atLeastOne' });
+      await runRevaluation(7);
+      await closePeriods(7);
       return;
     }
     for (const bill of WALKTHROUGH_DATASET.bills.filter((b) => b.month === month)) await enterBill(bill);
@@ -826,7 +979,13 @@ export function createWalkthroughReplay(api: ReplayClient, anchor: AnchorMonth) 
     invoiceFromOrder,
     makeRecurring,
     approveRecurringBill,
-    createRepeatingAccrual,
+    createRepeatingJournal,
+    createFormAccounts,
+    createExtraCustomers,
+    enterFxRates,
+    enterManualJournals,
+    recordFxPayment,
+    runRevaluation,
     importDocuments,
     importPayroll,
     createExtraVendors,

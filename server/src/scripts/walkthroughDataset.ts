@@ -1,4 +1,4 @@
-import { calendarYear, monthName, type AnchorMonth, type WalkthroughMonth } from './walkthroughDates.js';
+import { calendarYear, monthName, resolveDate, shiftIsoDate, type AnchorMonth, type ScenarioMonth, type WalkthroughMonth } from './walkthroughDates.js';
 
 /**
  * The source-of-truth data for `walkthrough/` — a hand-enterable, six-month
@@ -17,9 +17,9 @@ import { calendarYear, monthName, type AnchorMonth, type WalkthroughMonth } from
  * wherever it is used — never a float; rule 3's discipline applied at a file
  * boundary.
  *
- * Every document is tax-exempt (no `taxRateBp` field — the schema's default
- * is 0) so the arithmetic in `07-expected-results.md` stays checkable by
- * hand; the tax split is Capture's showcase, not this one.
+ * Months 1–6 are tax-exempt (no `taxRateBp` field — the schema's default is
+ * 0) so the arithmetic in `07-expected-results.md` stays checkable by hand;
+ * month 7 introduces 7.5% sales tax on some lines and EUR documents.
  */
 
 export type Tier =
@@ -30,7 +30,7 @@ export type Tier =
   | 'REVIEW_ANON'
   | 'REVIEW_PARTIAL'
   | 'REVIEW_REMAINDER'
-  /** Never paid inside the scenario — no settlement line. */
+  /** No bank line (unpaid, or settled outside the bank statement). */
   | 'OPEN';
 
 /** How a document reaches the books in the replay. Absent on a document = 'MANUAL'. */
@@ -45,6 +45,8 @@ export interface DatasetLine {
   /** Decimal string, e.g. "42.00". */
   unitPrice: string;
   accountCode: string;
+  /** Tax rate in basis points (750 = 7.5%); absent = 0. */
+  taxRateBp?: number;
 }
 
 export interface DatasetProduct {
@@ -85,12 +87,14 @@ export interface DatasetOrder {
 
 export interface DatasetJournal {
   ref: string;
-  entry: 'REPEATING' | 'IMPORT';
+  entry: 'REPEATING' | 'IMPORT' | 'POSTED' | 'DRAFT_DELETED' | 'POSTED_VOIDED';
   narration: string;
   month: WalkthroughMonth;
   day: number;
   lines: { accountCode: string; description: string | null; debit: string; credit: string }[];
-  repeat: { endMonth: WalkthroughMonth; endDay: number; autoReverse: boolean } | null;
+  /** POSTED_VOIDED only: the day of the same month the journal is voided. */
+  voidDay?: number;
+  repeat: { endMonth: ScenarioMonth; endDay: number; autoReverse: boolean } | null;
 }
 
 export interface DatasetBankRule {
@@ -138,7 +142,7 @@ export interface DatasetDocument {
   counterpartyKey: string;
   month: WalkthroughMonth;
   day: number;
-  /** Always 0 in this dataset — every document is due on receipt. */
+  /** Days after the document date the document falls due (0 = on receipt). */
   dueDays: number;
   /** Revenue account for an invoice, expense account for a bill. */
   accountCode: string;
@@ -152,12 +156,12 @@ export interface DatasetDocument {
   anonMemo: string | null;
   /** Set only on the REVIEW_PARTIAL document — where its REVIEW_REMAINDER line lands. */
   remainder: { month: WalkthroughMonth; day: number } | null;
+  /** Absent = USD (the base currency). Amounts and `total` are in this currency. */
+  currency?: 'EUR';
   /** Multi-line documents only; otherwise one line is synthesised (see `documentLines`). */
   lines?: DatasetLine[];
   /** Absent = 'MANUAL'. */
   entry?: DocumentEntry;
-  /** Absent = same day as the document. `month` 7 = the month after the scenario. */
-  dueDate?: { month: WalkthroughMonth | 7; day: number };
   /** The order a document is raised from (`ORDER`, `DEPOSIT`). */
   orderRef?: string;
   /** Order lines billed by this document; null = the remainder. */
@@ -207,6 +211,11 @@ export interface DatasetNote {
   allocations: DatasetNoteAllocation[];
 }
 
+export interface DatasetFormAccount { month: WalkthroughMonth; code: string; name: string; type: 'Asset' | 'Expense'; parent: string; bankAccountKind: 'BANK' | null }
+export interface DatasetFxRate { month: WalkthroughMonth; day: number | 'LAST'; fromCode: 'EUR'; toCode: 'USD'; rate: string }
+export interface DatasetFxPayment { ref: string; documentRef: string; month: WalkthroughMonth; day: number; amount: string; currency: 'EUR'; cashAccountCode: string }
+export interface DatasetFxRevaluation { month: WalkthroughMonth }
+
 export interface WalkthroughDataset {
   businessName: 'Harbor Point Fabrication';
   businessDescription: string;
@@ -225,6 +234,11 @@ export interface WalkthroughDataset {
   journals: DatasetJournal[];
   bankRules: DatasetBankRule[];
   extraVendors: DatasetVendor[];
+  formAccounts: DatasetFormAccount[];
+  extraCustomers: (DatasetCustomer & { month: WalkthroughMonth; taxNumber: string })[];
+  fxRates: DatasetFxRate[];
+  fxPayments: DatasetFxPayment[];
+  fxRevaluations: DatasetFxRevaluation[];
   depositApplications: DatasetDepositApplication[];
   periodCloses: { afterMonth: WalkthroughMonth; closeMonths: WalkthroughMonth[] }[];
 }
@@ -234,8 +248,8 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
   businessDescription:
     'A small metal-fabrication shop. It bills project work — brackets, mounts, custom runs — to ' +
     'commercial customers, and buys the materials, freight, software, rent and professional ' +
-    'services a shop like that actually needs. Every document here is tax-exempt, so every figure ' +
-    'in the answer key is checkable by hand without a tax split getting in the way.',
+    'services a shop like that actually needs. Months 1–6 are tax-exempt so the answer key is ' +
+    'checkable by hand; month 7 adds 7.5% sales tax and a euro customer.',
   baseCurrency: 'USD',
   cashAccountCode: '1110',
   extraAccounts: [{ code: '4300', name: 'Interest Income', type: 'Revenue', parent: '4000' }],
@@ -469,17 +483,44 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       ],
     },
     {
-      // Due 30 days after the invoice date: 22 September + 30 days = 22 October (month 7, day 22).
-      ref: 'I20', counterpartyKey: 'kestrel-logistics', month: 6, day: 22, dueDays: 0,
+      // Due 30 days after the invoice date.
+      ref: 'I20', counterpartyKey: 'kestrel-logistics', month: 6, day: 22, dueDays: 30,
       accountCode: '4100', lineDescription: 'Caster and fitting supply — remainder',
       total: '8860.00', vendorReference: null, tier: 'OPEN', anonMemo: null, remainder: null,
-      dueDate: { month: 7, day: 22 },
       entry: 'ORDER', orderRef: 'SO1', orderLines: null,
       lines: [
         { itemCode: 'CAST-6', description: 'Heavy-duty caster, 6 in', quantity: '60', unitPrice: '95.00', accountCode: '4100' },
         { itemCode: 'HFK-12', description: 'Hydraulic fitting kit', quantity: '40', unitPrice: '45.00', accountCode: '4100' },
         { itemCode: 'SVC-FAB', description: 'Fabrication labour (per hour)', quantity: '16', unitPrice: '85.00', accountCode: '4200' },
       ],
+    },
+    // --- Month 7: currency, tax and journals ---
+    {
+      ref: 'I21', counterpartyKey: 'rheinwerk', month: 7, day: 3, dueDays: 30, currency: 'EUR',
+      accountCode: '4100', lineDescription: 'Export — press guard assemblies, run 4',
+      total: '10000.00', vendorReference: null, tier: 'OPEN', anonMemo: null, remainder: null,
+    },
+    {
+      ref: 'I23', counterpartyKey: 'brightline-analytics', month: 7, day: 6, dueDays: 0,
+      accountCode: '4200', lineDescription: 'Design & drafting — guard retrofit',
+      total: '7525.00', vendorReference: null, tier: 'AUTO_0', anonMemo: null, remainder: null,
+      lines: [
+        { itemCode: 'SVC-DES', description: 'Design & drafting — guard retrofit', quantity: '20', unitPrice: '110.00', accountCode: '4200', taxRateBp: 750 },
+        { itemCode: null, description: 'Fabricated mounting brackets', quantity: '1', unitPrice: '4800.00', accountCode: '4100', taxRateBp: 750 },
+      ],
+    },
+    {
+      ref: 'I24', counterpartyKey: 'novato-health', month: 7, day: 13, dueDays: 0,
+      accountCode: '4200', lineDescription: 'Fabrication — cart frame retrofit',
+      total: '3870.00', vendorReference: null, tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
+      lines: [
+        { itemCode: null, description: 'Fabrication — cart frame retrofit', quantity: '1', unitPrice: '3600.00', accountCode: '4200', taxRateBp: 750 },
+      ],
+    },
+    {
+      ref: 'I22', counterpartyKey: 'rheinwerk', month: 7, day: 21, dueDays: 30, currency: 'EUR',
+      accountCode: '4100', lineDescription: 'Export — guard panels, run 5',
+      total: '6500.00', vendorReference: null, tier: 'OPEN', anonMemo: null, remainder: null,
     },
   ],
 
@@ -591,6 +632,20 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       total: '1240.00', vendorReference: 'CWF-1187', tier: 'REVIEW_LATE', anonMemo: null, remainder: null,
       entry: 'IMPORT',
     },
+    // --- Month 7: currency, tax and journals ---
+    {
+      ref: 'B19', counterpartyKey: 'ironclad-supply', month: 7, day: 8, dueDays: 0,
+      accountCode: '5100', lineDescription: 'Steel plate, 10mm — mill order',
+      total: '3440.00', vendorReference: 'INV-IC-9702', tier: 'AUTO_1', anonMemo: null, remainder: null,
+      lines: [
+        { itemCode: null, description: 'Steel plate, 10mm — mill order', quantity: '1', unitPrice: '3200.00', accountCode: '5100', taxRateBp: 750 },
+      ],
+    },
+    {
+      ref: 'B20', counterpartyKey: 'cloudspan', month: 7, day: 10, dueDays: 0,
+      accountCode: '6120', lineDescription: 'ERP hosting — [Month]',
+      total: '3480.00', vendorReference: 'CS-46790', tier: 'AUTO_2', anonMemo: null, remainder: null,
+    },
   ],
 
   noise: [
@@ -621,6 +676,11 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     { month: 6, day: 26, description: 'PAYROLL NET PAY', amount: '-11400.00', resolution: { kind: 'POST_JOURNAL', accountCode: '2160' } },
     { month: 6, day: 27, description: 'TRANSFER TO SAVINGS', amount: '-1500.00', resolution: { kind: 'IGNORE' } },
     { month: 6, day: 28, description: 'INTEREST PAID', amount: '18.40', resolution: { kind: 'RULE', accountCode: '4300' } },
+    // --- Month 7 ---
+    { month: 7, day: 2, description: 'MONTHLY SERVICE CHARGE', amount: '-38.00', resolution: { kind: 'RULE', accountCode: '6600' } },
+    { month: 7, day: 5, description: 'HARBOR MUTUAL INS PREMIUM', amount: '-1800.00', resolution: { kind: 'POST_JOURNAL', accountCode: '1130' } },
+    { month: 7, day: 20, description: 'TRANSFER TO SAVINGS', amount: '-1000.00', resolution: { kind: 'IGNORE' } },
+    { month: 7, day: 28, description: 'INTEREST PAID', amount: '19.60', resolution: { kind: 'RULE', accountCode: '4300' } },
   ],
 
   // Phase 26 — month 4's correcting documents, in the order they are entered.
@@ -719,6 +779,38 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
       ],
       repeat: null,
     },
+    {
+      ref: 'MJ1', entry: 'POSTED', narration: 'Owner contributes plasma cutter', month: 7, day: 3,
+      lines: [
+        { accountCode: '1500', description: 'Plasma cutter — contributed', debit: '6000.00', credit: '0.00' },
+        { accountCode: '3100', description: null, debit: '0.00', credit: '6000.00' },
+      ],
+      repeat: null,
+    },
+    {
+      ref: 'MJ2', entry: 'DRAFT_DELETED', narration: 'Plasma cutter contribution (duplicate)', month: 7, day: 10,
+      lines: [
+        { accountCode: '1500', description: 'Plasma cutter — contributed', debit: '6000.00', credit: '0.00' },
+        { accountCode: '3100', description: null, debit: '0.00', credit: '6000.00' },
+      ],
+      repeat: null,
+    },
+    {
+      ref: 'MJ3', entry: 'POSTED_VOIDED', narration: 'Bonus accrual — posted in error', month: 7, day: 15, voidDay: 18,
+      lines: [
+        { accountCode: '6100', description: null, debit: '1200.00', credit: '0.00' },
+        { accountCode: '2120', description: null, debit: '0.00', credit: '1200.00' },
+      ],
+      repeat: null,
+    },
+    {
+      ref: 'INS1', entry: 'REPEATING', narration: 'Insurance amortisation — [Month]', month: 7, day: 28,
+      lines: [
+        { accountCode: '6150', description: null, debit: '600.00', credit: '0.00' },
+        { accountCode: '1130', description: null, debit: '0.00', credit: '600.00' },
+      ],
+      repeat: { endMonth: 9, endDay: 28, autoReverse: false },
+    },
   ],
 
   bankRules: [
@@ -746,19 +838,50 @@ export const WALKTHROUGH_DATASET: WalkthroughDataset = {
     },
   ],
 
+  formAccounts: [
+    { month: 7, code: '1115', name: 'EUR Receipts Account', type: 'Asset', parent: '1100', bankAccountKind: 'BANK' },
+    { month: 7, code: '6150', name: 'Insurance', type: 'Expense', parent: '6000', bankAccountKind: null },
+  ],
+
+  extraCustomers: [
+    {
+      month: 7, key: 'rheinwerk', name: 'Rheinwerk Maschinenbau GmbH', email: 'ap@rheinwerk.example',
+      phone: '+49-211-555-0190', address: 'Königsallee 92, 40212 Düsseldorf, Germany', taxNumber: 'DE-814552907',
+    },
+  ],
+
+  fxRates: [
+    { month: 7, day: 1, fromCode: 'EUR', toCode: 'USD', rate: '1.08000000' },
+    { month: 7, day: 16, fromCode: 'EUR', toCode: 'USD', rate: '1.10000000' },
+    { month: 7, day: 'LAST', fromCode: 'EUR', toCode: 'USD', rate: '1.09000000' },
+  ],
+
+  fxPayments: [
+    { ref: 'RC1', documentRef: 'I21', month: 7, day: 17, amount: '10000.00', currency: 'EUR', cashAccountCode: '1115' },
+  ],
+
+  fxRevaluations: [{ month: 7 }],
+
   depositApplications: [{ depositRef: 'D1', documentRef: 'I20', day: 22, amount: '4090.00' }],
 
   periodCloses: [
     { afterMonth: 5, closeMonths: [1, 2, 3, 4] },
     { afterMonth: 6, closeMonths: [5] },
+    { afterMonth: 7, closeMonths: [6] },
   ],
 };
 
-/** Replaces `{M5}`/`{M6}` with the month's English name and `{Y6}` with month 6's calendar year. */
+/** A document's due date: its own date plus `dueDays`, calendar-correct across month ends. */
+export function documentDueDate(anchor: AnchorMonth, doc: DatasetDocument): string {
+  return shiftIsoDate(resolveDate(anchor, doc.month, doc.day), doc.dueDays);
+}
+
+/** Replaces `{M5}`/`{M6}`/`{M7}` with the month's English name and `{Y6}` with month 6's calendar year. */
 export function resolveTokens(anchor: AnchorMonth, text: string): string {
   return text
     .replaceAll('{M5}', monthName(anchor, 5))
     .replaceAll('{M6}', monthName(anchor, 6))
+    .replaceAll('{M7}', monthName(anchor, 7))
     .replaceAll('{Y6}', String(calendarYear(anchor, 6)));
 }
 
@@ -772,8 +895,14 @@ export function documentLines(doc: DatasetDocument): DatasetLine[] {
       quantity: '1',
       unitPrice: doc.total,
       accountCode: doc.accountCode,
+      taxRateBp: 0,
     },
   ];
+}
+
+/** The six original customers plus the one added by form in month 7. */
+export function allCustomers(): DatasetCustomer[] {
+  return [...WALKTHROUGH_DATASET.customers, ...WALKTHROUGH_DATASET.extraCustomers];
 }
 
 /** The six original vendors plus the one added by form in month 6. */
