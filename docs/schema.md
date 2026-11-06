@@ -995,6 +995,14 @@ Migration `107_ledger-core_gst_codes.sql`. Adding these columns rewrites no rows
 
 Migration `108_ledger-core_journal_tax_details.sql`. `journal_tax_details`: `org_id`, `journal_entry_id` (RESTRICT), `account_id` (RESTRICT), `tax_code` (CHECK), `tax_rate_bp`, `sign` (+1/-1), `net_cents`, `tax_cents`, audited, insert-only by convention. `manual_journal_lines.tax_code` and `bank_rules.tax_code`, nullable with the same CHECK.
 
+## Phase 49d — BAS returns (accounting) — applied
+
+Migration `109_ledger-core_bas_returns.sql`.
+
+- `bas_returns`: period, frozen `basis`/`method`/`cycle`, `status` (`DRAFT`/`FINALISED`/`LODGED`), `due_date`, `w1_cents`, `w2_cents`, `instalment_cents`, `lodged_on`, `ato_reference`, `clearing_journal_entry_id`. `EXCLUDE` on overlapping periods per organization. A trigger makes a `LODGED` row immutable. Audited.
+- `bas_return_labels` and `bas_return_events`: the snapshot, composite FK to the return. A trigger refuses UPDATE always, and DELETE once the parent is lodged.
+- `bas_return_adjustments`: `label` (`G7`/`G18`), signed `gross_cents`, `tax_cents`, `account_id`, required `reason`. Same trigger.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

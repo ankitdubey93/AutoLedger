@@ -11,7 +11,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | 49a | Region, GST settings, Australian chart, organization calendar, DD/MM/YYYY | ✅ |
 | 49b | GST codes and tax-inclusive pricing | ✅ |
 | 49c | GST on bank lines and journals | ✅ |
-| 49d | BAS engine and workflow | Not built |
+| 49d | BAS engine and workflow | ✅ |
 | 49e | Tax invoices | Not built |
 | 49f | ABN tools and capture | Not built |
 | 49g | Bank details, ABA files, bank CSV presets | Not built |
@@ -106,6 +106,57 @@ Money that moves without a document still carries GST. A bank line, bank rule or
 | Manual journal line | No GST. An account default is ignored, because most manual journals are accruals and adjustments |
 
 `sign` is +1 on the code's normal side (a sale credited, a purchase debited) and -1 for a refund the other way, such as money back from a supplier. A reversal gets no detail row of its own: the BAS will read `journal_entries.reverses_entry_id` and produce the opposite event on the reversal's date.
+
+## The BAS
+
+`gstEventService.loadGstEvents` is the one stream of signed GST events, for documents and journals. `utils/basWorksheet.ts` turns events into labels, purely. `basService` owns the return.
+
+### The worksheet
+
+| Label | Holds |
+|---|---|
+| G1 | Sales including GST, every reported sales code |
+| G2, G3, G4 | Exports, other GST-free, input-taxed |
+| G5, G6, G8, G9 | G2+G3+G4; G1−G5; G6+G7; G8÷11 |
+| G7, G18 | Notes against an earlier period, plus manual adjustments |
+| G10, G11 | Capital and non-capital purchases including GST |
+| G13, G14, G15 | Input-taxed related; no GST in the price; private or non-deductible |
+| G12, G16, G17, G19, G20 | G10+G11; G13+G14+G15; G12−G16; G17+G18; G19÷11 |
+| 1A, 1B | The actual GST on the events plus adjustments |
+
+**1A and 1B come from actual tax, not from G9 and G20.** That is the ATO's accounts method and the one that ties to the GL. G9 and G20 stay as a cross-check, with a warning when they differ by more than $1.
+
+Simpler BAS reports G1, 1A, 1B. Full adds G2, G3, G10, G11. The whole worksheet is always computed and exported as a record. Reported amounts are whole dollars with cents dropped; **the rounding direction must be confirmed against the ATO.**
+
+### Attribution
+
+- **Accruals:** the document's posting date, with `entryDate` allowing a late bill to post into an open period. Voids are opposite-signed events on the void's date.
+- **Cash:** `line × settled(to) ÷ total − line × settled(before) ÷ total`. Being cumulative, a fully paid document always sums to exactly its tax, and a voided payment comes out negative with no special case. A note counts by its applied amount, so an invoice cleared by a note nets to nil.
+- **Journals:** when posted, on either basis. A reversal mirrors its original on its own date.
+
+**A note against an earlier period** goes to G7 or G18 on accruals, keeping its tax in 1A or 1B, rather than reducing this period's G1. On a cash basis it reduces G1. **Confirm both treatments with a BAS agent.**
+
+### Lifecycle
+
+| State | What happens |
+|---|---|
+| `DRAFT` | Computes live. Holds W1, W2, T7 and manual adjustments. Basis, method and cycle were frozen at creation |
+| `FINALISED` | Labels and events are stored, never recomputed. The months covered close, and a note allocation dated inside is refused, since it posts no journal for the period trigger to catch. Reopening discards the snapshot and reopens the months |
+| `LODGED` | Immutable by service and by database trigger. Correct errors on a later return |
+
+**Recording lodgment posts one journal** (`source_type 'bas_return'`), dated when lodged since the period itself is closed: DR GST collected, CR GST paid, DR 2162 for W2, DR 1185 for the instalment, CR 2150 ATO Clearing for the whole-dollar net, with the cents to `6830 Rounding`. Paying the ATO is then a bank line to 2150. On a cash basis 2140 and 1180 keep the GST on unpaid documents, which belongs to a later return.
+
+**A manual adjustment names the account for the other side of its GST**, so the GST accounts stay reconciled. A reason is required.
+
+**Reconciliation:** GL movement on the GST account (excluding clearing journals) = reported + GST on unpaid documents as it moved over the period. What's left is shown, and is normally a journal posted straight to a GST account.
+
+### Known limits
+
+- W2 clears account 2162, so payroll journals must credit that account, not 2160.
+- Finalising closes months before computing, on one transaction, so a posting that starts afterwards is refused. A posting already in flight when the close commits can still land: the same small race the fiscal-period close has always had.
+- A financial year not starting on the 1st of a month can't finalise, because a fiscal period would straddle the BAS.
+- Warnings, not calculations: GST on deposits, and lines from before the organization became Australian.
+- Due dates are the standard ones. Agent programs and online-lodgment extensions are not calculated.
 
 ## Not built in this edition
 

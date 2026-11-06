@@ -1213,6 +1213,25 @@ Invoices, bills, credit and debit notes, quotes and orders accept a header `taxM
 
 `POST /bank-transactions/:id/post-journal`, `POST`/`PATCH /bank-rules` and manual journal lines accept `taxCode`. With a code the amount is GST-inclusive and the entry gains a GST line. `422` for a `GENERIC` organization, or for an unknown code on a rule or a draft.
 
+### Business activity statements — `/api/v1/bas` — Phase 49d ✅
+
+All need region `AU`, otherwise `403`.
+
+| Route | Permission | Does |
+|---|---|---|
+| `GET /bas` | `bas.view` | `{returns, suggested}`. `suggested` is the last completed and current periods with no return |
+| `POST /bas` | `bas.prepare` | Body `{periodStart}`. `201 {bas}`. `422` if not a period start, `409` if a return covers it |
+| `GET /bas/:id` | `bas.view` | `{bas}`, live while a draft. `?format=csv\|xlsx\|pdf` exports it |
+| `PATCH /bas/:id` | `bas.prepare` | Any of `w1Cents`, `w2Cents`, `instalmentCents`. Draft only |
+| `DELETE /bas/:id` | `bas.prepare` | Draft only |
+| `GET /bas/:id/events` | `bas.view` | The transactions behind it. `?label=G1` narrows; `?format=` exports the GST audit |
+| `POST /bas/:id/adjustments` | `bas.prepare` | `{label: 'G7'\|'G18', grossCents, accountId, reason}`. `DELETE /bas/:id/adjustments/:adjustmentId` removes |
+| `POST /bas/:id/finalise` | `bas.finalise` | `422` before the period ends |
+| `POST /bas/:id/reopen` | `bas.finalise` | `409` once lodged, or if a month is locked |
+| `POST /bas/:id/lodge` | `bas.finalise` | `{lodgedOn, atoReference}` after the period ends. Posts the clearing journal |
+
+`POST /settings/region/generic` is `409` once a BAS has been finalised.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

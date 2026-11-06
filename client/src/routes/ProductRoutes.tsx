@@ -86,6 +86,8 @@ import BalanceSheetPage from '../Pages/reports/BalanceSheetPage';
 import TrialBalancePage from '../Pages/reports/TrialBalancePage';
 import AgingReportPage from '../Pages/reports/AgingReportPage';
 import TaxSummaryPage from '../Pages/reports/TaxSummaryPage';
+import BasListPage from '../Pages/bas/BasListPage';
+import BasDetailPage from '../Pages/bas/BasDetailPage';
 import SalesPurchasesReportPage from '../Pages/reports/SalesPurchasesReportPage';
 import CashFlowPage from '../Pages/reports/CashFlowPage';
 import BusinessSnapshotPage from '../Pages/reports/BusinessSnapshotPage';
@@ -254,6 +256,8 @@ export default function ProductRoutes() {
           <Route path="/reports/aged-receivables" element={<AgingReportPage kind="AR" />} />
           <Route path="/reports/aged-payables" element={<AgingReportPage kind="AP" />} />
           <Route path="/reports/tax-summary" element={<TaxSummaryPage />} />
+          <Route path="/bas" element={<BasListPage />} />
+          <Route path="/bas/:basId" element={<BasDetailPage />} />
           <Route path="/reports/sales-by-customer" element={<SalesPurchasesReportPage kind="sales-by-customer" />} />
           <Route path="/reports/purchases-by-vendor" element={<SalesPurchasesReportPage kind="purchases-by-vendor" />} />
           <Route path="/reports/sales-by-item" element={<SalesPurchasesReportPage kind="sales-by-item" />} />

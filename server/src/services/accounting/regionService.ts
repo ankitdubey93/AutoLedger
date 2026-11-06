@@ -150,6 +150,11 @@ export async function activateAustralia(orgId: string, gst: GstSettingsInput, ti
 export async function deactivateAustralia(orgId: string): Promise<void> {
   await withTransaction(async (client) => {
     await client.query('SELECT id FROM organizations WHERE id = $1 FOR NO KEY UPDATE', [orgId]);
+    const { rows } = await client.query(`SELECT 1 FROM bas_returns WHERE org_id = $1 AND status <> 'DRAFT' LIMIT 1`, [orgId]);
+    if (rows.length > 0) {
+      throw new ApiError(409, 'This organization has finalised a BAS, so it cannot leave the Australian edition');
+    }
+    await client.query(`DELETE FROM bas_returns WHERE org_id = $1`, [orgId]);
     await client.query(`UPDATE organizations SET region = 'GENERIC' WHERE id = $1`, [orgId]);
     await client.query('DELETE FROM gst_settings WHERE org_id = $1', [orgId]);
   });

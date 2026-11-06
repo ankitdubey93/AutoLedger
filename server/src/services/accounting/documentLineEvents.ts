@@ -1,3 +1,4 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { allocateCents, cents } from '../../utils/money.js';
 
@@ -15,6 +16,10 @@ export interface DocumentLineEvent {
   lineId: string;
   itemId: string | null;
   taxRateBp: number;
+  /** Phase 49d — the GST code; null for a GENERIC organization or an uncoded historical line. */
+  taxCode: string | null;
+  /** Phase 49d — a note's original invoice or bill posting date; null otherwise. */
+  originalEntryDate: string | null;
   quantityMilli: number; // signed by `sign`
   baseNetCents: number; // signed by `sign`
   baseTaxCents: number; // signed by `sign`
@@ -66,6 +71,17 @@ const BRANCHES: Record<DocumentDirection, BranchSpec[]> = {
   ],
 };
 
+function originalDateSql(kind: BranchSpec['documentKind']): string {
+  if (kind === 'CREDIT_NOTE' || kind === 'DEBIT_NOTE') {
+    const [parent, fk] = kind === 'CREDIT_NOTE' ? ['invoices', 'invoice_id'] : ['bills', 'bill_id'];
+    return `(SELECT to_char(oe.entry_date, 'YYYY-MM-DD')
+               FROM ${parent} od
+               JOIN journal_entries oe ON oe.id = od.journal_entry_id AND oe.org_id = od.org_id
+              WHERE od.org_id = d.org_id AND od.id = d.${fk})`;
+  }
+  return 'NULL::text';
+}
+
 function branchSql(b: BranchSpec, branchIndex: number): string {
   return `
     SELECT
@@ -80,6 +96,8 @@ function branchSql(b: BranchSpec, branchIndex: number): string {
       l.id AS line_id,
       ${b.hasItem ? 'l.item_id' : 'NULL::uuid'} AS item_id,
       l.tax_rate_bp,
+      l.tax_code,
+      ${originalDateSql(b.documentKind)} AS original_entry_date,
       l.quantity_milli::text AS quantity_milli,
       l.net_cents::text AS net_cents,
       l.tax_cents::text AS tax_cents,
@@ -106,6 +124,8 @@ interface Row {
   line_id: string;
   item_id: string | null;
   tax_rate_bp: number;
+  tax_code: string | null;
+  original_entry_date: string | null;
   quantity_milli: string;
   net_cents: string;
   tax_cents: string;
@@ -126,11 +146,12 @@ export async function loadDocumentLineEvents(
   direction: DocumentDirection,
   from: string,
   to: string,
+  q: Pick<PoolClient, 'query'> = pool,
 ): Promise<DocumentLineEvent[]> {
   const branches = BRANCHES[direction];
   const sql = `${branches.map((b, i) => branchSql(b, i)).join('\nUNION ALL\n')}
     ORDER BY entry_date, document_id, line_number`;
-  const { rows } = await pool.query<Row>(sql, [orgId, from, to]);
+  const { rows } = await q.query<Row>(sql, [orgId, from, to]);
 
   // Group rows into events: (branch, document) is one (documentKind, documentId, sign) event.
   const groups = new Map<string, Row[]>();
@@ -161,6 +182,8 @@ export async function loadDocumentLineEvents(
         lineId: r.line_id,
         itemId: r.item_id,
         taxRateBp: r.tax_rate_bp,
+        taxCode: r.tax_code,
+        originalEntryDate: r.original_entry_date,
         quantityMilli: b.sign * Number(r.quantity_milli),
         baseNetCents: b.sign * (netShares[i] ?? 0),
         baseTaxCents: b.sign * (taxShares[i] ?? 0),

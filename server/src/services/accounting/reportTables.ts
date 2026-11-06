@@ -1,3 +1,5 @@
+import type { BasDetail, BasEventRow } from './basService.js';
+import { wholeDollars, WORKSHEET_LABELS } from '../../utils/basWorksheet.js';
 import {
   ACCOUNT_TRANSACTION_COLUMNS,
   GL_EXCEPTION_RULE_LABELS,
@@ -773,5 +775,121 @@ export function businessSnapshotTable(ctx: ReportContext, report: BusinessSnapsh
       'Fixed assets are non-current assets. A blank ratio has a zero or negative denominator.',
     ],
     filenameStem: `business-snapshot-${report.period.from}-${report.period.to}`,
+  };
+}
+
+const BAS_LABEL_TEXT: Record<string, string> = {
+  G1: 'Total sales',
+  G2: 'Export sales',
+  G3: 'Other GST-free sales',
+  G4: 'Input-taxed sales',
+  G5: 'G2 + G3 + G4',
+  G6: 'Total sales subject to GST (G1 - G5)',
+  G7: 'Adjustments',
+  G8: 'Total sales subject to GST after adjustments (G6 + G7)',
+  G9: 'GST on sales (G8 / 11)',
+  G10: 'Capital purchases',
+  G11: 'Non-capital purchases',
+  G12: 'G10 + G11',
+  G13: 'Purchases for making input-taxed sales',
+  G14: 'Purchases without GST in the price',
+  G15: 'Estimated private use or non-deductible',
+  G16: 'G13 + G14 + G15',
+  G17: 'Total purchases subject to GST (G12 - G16)',
+  G18: 'Adjustments',
+  G19: 'Total purchases subject to GST after adjustments (G17 + G18)',
+  G20: 'GST on purchases (G19 / 11)',
+  '1A': 'GST on sales',
+  '1B': 'GST on purchases',
+};
+
+/** Phase 49d — a BAS as it would be keyed into ATO Online, then the worksheet kept as a record. */
+export function basTable(ctx: ReportContext, bas: BasDetail): ReportTable {
+  const dollars = (cents: number): ReportCell => money(wholeDollars(cents) * 100);
+  const reported: ReportRow[] = bas.reportedLabels.map((label) => ({
+    style: 'detail',
+    indent: 1,
+    cells: { label: text(label), description: text(BAS_LABEL_TEXT[label] ?? ''), amount: dollars(bas.labels[label] ?? 0) },
+  }));
+  const payg: ReportRow[] = [
+    { label: 'W1', description: 'Total salary, wages and other payments', cents: bas.w1Cents },
+    { label: 'W2', description: 'Amount withheld', cents: bas.w2Cents },
+    { label: 'T7', description: 'PAYG instalment', cents: bas.instalmentCents },
+  ].map((row) => ({
+    style: 'detail',
+    indent: 1,
+    cells: { label: text(row.label), description: text(row.description), amount: dollars(row.cents) },
+  }));
+  const worksheet: ReportRow[] = [...WORKSHEET_LABELS].map((label) => ({
+    style: 'detail',
+    indent: 1,
+    cells: { label: text(label), description: text(BAS_LABEL_TEXT[label] ?? ''), amount: money(bas.labels[label] ?? 0) },
+  }));
+  return {
+    title: 'Business activity statement',
+    subtitle: `${ctx.organizationName} · ${dateLabel(bas.periodStart)} – ${dateLabel(bas.periodEnd)} · ${bas.basis === 'CASH' ? 'Cash' : 'Accruals'} · ${bas.status}`,
+    columns: [
+      { key: 'label', label: 'Label', align: 'left', widthChars: 8 },
+      { key: 'description', label: 'Description', align: 'left', widthChars: 56 },
+      { key: 'amount', label: 'Amount', align: 'right', widthChars: 16 },
+    ],
+    rows: [
+      { style: 'heading', indent: 0, cells: { label: text('To report') } },
+      ...reported,
+      { style: 'heading', indent: 0, cells: { label: text('PAYG') } },
+      ...payg,
+      { style: 'total', indent: 0, cells: { label: text('Net'), description: text(bas.summary.netPayable >= 0 ? 'Payable to the ATO' : 'Refund from the ATO'), amount: money(bas.summary.netPayable * 100) } },
+      { style: 'heading', indent: 0, cells: { label: text('GST calculation worksheet (keep with your records)') } },
+      ...worksheet,
+    ],
+    footnotes: [
+      `Due ${dateLabel(bas.dueDate)}. Amounts to report are in whole dollars, with cents dropped; the worksheet shows cents.`,
+      ...bas.adjustments.map((a) => `Adjustment at ${a.label}: ${groupedCents(a.grossCents)}. ${a.reason}`),
+      'Prepared by AutoLedger for review and manual lodgment. Not lodged with the ATO by this software.',
+    ],
+    filenameStem: `bas-${bas.periodStart}-${bas.periodEnd}`,
+  };
+}
+
+/** Phase 49d — every transaction behind a BAS, the GST audit report. */
+export function basEventsTable(ctx: ReportContext, bas: BasDetail, events: readonly BasEventRow[], label: string | null): ReportTable {
+  return {
+    title: label === null ? 'GST audit' : `GST audit: ${label}`,
+    subtitle: `${ctx.organizationName} · ${dateLabel(bas.periodStart)} – ${dateLabel(bas.periodEnd)} · ${ctx.baseCurrency}`,
+    columns: [
+      { key: 'date', label: 'Date', align: 'left', widthChars: 12 },
+      { key: 'kind', label: 'Source', align: 'left', widthChars: 12 },
+      { key: 'number', label: 'Reference', align: 'left', widthChars: 22 },
+      { key: 'party', label: 'Contact', align: 'left', widthChars: 24 },
+      { key: 'code', label: 'GST code', align: 'left', widthChars: 30 },
+      { key: 'gross', label: 'Gross', align: 'right', widthChars: 14 },
+      { key: 'tax', label: 'GST', align: 'right', widthChars: 12 },
+    ],
+    rows: [
+      ...events.map((e): ReportRow => ({
+        style: 'detail',
+        indent: 0,
+        cells: {
+          date: { kind: 'date', iso: e.eventDate },
+          kind: text(e.sourceKind),
+          number: text(e.documentNumber ?? ''),
+          party: text(e.partyName ?? ''),
+          code: text(e.taxLabel),
+          gross: money(e.grossCents),
+          tax: money(e.taxCents),
+        },
+      })),
+      {
+        style: 'total',
+        indent: 0,
+        cells: {
+          date: text('Total'),
+          gross: money(events.reduce((s, e) => s + e.grossCents, 0)),
+          tax: money(events.reduce((s, e) => s + e.taxCents, 0)),
+        },
+      },
+    ],
+    footnotes: bas.basis === 'CASH' ? ['Cash basis: a document shows the share paid in this period, dated at the period end.'] : [],
+    filenameStem: `gst-audit-${bas.periodStart}${label === null ? '' : `-${label.toLowerCase()}`}`,
   };
 }

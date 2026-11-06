@@ -123,7 +123,7 @@ export interface GrossSplit {
   sign: 1 | -1;
 }
 
-async function gstAccountOnClient(q: Queryable, orgId: string, direction: GstDirection): Promise<string> {
+export async function gstAccountOnClient(q: Queryable, orgId: string, direction: GstDirection): Promise<string> {
   const { rows } =
     direction === 'SALES'
       ? await q.query<{ id: string | null }>(
@@ -246,4 +246,19 @@ export async function assertTaxCodesUsableOnClient(
       throw new ApiError(422, 'An organization not registered for GST can only use a BAS-excluded code');
     }
   }
+}
+
+/**
+ * Phase 49d — a note allocation posts no journal, so the period trigger never
+ * sees it, yet on a cash basis it changes what a BAS reports. A date inside a
+ * finalised or lodged BAS is therefore refused here.
+ */
+export async function assertNotInFinalisedBasOnClient(q: Queryable, orgId: string, date: string): Promise<void> {
+  const { rows } = await q.query(
+    `SELECT 1 FROM bas_returns
+      WHERE org_id = $1 AND status <> 'DRAFT' AND $2::date BETWEEN period_start AND period_end
+      LIMIT 1`,
+    [orgId, date],
+  );
+  if (rows.length > 0) throw new ApiError(422, `${date} falls inside a finalised BAS; choose a later date`);
 }

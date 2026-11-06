@@ -304,3 +304,46 @@ export async function periodStatusOnClient(
   );
   return rows[0]?.status ?? null;
 }
+
+/**
+ * Phase 49d — closes every open month inside a finalised BAS, on the caller's
+ * transaction. A period straddling the range can't be closed without shutting
+ * off dates outside the return, so it is refused rather than left open.
+ */
+export async function closePeriodsInRangeOnClient(
+  client: PoolClient,
+  orgId: string,
+  userId: string,
+  from: string,
+  to: string,
+): Promise<void> {
+  const { rows: straddling } = await client.query(
+    `SELECT 1 FROM fiscal_periods
+      WHERE org_id = $1 AND status = 'OPEN' AND starts_on <= $3 AND ends_on >= $2
+        AND (starts_on < $2 OR ends_on > $3)
+      LIMIT 1`,
+    [orgId, from, to],
+  );
+  if (straddling.length > 0) {
+    throw new ApiError(422, 'A fiscal period straddles this BAS. BAS periods need a financial year that starts on the 1st of a month');
+  }
+  await client.query(
+    `UPDATE fiscal_periods SET status = 'CLOSED', closed_by = $4, closed_at = now()
+      WHERE org_id = $1 AND status = 'OPEN' AND starts_on >= $2 AND ends_on <= $3`,
+    [orgId, from, to, userId],
+  );
+}
+
+/** Undoes closePeriodsInRangeOnClient for a reopened BAS. A LOCKED month stays locked, so that refuses. */
+export async function reopenPeriodsInRangeOnClient(client: PoolClient, orgId: string, from: string, to: string): Promise<void> {
+  const { rows: locked } = await client.query(
+    `SELECT 1 FROM fiscal_periods WHERE org_id = $1 AND status = 'LOCKED' AND starts_on >= $2 AND ends_on <= $3 LIMIT 1`,
+    [orgId, from, to],
+  );
+  if (locked.length > 0) throw new ApiError(409, 'A fiscal period in this BAS is locked, so the BAS cannot be reopened');
+  await client.query(
+    `UPDATE fiscal_periods SET status = 'OPEN', closed_by = NULL, closed_at = NULL
+      WHERE org_id = $1 AND status = 'CLOSED' AND starts_on >= $2 AND ends_on <= $3`,
+    [orgId, from, to],
+  );
+}

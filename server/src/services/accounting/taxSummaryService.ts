@@ -69,7 +69,8 @@ async function accountCheck(
             COALESCE(SUM(l.base_credit_cents), 0)::text AS credits
        FROM ledger_lines l
        JOIN journal_entries e ON e.id = l.journal_entry_id AND e.org_id = l.org_id
-      WHERE l.org_id = $1 AND l.account_id = $2 AND e.entry_date BETWEEN $3 AND $4`,
+      WHERE l.org_id = $1 AND l.account_id = $2 AND e.entry_date BETWEEN $3 AND $4
+        AND e.source_type IS DISTINCT FROM 'bas_return'`,
     [orgId, account.id, from, to],
   );
   const debits = Number(rows[0]?.debits ?? '0');

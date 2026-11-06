@@ -1861,3 +1861,11 @@ A closed catalogue of twelve codes, `taxCodeService.prepareTaxOnClient`, and `co
 
 **Known gap until 49d:** the existing Tax summary's GL check shows this GST as a difference, because that report reads documents only.
 
+### 49d: BAS engine and workflow
+
+`gstEventService`, `basService`, pure `utils/basWorksheet.ts` and `utils/basPeriods.ts`, migration `109`, `/api/v1/bas`, permissions `bas.view`, `bas.prepare`, `bas.finalise`, a GST audit export, a list and detail page with label drill-down, a next-deadline banner on the dashboard. The integration suite's expected figures are all worked by hand from the transactions.
+
+2680 server (2 skipped) + 756 client tests at the time.
+
+**Corrected from the plan:** a manual adjustment gained a required account for the other side of its GST, because without one the clearing journal left the GST accounts permanently out by that amount. The clearing journal is dated at lodgment, because finalising has closed the period. The Tax summary's GL check now skips clearing journals, so a lodged BAS doesn't show there as a difference.
+

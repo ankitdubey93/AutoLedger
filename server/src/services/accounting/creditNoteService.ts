@@ -1,4 +1,4 @@
-import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import { assertLinesCodedOnClient, assertNotInFinalisedBasOnClient, prepareTaxOnClient } from './taxCodeService.js';
 import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -1030,6 +1030,7 @@ export async function applyCreditNoteOnClient(
   if (invoice.currency_code.trim() !== currencyCode) {
     throw new ApiError(422, 'A credit note can only be applied to an invoice in the same currency');
   }
+  await assertNotInFinalisedBasOnClient(client, orgId, input.allocationDate);
   if (input.allocationDate < note.issue_date || input.allocationDate < invoice.issue_date) {
     throw new ApiError(422, 'A credit cannot be applied before the credit note or the invoice is dated');
   }

@@ -36,7 +36,9 @@ describe('region-gated navigation (Phase 49a)', () => {
   const allow = () => true;
 
   it('never hides an entry with no region from either kind of organization', () => {
-    const count = (region: string) => visibleNavGroups(allow, region).flatMap((g) => g.items).length;
-    expect(count('AU')).toBe(count('GENERIC'));
+    const items = (region: string) => visibleNavGroups(allow, region).flatMap((g) => g.items);
+    const everyRegion = items('GENERIC');
+    expect(everyRegion.every((item) => item.region === undefined)).toBe(true);
+    expect(items('AU').map((item) => item.to)).toEqual(expect.arrayContaining(everyRegion.map((item) => item.to)));
   });
 });

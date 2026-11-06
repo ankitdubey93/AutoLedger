@@ -1,3 +1,4 @@
+import NextBasBanner from '../bas/NextBasBanner';
 import { useRegion } from '../../context/LedgerSettingsContext';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -183,6 +184,7 @@ function FullDashboard() {
 
   return (
     <section className="stagger flex flex-col gap-7">
+      <NextBasBanner />
       <PageHeader
         as="h2"
         title={organization?.name ?? 'Dashboard'}

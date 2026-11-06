@@ -7383,3 +7383,122 @@ export function addHistoryNote(
 ): Promise<{ success: boolean; entry: HistoryEntry }> {
   return apiFetch(`${basePath}/${id}/notes`, { method: 'POST', body: JSON.stringify({ text }) });
 }
+
+/* ------------------------------------------- Phase 49d — business activity statements */
+
+export type BasStatus = 'DRAFT' | 'FINALISED' | 'LODGED';
+
+export interface BasReturnSummary {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  basis: GstBasis;
+  method: BasMethod;
+  cycle: BasCycle;
+  status: BasStatus;
+  dueDate: string;
+  lodgedOn: string | null;
+  atoReference: string | null;
+  clearingJournalEntryId: string | null;
+  w1Cents: number;
+  w2Cents: number;
+  instalmentCents: number;
+}
+
+export interface BasAdjustment {
+  id: string;
+  label: 'G7' | 'G18';
+  grossCents: number;
+  taxCents: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  reason: string;
+}
+
+export interface BasReconciliationSide {
+  glCents: number;
+  reportedCents: number;
+  unpaidMovementCents: number;
+  differenceCents: number;
+}
+
+export interface BasDetail extends BasReturnSummary {
+  labels: Record<string, number>;
+  reportedLabels: string[];
+  summary: { gstOnSales: number; gstOnPurchases: number; paygWithheld: number; paygInstalment: number; netPayable: number };
+  adjustments: BasAdjustment[];
+  warnings: { code: string; message: string }[];
+  reconciliation: { sales: BasReconciliationSide; purchases: BasReconciliationSide } | null;
+  paygSuggestion: { w1Cents: number; w2Cents: number } | null;
+}
+
+export interface BasPeriodSuggestion {
+  start: string;
+  end: string;
+  dueDate: string;
+}
+
+export interface BasEventRow {
+  sourceKind: 'INVOICE' | 'CREDIT_NOTE' | 'BILL' | 'DEBIT_NOTE' | 'JOURNAL';
+  sourceId: string;
+  documentNumber: string | null;
+  partyName: string | null;
+  eventDate: string;
+  taxCode: string;
+  taxLabel: string;
+  netCents: number;
+  taxCents: number;
+  grossCents: number;
+  labels: string[];
+}
+
+export function listBas(signal?: AbortSignal): Promise<{ success: boolean; returns: BasReturnSummary[]; suggested: BasPeriodSuggestion[] }> {
+  return apiFetch('/bas', { signal: signal ?? null });
+}
+
+export function createBas(periodStart: string): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch('/bas', { method: 'POST', body: JSON.stringify({ periodStart }) });
+}
+
+export function getBas(id: string, signal?: AbortSignal): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}`, { signal: signal ?? null });
+}
+
+export function updateBas(
+  id: string,
+  body: { w1Cents?: number; w2Cents?: number; instalmentCents?: number },
+): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+}
+
+export function deleteBas(id: string): Promise<void> {
+  return apiFetch(`/bas/${id}`, { method: 'DELETE' });
+}
+
+export function addBasAdjustment(
+  id: string,
+  body: { label: 'G7' | 'G18'; grossCents: number; accountId: string; reason: string },
+): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}/adjustments`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function removeBasAdjustment(id: string, adjustmentId: string): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}/adjustments/${adjustmentId}`, { method: 'DELETE' });
+}
+
+export function finaliseBas(id: string): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}/finalise`, { method: 'POST', body: '{}' });
+}
+
+export function reopenBas(id: string): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}/reopen`, { method: 'POST', body: '{}' });
+}
+
+export function lodgeBas(id: string, body: { lodgedOn: string; atoReference: string | null }): Promise<{ success: boolean; bas: BasDetail }> {
+  return apiFetch(`/bas/${id}/lodge`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function listBasEvents(id: string, label: string, signal?: AbortSignal): Promise<{ success: boolean; count: number; events: BasEventRow[] }> {
+  return apiFetch(`/bas/${id}/events?label=${encodeURIComponent(label)}`, { signal: signal ?? null });
+}

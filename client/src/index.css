@@ -283,7 +283,8 @@ body {
 }
 
 .status--good,
-.status--bad {
+.status--bad,
+.status--warn {
   padding: 0.75rem 1rem;
   border-radius: var(--radius-md);
   animation: rise 400ms var(--ease) both;
@@ -297,6 +298,11 @@ body {
 .status--bad {
   color: var(--bad);
   background: var(--bad-soft);
+}
+
+.status--warn {
+  color: var(--warn-ink);
+  background: var(--warn-soft);
 }
 
 .muted {
