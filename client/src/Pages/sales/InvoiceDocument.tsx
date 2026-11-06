@@ -300,7 +300,7 @@ function ClassicLayout(props: InvoiceDocumentProps): ReactElement {
               <th className={`${pad} font-medium text-right`}>Qty</th>
               <th className={`${pad} font-medium text-right`}>Unit price</th>
               <th className={`${pad} font-medium`}>Account</th>
-              <th className={`${pad} font-medium text-right`}>Tax</th>
+              <th className={`${pad} font-medium text-right`}>{props.australian === undefined || props.australian === null ? 'Tax' : 'GST'}</th>
               <th className={`${pad} font-medium text-right`}>Amount</th>
             </tr>
           </thead>
@@ -372,7 +372,7 @@ function ModernLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings 
                 <th className={`${pad} font-medium text-right`}>Qty</th>
                 <th className={`${pad} font-medium text-right`}>Unit price</th>
                 <th className={`${pad} font-medium`}>Account</th>
-                <th className={`${pad} font-medium text-right`}>Tax</th>
+                <th className={`${pad} font-medium text-right`}>{props.australian === undefined || props.australian === null ? 'Tax' : 'GST'}</th>
                 <th className={`${pad} font-medium text-right`}>Amount</th>
               </tr>
             </thead>

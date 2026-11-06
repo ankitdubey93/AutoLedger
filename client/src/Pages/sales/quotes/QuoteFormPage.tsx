@@ -422,7 +422,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
               <th className="p-2 font-medium w-24 text-right">Qty</th>
               <th className="p-2 font-medium w-28 text-right">Unit price</th>
               <th className="p-2 font-medium">{config.lineAccountLabel}</th>
-              <th className="p-2 font-medium w-20 text-right">Tax %</th>
+              <th className={`p-2 font-medium ${gst.isAustralian ? 'w-56' : 'w-20 text-right'}`}>{gst.isAustralian ? 'GST' : 'Tax %'}</th>
               <th className="p-2 font-medium w-28 text-right">Amount</th>
               <th className="p-2 w-10" />
             </tr>
@@ -535,7 +535,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
             <span className="tabular-nums">{formatCents(subtotal)}</span>
           </div>
           <div className="flex justify-between gap-6">
-            <span className="text-[var(--muted)]">Tax</span>
+            <span className="text-[var(--muted)]">{gst.isAustralian ? 'GST' : 'Tax'}</span>
             <span className="tabular-nums">{formatCents(tax)}</span>
           </div>
           <div className="flex justify-between gap-6 font-semibold border-t border-[var(--border)] pt-1">

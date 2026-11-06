@@ -32,7 +32,7 @@ export const WORKSHEET_LABELS = [
   'G10', 'G11', 'G12', 'G13', 'G14', 'G15', 'G16', 'G17', 'G18', 'G19', 'G20',
 ] as const;
 
-function divideBy11(cents: number): number {
+export function divideBy11(cents: number): number {
   return Math.sign(cents) * Math.round(Math.abs(cents) / 11);
 }
 

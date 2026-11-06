@@ -189,6 +189,21 @@ describe('the seller snapshot', () => {
     expect(invoice).toMatchObject({ sellerAbn: null, sellerLegalName: null, sellerGstRegistered: null });
   });
 
+  it("does not take its seller from another organization, or show across tenants", async () => {
+    await agent.post('/api/v1/settings/region/australia').send({
+      gst: { registered: true, basis: 'ACCRUAL', basCycle: 'QUARTERLY', basMethod: 'FULL' },
+      timezone: 'Australia/Sydney',
+    });
+    await pool.query(`UPDATE organizations SET tax_number = '51 824 753 556' WHERE id = $1`, [user.orgId]);
+    const id = await issued();
+
+    const other = await createUserWithOrg({ label: 'b' });
+    await pool.query(`UPDATE organizations SET tax_number = '99 999 999 999' WHERE id = $1`, [other.orgId]);
+    const otherAgent = await loginAgent(app, other);
+    expect((await otherAgent.get(`/api/v1/invoices/${id}/pdf`)).status).toBe(404);
+    expect(await getInvoiceById(user.orgId, id)).toMatchObject({ sellerAbn: '51 824 753 556' });
+  });
+
   it('is refused once issued, by the immutability trigger', async () => {
     const id = await issued();
     await expect(pool.query(`UPDATE invoices SET seller_abn = 'X' WHERE id = $1`, [id])).rejects.toThrow(/immutable/);

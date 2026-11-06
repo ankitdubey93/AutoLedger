@@ -1903,3 +1903,11 @@ Seller snapshot at issue (migration `110`), Tax Invoice and Adjustment Note in t
 
 **Corrected from the plan:** the guide is one hand-written file rather than generated from `walkthroughGuide` templates, because the answers have to stay independent of the code. A captured receipt isn't replayed, since it needs a real vision model.
 
+### Phase 49: verification
+
+Guardrail review over the whole branch: no tenant leak, no SQL in a controller, no new dependency. It found two things, both fixed: divide-by-11 rounding in two places, and weak cross-tenant coverage for bank-line journals and tax invoices.
+
+A real browser pass (Chrome through Playwright, run from outside the repository, against a scratch database): an Australian sign-up and wizard, an invalid and a valid ABN, an inclusive tax invoice, DD/MM/YYYY under a US browser locale, then the demo's BAS with the hand-worked figures, drill-down, reconciliation, finalise, recorded lodgment, TPAR, pay run masking and bank presets. All 17 steps passed with no browser errors. It found what tests had not: the demo dashboard had no cash account or capital, the totals on forms still said "Tax", and the GST picker cut off its label. All fixed.
+
+**Still unverified, and needed before real use:** the rules against the live ATO pages (which refused automated fetching), a registered BAS agent's review of the code mapping and answer key, an ABA upload to a real bank, real bank CSV exports, and a live ABN Lookup call.
+

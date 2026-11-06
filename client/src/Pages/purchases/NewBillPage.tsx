@@ -632,7 +632,7 @@ export default function NewBillPage() {
                 <th className="p-3 font-medium w-24 text-right">Qty</th>
                 <th className="p-3 font-medium w-28 text-right">Unit price</th>
                 <th className="p-3 font-medium">Account</th>
-                <th className={`p-3 font-medium ${gst.isAustralian ? 'w-44' : 'w-20 text-right'}`}>{gst.isAustralian ? 'GST' : 'Tax %'}</th>
+                <th className={`p-3 font-medium ${gst.isAustralian ? 'w-56' : 'w-20 text-right'}`}>{gst.isAustralian ? 'GST' : 'Tax %'}</th>
                 <th className="p-3 font-medium w-28 text-right">Amount</th>
                 <th className="p-3 w-10" />
               </tr>
@@ -777,7 +777,7 @@ export default function NewBillPage() {
             <span className="tabular-nums whitespace-nowrap">{formatCents(totals.subtotal)}</span>
           </div>
           <div className="flex justify-between gap-6 w-full">
-            <span className="text-[var(--muted)] min-w-0">Tax</span>
+            <span className="text-[var(--muted)] min-w-0">{gst.isAustralian ? 'GST' : 'Tax'}</span>
             <span className="tabular-nums whitespace-nowrap">{formatCents(totals.tax)}</span>
           </div>
           <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">

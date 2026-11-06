@@ -83,6 +83,16 @@ export async function runAuScenario(api: AuApi, anchor: string, basis: 'CASH' | 
   }
   const FAR = '2099-12-31';
 
+  // The chart is seeded at sign-up, so the dashboard's cash account can be chosen in setup.
+  const accountsRes = await api.get('/api/v1/accounts');
+  check(accountsRes, 200, 'accounts');
+  const accounts = new Map((accountsRes.body.accounts as { id: string; code: string }[]).map((a) => [a.code, a.id]));
+  const account = (code: string): string => {
+    const id = accounts.get(code);
+    if (id === undefined) throw new Error(`au demo: no account ${code}`);
+    return id;
+  };
+
   const setup = await api.post('/api/v1/settings/onboarding', {
     organizationName: AU_ORG_NAME,
     legalName: 'Wattle & Ash Bakehouse Pty Ltd',
@@ -92,20 +102,15 @@ export async function runAuScenario(api: AuApi, anchor: string, basis: 'CASH' | 
     booksStartDate: `${String(Number(anchor.slice(0, 4)) - 1)}-07-01`,
     industry: 'Retail',
     timezone: 'Australia/Sydney',
-    cashAccountId: null,
+    cashAccountId: account('1110'),
     australia: { gst: { registered: true, basis, basCycle: 'QUARTERLY', basMethod: 'FULL' } },
   });
   check(setup, 200, 'setup');
+  // Activation added the Australian accounts.
+  const afterSetup = await api.get('/api/v1/accounts');
+  check(afterSetup, 200, 'accounts');
+  for (const a of afterSetup.body.accounts as { id: string; code: string }[]) accounts.set(a.code, a.id);
   check(await api.patch('/api/v1/organizations', { taxNumber: ABN.self }), 200, 'own ABN');
-
-  const accountsRes = await api.get('/api/v1/accounts');
-  check(accountsRes, 200, 'accounts');
-  const accounts = new Map((accountsRes.body.accounts as { id: string; code: string }[]).map((a) => [a.code, a.id]));
-  const account = (code: string): string => {
-    const id = accounts.get(code);
-    if (id === undefined) throw new Error(`au demo: no account ${code}`);
-    return id;
-  };
 
   async function customer(name: string, taxNumber: string | null): Promise<string> {
     const res = await api.post('/api/v1/customers', { name, taxNumber, billingAddress: '12 Wharf Rd, Sydney NSW 2000' });
@@ -249,9 +254,11 @@ export async function runAuScenario(api: AuApi, anchor: string, basis: 'CASH' | 
 
   await wages(on(1, 3, 28), 300_000, 45_000);
   const q1Lines = await statement([
+    [on(1, 1, 1), 'Owner capital', 2_000_000],
     [on(1, 3, 18), 'Telstra phone', -11_000],
     [on(1, 3, 28), 'Wages paid', -255_000],
   ]);
+  await postLine(q1Lines.get('Owner capital'), '3100', null);
   await postLine(q1Lines.get('Telstra phone'), '6110', 'P_GST');
   await postLine(q1Lines.get('Wages paid'), '2120', null);
 

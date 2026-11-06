@@ -70,7 +70,8 @@ describe('InvoiceDocument (Phase 49e)', () => {
     expect(screen.getByText('Tax Invoice')).toBeInTheDocument();
     expect(screen.getByText('ABN 51 824 753 556')).toBeInTheDocument();
     expect(screen.getByText('Harbour Bakery Pty Ltd')).toBeInTheDocument();
-    expect(screen.getByText('GST')).toBeInTheDocument();
+    expect(screen.getAllByText('GST').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('Tax')).not.toBeInTheDocument();
     expect(screen.getByText(/Total includes GST/)).toBeInTheDocument();
   });
 

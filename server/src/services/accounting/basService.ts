@@ -8,6 +8,7 @@ import { basDueDate, basPeriodContaining, isBasPeriodStart, previousBasPeriod, t
 import {
   basSummary,
   computeWorksheet,
+  divideBy11,
   FULL_LABELS,
   labelsForEvent,
   SIMPLER_LABELS,
@@ -398,7 +399,7 @@ export async function addAdjustment(
       [orgId, input.accountId],
     );
     if (account.length === 0) throw new ApiError(422, 'Choose an active postable account for the other side of this adjustment');
-    const taxCents = Math.sign(input.grossCents) * Math.round(Math.abs(input.grossCents) / 11);
+    const taxCents = divideBy11(input.grossCents);
     await client.query(
       `INSERT INTO bas_return_adjustments (org_id, bas_return_id, label, gross_cents, tax_cents, account_id, reason, created_by)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -498,6 +499,11 @@ export async function reopenBas(orgId: string, id: string): Promise<BasDetail> {
   return getBas(orgId, id);
 }
 
+/** 2026-09-03 becomes 03/09/2026, for text that is stored and shown to Australian users. */
+function auDate(isoDate: string): string {
+  return `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}/${isoDate.slice(0, 4)}`;
+}
+
 async function clearingAccountOnClient(
   client: PoolClient,
   orgId: string,
@@ -568,7 +574,7 @@ export async function lodgeBas(
     if (lines.length > 0) {
       entryId = await journalService.createEntryOnClient(client, orgId, userId, {
         entryDate: input.lodgedOn,
-        description: `BAS ${row.period_start} to ${row.period_end}`,
+        description: `BAS ${auDate(row.period_start)} to ${auDate(row.period_end)}`,
         sourceType: 'bas_return',
         sourceId: id,
         lines,

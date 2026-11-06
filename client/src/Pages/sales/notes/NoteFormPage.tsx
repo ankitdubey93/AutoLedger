@@ -330,7 +330,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
               <th className="p-2 font-medium w-24">Qty</th>
               <th className="p-2 font-medium w-32">Unit price</th>
               <th className="p-2 font-medium">{config.lineAccountLabel}</th>
-              <th className="p-2 font-medium w-24">Tax %</th>
+              <th className={`p-2 font-medium ${gst.isAustralian ? 'w-56' : 'w-24'}`}>{gst.isAustralian ? 'GST' : 'Tax %'}</th>
               <th className="p-2 font-medium text-right w-28">Amount</th>
               <th className="p-2 w-10" />
             </tr>
@@ -431,7 +431,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
             <span className="tabular-nums">{formatCents(subtotal)}</span>
           </div>
           <div className="flex justify-between gap-6">
-            <span className="text-[var(--muted)]">Tax</span>
+            <span className="text-[var(--muted)]">{gst.isAustralian ? 'GST' : 'Tax'}</span>
             <span className="tabular-nums">{formatCents(tax)}</span>
           </div>
           <div className="flex justify-between gap-6 font-semibold border-t border-[var(--border)] pt-1">

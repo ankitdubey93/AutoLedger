@@ -47,7 +47,7 @@ Amounts are in dollars. "GST" is the tax in the line.
 | Q1 | 3,000 | 450 | 0 |
 | Q2 | 3,300 | 500 | 200 |
 
-Wages posted by a manual journal credit `2162 PAYG Withholding Payable`, and the bank line paying the net has no GST code, so neither touches the GST labels.
+The owner put in $20,000 of capital on the first day, which has no GST. Wages posted by a manual journal credit `2162 PAYG Withholding Payable`, and the bank line paying the net has no GST code, so neither touches the GST labels.
 
 ## The answers
 

@@ -256,6 +256,52 @@ describe('a generic organization', () => {
   });
 });
 
+describe('across tenants', () => {
+  it("cannot post, reverse or code another organization's bank line", async () => {
+    await agentB.post('/api/v1/settings/region/australia').send(ACTIVATE);
+    const [id] = await importLines(agentA, userA.orgId, [['2026-08-03', 'Stationery', -11000]]);
+    const res = await agentB
+      .post(`/api/v1/bank-transactions/${id ?? ''}/post-journal`)
+      .send({ accountId: await accountId(userB.orgId, '6130'), taxCode: 'P_GST' });
+    expect(res.status).toBe(404);
+    const { rows } = await pool.query('SELECT 1 FROM journal_tax_details');
+    expect(rows).toHaveLength(0);
+  });
+
+  it("refuses another organization's account on a coded line, recording nothing", async () => {
+    await agentB.post('/api/v1/settings/region/australia').send(ACTIVATE);
+    const res = await agentB.post('/api/v1/manual-journals').send({
+      entryDate: '2026-08-10',
+      narration: 'x',
+      action: 'post',
+      lines: [
+        { accountId: await accountId(userA.orgId, '6200'), debitCents: 1100, taxCode: 'P_GST' },
+        { accountId: await accountId(userB.orgId, '2120'), creditCents: 1100 },
+      ],
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    const { rows } = await pool.query('SELECT 1 FROM journal_tax_details');
+    expect(rows).toHaveLength(0);
+  });
+
+  it("does not let one organization's journal reach another's BAS", async () => {
+    await agentB.post('/api/v1/settings/region/australia').send(ACTIVATE);
+    const posted = await agentA.post('/api/v1/manual-journals').send({
+      entryDate: '2026-02-10',
+      narration: 'x',
+      action: 'post',
+      lines: [
+        { accountId: await accountId(userA.orgId, '6200'), debitCents: 1100, taxCode: 'P_GST' },
+        { accountId: await accountId(userA.orgId, '2120'), creditCents: 1100 },
+      ],
+    });
+    expect(posted.status).toBe(201);
+    const bas = await agentB.post('/api/v1/bas').send({ periodStart: '2026-01-01' });
+    expect(bas.body.bas.labels['1B']).toBe(0);
+    expect(bas.body.bas.labels.G11).toBe(0);
+  });
+});
+
 describe('the database', () => {
   it('scopes tax details to their organization and enforces the catalogue', async () => {
     const [id] = await importLines(agentA, userA.orgId, [['2026-08-03', 'Stationery', -11000]]);
