@@ -2,6 +2,7 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { createApp } from '../app.js';
 import { pool } from '../db/connect.js';
+import { AU_ORG_NAME, defaultAuAnchor, runAuScenario, type AuApi } from './auDemoScenario.js';
 import { createWalkthroughReplay, type ReplayClient, type ReplayResponse } from './walkthroughReplay.js';
 import { WALKTHROUGH_MONTHS, defaultAnchor, parseAnchor, resolveDate, shiftIsoDate } from './walkthroughDates.js';
 import { DEMO_DEFAULT_EMAIL, DEMO_DEFAULT_PASSWORD } from './walkthroughNames.js';
@@ -45,14 +46,15 @@ function anchorFromArgs() {
 function createFetchClient(baseUrl: string) {
   const cookies = new Map<string, string>();
 
-  async function send(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<ReplayResponse> {
+  async function send(method: 'GET' | 'POST' | 'DELETE' | 'PATCH' | 'PUT', path: string, body?: unknown): Promise<ReplayResponse> {
     const headers: Record<string, string> = {};
     if (cookies.size > 0) headers.Cookie = [...cookies].map(([k, v]) => `${k}=${v}`).join('; ');
-    if (method === 'POST') headers['Content-Type'] = 'application/json';
+    const hasBody = method === 'POST' || method === 'PATCH' || method === 'PUT';
+    if (hasBody) headers['Content-Type'] = 'application/json';
     const res = await fetch(`${baseUrl}${path}`, {
       method,
       headers,
-      ...(method === 'POST' ? { body: JSON.stringify(body ?? {}) } : {}),
+      ...(hasBody ? { body: JSON.stringify(body ?? {}) } : {}),
     });
     for (const header of res.headers.getSetCookie()) {
       const pair = header.split(';', 1)[0] ?? '';
@@ -73,7 +75,9 @@ function createFetchClient(baseUrl: string) {
     get: (path) => send('GET', path),
     post: (path, body) => send('POST', path, body),
     delete: (path) => send('DELETE', path),
-  } satisfies ReplayClient;
+    patch: (path: string, body?: unknown) => send('PATCH', path, body),
+    put: (path: string, body?: unknown) => send('PUT', path, body),
+  } satisfies ReplayClient & AuApi;
 }
 
 function expectStatus(res: ReplayResponse, status: number, what: string): void {
@@ -84,6 +88,35 @@ const server = createApp().listen(0, '127.0.0.1');
 await once(server, 'listening');
 const { port } = server.address() as AddressInfo;
 const api = createFetchClient(`http://127.0.0.1:${String(port)}`);
+
+// Phase 49i — `npm run seed:demo -- --region au`: the Australian organization instead.
+if (process.argv.includes('--region') && process.argv[process.argv.indexOf('--region') + 1] === 'au') {
+  try {
+    const email = (process.env.DEMO_EMAIL ?? 'demo-au@autoledger.dev').toLowerCase();
+    const registered = await api.post('/api/v1/auth/register', {
+      name: 'Demo User',
+      email,
+      password: DEMO_PASSWORD,
+      organizationName: AU_ORG_NAME,
+    });
+    if (registered.status === 409) throw new Error(`seed:demo: ${email} already exists. Run \`npm run db:reset\` first, or set DEMO_EMAIL to another address.`);
+    expectStatus(registered, 201, 'register');
+    expectStatus(await api.post('/api/v1/auth/login', { email, password: DEMO_PASSWORD }), 200, 'login');
+    const anchor = defaultAuAnchor(new Date().toISOString().slice(0, 10));
+    const result = await runAuScenario(api, anchor, 'CASH');
+    console.log(`\nDemo organization "${AU_ORG_NAME}" is ready, with a lodged BAS from ${result.q1Start} and a draft from ${result.q2Start}.`);
+    console.log(`  Email:    ${email}`);
+    console.log(`  Password: ${DEMO_PASSWORD}`);
+    server.close();
+    await pool.end();
+    process.exit(0);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : err);
+    server.close();
+    await pool.end();
+    process.exit(1);
+  }
+}
 
 try {
   const anchor = anchorFromArgs();
