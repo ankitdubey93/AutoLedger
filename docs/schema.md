@@ -991,6 +991,10 @@ Migration `107_ledger-core_gst_codes.sql`. Adding these columns rewrites no rows
 - `tax_mode` (`EXCLUSIVE` by default, or `INCLUSIVE`) on `invoices`, `credit_notes`, `bills`, `debit_notes`, `quotes`, `orders`.
 - `items.sale_tax_code`, `items.purchase_tax_code`, `accounts.default_tax_code`.
 
+## Phase 49c — GST on journals (accounting) — applied
+
+Migration `108_ledger-core_journal_tax_details.sql`. `journal_tax_details`: `org_id`, `journal_entry_id` (RESTRICT), `account_id` (RESTRICT), `tax_code` (CHECK), `tax_rate_bp`, `sign` (+1/-1), `net_cents`, `tax_cents`, audited, insert-only by convention. `manual_journal_lines.tax_code` and `bank_rules.tax_code`, nullable with the same CHECK.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

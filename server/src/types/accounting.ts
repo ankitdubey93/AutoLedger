@@ -1263,6 +1263,8 @@ export interface BankRule {
   /** null = applies to every bank account. */
   bankAccountId: string | null;
   targetAccountId: string;
+  /** Phase 49c */
+  taxCode: string | null;
   targetAccountCode: string;
   targetAccountName: string;
   /** Journal entry description; null = the bank line's own description. */
@@ -2439,6 +2441,8 @@ export interface ManualJournalLine {
   description: string | null;
   debitCents: number;
   creditCents: number;
+  /** Phase 49c — the amount above is GST-inclusive when set. */
+  taxCode: string | null;
 }
 export interface ManualJournalSummary {
   id: string;

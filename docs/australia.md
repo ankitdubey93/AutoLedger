@@ -10,7 +10,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 |---|---|---|
 | 49a | Region, GST settings, Australian chart, organization calendar, DD/MM/YYYY | ✅ |
 | 49b | GST codes and tax-inclusive pricing | ✅ |
-| 49c | GST on bank lines and journals | Not built |
+| 49c | GST on bank lines and journals | ✅ |
 | 49d | BAS engine and workflow | Not built |
 | 49e | Tax invoices | Not built |
 | 49f | ABN tools and capture | Not built |
@@ -95,6 +95,17 @@ A closed catalogue in `config/taxPacks/au.ts`, served by `GET /tax-codes`, with 
 The mode travels with the document through quote revision, quote and order conversion, recurring runs and credit or debit notes. Without that, a gross price would silently become a net one on the next document.
 
 **Known limits:** a line left on "Default" previews the region's rate, while the server may apply an item or account default, and the saved document is what counts. A CSV import has no tax-inclusive option, and its preview shows the region's rate for a line with no code.
+
+## GST on bank lines and journals
+
+Money that moves without a document still carries GST. A bank line, bank rule or manual journal line with a code treats its amount as **GST-inclusive**, posts the net to the chosen account and the GST to the GST account, and writes a row to the insert-only `journal_tax_details` (migration `108`).
+
+| Path | No code given |
+|---|---|
+| Bank line, bank rule | The account's default on its normal side, else no GST. A refund is always a deliberate choice |
+| Manual journal line | No GST. An account default is ignored, because most manual journals are accruals and adjustments |
+
+`sign` is +1 on the code's normal side (a sale credited, a purchase debited) and -1 for a refund the other way, such as money back from a supplier. A reversal gets no detail row of its own: the BAS will read `journal_entries.reverses_entry_id` and produce the opposite event on the reversal's date.
 
 ## Not built in this edition
 

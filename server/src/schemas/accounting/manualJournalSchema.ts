@@ -20,6 +20,8 @@ const lineSchema = z
     // boundary too (guardrails rule 3).
     debitCents: z.int().nonnegative().default(0),
     creditCents: z.int().nonnegative().default(0),
+    // Phase 49c — for an Australian organization. The amount is then GST-inclusive.
+    taxCode: z.string().trim().max(20).nullable().default(null),
   })
   .refine((l) => !(l.debitCents > 0 && l.creditCents > 0), {
     message: 'A line cannot have both a debit and a credit',

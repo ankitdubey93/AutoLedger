@@ -1,3 +1,4 @@
+import { assertTaxCodesUsableOnClient } from './taxCodeService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
@@ -28,7 +29,7 @@ function pgErrorCode(err: unknown): string | undefined {
 
 const BANK_RULE_SELECT = `SELECT b.id, b.name, b.priority, b.direction, b.memo_contains,
                                   b.amount_min_cents, b.amount_max_cents, b.bank_account_id,
-                                  b.target_account_id, a.code AS target_account_code, a.name AS target_account_name,
+                                  b.target_account_id, b.tax_code, a.code AS target_account_code, a.name AS target_account_name,
                                   b.description, b.is_active, b.created_by, b.created_at, b.updated_at
                              FROM bank_rules b
                              JOIN accounts a ON a.id = b.target_account_id AND a.org_id = b.org_id`;
@@ -43,6 +44,7 @@ interface BankRuleRow {
   amount_max_cents: string | null;
   bank_account_id: string | null;
   target_account_id: string;
+  tax_code: string | null;
   target_account_code: string;
   target_account_name: string;
   description: string | null;
@@ -70,6 +72,7 @@ function toBankRule(row: BankRuleRow): BankRule {
     amountMaxCents: row.amount_max_cents === null ? null : parseCents(row.amount_max_cents),
     bankAccountId: row.bank_account_id,
     targetAccountId: row.target_account_id,
+    taxCode: row.tax_code,
     targetAccountCode: row.target_account_code,
     targetAccountName: row.target_account_name,
     description: row.description,
@@ -115,6 +118,7 @@ export interface CreateBankRuleInput {
   bankAccountId: string | null;
   targetAccountId: string;
   description: string | null;
+  taxCode?: string | null | undefined;
 }
 
 export interface UpdateBankRuleInput {
@@ -127,6 +131,7 @@ export interface UpdateBankRuleInput {
   bankAccountId?: (string | null) | undefined;
   targetAccountId?: string | undefined;
   description?: (string | null) | undefined;
+  taxCode?: (string | null) | undefined;
   isActive?: boolean | undefined;
 }
 
@@ -193,12 +198,13 @@ export async function createBankRule(
       amountMinCents: input.amountMinCents,
       amountMaxCents: input.amountMaxCents,
     });
+    await assertTaxCodesUsableOnClient(client, orgId, [input.taxCode]);
 
     const { rows } = await client.query<{ id: string }>(
       `INSERT INTO bank_rules
          (org_id, name, priority, direction, memo_contains, amount_min_cents, amount_max_cents,
-          bank_account_id, target_account_id, description, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          bank_account_id, target_account_id, description, created_by, tax_code)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING id`,
       [
         orgId,
@@ -212,6 +218,7 @@ export async function createBankRule(
         input.targetAccountId,
         input.description,
         createdBy,
+        input.taxCode ?? null,
       ],
     );
     const row = rows[0];
@@ -234,6 +241,7 @@ export async function updateBankRule(orgId: string, id: string, input: UpdateBan
     bankAccountId: 'bank_account_id',
     targetAccountId: 'target_account_id',
     description: 'description',
+    taxCode: 'tax_code',
     isActive: 'is_active',
   } as const;
 
@@ -268,6 +276,7 @@ export async function updateBankRule(orgId: string, id: string, input: UpdateBan
             : parseCents(existing.amount_max_cents),
     };
     await validateRuleOnClient(client, orgId, merged);
+    await assertTaxCodesUsableOnClient(client, orgId, [input.taxCode]);
 
     const assignments: string[] = [];
     const values: unknown[] = [id, orgId];
@@ -298,6 +307,7 @@ export async function updateBankRule(orgId: string, id: string, input: UpdateBan
 interface RuleForMatching extends BankRuleForMatch {
   targetAccountId: string;
   description: string | null;
+  taxCode: string | null;
 }
 
 interface CandidateLineRow {
@@ -332,9 +342,10 @@ export async function applyRulesOnClient(
     bank_account_id: string | null;
     target_account_id: string;
     description: string | null;
+    tax_code: string | null;
   }>(
     `SELECT id, priority, created_at, direction, memo_contains, amount_min_cents, amount_max_cents,
-            bank_account_id, target_account_id, description
+            bank_account_id, target_account_id, description, tax_code
        FROM bank_rules WHERE org_id = $1 AND is_active`,
     [orgId],
   );
@@ -352,6 +363,7 @@ export async function applyRulesOnClient(
     bankAccountId: r.bank_account_id,
     targetAccountId: r.target_account_id,
     description: r.description,
+    taxCode: r.tax_code,
   }));
 
   const { rows: lineRows } = await client.query<CandidateLineRow>(
@@ -383,7 +395,7 @@ export async function applyRulesOnClient(
         orgId,
         userId,
         line.id,
-        { accountId: matched.targetAccountId, description: matched.description },
+        { accountId: matched.targetAccountId, description: matched.description, taxCode: matched.taxCode },
         matched.id,
       );
       await client.query('RELEASE SAVEPOINT bank_rule_apply');

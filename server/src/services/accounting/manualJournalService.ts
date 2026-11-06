@@ -1,3 +1,4 @@
+import { assertTaxCodesUsableOnClient, recordJournalTaxOnClient, splitGrossOnClient, type GrossSplit } from './taxCodeService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
@@ -39,6 +40,7 @@ export interface ManualJournalLineInput {
   description: string | null;
   debitCents: number;
   creditCents: number;
+  taxCode?: string | null | undefined;
 }
 
 export interface ManualJournalInput {
@@ -132,6 +134,7 @@ interface LineRow {
   account_name: string | null;
   description: string | null;
   debit_cents: string;
+  tax_code: string | null;
   credit_cents: string;
 }
 
@@ -194,6 +197,7 @@ function toLine(row: LineRow): ManualJournalLine {
     description: row.description,
     debitCents: parseCents(row.debit_cents),
     creditCents: parseCents(row.credit_cents),
+    taxCode: row.tax_code,
   };
 }
 
@@ -208,7 +212,7 @@ async function loadLines(
   const { rows } = await q.query<LineRow>(
     `SELECT l.id, l.manual_journal_id, l.line_number, l.account_id,
             a.code AS account_code, a.name AS account_name,
-            l.description, l.debit_cents, l.credit_cents
+            l.description, l.debit_cents, l.credit_cents, l.tax_code
        FROM manual_journal_lines l
        LEFT JOIN accounts a ON a.id = l.account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1 AND l.manual_journal_id = ANY($2::uuid[])
@@ -371,12 +375,13 @@ async function insertLinesOnClient(
   manualJournalId: string,
   lines: ManualJournalLineInput[],
 ): Promise<void> {
+  await assertTaxCodesUsableOnClient(client, orgId, lines.map((l) => l.taxCode));
   await client.query(
     `INSERT INTO manual_journal_lines
-       (org_id, manual_journal_id, line_number, account_id, description, debit_cents, credit_cents)
-     SELECT $1, $2, v.line_number, v.account_id, v.description, v.debit_cents, v.credit_cents
-       FROM unnest($3::smallint[], $4::uuid[], $5::text[], $6::bigint[], $7::bigint[])
-            AS v(line_number, account_id, description, debit_cents, credit_cents)`,
+       (org_id, manual_journal_id, line_number, account_id, description, debit_cents, credit_cents, tax_code)
+     SELECT $1, $2, v.line_number, v.account_id, v.description, v.debit_cents, v.credit_cents, v.tax_code
+       FROM unnest($3::smallint[], $4::uuid[], $5::text[], $6::bigint[], $7::bigint[], $8::text[])
+            AS v(line_number, account_id, description, debit_cents, credit_cents, tax_code)`,
     [
       orgId,
       manualJournalId,
@@ -385,6 +390,7 @@ async function insertLinesOnClient(
       lines.map((l) => l.description),
       lines.map((l) => l.debitCents),
       lines.map((l) => l.creditCents),
+      lines.map((l) => l.taxCode ?? null),
     ],
   );
 }
@@ -527,19 +533,48 @@ async function postDraftOnClient(
     description: l.description,
     debitCents: l.debitCents,
     creditCents: l.creditCents,
+    taxCode: l.taxCode ?? null,
   }));
   await assertPostableOnClient(client, orgId, inputs);
 
   const posting: journalService.JournalLineInput[] = [];
+  const taxDetails: (GrossSplit & { accountId: string })[] = [];
+  const taxLegs = new Map<string, { debitCents: number; creditCents: number }>();
   for (const line of inputs) {
     // Rule 2 of assertPostableOnClient guarantees an account; narrow without `!`.
     if (line.accountId === null) throw new ApiError(422, 'A line has no account');
+    // Phase 49c: only a code on the line splits it. An account default is not
+    // applied here, because most manual journals are accruals and adjustments.
+    const isDebit = line.debitCents > 0;
+    const split =
+      line.taxCode === null || line.taxCode === undefined
+        ? null
+        : await splitGrossOnClient(client, orgId, {
+            taxCode: line.taxCode,
+            accountId: line.accountId,
+            grossCents: isDebit ? line.debitCents : line.creditCents,
+            side: isDebit ? 'DEBIT' : 'CREDIT',
+          });
     posting.push({
       accountId: line.accountId,
       description: line.description,
-      debitCents: line.debitCents,
-      creditCents: line.creditCents,
+      debitCents: split !== null && isDebit ? split.netCents : line.debitCents,
+      creditCents: split !== null && !isDebit ? split.netCents : line.creditCents,
     });
+    if (split !== null) {
+      taxDetails.push({ ...split, accountId: line.accountId });
+      if (split.taxAccountId !== null) {
+        const leg = taxLegs.get(split.taxAccountId) ?? { debitCents: 0, creditCents: 0 };
+        if (isDebit) leg.debitCents += split.taxCents;
+        else leg.creditCents += split.taxCents;
+        taxLegs.set(split.taxAccountId, leg);
+      }
+    }
+  }
+  // One side per line (rule 7), so an account with GST both ways gets two lines.
+  for (const [accountId, leg] of taxLegs) {
+    if (leg.debitCents > 0) posting.push({ accountId, description: 'GST', debitCents: leg.debitCents, creditCents: 0 });
+    if (leg.creditCents > 0) posting.push({ accountId, description: 'GST', debitCents: 0, creditCents: leg.creditCents });
   }
 
   const filled = await journalService.fillJournalDescriptionOnClient(
@@ -558,6 +593,7 @@ async function postDraftOnClient(
     sourceId: ctx.sourceId,
     lines: posting,
   });
+  await recordJournalTaxOnClient(client, orgId, entryId, taxDetails);
 
   await client.query(
     `UPDATE manual_journals

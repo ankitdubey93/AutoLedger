@@ -1209,6 +1209,10 @@ Customer and vendor statements are a **read** over the Phase 25 subledger, with 
 
 Invoices, bills, credit and debit notes, quotes and orders accept a header `taxMode` (`EXCLUSIVE` by default, `INCLUSIVE`) and a line `taxCode`, and return both. For an AU organization the code decides the rate and any `taxRateBp` sent is ignored. For a `GENERIC` organization a code or `INCLUSIVE` is `422`. `POST /invoices/:id/issue`, bill approval and note issue are `422` on an uncoded AU line. Items accept `saleTaxCode` and `purchaseTaxCode`; `PATCH /accounts/:id` accepts `defaultTaxCode`. The `INVOICES` and `BILLS` imports accept a `TaxCode` column.
 
+### GST on journals — Phase 49c ✅
+
+`POST /bank-transactions/:id/post-journal`, `POST`/`PATCH /bank-rules` and manual journal lines accept `taxCode`. With a code the amount is GST-inclusive and the entry gains a GST line. `422` for a `GENERIC` organization, or for an unknown code on a rule or a draft.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

@@ -1,3 +1,4 @@
+import { recordJournalTaxOnClient, splitGrossOnClient } from './taxCodeService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
@@ -751,6 +752,8 @@ export interface PostJournalInput {
   accountId: string;
   /** Entry description; null means the bank line's own description. */
   description: string | null;
+  /** Phase 49c — the GST code; the amount is GST-inclusive. Null falls back to the account's default, else no GST. */
+  taxCode?: string | null | undefined;
 }
 
 /**
@@ -837,14 +840,25 @@ export async function postJournalForTransactionOnClient(
 
   // Money in: debit the bank account, credit the chosen account. Money
   // out: the reverse. Exactly one side per line (guardrails rule 7).
+  // Phase 49c: GST comes out of the gross, so the entry gains a third line and still balances.
+  const gst = await splitGrossOnClient(client, orgId, {
+    taxCode: input.taxCode,
+    accountId: input.accountId,
+    grossCents: absAmount,
+    side: amountCents > 0 ? 'CREDIT' : 'DEBIT',
+  });
+  const counterCents = gst?.netCents ?? absAmount;
+  const taxLeg = gst === null || gst.taxAccountId === null ? [] : [{ accountId: gst.taxAccountId, cents: gst.taxCents }];
   const lines =
     amountCents > 0
       ? [
           { accountId: line.account_id, debitCents: absAmount, creditCents: 0 },
-          { accountId: input.accountId, debitCents: 0, creditCents: absAmount },
+          { accountId: input.accountId, debitCents: 0, creditCents: counterCents },
+          ...taxLeg.map((t) => ({ accountId: t.accountId, debitCents: 0, creditCents: t.cents })),
         ]
       : [
-          { accountId: input.accountId, debitCents: absAmount, creditCents: 0 },
+          { accountId: input.accountId, debitCents: counterCents, creditCents: 0 },
+          ...taxLeg.map((t) => ({ accountId: t.accountId, debitCents: t.cents, creditCents: 0 })),
           { accountId: line.account_id, debitCents: 0, creditCents: absAmount },
         ];
 
@@ -865,6 +879,7 @@ export async function postJournalForTransactionOnClient(
     sourceId: id,
     lines,
   });
+  if (gst !== null) await recordJournalTaxOnClient(client, orgId, entryId, [{ ...gst, accountId: input.accountId }]);
 
   await client.query(
     `UPDATE bank_transactions

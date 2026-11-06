@@ -1,3 +1,5 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect from '../../components/TaxCodeSelect';
 import { fluidUpdate } from '../../utils/motion';
 import { TabThumb, useSlidingThumb } from '../../components/ui/SlidingTabs';
 import { useEffect, useRef, useState } from 'react';
@@ -82,6 +84,8 @@ export default function BankTransactionsPage() {
   const [postJournalOpenId, setPostJournalOpenId] = useState<string | null>(null);
   const [postJournalAccountId, setPostJournalAccountId] = useState('');
   const [postJournalDescription, setPostJournalDescription] = useState('');
+  const gst = useGst('ANY');
+  const [postJournalTaxCode, setPostJournalTaxCode] = useState('');
   const [postJournalSuccess, setPostJournalSuccess] = useState<{ lineId: string; accountId: string; description: string; amountCents: number } | null>(null);
   const placeholderTarget = usePlaceholderTarget('postJournalDescription');
   const organisationName = useOrganizationName();
@@ -226,6 +230,7 @@ export default function BankTransactionsPage() {
     setPostJournalOpenId(txn.id);
     setPostJournalAccountId('');
     setPostJournalDescription('');
+    setPostJournalTaxCode('');
     setRowError(null);
   }
 
@@ -240,6 +245,7 @@ export default function BankTransactionsPage() {
       await postBankLineJournal(txn.id, {
         accountId: postJournalAccountId,
         description: postJournalDescription.trim() === '' ? null : postJournalDescription.trim(),
+        ...(gst.isAustralian && postJournalTaxCode !== '' ? { taxCode: postJournalTaxCode } : {}),
       });
       setPostJournalSuccess({
         lineId: txn.id,
@@ -503,6 +509,16 @@ export default function BankTransactionsPage() {
                                 </option>
                               ))}
                           </select>
+                          {gst.isAustralian && (
+                            <TaxCodeSelect
+                              gst={gst}
+                              value={postJournalTaxCode}
+                              onChange={setPostJournalTaxCode}
+                              label="GST code"
+                              emptyLabel="Account default, else no GST"
+                              className={inputClass}
+                            />
+                          )}
                           <input
                             type="text"
                             {...placeholderTarget.bind('postJournalDescription', setPostJournalDescription)}

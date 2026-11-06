@@ -62,6 +62,7 @@ export const matchBankTransactionSchema = z
 export const postBankLineJournalSchema = z.object({
   accountId: z.uuid(),
   description: z.string().trim().min(1).max(500).nullable().default(null),
+  taxCode: z.string().trim().max(20).nullable().default(null),
 });
 
 /**

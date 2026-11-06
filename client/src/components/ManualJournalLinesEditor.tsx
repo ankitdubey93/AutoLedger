@@ -1,3 +1,5 @@
+import { useGst } from '../context/useGst';
+import TaxCodeSelect from './TaxCodeSelect';
 import { Plus, Trash2 } from 'lucide-react';
 import type { Account } from '../services/fetchServices';
 import { formatCents, parseCentsInput } from '../utils/money';
@@ -14,6 +16,8 @@ export interface EditorLine {
   accountId: string;
   debit: string;
   credit: string;
+  /** Phase 49c: '' means no GST. */
+  taxCode?: string;
 }
 
 export function emptyLine(): EditorLine {
@@ -58,6 +62,7 @@ export function toInputLines(lines: EditorLine[]): Array<{
   description: string | null;
   debitCents: number;
   creditCents: number;
+  taxCode?: string | null;
 }> {
   return lines
     .filter((line) => !isFullyEmpty(line))
@@ -66,6 +71,7 @@ export function toInputLines(lines: EditorLine[]): Array<{
       description: line.description.trim() === '' ? null : line.description,
       debitCents: parseCentsInput(line.debit) ?? 0,
       creditCents: parseCentsInput(line.credit) ?? 0,
+      ...(line.taxCode === undefined || line.taxCode === '' ? {} : { taxCode: line.taxCode }),
     }));
 }
 
@@ -79,6 +85,7 @@ const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
 export default function ManualJournalLinesEditor({ lines, onChange, accounts }: Props) {
+  const gst = useGst('ANY');
   const totals = editorTotals(lines);
   const options = accounts.filter((a) => a.isPostable && a.isActive && a.bankAccountKind === null);
 
@@ -96,6 +103,7 @@ export default function ManualJournalLinesEditor({ lines, onChange, accounts }: 
               <th className="p-3 font-medium">Account</th>
               <th className="p-3 font-medium w-32 text-right">Debit</th>
               <th className="p-3 font-medium w-32 text-right">Credit</th>
+              {gst.isAustralian && <th className="p-3 font-medium w-44">GST (amount includes it)</th>}
               <th className="p-3 w-10" />
             </tr>
           </thead>
@@ -148,6 +156,18 @@ export default function ManualJournalLinesEditor({ lines, onChange, accounts }: 
                     className={`${inputClass} text-right tabular-nums`}
                   />
                 </td>
+                {gst.isAustralian && (
+                  <td className="p-2">
+                    <TaxCodeSelect
+                      gst={gst}
+                      value={line.taxCode ?? ''}
+                      onChange={(taxCode) => updateLine(index, { taxCode })}
+                      label={`GST code for line ${String(index + 1)}`}
+                      emptyLabel="No GST"
+                      className={inputClass}
+                    />
+                  </td>
+                )}
                 <td className="p-2 text-center">
                   <button
                     type="button"
@@ -190,6 +210,7 @@ export default function ManualJournalLinesEditor({ lines, onChange, accounts }: 
               </td>
               <td className="p-3 text-right tabular-nums">{formatCents(totals.debits)}</td>
               <td className="p-3 text-right tabular-nums">{formatCents(totals.credits)}</td>
+              {gst.isAustralian && <td />}
               <td />
             </tr>
           </tfoot>

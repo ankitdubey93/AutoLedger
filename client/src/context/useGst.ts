@@ -24,7 +24,7 @@ export interface GstHelpers {
 }
 
 /** Phase 49b — the GST catalogue for a document form. Asks the server only for an Australian organization. */
-export function useGst(direction: 'SALES' | 'PURCHASES'): GstHelpers {
+export function useGst(direction: 'SALES' | 'PURCHASES' | 'ANY'): GstHelpers {
   const settings = useLoadedLedgerSettings();
   const isAustralian = settings?.region === 'AU';
   const registered = settings?.gst?.registered ?? true;
@@ -46,7 +46,7 @@ export function useGst(direction: 'SALES' | 'PURCHASES'): GstHelpers {
   }, [isAustralian]);
 
   return useMemo(() => {
-    const codes = all.filter((c) => c.direction === direction && (registered || !c.reported));
+    const codes = all.filter((c) => (direction === 'ANY' || c.direction === direction) && (registered || !c.reported));
     const excluded = direction === 'SALES' ? 'S_EXCLUDED' : 'P_EXCLUDED';
     const taxable = direction === 'SALES' ? 'S_GST' : 'P_GST';
     const defaultCode = registered ? taxable : excluded;

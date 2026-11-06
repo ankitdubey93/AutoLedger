@@ -716,6 +716,7 @@ async function generateOccurrence(
           description: l.description,
           debitCents: l.debitCents,
           creditCents: l.creditCents,
+          taxCode: l.taxCode,
         }))
       : template.entry.lines.map((l) => ({
           accountId: l.accountId,

@@ -7,7 +7,9 @@ export default function TaxCodeSelect({
   onChange,
   label,
   className,
+  emptyLabel = 'Default',
 }: {
+  emptyLabel?: string;
   gst: GstHelpers;
   value: string;
   onChange: (code: string) => void;
@@ -16,7 +18,7 @@ export default function TaxCodeSelect({
 }) {
   return (
     <select aria-label={label} value={value} onChange={(e) => onChange(e.target.value)} className={className}>
-      <option value="">Default</option>
+      <option value="">{emptyLabel}</option>
       {gst.codes.map((code) => (
         <option key={code.code} value={code.code}>
           {code.label}

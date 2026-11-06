@@ -52,6 +52,7 @@ function toEditorLines(journal: ManualJournal): EditorLine[] {
     accountId: line.accountId ?? '',
     debit: line.debitCents > 0 ? formatCents(line.debitCents) : '',
     credit: line.creditCents > 0 ? formatCents(line.creditCents) : '',
+    taxCode: line.taxCode ?? '',
   }));
 }
 

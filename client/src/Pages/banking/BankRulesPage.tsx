@@ -1,3 +1,5 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect from '../../components/TaxCodeSelect';
 import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Filter } from 'lucide-react';
@@ -44,6 +46,8 @@ function BankRuleForm({
   const [amountMax, setAmountMax] = useState('');
   const [bankAccountId, setBankAccountId] = useState('');
   const [targetAccountId, setTargetAccountId] = useState(prefill?.account || '');
+  const gst = useGst('ANY');
+  const [taxCode, setTaxCode] = useState('');
   const [description, setDescription] = useState('');
   const placeholderTarget = usePlaceholderTarget('description');
   const organisationName = useOrganizationName();
@@ -78,6 +82,7 @@ function BankRuleForm({
         amountMaxCents,
         bankAccountId: bankAccountId === '' ? null : bankAccountId,
         targetAccountId,
+        ...(gst.isAustralian && taxCode !== '' ? { taxCode } : {}),
         description: description.trim() === '' ? null : description.trim(),
       };
       await createBankRule(input);
@@ -203,6 +208,19 @@ function BankRuleForm({
             ))}
           </select>
         </label>
+        {gst.isAustralian && (
+          <label className="flex flex-col gap-1 text-sm flex-1 min-w-40">
+            <span className="text-[var(--muted)]">GST code</span>
+            <TaxCodeSelect
+              gst={gst}
+              value={taxCode}
+              onChange={setTaxCode}
+              label="GST code"
+              emptyLabel="Account default, else no GST"
+              className={inputClass}
+            />
+          </label>
+        )}
       </div>
 
       <div className="flex flex-col gap-1 text-sm">

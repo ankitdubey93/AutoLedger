@@ -12,6 +12,7 @@ export const createBankRuleSchema = z.object({
   bankAccountId: z.uuid().nullable().default(null),
   targetAccountId: z.uuid(),
   description: z.string().trim().min(1).max(200).nullable().default(null),
+  taxCode: z.string().trim().max(20).nullable().default(null),
 }).refine((v) => v.amountMinCents === null || v.amountMaxCents === null || v.amountMinCents <= v.amountMaxCents,
   { message: 'amountMinCents must not exceed amountMaxCents' });
 
@@ -25,5 +26,6 @@ export const updateBankRuleSchema = z.object({
   bankAccountId: z.uuid().nullable().optional(),
   targetAccountId: z.uuid().optional(),
   description: z.string().trim().min(1).max(200).nullable().optional(),
+  taxCode: z.string().trim().max(20).nullable().optional(),
   isActive: z.boolean().optional(),
 }).refine((v) => Object.keys(v).length > 0, { message: 'No fields to update' });

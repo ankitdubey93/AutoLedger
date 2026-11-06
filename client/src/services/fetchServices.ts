@@ -872,6 +872,8 @@ export interface ManualJournalLine {
   description: string | null;
   debitCents: number;
   creditCents: number;
+  /** Phase 49c — the amount is GST-inclusive when set. */
+  taxCode?: string | null;
 }
 
 /** Phase 44. Mirrors server/src/types/accounting.ts's ManualJournalSummary. */
@@ -911,6 +913,7 @@ export interface ManualJournalInput {
     description: string | null;
     debitCents: number;
     creditCents: number;
+    taxCode?: string | null;
   }>;
 }
 
@@ -3675,6 +3678,8 @@ export function matchBankTransaction(
 export interface PostBankLineJournalInput {
   accountId: string;
   description: string | null;
+  /** Phase 49c — the amount is GST-inclusive. */
+  taxCode?: string | null;
 }
 
 /** POST /bank-transactions/:id/post-journal — posts a GL entry for a line with no counterpart document. */
@@ -3776,6 +3781,7 @@ export interface BankRule {
   amountMaxCents: number | null;
   bankAccountId: string | null;
   targetAccountId: string;
+  taxCode?: string | null;
   targetAccountCode: string;
   targetAccountName: string;
   description: string | null;

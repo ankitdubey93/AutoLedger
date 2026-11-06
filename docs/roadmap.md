@@ -1853,3 +1853,11 @@ A closed catalogue of twelve codes, `taxCodeService.prepareTaxOnClient`, and `co
 
 **Corrected from the plan:** the catalogue lives in code with a database CHECK, as planned, but a captured bill gets a provisional code here (`P_GST` when it has tax, otherwise `P_FREE`), since approval would otherwise refuse it. 49f replaces that with a real decision.
 
+### 49c: GST on bank lines and journals
+
+`taxCodeService.splitGrossOnClient` and `recordJournalTaxOnClient`, `journal_tax_details` (migration `108`), and a `taxCode` on bank-line journals, bank rules and manual journal lines, carried through repeating journals. Pickers on all three screens.
+
+2631 server (2 skipped) + 749 client tests at the time.
+
+**Known gap until 49d:** the existing Tax summary's GL check shows this GST as a difference, because that report reads documents only.
+
