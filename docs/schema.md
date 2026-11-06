@@ -1007,6 +1007,10 @@ Migration `109_ledger-core_bas_returns.sql`.
 
 Migration `110_ledger-core_seller_snapshot.sql`: `seller_abn`, `seller_legal_name`, `seller_gst_registered` on `invoices` and `credit_notes`. NULL on a `GENERIC` organization's documents and on drafts; written once at issue.
 
+## Phase 49f — GST in the bill inbox (capture) — applied
+
+Migration `111_ap-flow_gst_capture.sql`. `ap_flow_extractions.supplier_abn`, `ap_flow_line_items.tax_cents` and `tax_code` (purchase codes only). All nullable.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

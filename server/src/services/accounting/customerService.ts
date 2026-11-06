@@ -1,3 +1,4 @@
+import { normalizePartyTaxNumberOnClient } from './taxCodeService.js';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -123,6 +124,7 @@ export async function createCustomer(
   input: CreateCustomerInput,
 ): Promise<Customer> {
   const defaultTermId = input.defaultPaymentTermId ?? null;
+  const taxNumber = await normalizePartyTaxNumberOnClient(pool, orgId, input.taxNumber);
   const rows = await withTransaction(async (client) => {
     if (defaultTermId !== null) await paymentTermService.assertActiveTermOnClient(client, orgId, defaultTermId);
     const result = await client.query<CustomerRow>(
@@ -136,7 +138,7 @@ export async function createCustomer(
         input.email === null ? null : input.email.toLowerCase(),
         input.phone,
         input.billingAddress,
-        input.taxNumber,
+        taxNumber,
         input.notes,
         defaultTermId,
       ],
@@ -163,6 +165,9 @@ export async function updateCustomer(
   id: string,
   input: UpdateCustomerInput,
 ): Promise<Customer> {
+  if (input.taxNumber !== undefined) {
+    input = { ...input, taxNumber: await normalizePartyTaxNumberOnClient(pool, orgId, input.taxNumber) };
+  }
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence.
   const COLUMNS = {

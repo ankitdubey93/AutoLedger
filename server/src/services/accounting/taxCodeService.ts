@@ -1,3 +1,4 @@
+import { formatAbn, isValidAbn, looksLikeAbn } from '../../utils/abn.js';
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import { auDefaultTaxCode, auTaxCode, type GstDirection } from '../../config/taxPacks/au.js';
@@ -291,4 +292,30 @@ export function sellerFromSnapshot(
 ): SellerIdentity | null {
   if (snapshot.sellerGstRegistered === null) return live;
   return { abn: snapshot.sellerAbn, legalName: snapshot.sellerLegalName, gstRegistered: snapshot.sellerGstRegistered };
+}
+
+/** Phase 49f — the organization's GST registration, or null for a GENERIC one. For modules that may not read gst_settings (rule 16). */
+export async function gstRegistrationOnClient(q: Queryable, orgId: string): Promise<boolean | null> {
+  const { rows } = await q.query<{ registered: boolean }>('SELECT registered FROM gst_settings WHERE org_id = $1', [orgId]);
+  return rows[0]?.registered ?? null;
+}
+
+/**
+ * Phase 49f — tidies a customer's or vendor's tax number. Eleven digits are
+ * meant as an ABN, so a bad one is refused as a typo. Anything else is a foreign
+ * tax number and stays free text. A GENERIC organization's is left as typed.
+ */
+export async function normalizePartyTaxNumberOnClient(q: Queryable, orgId: string, raw: string | null): Promise<string | null> {
+  if (raw === null || raw === '') return raw;
+  if ((await gstRegistrationOnClient(q, orgId)) === null || !looksLikeAbn(raw)) return raw;
+  if (!isValidAbn(raw)) throw new ApiError(422, `${raw} is not a valid ABN. Check for a mistyped digit`);
+  return formatAbn(raw);
+}
+
+/** Phase 49f — the organization's own ABN must be a real one, since its tax invoices print it. */
+export async function normalizeOwnAbnOnClient(q: Queryable, orgId: string, raw: string | null): Promise<string | null> {
+  if (raw === null || raw === '') return raw;
+  if ((await gstRegistrationOnClient(q, orgId)) === null) return raw;
+  if (!isValidAbn(raw)) throw new ApiError(422, `${raw} is not a valid ABN. Check for a mistyped digit`);
+  return formatAbn(raw);
 }

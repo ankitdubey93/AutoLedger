@@ -112,6 +112,17 @@ Because the printed price would then have to be recomputed, and a rounded net ca
 **Q: How do you keep a calculation identical on client and server without sharing code?**
 A shared JSON fixture that both test suites run. The client's preview and the server's arithmetic are separate functions in separate packages, and the fixture fails whichever one drifts. Only the server's result is ever stored, so a drift would be a display bug and not a money bug, but it would still confuse a user.
 
+## Phase 49f: checksums and refusing to guess
+
+**A checksum proves form, not existence.** The ABN check catches a mistyped digit. It says nothing about whether anyone holds that number, which takes a register lookup. So we validate on every write and keep the lookup optional.
+
+**A checksum's strength decides how far to trust it alone.** The ABN's mod-89 check passes about 1 in 89 random numbers, on an 11-digit field that's rarely anything else. A tax file number's mod-11 check passes about 1 in 11 random 9-digit numbers, and invoice numbers are often 9 digits. So masking TFNs by checksum alone would black out invoice numbers, and we require a label as well. The cost is that an unlabelled TFN isn't masked, which is the same honest limit the rest of the masking has.
+
+**Automation should refuse rather than guess when a wrong answer is silent.** A captured bill posts immediately. Spreading GST across every line would produce a plausible total and a wrong tax return, and nobody would notice. So the decision function has an explicit "I can't tell" outcome, and that blocks auto-post with a reason a person can act on.
+
+**Q: How would you design an AI extraction feature that feeds a financial record?**
+Treat the model's output as untrusted input, the same as a request body. Validate its format, cross-check it against the document's own arithmetic, and only let it through automatically when the numbers corroborate each other. Where they don't, route to a person with a specific reason. A misread ABN that fails its checksum should fall back to the name, and never create a vendor keyed on a wrong number.
+
 ## Follow-ups
 
 - "What about a tenant who operates in several zones?" We store one zone per organization, because a BAS is per entity. The user's own display zone would be a separate concern, and audit timestamps stay instants.

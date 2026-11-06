@@ -1,3 +1,4 @@
+import { useRegion } from '../../context/LedgerSettingsContext';
 import { useEffect, useState } from 'react';
 import { updateOrganization } from '../../services/fetchServices';
 import { useAuthActions } from '../../context/AuthContext';
@@ -13,6 +14,7 @@ export default function BusinessIdentificationPanel() {
   const { refreshNow } = useAuthActions();
 
   const [taxNumber, setTaxNumber] = useState('');
+  const isAustralian = useRegion() === 'AU';
   const [businessNumber, setBusinessNumber] = useState('');
   const [seeded, setSeeded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -53,7 +55,7 @@ export default function BusinessIdentificationPanel() {
       <h2>Business identification</h2>
 
       <div className="form">
-        <label htmlFor="tax-number">Tax registration number</label>
+        <label htmlFor="tax-number">{isAustralian ? 'ABN' : 'Tax registration number'}</label>
         <input
           id="tax-number"
           type="text"

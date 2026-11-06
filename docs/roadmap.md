@@ -1877,3 +1877,11 @@ Seller snapshot at issue (migration `110`), Tax Invoice and Adjustment Note in t
 
 **Corrected from the plan:** a `documentTitle` chosen in the template is overridden for an AU organization, since a wrong title is a compliance problem rather than a style choice. A missing ABN warns instead of blocking.
 
+### 49f: ABN tools and capture
+
+`utils/abn.ts`, ABN validation on the organization and parties, optional ABN Lookup, TFN masking, supplier ABN and per-line GST in extraction, `utils/capturedGst.ts`, a GST column and reason on the review screen, vendor matching by ABN (migration `111`).
+
+2727 server (2 skipped) + 759 client tests at the time.
+
+**Found while building:** a captured bill is approved immediately, so 49b's "provisional" code was not provisional at all. A mixed receipt could have reached the BAS with GST on its GST-free lines. It is now refused until a person chooses.
+

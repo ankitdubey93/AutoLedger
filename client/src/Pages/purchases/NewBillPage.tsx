@@ -463,6 +463,11 @@ export default function NewBillPage() {
                 </option>
               ))}
             </select>
+            {gst.isAustralian && vendorId !== '' && (vendors.find((v) => v.id === vendorId)?.taxNumber ?? null) === null && (
+              <span className="text-xs text-[var(--warn-ink)]">
+                No ABN on file. If this supplier should have quoted one, you may have to withhold tax from the payment.
+              </span>
+            )}
             <Link to="/vendors?new=1" className="text-xs">
               + New vendor
             </Link>

@@ -70,7 +70,7 @@ export interface OcrPageResult {
   words: OcrWord[];
 }
 
-export type PiiKind = 'CARD_NUMBER' | 'PAN' | 'AADHAAR' | 'GSTIN' | 'SSN' | 'PERSON_NAME';
+export type PiiKind = 'TFN' | 'CARD_NUMBER' | 'PAN' | 'AADHAAR' | 'GSTIN' | 'SSN' | 'PERSON_NAME';
 
 export interface RedactedRegion {
   kind: PiiKind;
@@ -80,6 +80,8 @@ export interface RedactedRegion {
 export interface CaptureLineItem {
   description: string;
   amountCents: number;
+  /** Phase 49f — GST printed for this line, when the receipt prints one. */
+  taxCents?: number | null;
 }
 
 /**
@@ -108,6 +110,10 @@ export interface CaptureLineItemRecord {
   suggestedAccountId: string | null;
   mappingSource: CaptureMappingSource;
   mappingConfidence: number | null;
+  /** Phase 49f — GST printed for this line. */
+  taxCents: number | null;
+  /** Phase 49f — a reviewer's choice. */
+  taxCode: string | null;
 }
 
 /** One row in GET /capture/review-queue, lowest confidence first. */
@@ -131,6 +137,8 @@ export interface CaptureReviewQueueEntry {
 
 export interface CaptureExtraction {
   id: string;
+  /** Phase 49f — as read from the document; not verified. */
+  supplierAbn: string | null;
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null; // 'YYYY-MM-DD'
@@ -193,6 +201,8 @@ export interface CaptureDocumentRecord {
 }
 
 export interface CaptureDocumentDetail extends CaptureDocumentRecord {
+  /** Phase 49f — why a person must choose GST codes before this posts; null when they needn't. */
+  gstReview: { reason: string } | null;
   pages: CapturePage[];
   extraction: CaptureExtraction | null;
   lineItems: CaptureLineItemRecord[];

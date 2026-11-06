@@ -117,11 +117,14 @@ export const reviewQueue: RequestHandler = async (req, res) => {
 export const updateLineItem: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const input = parseBody(updateLineItemSchema, req.body);
-  const document = await captureDocumentService.updateLineItemAccount(
-    user.orgId,
-    requireParam(req, 'id'),
-    requireParam(req, 'lineId'),
-    input.accountId,
-  );
+  const id = requireParam(req, 'id');
+  const lineId = requireParam(req, 'lineId');
+  let document = await captureDocumentService.getCaptureDocumentById(user.orgId, id);
+  if (input.accountId !== undefined) {
+    document = await captureDocumentService.updateLineItemAccount(user.orgId, id, lineId, input.accountId);
+  }
+  if (input.taxCode !== undefined) {
+    document = await captureDocumentService.updateLineItemTaxCode(user.orgId, id, lineId, input.taxCode);
+  }
   res.json({ success: true, document });
 };

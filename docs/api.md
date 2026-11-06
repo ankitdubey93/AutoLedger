@@ -1236,6 +1236,14 @@ All need region `AU`, otherwise `403`.
 
 Invoices and credit notes return `sellerAbn`, `sellerLegalName`, `sellerGstRegistered`, null unless issued by an AU organization. `GET /invoices/:id/pdf` and `GET /credit-notes/:id/pdf` render a tax invoice or adjustment note for an AU organization. `GET /public/invoices/:token` gains `gst: {registered, abn} | null`.
 
+### ABN and the bill inbox — Phase 49f ✅
+
+`GET /abn/status` returns `{lookupEnabled}`. `GET /abn/:abn` returns `{found, result: {abn, active, entityName, gstRegisteredFrom} | null}`, `503` unless `ABR_GUID` is set. Both need region `AU`.
+
+`PATCH /capture/documents/:id/line-items/:lineId` now takes `accountId` and/or `taxCode` (a purchase code, or null for automatic). `GET /capture/documents/:id` gains `gstReview: {reason} | null`, `extraction.supplierAbn`, and per-line `taxCents` and `taxCode`. `POST /capture/documents/:id/post` is `422` with a reason for a mixed receipt.
+
+`PATCH /organizations`, and customer and vendor create and update, are `422` on an invalid ABN for an AU organization.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

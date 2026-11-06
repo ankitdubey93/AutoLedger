@@ -1,3 +1,5 @@
+import { useRegion } from '../../context/LedgerSettingsContext';
+import AbnLookupButton from '../../components/AbnLookupButton';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
@@ -35,6 +37,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
   const [phone, setPhone] = useState('');
   const [billingAddress, setBillingAddress] = useState('');
   const [taxNumber, setTaxNumber] = useState('');
+  const isAustralian = useRegion() === 'AU';
   const [paymentTerms, setPaymentTerms] = useState('');
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
@@ -121,7 +124,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
           />
         </label>
         <label className="flex flex-col gap-1 text-sm flex-1 min-w-48">
-          <span className="text-[var(--muted)]">Tax number</span>
+          <span className="text-[var(--muted)]">{isAustralian ? 'ABN' : 'Tax number'}</span>
           <input
             type="text"
             maxLength={64}
@@ -129,6 +132,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
             onChange={(e) => setTaxNumber(e.target.value)}
             className={inputClass}
           />
+          {isAustralian && <AbnLookupButton value={taxNumber} />}
         </label>
       </div>
 
@@ -189,6 +193,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
 }
 
 export default function VendorsPage() {
+  const taxNumberLabel = useRegion() === 'AU' ? 'ABN' : 'Tax number';
   const [params, setParams] = useSearchParams();
   const [vendors, setVendors] = useState<Vendor[] | null>(null);
   // Balance due per vendor, from the AP aging report's per-party rows
@@ -323,7 +328,7 @@ export default function VendorsPage() {
                 <SortableHeader label="Name" sortKey="name" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Email" sortKey="email" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Phone" sortKey="phone" sort={sort} onSort={toggleSort} />
-                <SortableHeader label="Tax number" sortKey="taxNumber" sort={sort} onSort={toggleSort} />
+                <SortableHeader label={taxNumberLabel} sortKey="taxNumber" sort={sort} onSort={toggleSort} />
                 <SortableHeader label="Balance due" sortKey="balance" sort={sort} onSort={toggleSort} align="right" />
                 <SortableHeader label="Status" sortKey="status" sort={sort} onSort={toggleSort} />
                 <th className="p-3 font-medium text-right">Actions</th>

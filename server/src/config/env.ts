@@ -213,6 +213,8 @@ const parsed = {
   // segment that authenticates the webhook (Brevo documents no signature).
   INBOUND_MAIL: oneOf('INBOUND_MAIL', ['off', 'brevo'] as const, 'off'),
   INBOUND_MAIL_DOMAIN: optional('INBOUND_MAIL_DOMAIN', '').toLowerCase(),
+  // Phase 49f — a free GUID from the ABR enables ABN Lookup. Blank: format checks only.
+  ABR_GUID: optional('ABR_GUID', ''),
   INBOUND_MAIL_WEBHOOK_SECRET: optional('INBOUND_MAIL_WEBHOOK_SECRET', ''),
 
   // Phase 39c — online payment of an emailed statement, through Stripe. All

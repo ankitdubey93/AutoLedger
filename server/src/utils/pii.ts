@@ -25,12 +25,22 @@ const NAME_TOKEN = /^[A-Z][a-z]+$/;
 
 const PAN_RE = /\b[A-Z]{5}[0-9]{4}[A-Z]\b/g;
 const GSTIN_RE = /\b[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]\b/g;
+// Label-anchored: about 1 in 11 random nine-digit numbers pass the checksum, so the
+// checksum alone would black out invoice numbers.
+const TFN_RE = /\b(?:TFN|Tax File (?:Number|No\.?))[\s:#-]*([0-9]{3}[ -]?[0-9]{3}[ -]?[0-9]{3})\b/gi;
+const TFN_WEIGHTS = [1, 4, 3, 7, 5, 8, 6, 9, 10] as const;
 const SSN_RE = /\b[0-9]{3}-[0-9]{2}-[0-9]{4}\b/g;
 
 // 13-19 digits, optionally grouped by single spaces or hyphens.
 const CARD_CANDIDATE_RE = /\b[0-9](?:[0-9 -]{11,23})[0-9]\b/g;
 // Exactly 12 digits, optionally grouped, first digit 2-9.
 const AADHAAR_CANDIDATE_RE = /\b[2-9][0-9](?:[0-9 -]{6,10})[0-9]\b/g;
+
+function isValidTfn(digits: string): boolean {
+  let sum = 0;
+  for (let i = 0; i < 9; i += 1) sum += Number(digits[i]) * (TFN_WEIGHTS[i] ?? 0);
+  return sum % 11 === 0;
+}
 
 function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd;
@@ -80,6 +90,13 @@ export function detectPii(text: string): PiiSpan[] {
 
   for (const match of text.matchAll(SSN_RE)) {
     spans.push({ kind: 'SSN', start: match.index, end: match.index + match[0].length });
+  }
+
+  for (const match of text.matchAll(TFN_RE)) {
+    const number = match[1] ?? '';
+    if (!isValidTfn(number.replace(/[ -]/g, ''))) continue;
+    const start = match.index + match[0].length - number.length;
+    spans.push({ kind: 'TFN', start, end: start + number.length });
   }
 
   for (const labelMatch of text.matchAll(LABEL_NAMES)) {

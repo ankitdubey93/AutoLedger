@@ -13,7 +13,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | 49c | GST on bank lines and journals | ✅ |
 | 49d | BAS engine and workflow | ✅ |
 | 49e | Tax invoices | ✅ |
-| 49f | ABN tools and capture | Not built |
+| 49f | ABN tools and capture | ✅ |
 | 49g | Bank details, ABA files, bank CSV presets | Not built |
 | 49h | TPAR | Not built |
 | 49i | Australian demo and walkthrough | Not built |
@@ -176,6 +176,36 @@ Quote PDFs stay titled as quotes, since a quote is not a tax invoice, and gain t
 **A missing ABN is a warning on the draft, not a refusal.** Blocking issue would stop a business invoicing over a settings field; **confirm whether that is the right call.**
 
 **Exact tax invoice and adjustment note wording must be checked against the ATO.**
+
+## ABN tools
+
+`utils/abn.ts` runs the ABR's mod-89 check, verified against the ABR's worked example. A checksum proves a number is well formed, not that anyone holds it.
+
+| Where | Rule |
+|---|---|
+| The organization | Must be a valid ABN, since its tax invoices print it |
+| Customers and vendors | Eleven digits must be valid, and are stored as `51 824 753 556`. Anything else is a foreign tax number and stays free text |
+| A bill for a vendor with no ABN | A warning that tax may have to be withheld. Nothing is calculated |
+
+**ABN Lookup** (`GET /abn/:abn`) is optional and off unless `ABR_GUID` is set. It is tested against a fake and **has never called the real service**. Without a GUID the forms link to the public register.
+
+CSV imports of customers and vendors do not run this check.
+
+## The bill inbox
+
+**A captured bill is approved the moment it posts, so nothing may guess at its GST.** `utils/capturedGst.ts` decides, in order:
+
+1. What a reviewer chose per line.
+2. GST the receipt printed per line, if it adds up to the document's GST.
+3. No GST on the receipt: every line `P_FREE`.
+4. GST that only fits every line being taxable, within rounding: every line `P_GST`.
+5. Otherwise the receipt is mixed and is **refused with a reason**, by hand and by auto-post, until a person chooses codes on the review screen.
+
+An unregistered business claims nothing, so the GST becomes part of the cost. A receipt whose lines already include GST is recognised when they sum to the total. It is not recognised when a printed subtotal contradicts them, because the arithmetic check runs without knowing the region.
+
+**Vendors match by ABN before name**, only when the ABN read from the page passes the checksum, and a new vendor keeps it. **An ABN is not masked** before an image goes to the model, since the model has to read it. **A tax file number is masked**, but only when labelled, because about 1 in 11 random nine-digit numbers pass its checksum and masking those would black out invoice numbers.
+
+The extraction prompt asks every organization's documents for a supplier number and per-line tax. The fields are optional and ignored for a `GENERIC` organization.
 
 ## Not built in this edition
 

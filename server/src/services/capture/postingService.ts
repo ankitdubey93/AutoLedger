@@ -1,3 +1,6 @@
+import { gstRegistrationOnClient } from '../accounting/taxCodeService.js';
+import { decideCapturedGst, type DecidedLine } from '../../utils/capturedGst.js';
+import { isValidAbn } from '../../utils/abn.js';
 import { pool } from '../../db/connect.js';
 import { beginTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -65,6 +68,7 @@ function addDays(isoDate: string, days: number): string {
 }
 
 interface DocumentForPostingRow {
+  supplier_abn: string | null;
   id: string;
   document_id: string;
   status: CaptureDocumentStatus;
@@ -82,6 +86,8 @@ interface DocumentForPostingRow {
 }
 
 interface LineItemForPostingRow {
+  tax_cents: string | null;
+  tax_code: string | null;
   line_index: number;
   description: string;
   amount_cents: string;
@@ -100,7 +106,7 @@ export async function postCaptureDocument(
 
     const { rows: docRows } = await client.query<DocumentForPostingRow>(
       `SELECT a.id, a.document_id, a.status, d.sha256, d.original_filename,
-              x.vendor_name, x.invoice_number, x.invoice_date, x.due_date, x.currency,
+              x.supplier_abn, x.vendor_name, x.invoice_number, x.invoice_date, x.due_date, x.currency,
               x.subtotal_cents, x.tax_cents, x.total_cents, x.arithmetic_ok
          FROM ap_flow_documents a
          JOIN documents d ON d.org_id = a.org_id AND d.id = a.document_id
@@ -138,7 +144,7 @@ export async function postCaptureDocument(
     const taxCents = doc.tax_cents === null ? 0 : parseCents(doc.tax_cents);
 
     const { rows: lineItemRows } = await client.query<LineItemForPostingRow>(
-      `SELECT line_index, description, amount_cents, account_id
+      `SELECT line_index, description, amount_cents, account_id, tax_cents, tax_code
          FROM ap_flow_line_items
         WHERE org_id = $1 AND ap_flow_document_id = $2
         ORDER BY line_index`,
@@ -155,8 +161,29 @@ export async function postCaptureDocument(
     }
 
     const lineAmountSum = sumCents(lineItemRows.map((row) => parseCents(row.amount_cents)));
-    if (lineAmountSum + taxCents !== totalCents) {
+    const gstRegistered = await gstRegistrationOnClient(client, orgId);
+    // Phase 49f — an Australian receipt may list prices that already include GST.
+    const linesAreGross = gstRegistered !== null && taxCents > 0 && lineAmountSum === totalCents;
+    if (lineAmountSum + taxCents !== totalCents && !linesAreGross) {
       throw new ApiError(422, 'Extracted line items and tax do not sum to the document total');
+    }
+
+    // A captured bill is approved straight away, so nothing here may guess: a
+    // receipt that doesn't settle its GST is refused, and a person chooses.
+    let gstLines: DecidedLine[] | null = null;
+    if (gstRegistered !== null) {
+      const decision = decideCapturedGst({
+        registered: gstRegistered,
+        taxCents,
+        totalCents,
+        lines: lineItemRows.map((row) => ({
+          amountCents: parseCents(row.amount_cents),
+          extractedTaxCents: row.tax_cents === null ? null : parseCents(row.tax_cents),
+          chosenCode: row.tax_code,
+        })),
+      });
+      if (!decision.ok) throw new ApiError(422, decision.reason);
+      gstLines = decision.lines;
     }
 
     const { rows: orgRows } = await client.query<{ base_currency: string }>(
@@ -167,7 +194,9 @@ export async function postCaptureDocument(
     if (baseCurrency === undefined) throw new ApiError(404, 'Organization not found');
     const documentCurrency = (doc.currency ?? baseCurrency).trim();
 
-    const vendorId = await vendorService.findOrCreateVendorByNameOnClient(client, orgId, userId, doc.vendor_name);
+    // Only a well-formed ABN is used for matching: this is what a model read off a page.
+    const supplierAbn = gstRegistered !== null && doc.supplier_abn !== null && isValidAbn(doc.supplier_abn) ? doc.supplier_abn : null;
+    const vendorId = await vendorService.findOrCreateVendorByNameOnClient(client, orgId, userId, doc.vendor_name, supplierAbn);
 
     const lineTaxes: number[] =
       taxCents > 0
@@ -176,12 +205,6 @@ export async function postCaptureDocument(
             lineItemRows.map((row) => cents(parseCents(row.amount_cents))),
           )
         : lineItemRows.map(() => 0);
-
-    const { rows: gstRows } = await client.query<{ registered: boolean }>(
-      'SELECT registered FROM gst_settings WHERE org_id = $1',
-      [orgId],
-    );
-    const gstRegistered = gstRows[0]?.registered ?? null;
 
     const dueDate =
       doc.due_date !== null && doc.due_date >= doc.invoice_date
@@ -199,10 +222,9 @@ export async function postCaptureDocument(
         notes: `Captured from ${doc.original_filename}`.slice(0, 1000),
         lines: lineItemRows.map((row, index) => ({
           description: row.description.trim() === '' ? `Line ${String(row.line_index + 1)}` : row.description.slice(0, 500),
-          netCents: parseCents(row.amount_cents),
-          taxCents: lineTaxes[index] ?? 0,
-          // Phase 49b — a provisional code from the amounts; the bill stays an editable draft.
-          taxCode: gstRegistered === null ? null : !gstRegistered ? 'P_EXCLUDED' : (lineTaxes[index] ?? 0) > 0 ? 'P_GST' : 'P_FREE',
+          netCents: gstLines?.[index]?.netCents ?? parseCents(row.amount_cents),
+          taxCents: gstLines?.[index]?.taxCents ?? lineTaxes[index] ?? 0,
+          taxCode: gstLines?.[index]?.taxCode ?? null,
           // account_id === null is refused above; the non-null assertion here
           // is safe by that check, not by TypeScript's own narrowing.
           expenseAccountId: row.account_id as string,

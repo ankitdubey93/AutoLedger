@@ -172,7 +172,7 @@ export default function GeneralSettingsPage() {
       </label>
 
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-[var(--muted)]">Tax registration number</span>
+        <span className="text-[var(--muted)]">{ledgerSettings.status === 'ready' && ledgerSettings.settings.region === 'AU' ? 'ABN' : 'Tax registration number'}</span>
         <input
           type="text"
           value={taxNumber}

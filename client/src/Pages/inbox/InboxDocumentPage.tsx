@@ -1,3 +1,5 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect from '../../components/TaxCodeSelect';
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import {
@@ -8,6 +10,7 @@ import {
   postCaptureDocument,
   reextractCaptureDocument,
   updateCaptureLineItem,
+  updateCaptureLineItemTaxCode,
   type Account,
   type CaptureDocumentDetail,
   type CaptureDocumentStatus,
@@ -57,6 +60,7 @@ function mappingSourceClass(source: CaptureMappingSource): string {
 }
 
 export default function InboxDocumentPage() {
+  const gst = useGst('PURCHASES');
   const { id } = useParams<{ id: string }>();
   const base = INBOX_BASE;
 
@@ -144,6 +148,17 @@ export default function InboxDocumentPage() {
     }
   }
 
+  async function handleTaxCodeChange(lineItemId: string, taxCode: string) {
+    if (id === undefined) return;
+    setError(null);
+    try {
+      const res = await updateCaptureLineItemTaxCode(id, lineItemId, taxCode === '' ? null : taxCode);
+      setDocument(res.document);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not update this line item');
+    }
+  }
+
   async function handleAccountChange(lineItemId: string, accountId: string) {
     if (id === undefined || accountId === '') return;
     setError(null);
@@ -208,7 +223,8 @@ export default function InboxDocumentPage() {
   const canReextract = document.status === 'EXTRACTED' || document.status === 'FAILED' || isDuplicate;
   const canReview = document.status === 'EXTRACTED';
   const hasUnmappedLine = document.lineItems.some((item) => item.accountId === null);
-  const canPost = canReview && (extraction?.arithmeticOk ?? false) && !hasUnmappedLine && document.lineItems.length > 0;
+  const gstReason = document.gstReview?.reason ?? null;
+  const canPost = canReview && (extraction?.arithmeticOk ?? false) && !hasUnmappedLine && document.lineItems.length > 0 && gstReason === null;
   const postBlockedReason =
     extraction !== null && !extraction.arithmeticOk
       ? "Totals don't reconcile — re-extract before posting."
@@ -414,6 +430,10 @@ export default function InboxDocumentPage() {
               ))}
             </dl>
 
+            {gstReason !== null && <p className="status status--warn">{gstReason}</p>}
+            {gst.isAustralian && extraction !== null && (extraction.supplierAbn ?? null) !== null && (
+              <p className="text-sm m-0">Supplier ABN on the document: {extraction.supplierAbn}</p>
+            )}
             {document.lineItems.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-sm">
@@ -422,6 +442,7 @@ export default function InboxDocumentPage() {
                       <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Description</th>
                       <th className="text-right px-2 py-1.5 border-b border-[var(--border)]">Amount</th>
                       <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Account</th>
+                      {gst.isAustralian && <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">GST</th>}
                       <th className="text-left px-2 py-1.5 border-b border-[var(--border)]">Source</th>
                     </tr>
                   </thead>
@@ -448,6 +469,18 @@ export default function InboxDocumentPage() {
                             ))}
                           </select>
                         </td>
+                        {gst.isAustralian && (
+                          <td className="px-2 py-1.5 border-b border-[var(--border)]">
+                            <TaxCodeSelect
+                              gst={gst}
+                              value={item.taxCode ?? ''}
+                              onChange={(code) => void handleTaxCodeChange(item.id, code)}
+                              label={`GST code for ${item.description}`}
+                              emptyLabel="Automatic"
+                              className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-sm text-[var(--text)]"
+                            />
+                          </td>
+                        )}
                         <td className="px-2 py-1.5 border-b border-[var(--border)]">
                           <span
                             className={`text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full ${mappingSourceClass(item.mappingSource)}`}

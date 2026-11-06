@@ -1,3 +1,4 @@
+import { auTaxCode } from '../../config/taxPacks/au.js';
 import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
 import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
@@ -1032,7 +1033,13 @@ export async function createCapturedBillOnClient(
       quantityMilli: 1000,
       unitPriceCents: line.netCents,
       expenseAccountId: line.expenseAccountId,
-      taxRateBp: line.netCents === 0 ? 0 : Math.min(10000, Number(scaleCents(cents(line.taxCents), 10000, line.netCents))),
+      // Phase 49f — a coded line snapshots its code's rate rather than a ratio rounded from OCR amounts.
+      taxRateBp:
+        line.taxCode !== null && line.taxCode !== undefined
+          ? (auTaxCode(line.taxCode)?.rateBp ?? 0)
+          : line.netCents === 0
+            ? 0
+            : Math.min(10000, Number(scaleCents(cents(line.taxCents), 10000, line.netCents))),
       // A captured (Capture) line never comes from the item catalogue.
       itemId: null,
       taxCode: line.taxCode ?? null,

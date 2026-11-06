@@ -1,3 +1,5 @@
+import { abnDigits, formatAbn } from '../../utils/abn.js';
+import { normalizePartyTaxNumberOnClient } from './taxCodeService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
@@ -131,6 +133,7 @@ export async function createVendor(
   input: CreateVendorInput,
 ): Promise<Vendor> {
   const defaultTermId = input.defaultPaymentTermId ?? null;
+  const taxNumber = await normalizePartyTaxNumberOnClient(pool, orgId, input.taxNumber);
   const rows = await withTransaction(async (client) => {
     if (defaultTermId !== null) await paymentTermService.assertActiveTermOnClient(client, orgId, defaultTermId);
     const result = await client.query<VendorRow>(
@@ -144,7 +147,7 @@ export async function createVendor(
         input.email === null ? null : input.email.toLowerCase(),
         input.phone,
         input.billingAddress,
-        input.taxNumber,
+        taxNumber,
         input.paymentTerms,
         input.notes,
         defaultTermId,
@@ -172,6 +175,9 @@ export async function updateVendor(
   id: string,
   input: UpdateVendorInput,
 ): Promise<Vendor> {
+  if (input.taxNumber !== undefined) {
+    input = { ...input, taxNumber: await normalizePartyTaxNumberOnClient(pool, orgId, input.taxNumber) };
+  }
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence.
   const COLUMNS = {
@@ -245,6 +251,8 @@ export async function findOrCreateVendorByNameOnClient(
   orgId: string,
   createdBy: string,
   name: string,
+  /** Phase 49f — an ABN read from the document. It identifies a business better than a name does. */
+  abn: string | null = null,
 ): Promise<string> {
   const trimmed = name.trim();
   if (trimmed === '') throw new ApiError(422, 'A vendor name is required');
@@ -256,14 +264,23 @@ export async function findOrCreateVendorByNameOnClient(
     'SELECT id, name FROM vendors WHERE org_id = $1 AND is_active = true ORDER BY created_at ASC, id ASC',
     [orgId],
   );
+  if (abn !== null) {
+    const { rows: byAbn } = await client.query<{ id: string }>(
+      `SELECT id FROM vendors
+        WHERE org_id = $1 AND is_active = true AND regexp_replace(COALESCE(tax_number, ''), '[[:space:]-]', '', 'g') = $2
+        ORDER BY created_at ASC, id ASC LIMIT 1`,
+      [orgId, abnDigits(abn)],
+    );
+    if (byAbn[0] !== undefined) return byAbn[0].id;
+  }
   const existing = rows.find((row) => normalizeForMatching(row.name) === normalized);
   if (existing !== undefined) return existing.id;
 
   const { rows: inserted } = await client.query<{ id: string }>(
-    `INSERT INTO vendors (org_id, created_by, name)
-     VALUES ($1, $2, $3)
+    `INSERT INTO vendors (org_id, created_by, name, tax_number)
+     VALUES ($1, $2, $3, $4)
      RETURNING id`,
-    [orgId, createdBy, trimmed.slice(0, 200)],
+    [orgId, createdBy, trimmed.slice(0, 200), abn === null ? null : formatAbn(abn)],
   );
   const id = inserted[0]?.id;
   if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');

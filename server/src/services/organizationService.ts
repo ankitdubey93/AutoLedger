@@ -1,3 +1,4 @@
+import { normalizeOwnAbnOnClient } from './accounting/taxCodeService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../db/connect.js';
 import { withTransaction } from '../db/transaction.js';
@@ -79,6 +80,9 @@ export async function updateOrganization(
   },
   q: Queryable = pool,
 ): Promise<OrganizationSummary> {
+  if (input.taxNumber !== undefined) {
+    input = { ...input, taxNumber: await normalizeOwnAbnOnClient(q, orgId, input.taxNumber) };
+  }
   // Column names come from this frozen map, never from the request — rule 4
   // forbids interpolating an identifier a caller could influence.
   const COLUMNS = {

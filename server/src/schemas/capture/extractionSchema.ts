@@ -10,10 +10,13 @@ import { z } from 'zod';
 export const extractionLineItemSchema = z.object({
   description: z.string(),
   amount: z.string(),
+  // Phase 49f — GST printed for this line, when the receipt prints one.
+  tax: z.string().nullable().optional(),
 });
 
 export const extractionToolInputSchema = z.object({
   vendor_name: z.string().nullable().optional(),
+  supplier_abn: z.string().nullable().optional(),
   invoice_number: z.string().nullable().optional(),
   invoice_date: z.string().nullable().optional(),
   due_date: z.string().nullable().optional(),

@@ -4930,6 +4930,8 @@ export interface CaptureLineItem {
 
 export interface CaptureExtraction {
   id: string;
+  /** Phase 49f — as read from the document; not verified. */
+  supplierAbn?: string | null;
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
@@ -5010,6 +5012,9 @@ export interface CaptureLineItemRecord {
   suggestedAccountId: string | null;
   mappingSource: CaptureMappingSource;
   mappingConfidence: number | null;
+  /** Phase 49f */
+  taxCents?: number | null;
+  taxCode?: string | null;
 }
 
 export interface CaptureReviewQueueEntry {
@@ -5030,6 +5035,8 @@ export interface CaptureReviewQueueEntry {
 }
 
 export interface CaptureDocumentDetail extends CaptureDocument {
+  /** Phase 49f — why a person must choose GST codes before this posts. */
+  gstReview?: { reason: string } | null;
   pages: CapturePage[];
   extraction: CaptureExtraction | null;
   lineItems: CaptureLineItemRecord[];
@@ -7511,4 +7518,29 @@ export function lodgeBas(id: string, body: { lodgedOn: string; atoReference: str
 
 export function listBasEvents(id: string, label: string, signal?: AbortSignal): Promise<{ success: boolean; count: number; events: BasEventRow[] }> {
   return apiFetch(`/bas/${id}/events?label=${encodeURIComponent(label)}`, { signal: signal ?? null });
+}
+
+/* ------------------------------------------- Phase 49f — ABN and the bill inbox */
+
+export function updateCaptureLineItemTaxCode(
+  documentId: string,
+  lineItemId: string,
+  taxCode: string | null,
+): Promise<{ success: boolean; document: CaptureDocumentDetail }> {
+  return apiFetch(`/capture/documents/${documentId}/line-items/${lineItemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ taxCode }),
+  });
+}
+
+export function getAbnLookupStatus(): Promise<{ success: boolean; lookupEnabled: boolean }> {
+  return apiFetch('/abn/status');
+}
+
+export function lookupAbn(abn: string): Promise<{
+  success: boolean;
+  found: boolean;
+  result: { abn: string; active: boolean; entityName: string; gstRegisteredFrom: string | null } | null;
+}> {
+  return apiFetch(`/abn/${encodeURIComponent(abn)}`);
 }

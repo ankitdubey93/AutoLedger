@@ -54,6 +54,7 @@ export const EXTRACTION_TOOL = {
     type: 'object',
     properties: {
       vendor_name: { type: ['string', 'null'] },
+      supplier_abn: { type: ['string', 'null'], description: "The seller's ABN or tax number, if printed. Never the buyer's." },
       invoice_number: { type: ['string', 'null'] },
       invoice_date: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
       due_date: { type: ['string', 'null'], description: 'YYYY-MM-DD' },
@@ -68,6 +69,7 @@ export const EXTRACTION_TOOL = {
           properties: {
             description: { type: 'string' },
             amount: { type: 'string', description: 'Decimal STRING exactly as printed' },
+            tax: { type: ['string', 'null'], description: 'GST or tax printed for this line, if any' },
           },
           required: ['description', 'amount'],
         },
@@ -99,6 +101,7 @@ export const GEMINI_EXTRACTION_SCHEMA = {
   type: 'OBJECT',
   properties: {
     vendor_name: nullableString(),
+    supplier_abn: nullableString("The seller's ABN or tax number, if printed. Never the buyer's."),
     invoice_number: nullableString(),
     invoice_date: nullableString('YYYY-MM-DD'),
     due_date: nullableString('YYYY-MM-DD'),
@@ -113,6 +116,7 @@ export const GEMINI_EXTRACTION_SCHEMA = {
         properties: {
           description: { type: 'STRING' },
           amount: { type: 'STRING', description: 'Decimal STRING exactly as printed' },
+          tax: nullableString('GST or tax printed for this line, if any'),
         },
         required: ['description', 'amount'],
       },
@@ -136,6 +140,7 @@ export const GEMINI_EXTRACTION_SCHEMA = {
 } as const;
 
 export interface ExtractionResult {
+  supplierAbn: string | null;
   vendorName: string | null;
   invoiceNumber: string | null;
   invoiceDate: string | null;
@@ -249,7 +254,7 @@ export async function extractFromPages(
   const request = {
     images: pages,
     prompt:
-      'Extract the vendor, invoice number, invoice date, due date, currency, subtotal, tax, total and line items from this document using the record_invoice tool. Report field_confidence keys using the same snake_case field names.',
+      'Extract the vendor, supplier ABN or tax number, invoice number, invoice date, due date, currency, subtotal, tax, total and line items from this document using the record_invoice tool. Report field_confidence keys using the same snake_case field names.',
     schema: {
       name: EXTRACTION_TOOL.name,
       description: EXTRACTION_TOOL.description,
@@ -312,11 +317,15 @@ export async function extractFromPages(
   const lineItems: CaptureLineItem[] = parsed.line_items.map((item) => ({
     description: item.description,
     amountCents: tryParseAmount(item.amount, `line item "${item.description}"`, errors) ?? 0,
+    ...(item.tax === null || item.tax === undefined
+      ? {}
+      : { taxCents: tryParseAmount(item.tax, `tax on line item "${item.description}"`, errors) }),
   }));
 
   const arithmetic = validateArithmetic(lineItems, subtotalCents, taxCents, totalCents);
 
   return {
+    supplierAbn: parsed.supplier_abn ?? null,
     vendorName: parsed.vendor_name ?? null,
     invoiceNumber: parsed.invoice_number ?? null,
     invoiceDate,

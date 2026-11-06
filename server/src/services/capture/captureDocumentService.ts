@@ -1,3 +1,5 @@
+import { gstRegistrationOnClient } from '../accounting/taxCodeService.js';
+import { decideCapturedGst } from '../../utils/capturedGst.js';
 import type { Readable } from 'node:stream';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -75,6 +77,8 @@ interface LineItemRow {
   line_index: number;
   description: string;
   amount_cents: string;
+  tax_cents: string | null;
+  tax_code: string | null;
   account_id: string | null;
   suggested_account_id: string | null;
   mapping_source: CaptureMappingSource;
@@ -92,6 +96,7 @@ interface PageRow {
 
 interface ExtractionRow {
   id: string;
+  supplier_abn: string | null;
   vendor_name: string | null;
   invoice_number: string | null;
   invoice_date: string | null;
@@ -165,6 +170,7 @@ function toPage(row: PageRow): CapturePage {
 function toExtraction(row: ExtractionRow): CaptureExtraction {
   return {
     id: row.id,
+    supplierAbn: row.supplier_abn,
     vendorName: row.vendor_name,
     invoiceNumber: row.invoice_number,
     invoiceDate: row.invoice_date,
@@ -199,6 +205,8 @@ function toLineItem(
     suggestedAccountId: row.suggested_account_id,
     mappingSource: row.mapping_source,
     mappingConfidence: row.mapping_confidence === null ? null : Number(row.mapping_confidence),
+    taxCents: row.tax_cents === null ? null : Number(row.tax_cents),
+    taxCode: row.tax_code,
   };
 }
 
@@ -537,7 +545,7 @@ export async function getCaptureDocumentById(orgId: string, id: string): Promise
   const { rows: extractionRows } = await pool.query<ExtractionRow>(
     `SELECT id, vendor_name, invoice_number, invoice_date, due_date, currency,
             subtotal_cents, tax_cents, total_cents, line_items, field_confidence,
-            arithmetic_ok, validation_errors, model, created_at
+            arithmetic_ok, validation_errors, model, created_at, supplier_abn
        FROM ap_flow_extractions
       WHERE org_id = $1 AND ap_flow_document_id = $2`,
     [orgId, id],
@@ -545,7 +553,7 @@ export async function getCaptureDocumentById(orgId: string, id: string): Promise
 
   const { rows: lineItemRows } = await pool.query<LineItemRow>(
     `SELECT id, line_index, description, amount_cents, account_id,
-            suggested_account_id, mapping_source, mapping_confidence
+            suggested_account_id, mapping_source, mapping_confidence, tax_cents, tax_code
        FROM ap_flow_line_items
       WHERE org_id = $1 AND ap_flow_document_id = $2
       ORDER BY line_index`,
@@ -577,6 +585,7 @@ export async function getCaptureDocumentById(orgId: string, id: string): Promise
     extraction: extractionRows[0] === undefined ? null : toExtraction(extractionRows[0]),
     lineItems: lineItemRows.map((row) => toLineItem(row, accountsById)),
     modelCalls,
+    gstReview: await gstReviewFor(orgId, document.status, extractionRows[0], lineItemRows),
   };
 }
 
@@ -648,6 +657,57 @@ export async function requestReextraction(orgId: string, id: string): Promise<Ca
  * `accountService.getAccountById` (rule 16) — never a query against
  * `accounts` in this file.
  */
+async function gstReviewFor(
+  orgId: string,
+  status: CaptureDocumentStatus,
+  extraction: ExtractionRow | undefined,
+  lines: readonly LineItemRow[],
+): Promise<{ reason: string } | null> {
+  if (status !== 'EXTRACTED' || extraction === undefined || extraction.total_cents === null) return null;
+  const registered = await gstRegistrationOnClient(pool, orgId);
+  if (registered === null) return null;
+  const decision = decideCapturedGst({
+    registered,
+    taxCents: extraction.tax_cents === null ? 0 : Number(extraction.tax_cents),
+    totalCents: Number(extraction.total_cents),
+    lines: lines.map((l) => ({
+      amountCents: Number(l.amount_cents),
+      extractedTaxCents: l.tax_cents === null ? null : Number(l.tax_cents),
+      chosenCode: l.tax_code,
+    })),
+  });
+  return decision.ok ? null : { reason: decision.reason };
+}
+
+/** Phase 49f — a reviewer's GST code for one line. Null puts it back to automatic. */
+export async function updateLineItemTaxCode(
+  orgId: string,
+  captureDocumentId: string,
+  lineItemId: string,
+  taxCode: string | null,
+): Promise<CaptureDocumentDetail> {
+  await withTransaction(async (client) => {
+    const { rows } = await client.query<{ status: CaptureDocumentStatus }>(
+      'SELECT status FROM ap_flow_documents WHERE org_id = $1 AND id = $2 FOR UPDATE',
+      [orgId, captureDocumentId],
+    );
+    const row = rows[0];
+    if (row === undefined) throw new ApiError(404, 'Captured document not found');
+    if (row.status !== 'EXTRACTED') {
+      throw new ApiError(409, `Cannot edit line items on a document in status ${row.status}`);
+    }
+    if ((await gstRegistrationOnClient(client, orgId)) === null) {
+      throw new ApiError(422, 'GST codes are for Australian organizations');
+    }
+    const { rowCount } = await client.query(
+      'UPDATE ap_flow_line_items SET tax_code = $3 WHERE org_id = $1 AND id = $2 AND ap_flow_document_id = $4',
+      [orgId, lineItemId, taxCode, captureDocumentId],
+    );
+    if (rowCount === 0) throw new ApiError(404, 'Line item not found');
+  });
+  return getCaptureDocumentById(orgId, captureDocumentId);
+}
+
 export async function updateLineItemAccount(
   orgId: string,
   captureDocumentId: string,
@@ -797,8 +857,8 @@ export async function savePipelineResult(
       `INSERT INTO ap_flow_extractions
          (org_id, ap_flow_document_id, vendor_name, invoice_number, invoice_date, due_date, currency,
           subtotal_cents, tax_cents, total_cents, line_items, field_confidence,
-          arithmetic_ok, validation_errors, model)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14::jsonb, $15)`,
+          arithmetic_ok, validation_errors, model, supplier_abn)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb, $13, $14::jsonb, $15, $16)`,
       [
         orgId,
         id,
@@ -815,6 +875,7 @@ export async function savePipelineResult(
         extraction.arithmeticOk,
         JSON.stringify(extraction.validationErrors),
         extraction.model,
+        extraction.supplierAbn ?? null,
       ],
     );
 
@@ -822,6 +883,18 @@ export async function savePipelineResult(
     // saved on this same client so pages, extraction, line items and
     // status all commit together or not at all.
     await mappingService.saveLineItemsOnClient(client, orgId, id, classifications);
+    // Phase 49f — GST the receipt printed per line, matched by position.
+    const printedTax = extraction.lineItems.flatMap((item, index) =>
+      item.taxCents === null || item.taxCents === undefined ? [] : [{ index, taxCents: item.taxCents }],
+    );
+    if (printedTax.length > 0) {
+      await client.query(
+        `UPDATE ap_flow_line_items l SET tax_cents = v.tax_cents
+           FROM unnest($3::int[], $4::bigint[]) AS v(line_index, tax_cents)
+          WHERE l.org_id = $1 AND l.ap_flow_document_id = $2 AND l.line_index = v.line_index`,
+        [orgId, id, printedTax.map((p) => p.index), printedTax.map((p) => p.taxCents)],
+      );
+    }
 
     const { rows } = await client.query<{ status: CaptureDocumentStatus }>(
       'SELECT status FROM ap_flow_documents WHERE org_id = $1 AND id = $2 FOR UPDATE',
