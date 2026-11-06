@@ -1869,3 +1869,11 @@ A closed catalogue of twelve codes, `taxCodeService.prepareTaxOnClient`, and `co
 
 **Corrected from the plan:** a manual adjustment gained a required account for the other side of its GST, because without one the clearing journal left the GST accounts permanently out by that amount. The clearing journal is dated at lodgment, because finalising has closed the period. The Tax summary's GL check now skips clearing journals, so a lodged BAS doesn't show there as a difference.
 
+### 49e: Tax invoices
+
+Seller snapshot at issue (migration `110`), Tax Invoice and Adjustment Note in the PDF and browser layouts, ABN, GST row, "Total includes GST", AU dates, and a warning on a draft with no ABN.
+
+2689 server (2 skipped) + 759 client tests at the time.
+
+**Corrected from the plan:** a `documentTitle` chosen in the template is overridden for an AU organization, since a wrong title is a compliance problem rather than a style choice. A missing ABN warns instead of blocking.
+

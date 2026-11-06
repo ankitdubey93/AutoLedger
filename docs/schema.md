@@ -1003,6 +1003,10 @@ Migration `109_ledger-core_bas_returns.sql`.
 - `bas_return_labels` and `bas_return_events`: the snapshot, composite FK to the return. A trigger refuses UPDATE always, and DELETE once the parent is lodged.
 - `bas_return_adjustments`: `label` (`G7`/`G18`), signed `gross_cents`, `tax_cents`, `account_id`, required `reason`. Same trigger.
 
+## Phase 49e — seller snapshot (accounting) — applied
+
+Migration `110_ledger-core_seller_snapshot.sql`: `seller_abn`, `seller_legal_name`, `seller_gst_registered` on `invoices` and `credit_notes`. NULL on a `GENERIC` organization's documents and on drafts; written once at issue.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

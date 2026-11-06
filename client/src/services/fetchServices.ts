@@ -1738,6 +1738,10 @@ export interface Invoice {
   lastSentAt: string | null;
   /** Phase 48 — the newest time any customer opened a send link; null when never opened. Derived from invoice_sends. */
   lastViewedAt: string | null;
+  /** Phase 49e: the seller as at issue, for an Australian organization. */
+  sellerAbn?: string | null;
+  sellerLegalName?: string | null;
+  sellerGstRegistered?: boolean | null;
 }
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
@@ -5402,6 +5406,10 @@ export interface CreditNote {
   allocations: CreditNoteAllocation[];
   appliedCents: number;
   unappliedCents: number;
+  /** Phase 49e: the seller as at issue, for an Australian organization. */
+  sellerAbn?: string | null;
+  sellerLegalName?: string | null;
+  sellerGstRegistered?: boolean | null;
 }
 
 /** Mirrors server/src/types/accounting.ts's DebitNoteLine. */
@@ -6931,6 +6939,8 @@ export async function revokeInvoiceSend(id: string, sendId: string): Promise<Inv
 
 /** What the public invoice link shows — no session involved. Mirrors server PublicInvoiceView. */
 export interface PublicInvoiceView {
+  /** Phase 49e — absent for a GENERIC organization. */
+  gst?: { registered: boolean; abn: string | null } | null;
   merchant: { name: string; addressLines: string[]; hasLogo: boolean };
   invoice: {
     number: string | null;

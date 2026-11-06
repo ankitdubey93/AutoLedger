@@ -1,4 +1,4 @@
-import { prepareTaxOnClient } from './taxCodeService.js';
+import { prepareTaxOnClient, sellerIdentityOnClient } from './taxCodeService.js';
 import type { TaxMode } from '../../utils/documentTotals.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
@@ -1285,6 +1285,7 @@ export async function buildQuotePdf(orgId: string, quote: Quote): Promise<{ file
     organizationProfileService.getProfile(orgId),
   ]);
   const logo = await readLogoBytes(orgId, profile.logoDocumentId);
+  const seller = await sellerIdentityOnClient(pool, orgId);
   const pdf = await renderQuotePdf({
     merchantName: organization.name,
     merchantAddressLines: addressLines(profile),
@@ -1310,7 +1311,9 @@ export async function buildQuotePdf(orgId: string, quote: Quote): Promise<{ file
       unitPriceCents: l.unitPriceCents,
       taxRateBp: l.taxRateBp,
       netCents: l.netCents,
+      taxCents: l.taxCents,
     })),
+    gst: seller === null ? null : { registered: seller.gstRegistered, abn: seller.abn, inclusive: quote.taxMode === 'INCLUSIVE' },
     subtotalCents: quote.subtotalCents,
     taxCents: quote.taxCents,
     totalCents: quote.totalCents,

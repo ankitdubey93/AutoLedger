@@ -1,3 +1,4 @@
+import { useLoadedLedgerSettings } from '../../context/LedgerSettingsContext';
 import { useEffect, useMemo, useState } from 'react';
 import { FileText } from 'lucide-react';
 import {
@@ -123,6 +124,7 @@ function toPatch(draft: Draft): Partial<InvoiceSettings> {
 }
 
 export default function InvoiceTemplatePage() {
+  const ledger = useLoadedLedgerSettings();
   const { organization } = useOrg();
 
   const [loaded, setLoaded] = useState<InvoiceSettings | null>(null);
@@ -424,6 +426,11 @@ export default function InvoiceTemplatePage() {
             baseCurrency={baseCurrency}
             logoSrc={logoSrc}
             preview
+            australian={
+              ledger?.region === 'AU'
+                ? { registered: ledger.gst?.registered ?? false, abn: organization?.taxNumber ?? null, legalName: profile?.legalName ?? null }
+                : null
+            }
           />
         </div>
       </div>

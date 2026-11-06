@@ -262,3 +262,33 @@ export async function assertNotInFinalisedBasOnClient(q: Queryable, orgId: strin
   );
   if (rows.length > 0) throw new ApiError(422, `${date} falls inside a finalised BAS; choose a later date`);
 }
+
+export interface SellerIdentity {
+  abn: string | null;
+  legalName: string | null;
+  gstRegistered: boolean;
+}
+
+/** Phase 49e — who is selling, for an Australian organization. Null for a GENERIC one. */
+export async function sellerIdentityOnClient(q: Queryable, orgId: string): Promise<SellerIdentity | null> {
+  const { rows } = await q.query<{ registered: boolean; tax_number: string | null; legal_name: string | null }>(
+    `SELECT g.registered, o.tax_number, p.legal_name
+       FROM gst_settings g
+       JOIN organizations o ON o.id = g.org_id
+       LEFT JOIN organization_profiles p ON p.org_id = g.org_id
+      WHERE g.org_id = $1`,
+    [orgId],
+  );
+  const row = rows[0];
+  if (row === undefined) return null;
+  return { abn: row.tax_number, legalName: row.legal_name, gstRegistered: row.registered };
+}
+
+/** The snapshot if the document has one, else who the seller is now (a draft). */
+export function sellerFromSnapshot(
+  snapshot: { sellerAbn: string | null; sellerLegalName: string | null; sellerGstRegistered: boolean | null },
+  live: SellerIdentity | null,
+): SellerIdentity | null {
+  if (snapshot.sellerGstRegistered === null) return live;
+  return { abn: snapshot.sellerAbn, legalName: snapshot.sellerLegalName, gstRegistered: snapshot.sellerGstRegistered };
+}

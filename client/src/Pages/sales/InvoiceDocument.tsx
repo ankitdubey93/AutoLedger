@@ -51,6 +51,14 @@ export interface InvoiceDocumentProps {
   accountHref?: (accountId: string) => string;
   /** Preview mode scales the page down and disables print rules. */
   preview?: boolean;
+  /** Phase 49e — an Australian organization's seller. Absent: the generic document, exactly as before. */
+  australian?: { registered: boolean; abn: string | null; legalName: string | null } | null | undefined;
+}
+
+/** Only a registered seller may call this a tax invoice; anyone else's would mislead the buyer into claiming a credit. */
+function documentTitle(props: InvoiceDocumentProps): string {
+  if (props.australian === undefined || props.australian === null) return props.settings?.documentTitle ?? '';
+  return props.australian.registered ? 'Tax Invoice' : 'Invoice';
 }
 
 const SERIF_STACK = 'Georgia, "Times New Roman", Times, serif';
@@ -102,7 +110,7 @@ function Logo(props: InvoiceDocumentProps & { className: string }): ReactElement
 
 /** The organization block: identity, disclosed numbers, address, billing address. */
 function OrgBlock(props: InvoiceDocumentProps): ReactElement {
-  const { settings, profile, organizationName, taxNumber, businessNumber, legalName } = props;
+  const { settings, profile, organizationName, taxNumber, businessNumber, legalName, australian } = props;
   const lines = settings?.showOrgAddress === true && profile !== null ? addressLines(profile) : [];
   return (
     <div>
@@ -110,8 +118,16 @@ function OrgBlock(props: InvoiceDocumentProps): ReactElement {
         <p className="font-semibold m-0">{legalName}</p>
       )}
       <p className="text-sm text-[var(--muted)] m-0">{organizationName}</p>
-      {settings?.showTaxNumber === true && taxNumber !== null && (
-        <p className="text-xs text-[var(--muted)] m-0">Tax no. {taxNumber}</p>
+      {australian !== undefined && australian !== null ? (
+        <>
+          {australian.legalName !== null && australian.legalName !== organizationName && (
+            <p className="text-xs text-[var(--muted)] m-0">{australian.legalName}</p>
+          )}
+          {australian.abn !== null && <p className="text-xs text-[var(--muted)] m-0">ABN {australian.abn}</p>}
+        </>
+      ) : (
+        settings?.showTaxNumber === true &&
+        taxNumber !== null && <p className="text-xs text-[var(--muted)] m-0">Tax no. {taxNumber}</p>
       )}
       {settings?.showBusinessNumber === true && businessNumber !== null && (
         <p className="text-xs text-[var(--muted)] m-0">Business no. {businessNumber}</p>
@@ -128,7 +144,7 @@ function OrgBlock(props: InvoiceDocumentProps): ReactElement {
   );
 }
 
-function BillTo({ invoice }: Pick<InvoiceDocumentProps, 'invoice'>): ReactElement {
+function BillTo({ invoice, australian }: Pick<InvoiceDocumentProps, 'invoice' | 'australian'>): ReactElement {
   return (
     <div>
       <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">Bill to</p>
@@ -137,7 +153,9 @@ function BillTo({ invoice }: Pick<InvoiceDocumentProps, 'invoice'>): ReactElemen
         <p className="text-sm text-[var(--muted)] m-0 whitespace-pre-line">{invoice.customerAddressSnapshot}</p>
       )}
       {invoice.customerTaxNumberSnapshot !== null && (
-        <p className="text-xs text-[var(--muted)] m-0">Tax no. {invoice.customerTaxNumberSnapshot}</p>
+        <p className="text-xs text-[var(--muted)] m-0">
+          {australian === undefined || australian === null ? 'Tax no.' : 'ABN'} {invoice.customerTaxNumberSnapshot}
+        </p>
       )}
     </div>
   );
@@ -158,7 +176,8 @@ function AccountCode(props: {
 }
 
 function Totals(props: InvoiceDocumentProps & { cardStyle?: CSSProperties | undefined }): ReactElement {
-  const { invoice, settings, baseCurrency } = props;
+  const { invoice, settings, baseCurrency, australian } = props;
+  const hasAustralian = australian !== undefined && australian !== null;
   return (
     <div
       className="flex flex-col items-end gap-1.5 w-full max-w-sm self-end text-sm"
@@ -168,16 +187,21 @@ function Totals(props: InvoiceDocumentProps & { cardStyle?: CSSProperties | unde
         <span className="text-[var(--muted)] min-w-0">Subtotal</span>
         <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.subtotalCents)}</span>
       </div>
-      <div className="flex justify-between gap-6 w-full">
-        <span className="text-[var(--muted)] min-w-0">{settings?.taxLabel ?? 'Tax'}</span>
-        <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.taxCents)}</span>
-      </div>
+      {australian?.registered !== false && (
+        <div className="flex justify-between gap-6 w-full">
+          <span className="text-[var(--muted)] min-w-0">{hasAustralian ? 'GST' : (settings?.taxLabel ?? 'Tax')}</span>
+          <span className="tabular-nums whitespace-nowrap">{formatCents(invoice.taxCents)}</span>
+        </div>
+      )}
       <div className="flex justify-between gap-6 w-full font-semibold border-t border-[var(--border)] pt-2">
         <span className="min-w-0">Total</span>
         <span className="tabular-nums whitespace-nowrap">
           {formatCents(invoice.totalCents)} {invoice.currencyCode}
         </span>
       </div>
+      {australian?.registered === true && (
+        <p className="text-xs text-[var(--muted)] m-0 w-full text-right">Total includes GST of {formatCents(invoice.taxCents)}</p>
+      )}
       {invoice.currencyCode !== baseCurrency && (
         <div className="flex justify-between gap-6 w-full text-[var(--muted)]">
           <span className="min-w-0">
@@ -257,7 +281,7 @@ function ClassicLayout(props: InvoiceDocumentProps): ReactElement {
         <div className="text-right">
           {settings !== null && (
             <p className="text-xs uppercase tracking-wide m-0" style={{ color: settings.accentColor }}>
-              {settings.documentTitle}
+              {documentTitle(props)}
             </p>
           )}
           <p className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'DRAFT'}</p>
@@ -266,7 +290,7 @@ function ClassicLayout(props: InvoiceDocumentProps): ReactElement {
         </div>
       </div>
 
-      <BillTo invoice={invoice} />
+      <BillTo invoice={invoice} australian={props.australian} />
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse text-sm min-w-[36rem]">
@@ -323,14 +347,14 @@ function ModernLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings 
         className="flex items-center justify-between gap-4 px-6 py-4 text-white"
         style={{ backgroundColor: accent }}
       >
-        <p className="text-xl font-semibold tracking-wide uppercase m-0">{settings.documentTitle}</p>
+        <p className="text-xl font-semibold tracking-wide uppercase m-0">{documentTitle(props)}</p>
         <Logo {...props} className="max-h-12 max-w-[8rem] object-contain" />
       </div>
 
       <div className={`px-6 flex flex-col ${sectionGap(settings)}`}>
         <div className="flex justify-between gap-6 flex-wrap">
           <OrgBlock {...props} />
-          <BillTo invoice={invoice} />
+          <BillTo invoice={invoice} australian={props.australian} />
           <div className="text-right">
             <p className="text-lg font-semibold m-0" style={{ color: accent }}>
               {invoice.invoiceNumber ?? 'DRAFT'}
@@ -406,7 +430,7 @@ function CompactLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings
       <div className="flex items-start justify-between gap-4">
         <Logo {...props} className="max-h-10 max-w-[6rem] object-contain" />
         <div className="text-right ml-auto">
-          <p className="text-sm font-semibold uppercase tracking-wide m-0">{settings.documentTitle}</p>
+          <p className="text-sm font-semibold uppercase tracking-wide m-0">{documentTitle(props)}</p>
           <p className="font-semibold m-0">{invoice.invoiceNumber ?? 'DRAFT'}</p>
           <p className="text-[var(--muted)] m-0">Issued {formatDate(invoice.issueDate)}</p>
           {showsDueDate(settings) && <p className="text-[var(--muted)] m-0">Due {formatDate(invoice.dueDate)}</p>}
@@ -414,7 +438,7 @@ function CompactLayout(props: InvoiceDocumentProps & { settings: InvoiceSettings
       </div>
 
       <OrgBlock {...props} />
-      <BillTo invoice={invoice} />
+      <BillTo invoice={invoice} australian={props.australian} />
 
       <table className="w-full border-collapse">
         <thead>

@@ -28,10 +28,12 @@ export interface QuotePdfInput {
   terms: string | null;
   paymentTerms: string | null;
   depositPercentBp: number | null; // render nothing when null
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; taxRateBp: number; netCents: number }[];
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; taxRateBp: number; netCents: number; taxCents?: number }[];
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
+  /** Phase 49e — an Australian organization's quote. It is not a tax invoice, so the title stays. */
+  gst?: { registered: boolean; abn: string | null; inclusive: boolean } | null;
 }
 
 const REGULAR = 'Helvetica';
@@ -63,6 +65,11 @@ export function rate(bp: number): string {
 function label(input: Pick<QuotePdfInput, 'quoteNumber' | 'revision'>): string {
   if (input.quoteNumber === null) return input.revision > 1 ? `DRAFT revision ${String(input.revision)}` : 'DRAFT';
   return input.revision > 1 ? `${input.quoteNumber} rev ${String(input.revision)}` : input.quoteNumber;
+}
+
+/** Phase 49e — 2026-09-03 becomes 03/09/2026. */
+function auDate(isoDate: string): string {
+  return `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}/${isoDate.slice(0, 4)}`;
 }
 
 export function renderQuotePdf(input: QuotePdfInput, options: { compress?: boolean } = {}): Promise<Buffer> {
@@ -100,14 +107,16 @@ export function renderQuotePdf(input: QuotePdfInput, options: { compress?: boole
       }
       doc.font(BOLD).fontSize(12).fillColor('black').text(input.merchantName, left, leftY, { width: width / 2 });
       doc.font(REGULAR).fontSize(9).fillColor(MUTED);
+      if (input.gst?.abn !== null && input.gst?.abn !== undefined) doc.text(`ABN ${input.gst.abn}`, left, doc.y, { width: width / 2 });
       for (const line of input.merchantAddressLines) doc.text(line, left, doc.y, { width: width / 2 });
       const leftEnd = doc.y;
 
       doc.font(BOLD).fontSize(18).fillColor('black').text(heading, left, top, { width, align: 'right' });
       doc.font(REGULAR).fontSize(10).text(label(input), left, doc.y, { width, align: 'right' });
       doc.fillColor(MUTED).fontSize(9);
-      doc.text(`Date ${input.quoteDate}`, left, doc.y, { width, align: 'right' });
-      doc.text(`Valid until ${input.validUntil}`, left, doc.y, { width, align: 'right' });
+      const showDate = (date: string): string => (input.gst === undefined || input.gst === null ? date : auDate(date));
+      doc.text(`Date ${showDate(input.quoteDate)}`, left, doc.y, { width, align: 'right' });
+      doc.text(`Valid until ${showDate(input.validUntil)}`, left, doc.y, { width, align: 'right' });
       doc.y = Math.max(doc.y, leftEnd) + 16;
 
       // Party block.
@@ -116,7 +125,7 @@ export function renderQuotePdf(input: QuotePdfInput, options: { compress?: boole
       doc.font(BOLD).fontSize(11).fillColor('black').text(input.partyName, left, doc.y, { width: width / 2 });
       doc.font(REGULAR).fontSize(9).fillColor(MUTED);
       if (input.partyAddress !== null) doc.text(input.partyAddress, left, doc.y, { width: width / 2 });
-      if (input.partyTaxNumber !== null) doc.text(`Tax no. ${input.partyTaxNumber}`, left, doc.y, { width: width / 2 });
+      if (input.partyTaxNumber !== null) doc.text(`${input.gst === undefined || input.gst === null ? 'Tax no.' : 'ABN'} ${input.partyTaxNumber}`, left, doc.y, { width: width / 2 });
       const partyEnd = doc.y;
 
       doc.y = partyTop;
@@ -173,7 +182,8 @@ export function renderQuotePdf(input: QuotePdfInput, options: { compress?: boole
         doc.text(quantity(line.quantityMilli), colQty, y, { width: numW.qty, align: 'right' });
         doc.text(money(line.unitPriceCents), colPrice, y, { width: numW.price, align: 'right' });
         doc.text(line.taxRateBp === 0 ? '-' : `${rate(line.taxRateBp)}%`, colTax, y, { width: numW.tax, align: 'right' });
-        doc.text(money(line.netCents), colAmt, y, { width: numW.amt, align: 'right' });
+        const lineAmount = input.gst?.inclusive === true ? line.netCents + (line.taxCents ?? 0) : line.netCents;
+        doc.text(money(lineAmount), colAmt, y, { width: numW.amt, align: 'right' });
         doc.y = Math.max(endY, y + 11) + 4;
       }
 
@@ -192,7 +202,7 @@ export function renderQuotePdf(input: QuotePdfInput, options: { compress?: boole
         doc.y = y + (bold ? 15 : 13);
       };
       totalRow('Subtotal', money(input.subtotalCents), false);
-      totalRow('Tax', money(input.taxCents), false);
+      if (input.gst?.registered !== false) totalRow(input.gst === undefined || input.gst === null ? 'Tax' : 'GST', money(input.taxCents), false);
       totalRow('Total', formatMoney(input.totalCents, input.currencyCode), true);
 
       const section = (heading2: string, body: string): void => {

@@ -27,12 +27,28 @@ export interface SalesDocumentPdfInput {
   paymentTerms: string | null;
   notes: string | null;
   bankDetails: string | null;
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; taxRateBp: number; netCents: number }[];
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; taxRateBp: number; netCents: number; taxCents?: number }[];
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
   paidCents: number | null;
   amountDueCents: number | null; // null hides both rows
+  /** Phase 49e — an Australian organization's document. Null or absent: the generic layout, exactly as before. */
+  gst?: SalesDocumentGst | null;
+}
+
+export interface SalesDocumentGst {
+  registered: boolean;
+  abn: string | null;
+  legalName: string | null;
+  inclusive: boolean;
+  /** A credit note: why the sale was adjusted, which an adjustment note must state. */
+  reason?: string | null;
+}
+
+/** 2026-09-03 becomes 03/09/2026. */
+function auDate(isoDate: string): string {
+  return `${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}/${isoDate.slice(0, 4)}`;
 }
 
 const REGULAR = 'Helvetica';
@@ -45,7 +61,12 @@ export function renderSalesDocumentPdf(
 ): Promise<Buffer> {
   return new Promise<Buffer>((resolve, reject) => {
     const creditNote = input.kind === 'CREDIT_NOTE';
-    const heading = creditNote ? 'CREDIT NOTE' : 'INVOICE';
+    const gst = input.gst ?? null;
+    // Only a registered seller can issue a tax invoice; anyone else's would mislead the buyer into claiming a credit.
+    const heading =
+      gst?.registered === true ? (creditNote ? 'ADJUSTMENT NOTE' : 'TAX INVOICE') : creditNote ? 'CREDIT NOTE' : 'INVOICE';
+    const showDate = (date: string): string => (gst === null ? date : auDate(date));
+    const taxNumberLabel = gst === null ? 'Tax no.' : 'ABN';
     const label = input.number ?? 'DRAFT';
     const doc = new PDFDocument({
       size: 'A4',
@@ -78,6 +99,10 @@ export function renderSalesDocumentPdf(
       }
       doc.font(BOLD).fontSize(12).fillColor('black').text(input.merchantName, left, leftY, { width: width / 2 });
       doc.font(REGULAR).fontSize(9).fillColor(MUTED);
+      if (gst?.legalName !== null && gst?.legalName !== undefined && gst.legalName !== input.merchantName) {
+        doc.text(gst.legalName, left, doc.y, { width: width / 2 });
+      }
+      if (gst?.abn !== null && gst?.abn !== undefined) doc.text(`ABN ${gst.abn}`, left, doc.y, { width: width / 2 });
       for (const line of input.merchantAddressLines) doc.text(line, left, doc.y, { width: width / 2 });
       const leftEnd = doc.y;
 
@@ -87,8 +112,8 @@ export function renderSalesDocumentPdf(
         doc.font(BOLD).fontSize(10).fillColor('#b00020').text('VOID', left, doc.y, { width, align: 'right' });
       }
       doc.font(REGULAR).fillColor(MUTED).fontSize(9);
-      doc.text(`Date ${input.issueDate}`, left, doc.y, { width, align: 'right' });
-      if (input.dueDate !== null) doc.text(`Due ${input.dueDate}`, left, doc.y, { width, align: 'right' });
+      doc.text(`Date ${showDate(input.issueDate)}`, left, doc.y, { width, align: 'right' });
+      if (input.dueDate !== null) doc.text(`Due ${showDate(input.dueDate)}`, left, doc.y, { width, align: 'right' });
       doc.y = Math.max(doc.y, leftEnd) + 16;
 
       // Party block.
@@ -97,7 +122,7 @@ export function renderSalesDocumentPdf(
       doc.font(BOLD).fontSize(11).fillColor('black').text(input.partyName, left, doc.y, { width: width / 2 });
       doc.font(REGULAR).fontSize(9).fillColor(MUTED);
       if (input.partyAddress !== null) doc.text(input.partyAddress, left, doc.y, { width: width / 2 });
-      if (input.partyTaxNumber !== null) doc.text(`Tax no. ${input.partyTaxNumber}`, left, doc.y, { width: width / 2 });
+      if (input.partyTaxNumber !== null) doc.text(`${taxNumberLabel} ${input.partyTaxNumber}`, left, doc.y, { width: width / 2 });
       const partyEnd = doc.y;
 
       doc.y = partyTop;
@@ -146,7 +171,9 @@ export function renderSalesDocumentPdf(
         doc.text(quantity(line.quantityMilli), colQty, y, { width: numW.qty, align: 'right' });
         doc.text(money(line.unitPriceCents), colPrice, y, { width: numW.price, align: 'right' });
         doc.text(line.taxRateBp === 0 ? '-' : `${rate(line.taxRateBp)}%`, colTax, y, { width: numW.tax, align: 'right' });
-        doc.text(money(line.netCents), colAmt, y, { width: numW.amt, align: 'right' });
+        // A price that included GST must add up to what the buyer pays.
+        const lineAmount = gst?.inclusive === true ? line.netCents + (line.taxCents ?? 0) : line.netCents;
+        doc.text(money(lineAmount), colAmt, y, { width: numW.amt, align: 'right' });
         doc.y = Math.max(endY, y + 11) + 4;
       }
 
@@ -165,8 +192,13 @@ export function renderSalesDocumentPdf(
         doc.y = y + (bold ? 15 : 13);
       };
       totalRow('Subtotal', money(input.subtotalCents), false);
-      totalRow('Tax', money(input.taxCents), false);
+      if (gst?.registered !== false) totalRow(gst === null ? 'Tax' : 'GST', money(input.taxCents), false);
       totalRow('Total', formatMoney(input.totalCents, input.currencyCode), true);
+      if (gst?.registered === true) {
+        doc.font(REGULAR).fontSize(8).fillColor(MUTED);
+        doc.text(`Total includes GST of ${money(input.taxCents)}. Lines showing "-" are not taxable.`, left, doc.y, { width, align: 'right' });
+        doc.moveDown(0.4);
+      }
       if (input.paidCents !== null && input.amountDueCents !== null) {
         totalRow('Paid', money(input.paidCents), false);
         totalRow('Amount due', formatMoney(input.amountDueCents, input.currencyCode), true);
@@ -178,6 +210,7 @@ export function renderSalesDocumentPdf(
         doc.font(REGULAR).fontSize(8).fillColor(MUTED).text(heading2, left, doc.y, { width });
         doc.font(REGULAR).fontSize(9).fillColor('black').text(body, left, doc.y, { width });
       };
+      if (gst?.reason !== null && gst?.reason !== undefined) section('REASON FOR ADJUSTMENT', gst.reason);
       if (input.bankDetails !== null) section('PAYMENT DETAILS', input.bankDetails);
       if (input.notes !== null) section('NOTES', input.notes);
 

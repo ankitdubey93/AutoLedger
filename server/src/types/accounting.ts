@@ -450,6 +450,10 @@ export interface Invoice {
   lastSentAt: string | null;
   /** Phase 48 — the newest time any customer opened a send link; null when never opened. Derived from invoice_sends. */
   lastViewedAt: string | null;
+  /** Phase 49e: the seller as at issue, for an Australian organization; null otherwise. */
+  sellerAbn: string | null;
+  sellerLegalName: string | null;
+  sellerGstRegistered: boolean | null;
 }
 
 /* ------------------------------------------------------ Phase 48 — invoice delivery */
@@ -880,6 +884,10 @@ export interface CreditNote {
   appliedCents: number;
   /** totalCents − appliedCents while ISSUED; 0 otherwise. */
   unappliedCents: number;
+  /** Phase 49e: the seller as at issue, for an Australian organization; null otherwise. */
+  sellerAbn: string | null;
+  sellerLegalName: string | null;
+  sellerGstRegistered: boolean | null;
 }
 
 export interface DebitNoteLine {

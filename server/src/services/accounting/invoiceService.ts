@@ -1,4 +1,4 @@
-import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import { sellerIdentityOnClient, assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
 import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -168,6 +168,9 @@ interface InvoiceRow {
   subtotal_cents: string;
   tax_cents: string;
   tax_mode: TaxMode;
+  seller_abn: string | null;
+  seller_legal_name: string | null;
+  seller_gst_registered: boolean | null;
   total_cents: string;
   fx_rate: string;
   base_subtotal_cents: string;
@@ -219,7 +222,7 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.issue_date, i.due_date, i.currency_code,
                                 i.customer_name_snapshot, i.customer_address_snapshot,
                                 i.customer_tax_number_snapshot, i.notes, i.notes_template, i.payment_terms, i.payment_terms_code,
-                                i.subtotal_cents, i.tax_cents, i.tax_mode, i.total_cents,
+                                i.subtotal_cents, i.tax_cents, i.tax_mode, i.seller_abn, i.seller_legal_name, i.seller_gst_registered, i.total_cents,
                                 i.fx_rate::text AS fx_rate, i.base_subtotal_cents,
                                 i.base_tax_cents, i.base_total_cents,
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
@@ -302,6 +305,9 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
     taxMode: row.tax_mode,
+    sellerAbn: row.seller_abn,
+    sellerLegalName: row.seller_legal_name,
+    sellerGstRegistered: row.seller_gst_registered,
     totalCents,
     fxRate: row.fx_rate,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
@@ -1300,13 +1306,15 @@ export async function issueInvoiceOnClient(
       lines: glLines,
     });
 
+    const seller = await sellerIdentityOnClient(client, orgId);
     await client.query(
       `UPDATE invoices
-          SET status = 'ISSUED', invoice_number = $1, journal_entry_id = $2, issued_at = now(),
+          SET seller_abn = $11, seller_legal_name = $12, seller_gst_registered = $13,
+              status = 'ISSUED', invoice_number = $1, journal_entry_id = $2, issued_at = now(),
               fx_rate = $3, base_subtotal_cents = $4, base_tax_cents = $5, base_total_cents = $6,
               notes = $9, notes_template = COALESCE(notes_template, $10)
         WHERE id = $7 AND org_id = $8`,
-      [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId, notes, notesTemplate],
+      [invoiceNumber, journalEntryId, fxRate, baseSubtotalCents, baseTaxCents, baseTotalCents, id, orgId, notes, notesTemplate, seller?.abn ?? null, seller?.legalName ?? null, seller?.gstRegistered ?? null],
     );
 
     await historyService.recordEventOnClient(client, orgId, {

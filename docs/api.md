@@ -1232,6 +1232,10 @@ All need region `AU`, otherwise `403`.
 
 `POST /settings/region/generic` is `409` once a BAS has been finalised.
 
+### Tax invoices — Phase 49e ✅
+
+Invoices and credit notes return `sellerAbn`, `sellerLegalName`, `sellerGstRegistered`, null unless issued by an AU organization. `GET /invoices/:id/pdf` and `GET /credit-notes/:id/pdf` render a tax invoice or adjustment note for an AU organization. `GET /public/invoices/:token` gains `gst: {registered, abn} | null`.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

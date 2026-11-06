@@ -1,3 +1,4 @@
+import { useLoadedLedgerSettings } from '../../context/LedgerSettingsContext';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Download, Mail, Printer } from 'lucide-react';
@@ -61,6 +62,9 @@ function statusLabel(status: Invoice['status']): string {
 }
 
 export default function InvoiceDetailPage() {
+  const loadedSettings = useLoadedLedgerSettings();
+  const region = loadedSettings?.region ?? 'GENERIC';
+  const gstRegistered = loadedSettings?.gst?.registered ?? false;
   const { invoiceId } = useParams<{ invoiceId: string }>();
   const navigate = useNavigate();
   const { organization } = useOrg();
@@ -407,6 +411,11 @@ export default function InvoiceDetailPage() {
       </header>
 
       {error !== null && <p className="status status--bad">{error}</p>}
+      {region === 'AU' && gstRegistered && invoice.status === 'DRAFT' && (organization?.taxNumber ?? null) === null && (
+        <p className="status status--warn no-print">
+          A tax invoice must show your ABN. <Link to="/settings/general">Add it in Settings</Link> before you issue this.
+        </p>
+      )}
 
       <InvoiceDocument
         invoice={invoice}
@@ -419,6 +428,13 @@ export default function InvoiceDetailPage() {
         baseCurrency={baseCurrency}
         logoSrc={logoSrc}
         accountHref={(id) => `/accounts/${id}`}
+        australian={
+          region !== 'AU'
+            ? null
+            : invoice.sellerGstRegistered !== null && invoice.sellerGstRegistered !== undefined
+              ? { registered: invoice.sellerGstRegistered, abn: invoice.sellerAbn ?? null, legalName: invoice.sellerLegalName ?? null }
+              : { registered: gstRegistered, abn: organization?.taxNumber ?? null, legalName }
+        }
       />
 
       <dl className="no-print grid grid-cols-2 sm:grid-cols-3 gap-4 m-0">

@@ -1,4 +1,4 @@
-import { assertLinesCodedOnClient, assertNotInFinalisedBasOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import { sellerIdentityOnClient, assertLinesCodedOnClient, assertNotInFinalisedBasOnClient, prepareTaxOnClient } from './taxCodeService.js';
 import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -133,6 +133,9 @@ interface CreditNoteRow {
   subtotal_cents: string;
   tax_cents: string;
   tax_mode: TaxMode;
+  seller_abn: string | null;
+  seller_legal_name: string | null;
+  seller_gst_registered: boolean | null;
   total_cents: string;
   base_subtotal_cents: string;
   base_tax_cents: string;
@@ -179,7 +182,7 @@ const CREDIT_NOTE_SELECT = `SELECT n.id, n.credit_note_number, n.status, n.custo
                                    n.fx_rate::text AS fx_rate, n.reason_code, n.reason,
                                    n.customer_name_snapshot, n.customer_address_snapshot,
                                    n.customer_tax_number_snapshot, n.notes,
-                                   n.subtotal_cents, n.tax_cents, n.tax_mode, n.total_cents,
+                                   n.subtotal_cents, n.tax_cents, n.tax_mode, n.seller_abn, n.seller_legal_name, n.seller_gst_registered, n.total_cents,
                                    n.base_subtotal_cents, n.base_tax_cents, n.base_total_cents,
                                    n.journal_entry_id, n.void_journal_entry_id, n.issued_at, n.voided_at,
                                    n.created_by, u.name AS created_by_name, n.created_at, n.updated_at
@@ -253,6 +256,9 @@ function toCreditNote(
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
     taxMode: row.tax_mode,
+    sellerAbn: row.seller_abn,
+    sellerLegalName: row.seller_legal_name,
+    sellerGstRegistered: row.seller_gst_registered,
     totalCents,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
     baseTaxCents: parseCents(row.base_tax_cents),
@@ -881,11 +887,13 @@ export async function issueCreditNote(
       lines: glLines,
     });
 
+    const seller = await sellerIdentityOnClient(client, orgId);
     await client.query(
       `UPDATE credit_notes
-          SET status = 'ISSUED', credit_note_number = $1, journal_entry_id = $2, issued_at = now(), notes = $5
+          SET status = 'ISSUED', credit_note_number = $1, journal_entry_id = $2, issued_at = now(), notes = $5,
+              seller_abn = $6, seller_legal_name = $7, seller_gst_registered = $8
         WHERE id = $3 AND org_id = $4`,
-      [number, journalEntryId, id, orgId, notes],
+      [number, journalEntryId, id, orgId, notes, seller?.abn ?? null, seller?.legalName ?? null, seller?.gstRegistered ?? null],
     );
 
     // Auto-apply to the original invoice, up to what it still owes. A fully

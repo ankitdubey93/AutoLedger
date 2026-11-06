@@ -1,3 +1,5 @@
+import { pool } from '../../db/connect.js';
+import { sellerFromSnapshot, sellerIdentityOnClient } from './taxCodeService.js';
 import * as organizationService from '../organizationService.js';
 import * as organizationProfileService from '../organizationProfileService.js';
 import * as invoiceSettingsService from './invoiceSettingsService.js';
@@ -21,6 +23,7 @@ export async function buildInvoicePdf(orgId: string, invoice: Invoice): Promise<
     invoiceSettingsService.getInvoiceSettings(orgId),
   ]);
   const logo = settings.showLogo ? await readLogoBytes(orgId, profile.logoDocumentId) : null;
+  const seller = sellerFromSnapshot(invoice, await sellerIdentityOnClient(pool, orgId));
   const issued = invoice.status === 'ISSUED';
   const pdf = await renderSalesDocumentPdf({
     kind: 'INVOICE',
@@ -45,12 +48,14 @@ export async function buildInvoicePdf(orgId: string, invoice: Invoice): Promise<
       unitPriceCents: l.unitPriceCents,
       taxRateBp: l.taxRateBp,
       netCents: l.netCents,
+      taxCents: l.taxCents,
     })),
     subtotalCents: invoice.subtotalCents,
     taxCents: invoice.taxCents,
     totalCents: invoice.totalCents,
     paidCents: issued ? invoice.allocatedCents + invoice.creditedCents + invoice.depositAppliedCents : null,
     amountDueCents: issued ? invoice.amountDueCents : null,
+    gst: seller === null ? null : { registered: seller.gstRegistered, abn: seller.abn, legalName: seller.legalName, inclusive: invoice.taxMode === 'INCLUSIVE' },
   });
   const filename = invoice.invoiceNumber === null ? 'invoice-draft.pdf' : `${invoice.invoiceNumber}.pdf`;
   return { filename, pdf };
@@ -70,6 +75,7 @@ export async function getCreditNotePdf(orgId: string, id: string): Promise<{ fil
     invoiceSettingsService.getInvoiceSettings(orgId),
   ]);
   const logo = settings.showLogo ? await readLogoBytes(orgId, profile.logoDocumentId) : null;
+  const seller = sellerFromSnapshot(note, await sellerIdentityOnClient(pool, orgId));
   const pdf = await renderSalesDocumentPdf({
     kind: 'CREDIT_NOTE',
     merchantName: organization.name,
@@ -93,12 +99,17 @@ export async function getCreditNotePdf(orgId: string, id: string): Promise<{ fil
       unitPriceCents: l.unitPriceCents,
       taxRateBp: l.taxRateBp,
       netCents: l.netCents,
+      taxCents: l.taxCents,
     })),
     subtotalCents: note.subtotalCents,
     taxCents: note.taxCents,
     totalCents: note.totalCents,
     paidCents: null,
     amountDueCents: null,
+    gst:
+      seller === null
+        ? null
+        : { registered: seller.gstRegistered, abn: seller.abn, legalName: seller.legalName, inclusive: note.taxMode === 'INCLUSIVE', reason: note.reason },
   });
   const filename = note.creditNoteNumber === null ? 'credit-note-draft.pdf' : `${note.creditNoteNumber}.pdf`;
   return { filename, pdf };

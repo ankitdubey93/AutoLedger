@@ -1,3 +1,4 @@
+import { sellerFromSnapshot, sellerIdentityOnClient } from './taxCodeService.js';
 import type { Readable } from 'node:stream';
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -26,6 +27,8 @@ import type { SettlementStatus } from '../../types/accounting.js';
  */
 
 export interface PublicInvoiceView {
+  /** Phase 49e — null for a GENERIC organization. */
+  gst: { registered: boolean; abn: string | null } | null;
   merchant: { name: string; addressLines: string[]; hasLogo: boolean };
   invoice: {
     number: string | null;
@@ -71,7 +74,9 @@ export async function getPublicInvoice(token: string): Promise<PublicInvoiceView
     send.id,
   ]);
 
+  const seller = sellerFromSnapshot(invoice, await sellerIdentityOnClient(pool, send.orgId));
   return {
+    gst: seller === null ? null : { registered: seller.gstRegistered, abn: seller.abn },
     merchant: {
       name: organization.name,
       addressLines: settings.showOrgAddress ? addressLines(profile) : [],

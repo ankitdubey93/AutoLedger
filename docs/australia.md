@@ -12,7 +12,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | 49b | GST codes and tax-inclusive pricing | ✅ |
 | 49c | GST on bank lines and journals | ✅ |
 | 49d | BAS engine and workflow | ✅ |
-| 49e | Tax invoices | Not built |
+| 49e | Tax invoices | ✅ |
 | 49f | ABN tools and capture | Not built |
 | 49g | Bank details, ABA files, bank CSV presets | Not built |
 | 49h | TPAR | Not built |
@@ -157,6 +157,25 @@ Simpler BAS reports G1, 1A, 1B. Full adds G2, G3, G10, G11. The whole worksheet 
 - A financial year not starting on the 1st of a month can't finalise, because a fiscal period would straddle the BAS.
 - Warnings, not calculations: GST on deposits, and lines from before the organization became Australian.
 - Due dates are the standard ones. Agent programs and online-lodgment extensions are not calculated.
+
+## Tax invoices
+
+**The seller is frozen at issue.** `invoices` and `credit_notes` gain `seller_abn`, `seller_legal_name` and `seller_gst_registered` (migration `110`), written in the same transaction that issues the document. Read live, a later ABN change would rewrite every invoice already sent. The existing immutability trigger then protects them. The ABN is `organizations.tax_number`, shown as "ABN" for an AU organization.
+
+| Registered | Invoice title | Credit note title | Shows |
+|---|---|---|---|
+| Yes | Tax Invoice | Adjustment Note | ABN, GST row, "Total includes GST of $X", and for a note the reason and original invoice |
+| No | Invoice | Credit Note | ABN if known, no GST row |
+
+An unregistered seller's document must never say Tax Invoice, because it would mislead the buyer into claiming a credit. For an AU organization this overrides the template's `documentTitle`.
+
+Lines with a price that includes GST show the amount the buyer pays. Dates are DD/MM/YYYY. The buyer's name always appears, which covers the identity requirement at $1,000 or more; their ABN shows when known.
+
+Quote PDFs stay titled as quotes, since a quote is not a tax invoice, and gain the ABN, the GST label and AU dates. The public invoice page follows suit. A `GENERIC` organization's PDF is byte-for-byte what it was, which a test holds.
+
+**A missing ABN is a warning on the draft, not a refusal.** Blocking issue would stop a business invoicing over a settings field; **confirm whether that is the right call.**
+
+**Exact tax invoice and adjustment note wording must be checked against the ATO.**
 
 ## Not built in this edition
 

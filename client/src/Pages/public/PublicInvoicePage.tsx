@@ -106,6 +106,7 @@ export default function PublicInvoicePage() {
   }
 
   const { invoice, merchant } = view;
+  const gstLabel = view.gst === undefined || view.gst === null ? 'Tax' : 'GST';
   const isVoid = invoice.status === 'VOID';
   const owing = !isVoid && invoice.amountDueCents > 0;
   const canPay = owing && view.payment.enabled;
@@ -117,6 +118,7 @@ export default function PublicInvoicePage() {
           {logoSrc !== null && <img src={logoSrc} alt="" className="max-h-10 max-w-[8rem] object-contain" />}
           <div>
             <p className="m-0 font-semibold">{merchant.name}</p>
+            {view.gst?.abn !== null && view.gst?.abn !== undefined && <p className="m-0 text-sm text-[var(--muted)]">ABN {view.gst.abn}</p>}
             {merchant.addressLines.map((line) => (
               <p key={line} className="m-0 text-xs text-[var(--muted)]">
                 {line}
@@ -129,7 +131,7 @@ export default function PublicInvoicePage() {
       <div className="max-w-4xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <section className="flex flex-col gap-4 min-w-0" aria-label="Invoice">
           <div>
-            <h1 className="page-title m-0">Invoice {invoice.number ?? ''}</h1>
+            <h1 className="page-title m-0">{view.gst?.registered === true ? 'Tax invoice' : 'Invoice'} {invoice.number ?? ''}</h1>
             <p className="text-sm text-[var(--muted)] m-0 mt-1">For {invoice.customerName}</p>
           </div>
 
@@ -158,7 +160,7 @@ export default function PublicInvoicePage() {
                   <th className="p-3 font-medium">Description</th>
                   <th className="p-3 font-medium text-right">Qty</th>
                   <th className="p-3 font-medium text-right">Unit price</th>
-                  <th className="p-3 font-medium text-right">Tax</th>
+                  <th className="p-3 font-medium text-right">{gstLabel}</th>
                   <th className="p-3 font-medium text-right">Amount</th>
                 </tr>
               </thead>
@@ -182,7 +184,7 @@ export default function PublicInvoicePage() {
               <dd className="m-0 tabular-nums">{formatCents(invoice.subtotalCents)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-[var(--muted)]">Tax</dt>
+              <dt className="text-[var(--muted)]">{gstLabel}</dt>
               <dd className="m-0 tabular-nums">{formatCents(invoice.taxCents)}</dd>
             </div>
             <div className="flex justify-between font-semibold">
