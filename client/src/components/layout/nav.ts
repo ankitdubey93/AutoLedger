@@ -28,6 +28,7 @@ import {
   Scale,
   ScrollText,
   Search,
+  Send,
   Settings as SettingsIcon,
   Tags,
   Upload,
@@ -107,6 +108,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
       { to: '/bank/import', label: 'Import statement', icon: Upload, end: false, permission: 'bank.reconcile' },
       { to: '/bank/reconciliation', label: 'Reconciliation', icon: GitCompareArrows, end: false, permission: 'reports.view' },
       { to: '/bank/rules', label: 'Bank rules', icon: Filter, end: false, permission: 'bank.view' },
+      { to: '/bank/pay-run', label: 'Pay run', icon: Send, end: false, permission: 'payments.export_aba', region: 'AU' },
     ],
   },
   {

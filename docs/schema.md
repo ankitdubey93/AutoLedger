@@ -1011,6 +1011,10 @@ Migration `110_ledger-core_seller_snapshot.sql`: `seller_abn`, `seller_legal_nam
 
 Migration `111_ap-flow_gst_capture.sql`. `ap_flow_extractions.supplier_abn`, `ap_flow_line_items.tax_cents` and `tax_code` (purchase codes only). All nullable.
 
+## Phase 49g — pay runs (accounting) — applied
+
+Migration `112_ledger-core_aba_pay_runs.sql`. `bank_account_details` (1:1 with an account) and `vendor_bank_details` (1:1 with a vendor), with `bsb`, `account_number_enc`, `account_number_last3`, `account_name`; audited. `payment_batches` and `payment_batch_items`, linking payments to a run.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

@@ -1885,3 +1885,9 @@ Seller snapshot at issue (migration `110`), Tax Invoice and Adjustment Note in t
 
 **Found while building:** a captured bill is approved immediately, so 49b's "provisional" code was not provisional at all. A mixed receipt could have reached the BAS with GST on its GST-free lines. It is now refused until a person chooses.
 
+### 49g: Bank details, ABA files, bank CSV presets
+
+`utils/abaFile.ts`, `payRunService`, `/api/v1/pay-runs`, migration `112`, permission `payments.export_aba`, a pay run page, and CBA, ANZ, Westpac and NAB presets on the statement import. Neither the ABA layout nor the bank presets have met a real bank.
+
+2750 server (2 skipped) + 764 client tests at the time.
+

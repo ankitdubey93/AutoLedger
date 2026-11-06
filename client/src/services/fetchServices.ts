@@ -7544,3 +7544,73 @@ export function lookupAbn(abn: string): Promise<{
 }> {
   return apiFetch(`/abn/${encodeURIComponent(abn)}`);
 }
+
+/* ------------------------------------------- Phase 49g — ABA pay runs */
+
+export interface BankAccountDetails {
+  accountId: string;
+  bsb: string;
+  accountNumberLast3: string;
+  accountName: string;
+  financialInstitution: string;
+  apcaUserId: string;
+  selfBalancing: boolean;
+}
+
+export interface VendorBankDetails {
+  vendorId: string;
+  bsb: string;
+  accountNumberLast3: string;
+  accountName: string;
+  changedAt: string;
+}
+
+export interface PaymentBatch {
+  id: string;
+  bankAccountId: string;
+  paymentDate: string;
+  description: string;
+  totalCents: number;
+  paymentCount: number;
+  createdAt: string;
+}
+
+export function getBankAccountDetails(accountId: string): Promise<{ success: boolean; details: BankAccountDetails | null }> {
+  return apiFetch(`/pay-runs/bank-accounts/${accountId}`);
+}
+
+export function saveBankAccountDetails(
+  accountId: string,
+  body: { bsb: string; accountNumber: string; accountName: string; financialInstitution: string; apcaUserId: string; selfBalancing: boolean },
+): Promise<{ success: boolean; details: BankAccountDetails }> {
+  return apiFetch(`/pay-runs/bank-accounts/${accountId}`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export function listVendorBankDetails(): Promise<{ success: boolean; details: VendorBankDetails[] }> {
+  return apiFetch('/pay-runs/vendor-details');
+}
+
+export function saveVendorBankDetails(
+  vendorId: string,
+  body: { bsb: string; accountNumber: string; accountName: string },
+): Promise<{ success: boolean; details: VendorBankDetails }> {
+  return apiFetch(`/pay-runs/vendor-details/${vendorId}`, { method: 'PUT', body: JSON.stringify(body) });
+}
+
+export function listPayRuns(): Promise<{ success: boolean; batches: PaymentBatch[] }> {
+  return apiFetch('/pay-runs');
+}
+
+export function createPayRun(body: {
+  bankAccountId: string;
+  paymentDate: string;
+  description: string;
+  items: { billId: string; amountCents: number }[];
+}): Promise<{ success: boolean; batch: PaymentBatch }> {
+  return apiFetch('/pay-runs', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function downloadPayRunAba(id: string): Promise<void> {
+  const { blob, filename } = await apiDownloadBlob(`/pay-runs/${id}/aba`);
+  saveBlob(blob, filename !== 'download' ? filename : 'pay-run.aba');
+}

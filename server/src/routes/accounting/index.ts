@@ -9,6 +9,7 @@ import manualJournalRoutes from './manualJournalRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
+import payRunRoutes from './payRunRoutes.js';
 import abnRoutes from './abnRoutes.js';
 import basRoutes from './basRoutes.js';
 import taxCodeRoutes from './taxCodeRoutes.js';
@@ -46,6 +47,7 @@ const router = Router();
 
 router.use('/accounts', accountRoutes);
 router.use('/tax-codes', taxCodeRoutes);
+router.use('/pay-runs', payRunRoutes);
 router.use('/abn', abnRoutes);
 router.use('/bas', basRoutes);
 router.use('/bank-imports', bankImportRoutes);

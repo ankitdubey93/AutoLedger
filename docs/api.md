@@ -1244,6 +1244,18 @@ Invoices and credit notes return `sellerAbn`, `sellerLegalName`, `sellerGstRegis
 
 `PATCH /organizations`, and customer and vendor create and update, are `422` on an invalid ABN for an AU organization.
 
+### Pay runs — `/api/v1/pay-runs` — Phase 49g ✅
+
+All need `payments.export_aba` and region `AU`.
+
+| Route | Does |
+|---|---|
+| `GET`, `PUT /pay-runs/bank-accounts/:accountId` | `{bsb, accountNumber, accountName, financialInstitution, apcaUserId, selfBalancing}`. Responses carry `accountNumberLast3` only. `404` unless a `BANK` account of this organization |
+| `GET /pay-runs/vendor-details`, `PUT /pay-runs/vendor-details/:vendorId` | `{bsb, accountNumber, accountName}`, the same masking. Each change writes a history event |
+| `GET /pay-runs` | `{batches}` |
+| `POST /pay-runs` | `{bankAccountId, paymentDate, description, items: [{billId, amountCents}]}`. One payment per vendor, all or nothing. `422` names any vendor with no details |
+| `GET /pay-runs/:id/aba` | The file, built on request and excluding voided payments. `409` if all are voided |
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

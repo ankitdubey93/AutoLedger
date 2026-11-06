@@ -94,6 +94,7 @@ const DEFS = [
   // Banking
   { key: 'payments.view', area: 'Banking', label: 'View payments', tier: 'V' },
   { key: 'payments.create', area: 'Banking', label: 'Record payments', tier: 'A', requires: ['payments.view', 'invoices.view', 'bills.view', 'accounts.view'] },
+  { key: 'payments.export_aba', area: 'Banking', label: 'Run ABA pay runs and change bank details', tier: 'M', requires: ['payments.create'] },
   { key: 'payments.void', area: 'Banking', label: 'Void payments', tier: 'A', requires: ['payments.view'] },
   { key: 'bank.view', area: 'Banking', label: 'View bank statements and rules', tier: 'V' },
   { key: 'bank.reconcile', area: 'Banking', label: 'Import statements, reconcile and manage bank rules', tier: 'A', requires: ['bank.view', 'accounts.view'] },

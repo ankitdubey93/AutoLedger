@@ -1,3 +1,5 @@
+import { useRegion } from '../../context/LedgerSettingsContext';
+import { BANK_PRESETS, withPresetHeader } from './bankPresets';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -43,6 +45,8 @@ export default function BankImportPage() {
   const [fileName, setFileName] = useState('');
   const [content, setContent] = useState('');
   const [dateFormat, setDateFormat] = useState<DateFormat>('ISO');
+  const isAustralian = useRegion() === 'AU';
+  const [presetId, setPresetId] = useState('');
   const [showColumnMap, setShowColumnMap] = useState(false);
   const [dateColumn, setDateColumn] = useState('');
   const [descriptionColumn, setDescriptionColumn] = useState('');
@@ -131,6 +135,20 @@ export default function BankImportPage() {
 
   const canSubmit = accountId !== '' && content !== '' && !busy;
 
+  function choosePreset(id: string) {
+    setPresetId(id);
+    const preset = BANK_PRESETS.find((b) => b.id === id);
+    if (preset === undefined) return;
+    setDateFormat(preset.dateFormat);
+    setShowColumnMap(true);
+    setDateColumn(preset.columns.date);
+    setDescriptionColumn(preset.columns.description);
+    setAmountColumn(preset.columns.amount);
+    setDebitColumn(preset.columns.debit);
+    setCreditColumn(preset.columns.credit);
+    setReferenceColumn(preset.columns.reference);
+  }
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!canSubmit) return;
@@ -169,7 +187,7 @@ export default function BankImportPage() {
       const res = await importBankStatement({
         accountId,
         fileName: fileName === '' ? 'statement.csv' : fileName,
-        content,
+        content: withPresetHeader(content, BANK_PRESETS.find((b) => b.id === presetId) ?? null),
         dateFormat,
         columnMap,
         closingBalanceCents,
@@ -236,6 +254,25 @@ export default function BankImportPage() {
             className={inputClass}
           />
         </label>
+
+        {isAustralian && (
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Bank</span>
+            <select value={presetId} onChange={(e) => choosePreset(e.target.value)} className={inputClass}>
+              <option value="">Other, or detect from the file</option>
+              {BANK_PRESETS.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
+            </select>
+            {presetId !== '' && (
+              <span className="text-xs text-[var(--muted)]">
+                Filled in below. Banks change their exports, so check the columns match your file.
+              </span>
+            )}
+          </label>
+        )}
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Date format</span>

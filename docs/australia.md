@@ -14,7 +14,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | 49d | BAS engine and workflow | ✅ |
 | 49e | Tax invoices | ✅ |
 | 49f | ABN tools and capture | ✅ |
-| 49g | Bank details, ABA files, bank CSV presets | Not built |
+| 49g | Bank details, ABA files, bank CSV presets | ✅ |
 | 49h | TPAR | Not built |
 | 49i | Australian demo and walkthrough | Not built |
 
@@ -206,6 +206,23 @@ An unregistered business claims nothing, so the GST becomes part of the cost. A 
 **Vendors match by ABN before name**, only when the ABN read from the page passes the checksum, and a new vendor keeps it. **An ABN is not masked** before an image goes to the model, since the model has to read it. **A tax file number is masked**, but only when labelled, because about 1 in 11 random nine-digit numbers pass its checksum and masking those would black out invoice numbers.
 
 The extraction prompt asks every organization's documents for a supplier number and per-line tax. The fields are optional and ignored for a `GENERIC` organization.
+
+## Pay runs and ABA files
+
+**Banking → Pay run** selects approved expenses and creates one payment per vendor through the ordinary payment path, all or nothing on one transaction (migration `112`). Then it produces an ABA file. **No money moves until the user uploads that file to their bank**, and a pay run they abandon needs its payments voided. A voided payment drops out of a re-download, since the file is built on request.
+
+`utils/abaFile.ts` writes records of exactly 120 characters, CRLF-ended: descriptive (0), detail (1, code `50`), and total (7). An optional balancing debit (code `13`) is set per bank account, because banks differ. Characters outside the format's set are stripped rather than breaking the fixed width.
+
+**The layout comes from the published format as recalled during the build, and has not been uploaded to a real bank. Do a test upload before relying on it.**
+
+| Bank details | |
+|---|---|
+| Account numbers | Encrypted with `utils/secretBox.ts`, returned only as the last three digits, and absent from audit rows as plaintext. Saving needs `INTEGRATION_ENCRYPTION_KEY`, otherwise `503` |
+| Permission | `payments.export_aba` covers changing bank details and producing files, deliberately senior |
+| Fraud controls | Each change to a supplier's details writes a history event. A pay run warns about any changed in the last 7 days, and tells the user to confirm by phone |
+| Currency | AUD only |
+
+**Bank statement presets** for CBA, ANZ, Westpac and NAB fill the column mapping and date format on the import screen, and add a header row for a bank whose export has none. **Written from memory of published examples, not real exports.** Banks change these, so the mapping stays visible and editable.
 
 ## Not built in this edition
 
