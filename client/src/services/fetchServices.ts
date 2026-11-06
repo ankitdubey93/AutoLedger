@@ -1382,6 +1382,8 @@ export interface RecurringSchedule {
   nextOccurrenceIndex: number;
   mode: RecurringMode;
   autoReverse: boolean;
+  /** Phase 48 — email each generated invoice to the customer. Only for kind INVOICE with mode POST. */
+  autoSend: boolean;
   status: RecurringStatus;
   lastError: string | null;
   lastErrorAt: string | null;
@@ -1419,6 +1421,8 @@ export type CreateRecurringScheduleInput = {
   endDate: string | null;
   mode: RecurringMode;
   autoReverse: boolean;
+  /** Phase 48 — optional on the wire; the server defaults it to false. */
+  autoSend?: boolean;
 };
 
 /** GET /recurring-schedules */
@@ -1661,6 +1665,10 @@ export interface Invoice {
   salesOrderId: string | null;
   /** Phase 43b — the referenced sales order's number; null if none. */
   salesOrderNumber: string | null;
+  /** Phase 48 — the newest non-failed send's creation time; null when never sent. Derived from invoice_sends. */
+  lastSentAt: string | null;
+  /** Phase 48 — the newest time any customer opened a send link; null when never opened. Derived from invoice_sends. */
+  lastViewedAt: string | null;
 }
 
 export type SettlementFilter = 'OUTSTANDING' | 'OVERDUE' | 'PAID';
@@ -1849,6 +1857,10 @@ export interface InvoiceSettings {
   showOrgAddress: boolean;
   showPaymentTerms: boolean;
   showDueDate: boolean;
+  /** Phase 48 — payment reminders on/off. Default false. */
+  remindersEnabled: boolean;
+  /** Phase 48 — days after the due date to remind (negative = before). Stored sorted ascending. */
+  reminderOffsetsDays: number[];
   bankDetails: string | null;
   quotePrefix: string;
   quoteNextNumber: number;
@@ -6753,6 +6765,161 @@ export function acceptPublicQuote(
   return apiFetch(
     `/public/quotes/${encodeURIComponent(token)}/accept`,
     { method: 'POST', body: JSON.stringify(body), credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
+/* ------------------------------------- invoices: delivery (Phase 48) */
+
+/** Mirrors server/src/types/accounting.ts's InvoiceSendKind. */
+export type InvoiceSendKind = 'MANUAL' | 'REMINDER' | 'RECURRING';
+
+/** Mirrors server/src/types/accounting.ts's InvoiceSend. */
+export interface InvoiceSend {
+  id: string;
+  invoiceId: string;
+  sendKind: InvoiceSendKind;
+  toEmail: string;
+  sentByName: string | null;
+  createdAt: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  lastViewedAt: string | null;
+  deliveryStatus: 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | null;
+}
+
+/** Fetches a PDF as a blob with the session cookie (same shape as downloadQuotePdf). */
+async function downloadAuthedPdf(path: string): Promise<Blob> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}${path}`, {
+    credentials: 'include',
+  });
+  if (!response.ok) throw new ApiRequestError(response.status, 'Could not download the PDF');
+  return response.blob();
+}
+
+/** GET /invoices/:id/pdf as a blob (Phase 48, Slice A). */
+export function getInvoicePdf(id: string): Promise<Blob> {
+  return downloadAuthedPdf(`/invoices/${id}/pdf`);
+}
+
+/** GET /credit-notes/:id/pdf as a blob (Phase 48, Slice A). */
+export function getCreditNotePdf(id: string): Promise<Blob> {
+  return downloadAuthedPdf(`/credit-notes/${id}/pdf`);
+}
+
+/** POST /invoices/:id/send — 201. A null toEmail uses the customer's email on file. */
+export async function sendInvoice(
+  id: string,
+  input: { toEmail: string | null; message: string | null },
+): Promise<InvoiceSend> {
+  const body = await apiFetch<{ success: boolean; send: InvoiceSend }>(`/invoices/${id}/send`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return body.send;
+}
+
+/** GET /invoices/:id/sends — newest first. */
+export async function listInvoiceSends(id: string): Promise<InvoiceSend[]> {
+  const body = await apiFetch<{ success: boolean; sends: InvoiceSend[] }>(`/invoices/${id}/sends`);
+  return body.sends;
+}
+
+/** POST /invoices/:id/sends/:sendId/revoke */
+export async function revokeInvoiceSend(id: string, sendId: string): Promise<InvoiceSend> {
+  const body = await apiFetch<{ success: boolean; send: InvoiceSend }>(
+    `/invoices/${id}/sends/${sendId}/revoke`,
+    { method: 'POST' },
+  );
+  return body.send;
+}
+
+/** What the public invoice link shows — no session involved. Mirrors server PublicInvoiceView. */
+export interface PublicInvoiceView {
+  merchant: { name: string; addressLines: string[]; hasLogo: boolean };
+  invoice: {
+    number: string | null;
+    status: string;
+    settlementStatus: SettlementStatus;
+    issueDate: string;
+    dueDate: string;
+    currencyCode: string;
+    customerName: string;
+    notes: string | null;
+    paymentTerms: string | null;
+    lines: { description: string; quantityMilli: number; unitPriceCents: number; taxRateBp: number; netCents: number }[];
+    subtotalCents: number;
+    taxCents: number;
+    totalCents: number;
+    paidCents: number;
+    amountDueCents: number;
+  };
+  bankDetails: string | null;
+  payment: { enabled: boolean; publishableKey: string | null };
+  expiresAt: string;
+}
+
+/** GET /public/invoices/:token — public; the token is the credential. */
+export async function getPublicInvoice(token: string, signal?: AbortSignal): Promise<PublicInvoiceView> {
+  return apiFetch<PublicInvoiceView>(
+    `/public/invoices/${encodeURIComponent(token)}`,
+    { signal: signal ?? null, credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+}
+
+/** GET /public/invoices/:token/logo as a blob (the API is cross-origin, so no bare <img>). */
+export async function getPublicInvoiceLogo(token: string, signal?: AbortSignal): Promise<Blob | null> {
+  if (!API_BASE_URL) return null;
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/public/invoices/${encodeURIComponent(token)}/logo`, {
+    credentials: 'omit',
+    signal: signal ?? null,
+  });
+  return response.ok ? response.blob() : null;
+}
+
+/** GET /public/invoices/:token/pdf as a blob — no cookies: the token is the credential. */
+export async function getPublicInvoicePdf(token: string): Promise<Blob> {
+  if (!API_BASE_URL) {
+    throw new Error('VITE_API_BASE_URL is not set — copy client/.env.example to client/.env');
+  }
+  const response = await fetch(`${API_BASE_URL}${API_PREFIX}/public/invoices/${encodeURIComponent(token)}/pdf`, {
+    credentials: 'omit',
+  });
+  if (!response.ok) throw new ApiRequestError(response.status, 'Could not download the PDF');
+  return response.blob();
+}
+
+/** Mirrors server/src/services/accounting/onlinePaymentService.ts's StartedPayment (invoice path). */
+export interface StartedInvoicePayment {
+  onlinePaymentId: string;
+  clientSecret: string;
+  publishableKey: string;
+  amountCents: number;
+  currencyCode: string;
+}
+
+/** POST /public/invoices/:token/payments — public; the server prices the whole amount due. No body. */
+export async function startInvoicePayment(token: string): Promise<StartedInvoicePayment> {
+  const body = await apiFetch<{ success: boolean; payment: StartedInvoicePayment }>(
+    `/public/invoices/${encodeURIComponent(token)}/payments`,
+    { method: 'POST', credentials: 'omit' },
+    NO_AUTO_REFRESH,
+  );
+  return body.payment;
+}
+
+/** POST /public/invoices/:token/payments/:intentId/confirm — public. */
+export function confirmInvoicePayment(
+  token: string,
+  intentId: string,
+): Promise<{ success: boolean; status: OnlinePaymentStatus; paymentId: string | null }> {
+  return apiFetch(
+    `/public/invoices/${encodeURIComponent(token)}/payments/${encodeURIComponent(intentId)}/confirm`,
+    { method: 'POST', credentials: 'omit' },
     NO_AUTO_REFRESH,
   );
 }

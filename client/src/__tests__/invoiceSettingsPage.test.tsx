@@ -67,6 +67,8 @@ function baseInvoiceSettings(overrides: Partial<InvoiceSettings> = {}): InvoiceS
     purchaseQuoteNextNumber: 1,
     defaultQuoteValidityDays: 30,
     defaultQuoteTerms: null,
+    remindersEnabled: false,
+    reminderOffsetsDays: [7, 14, 30],
     quoteAcceptanceRequiresCode: false,
     customerDepositAccountId: null,
     supplierPrepaymentAccountId: null,

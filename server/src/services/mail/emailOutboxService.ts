@@ -9,7 +9,14 @@ import {
 } from '../../config/constants.js';
 import { decryptSecret, encryptSecret } from '../../utils/secretBox.js';
 import { logger } from '../../utils/logger.js';
-import { isEmailTemplate, type EmailTemplate } from '../../types/email.js';
+import { ApiError } from '../../utils/apiError.js';
+import {
+  isEmailAttachmentKind,
+  isEmailTemplate,
+  type EmailAttachment,
+  type EmailAttachmentKind,
+  type EmailTemplate,
+} from '../../types/email.js';
 import { renderEmail } from './templates.js';
 import { MailSendError, transportFromEnv, type MailTransport } from './transports.js';
 
@@ -37,7 +44,15 @@ export interface EnqueueEmailInput {
   data?: Record<string, unknown>;
   /** A token-bearing link. Encrypted at rest when a key is configured; cleared once sent. */
   link?: string | null;
+  /**
+   * A reference, not bytes: the drain asks the injected resolver for the file
+   * at send time. Requires `orgId` (CHECK ck_email_outbox_attachment).
+   */
+  attachment?: { kind: EmailAttachmentKind; refId: string } | null;
 }
+
+/** Turns an attachment reference into the file. Supplied by the worker so platform mail never imports a module. */
+export type AttachmentResolver = (kind: EmailAttachmentKind, orgId: string, refId: string) => Promise<EmailAttachment>;
 
 /**
  * Writes one outbox row on the caller's transaction. An organization's
@@ -63,8 +78,9 @@ export async function enqueueEmailOnClient(client: Queryable, input: EnqueueEmai
 
   const { rows } = await client.query<{ id: string }>(
     `INSERT INTO email_outbox
-       (org_id, to_email, to_name, template, template_data, secret_link, secret_encrypted, sender_name, reply_to)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       (org_id, to_email, to_name, template, template_data, secret_link, secret_encrypted, sender_name, reply_to,
+        attachment_kind, attachment_ref_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
      RETURNING id`,
     [
       input.orgId,
@@ -76,6 +92,8 @@ export async function enqueueEmailOnClient(client: Queryable, input: EnqueueEmai
       encrypted,
       senderName,
       replyTo,
+      input.attachment?.kind ?? null,
+      input.attachment?.refId ?? null,
     ],
   );
   const id = rows[0]?.id;
@@ -85,6 +103,9 @@ export async function enqueueEmailOnClient(client: Queryable, input: EnqueueEmai
 
 interface ClaimedRow {
   id: string;
+  org_id: string | null;
+  attachment_kind: string | null;
+  attachment_ref_id: string | null;
   to_email: string;
   to_name: string | null;
   template: string;
@@ -122,7 +143,7 @@ function backoffMs(attempts: number): number {
  *    A finished row's link is cleared (CHECK ck_email_outbox_link_cleared).
  */
 export async function drainEmailOutbox(
-  options: { transport?: MailTransport; batchSize?: number } = {},
+  options: { transport?: MailTransport; batchSize?: number; resolveAttachment?: AttachmentResolver } = {},
 ): Promise<DrainResult> {
   const transport = options.transport ?? transportFromEnv();
   const batchSize = options.batchSize ?? EMAIL_DRAIN_BATCH;
@@ -142,7 +163,7 @@ export async function drainEmailOutbox(
                ORDER BY next_attempt_at
                LIMIT $1
                FOR UPDATE SKIP LOCKED)
-      RETURNING o.id, o.to_email, o.to_name, o.template, o.template_data, o.secret_link,
+      RETURNING o.id, o.org_id, o.attachment_kind, o.attachment_ref_id, o.to_email, o.to_name, o.template, o.template_data, o.secret_link,
                 o.secret_encrypted, o.sender_name, o.reply_to, o.attempts`,
     [batchSize],
   );
@@ -165,8 +186,29 @@ export async function drainEmailOutbox(
       }
 
       const rendered = renderEmail(row.template, row.template_data, link);
+
+      // An email that promises an attachment never goes out without it.
+      let attachments: EmailAttachment[] | undefined;
+      if (row.attachment_kind !== null) {
+        if (!isEmailAttachmentKind(row.attachment_kind) || row.org_id === null || row.attachment_ref_id === null) {
+          throw new MailSendError('Attachment reference is malformed', true);
+        }
+        if (options.resolveAttachment === undefined) {
+          throw new MailSendError('No attachment resolver is configured', true);
+        }
+        try {
+          attachments = [await options.resolveAttachment(row.attachment_kind, row.org_id, row.attachment_ref_id)];
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            throw new MailSendError('Attachment source no longer exists', true);
+          }
+          throw err;
+        }
+      }
+
       const sent = await transport.send({
         ...rendered,
+        ...(attachments === undefined ? {} : { attachments }),
         to: { email: row.to_email, name: row.to_name },
         from: { email: env.MAIL_FROM_EMAIL, name: row.sender_name ?? env.MAIL_FROM_NAME },
         replyTo: row.reply_to,

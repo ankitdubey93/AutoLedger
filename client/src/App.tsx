@@ -14,7 +14,8 @@ import InvitePage from './Pages/auth/InvitePage';
 import EmailLinkPage from './Pages/auth/EmailLinkPage';
 import PublicStatementPage from './Pages/public/PublicStatementPage';
 import PublicQuotePage from './Pages/public/PublicQuotePage';
-import StripePayPanel from './Pages/public/StripePayPanel';
+import { StatementStripePayPanel } from './Pages/public/StripePayPanel';
+import PublicInvoicePage from './Pages/public/PublicInvoicePage';
 import NotFoundPage from './Pages/NotFoundPage';
 import AccountPage from './Pages/AccountPage';
 import DocumentsPage from './Pages/DocumentsPage';
@@ -55,11 +56,14 @@ export default function App() {
             {/* Phase 39 — an emailed statement; public, the token is the proof. */}
             <Route
               path="/statement/:token"
-              element={<PublicStatementPage renderPayPanel={(props) => <StripePayPanel {...props} />} />}
+              element={<PublicStatementPage renderPayPanel={(props) => <StatementStripePayPanel {...props} />} />}
             />
 
             {/* Phase 41 — an emailed quote; public, the token is the proof. */}
             <Route path="/quote/:token" element={<PublicQuotePage />} />
+
+            {/* Phase 48 — an emailed invoice; public, the token is the proof. */}
+            <Route path="/invoice/:token" element={<PublicInvoicePage />} />
 
             <Route element={<ProtectedRoute />}>
               <Route element={<AppShell />}>

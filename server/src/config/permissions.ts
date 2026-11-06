@@ -53,6 +53,7 @@ const DEFS = [
   { key: 'invoices.edit', area: 'Sales', label: 'Create and edit draft invoices', tier: 'A', requires: ['invoices.view', 'customers.view', 'products.view', 'accounts.view'] },
   { key: 'invoices.issue', area: 'Sales', label: 'Issue invoices', tier: 'A', requires: ['invoices.view'] },
   { key: 'invoices.void', area: 'Sales', label: 'Void invoices', tier: 'A', requires: ['invoices.view'] },
+  { key: 'invoices.send', area: 'Sales', label: 'Email invoices', tier: 'A', requires: ['invoices.view'] },
   { key: 'credit_notes.view', area: 'Sales', label: 'View credit notes', tier: 'V', requires: ['customers.view'] },
   { key: 'credit_notes.edit', area: 'Sales', label: 'Create and edit draft credit notes', tier: 'A', requires: ['credit_notes.view', 'invoices.view', 'accounts.view'] },
   { key: 'credit_notes.issue', area: 'Sales', label: 'Issue and apply credit notes', tier: 'A', requires: ['credit_notes.view'] },

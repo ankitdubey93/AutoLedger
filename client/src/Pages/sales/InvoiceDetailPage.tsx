@@ -1,22 +1,26 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { Printer } from 'lucide-react';
+import { Download, Mail, Printer } from 'lucide-react';
 import {
   ApiRequestError,
   applyDeposit,
   getInvoice,
+  getInvoicePdf,
   getInvoiceSettings,
   getOrganizationProfile,
   issueInvoice,
   getAvailableCredits,
   listCreditNotes,
+  listInvoiceSends,
   listInvoices,
   listPayments,
+  revokeInvoiceSend,
   voidDepositApplication,
   voidInvoice,
   type AvailableCredit,
   type CreditNote,
   type Invoice,
+  type InvoiceSend,
   type InvoiceSettings,
   type OrganizationProfile,
   type Payment,
@@ -24,12 +28,15 @@ import {
 import { formatCents, parseCentsInput } from '../../utils/money';
 import { useDocumentObjectUrl } from '../../utils/useDocumentObjectUrl';
 import { useOrg } from '../../context/OrgContext';
+import { useCan } from '../../context/AuthContext';
+import { saveBlob } from '../../utils/saveBlob';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import BackLink from '../../components/BackLink';
 import ConfirmDialog from '../../components/ConfirmDialog';
 import ApplyCreditsDialog from '../../components/ApplyCreditsDialog';
 import type { ApplyCredit } from '../../components/ApplyCreditsDialog';
 import PaymentDialog from './PaymentDialog';
+import SendInvoiceDialog from './SendInvoiceDialog';
 import InvoiceDocument from './InvoiceDocument';
 import AttachmentsPanel from '../../components/AttachmentsPanel';
 import HistoryAndNotes from '../../components/history/HistoryAndNotes';
@@ -58,6 +65,7 @@ export default function InvoiceDetailPage() {
   const navigate = useNavigate();
   const { organization } = useOrg();
   const ledgerSettings = useLedgerSettings();
+  const can = useCan();
 
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [invoiceSettings, setInvoiceSettings] = useState<InvoiceSettings | null>(null);
@@ -73,6 +81,9 @@ export default function InvoiceDetailPage() {
   const [showPaymentDialog, setShowPaymentDialog] = useState(false);
   const [showApplyDeposit, setShowApplyDeposit] = useState(false);
   const [showMakeRecurringDialog, setShowMakeRecurringDialog] = useState(false);
+  const [showSendDialog, setShowSendDialog] = useState(false);
+  const [sends, setSends] = useState<InvoiceSend[]>([]);
+  const [revokeTarget, setRevokeTarget] = useState<InvoiceSend | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const logoSrc = useDocumentObjectUrl(profile?.logoDocumentId ?? null);
 
@@ -82,6 +93,15 @@ export default function InvoiceDetailPage() {
     setInvoice(null);
     setNotFound(false);
     setError(null);
+
+    // Phase 48 — who this invoice was emailed to. Decoration: a failure shows an empty list.
+    listInvoiceSends(invoiceId)
+      .then((list) => {
+        if (!ignore) setSends(list);
+      })
+      .catch(() => {
+        if (!ignore) setSends([]);
+      });
 
     // Phase 26 — the credit notes raised against this invoice.
     listCreditNotes({ originalId: invoiceId, limit: 100 })
@@ -131,6 +151,32 @@ export default function InvoiceDetailPage() {
       setReloadToken((n) => n + 1);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not void the deposit application');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (invoice === null) return;
+    setError(null);
+    try {
+      saveBlob(await getInvoicePdf(invoice.id), `${invoice.invoiceNumber ?? 'invoice-draft'}.pdf`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not download the PDF');
+    }
+  }
+
+  async function handleRevokeSend() {
+    if (invoice === null || revokeTarget === null) return;
+    const target = revokeTarget;
+    setRevokeTarget(null);
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeInvoiceSend(invoice.id, target.id);
+      setReloadToken((n) => n + 1);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not revoke the link');
     } finally {
       setBusy(false);
     }
@@ -331,6 +377,25 @@ export default function InvoiceDetailPage() {
               Make recurring
             </button>
           )}
+          {invoice.status === 'ISSUED' && can('invoices.send') && (
+            <button
+              type="button"
+              onClick={() => setShowSendDialog(true)}
+              disabled={busy}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+            >
+              <Mail size={14} aria-hidden="true" /> Email
+            </button>
+          )}
+          {can('invoices.view') && (
+            <button
+              type="button"
+              onClick={() => void handleDownloadPdf()}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer"
+            >
+              <Download size={14} aria-hidden="true" /> Download PDF
+            </button>
+          )}
           <button
             type="button"
             onClick={() => window.print()}
@@ -407,6 +472,57 @@ export default function InvoiceDetailPage() {
                     <td className="p-2 text-right tabular-nums">
                       {formatCents(
                         payment.allocations.find((a) => a.invoiceId === invoice.id)?.amountCents ?? 0,
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {sends.length > 0 && (
+        <div className="no-print flex flex-col gap-2">
+          <h3 className="text-sm font-semibold m-0">Sent</h3>
+          <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
+            <table className="w-full border-collapse text-sm min-w-[30rem]">
+              <thead>
+                <tr className="text-left text-[var(--muted)] text-xs uppercase tracking-wide">
+                  <th className="p-2 font-medium">To</th>
+                  <th className="p-2 font-medium">Kind</th>
+                  <th className="p-2 font-medium">Sent</th>
+                  <th className="p-2 font-medium">Status</th>
+                  <th className="p-2 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {sends.map((send) => (
+                  <tr key={send.id} className="border-t border-[var(--border)]">
+                    <td className="p-2">{send.toEmail}</td>
+                    <td className="p-2">
+                      {send.sendKind === 'MANUAL' ? 'Manual' : send.sendKind === 'REMINDER' ? 'Reminder' : 'Recurring'}
+                    </td>
+                    <td className="p-2 tabular-nums">{formatDate(send.createdAt)}</td>
+                    <td className="p-2">
+                      {send.revokedAt !== null
+                        ? 'Link revoked'
+                        : send.deliveryStatus === 'FAILED'
+                          ? 'Failed'
+                          : send.lastViewedAt !== null
+                            ? `Viewed ${formatDate(send.lastViewedAt)}`
+                            : 'Not viewed'}
+                    </td>
+                    <td className="p-2 text-right">
+                      {send.revokedAt === null && can('invoices.send') && (
+                        <button
+                          type="button"
+                          onClick={() => setRevokeTarget(send)}
+                          disabled={busy}
+                          className="px-2 py-1 rounded-md text-xs text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40"
+                        >
+                          Revoke
+                        </button>
                       )}
                     </td>
                   </tr>
@@ -562,6 +678,27 @@ export default function InvoiceDetailPage() {
             setShowPaymentDialog(false);
             setReloadToken((t) => t + 1);
           }}
+        />
+      )}
+      {showSendDialog && (
+        <SendInvoiceDialog
+          invoice={invoice}
+          onClose={() => setShowSendDialog(false)}
+          onSent={() => {
+            setShowSendDialog(false);
+            setReloadToken((n) => n + 1);
+          }}
+        />
+      )}
+      {revokeTarget !== null && (
+        <ConfirmDialog
+          title="Revoke this link?"
+          body={`The link emailed to ${revokeTarget.toEmail} will stop working. The customer can no longer view or pay this invoice through it.`}
+          confirmLabel="Revoke link"
+          tone="danger"
+          busy={busy}
+          onConfirm={() => void handleRevokeSend()}
+          onCancel={() => setRevokeTarget(null)}
         />
       )}
       {showMakeRecurringDialog && (

@@ -104,7 +104,7 @@ export async function getPublicStatement(token: string): Promise<PublicStatement
 }
 
 /** Only raster images are served from a public link — never SVG (script), never a PDF. */
-const LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+export const LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 /** GET /public/statements/:token/logo */
 export async function openPublicLogo(

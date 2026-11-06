@@ -65,6 +65,8 @@ export default function InvoiceSettingsPage() {
     invoiceNumber: SAMPLE_INVOICE.invoiceNumber,
   };
   const [accentColor, setAccentColor] = useState('#2563eb');
+  const [remindersEnabled, setRemindersEnabled] = useState(false);
+  const [reminderDays, setReminderDays] = useState('7, 14, 30');
 
   const [seeded, setSeeded] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -102,6 +104,8 @@ export default function InvoiceSettingsPage() {
         setPaymentTerms(settingsRes.paymentTerms ?? '');
         setFooterNotes(settingsRes.footerNotes ?? '');
         setAccentColor(settingsRes.accentColor);
+        setRemindersEnabled(settingsRes.remindersEnabled);
+        setReminderDays(settingsRes.reminderOffsetsDays.join(', '));
         setSeeded(true);
       })
       .catch((err: unknown) => {
@@ -117,6 +121,16 @@ export default function InvoiceSettingsPage() {
     setSaving(true);
     setError(null);
     setSaved(false);
+    const offsets = reminderDays
+      .split(',')
+      .map((part) => part.trim())
+      .filter((part) => part !== '')
+      .map((part) => (/^-?\d+$/.test(part) ? Number(part) : Number.NaN));
+    if (offsets.some((n) => Number.isNaN(n))) {
+      setError('Reminder days must be whole numbers separated by commas');
+      setSaving(false);
+      return;
+    }
     try {
       await updateInvoiceSettings({
         numberPrefix,
@@ -144,6 +158,8 @@ export default function InvoiceSettingsPage() {
         paymentTerms: paymentTerms.trim() === '' ? null : paymentTerms.trim(),
         footerNotes: footerNotes.trim() === '' ? null : footerNotes.trim(),
         accentColor,
+        remindersEnabled,
+        reminderOffsetsDays: offsets,
       });
       setSaved(true);
     } catch (err) {
@@ -480,6 +496,26 @@ export default function InvoiceSettingsPage() {
             onChange={(e) => setAccentColor(e.target.value)}
             className="h-8 w-14 rounded border border-[var(--border)] bg-transparent"
           />
+        </label>
+      </fieldset>
+
+      <fieldset className="flex flex-col gap-3 border border-[var(--border)] rounded-lg p-4">
+        <legend className="text-sm font-semibold px-1">Payment reminders</legend>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={remindersEnabled} onChange={(e) => setRemindersEnabled(e.target.checked)} />
+          Email payment reminders for invoices that were sent
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-[var(--muted)]">Reminder days</span>
+          <input
+            type="text"
+            value={reminderDays}
+            onChange={(e) => setReminderDays(e.target.value)}
+            className={inputClass}
+          />
+          <span className="text-xs text-[var(--muted)]">
+            Days after the due date. Use a negative number for days before.
+          </span>
         </label>
       </fieldset>
 

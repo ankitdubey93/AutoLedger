@@ -13,6 +13,7 @@ export const createRecurringScheduleSchema = z
     endDate: z.string().date().nullable().default(null),
     mode: z.enum(['DRAFT', 'POST']).default('DRAFT'),
     autoReverse: z.boolean().default(false),
+    autoSend: z.boolean().default(false),
   })
   .refine((v) => v.endDate === null || v.endDate >= v.startDate, {
     message: 'endDate must not be before startDate',

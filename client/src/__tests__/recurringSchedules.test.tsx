@@ -27,6 +27,7 @@ const mockSchedule: fetchServices.RecurringSchedule = {
   nextOccurrenceIndex: 1,
   mode: 'DRAFT',
   autoReverse: false,
+  autoSend: false,
   status: 'ACTIVE',
   lastError: null,
   lastErrorAt: null,

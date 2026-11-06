@@ -709,6 +709,19 @@ A ratio is stored as integer bp (5.8333× is `58333`), rounded half away from ze
 Full detail: [roadmap.md § Phase 47, as delivered](roadmap.md#phase-47-as-delivered).
 
 
+### Phase 48 — Invoice delivery ✅ shipped
+
+An issued invoice can be downloaded as a PDF, emailed with that PDF attached and a link, opened by the customer on `/invoice/:token` and paid by card, chased by automatic reminders, and emailed automatically by a recurring schedule.
+
+- **Sent state is derived.** `invoice_sends` (one row per email, token stored only as a SHA-256 hash) is the record; `lastSentAt` ignores sends whose outbox row failed, `lastViewedAt` is stamped when the link is fetched. Nothing is written to `invoices` (rule 6).
+- **PDF.** One layout (Helvetica, Latin text only) honouring `showLogo`, `showOrgAddress`, `showPaymentTerms`, `showDueDate` and `bankDetails`; the classic/modern/compact browser layouts are not reproduced. It is rendered when the outbox drains, not stored, so the amount-due line shows the position at send time. Credit notes: PDF download only.
+- **Card payment** always pays the invoice's whole outstanding amount, priced by the server; settlement is shared with the statement path (`online_payments` gains `invoice_send_id`, exactly one source).
+- **Reminders** (`Settings → Invoicing`; off by default; offsets default 7/14/30 days after due, negative = before). Eligible: issued, amount due > 0, customer has an email, and at least one earlier non-failed send. At most one reminder per invoice per tick at the largest passed offset (no back-fill); exactly once per offset (advisory lock + `UNIQUE (org_id, invoice_id, offset_days)`). There is **no per-customer opt-out**.
+- **Recurring auto-send:** `auto_send` on an `INVOICE` schedule with `mode = 'POST'`; a customer with no email still gets the invoice issued, with a `SEND_SKIPPED` history event. Issuing never fails because of email.
+- **Permission:** `invoices.send` (tier A); existing custom roles must be edited to gain it.
+
+Full detail: [roadmap.md § Phase 48, as delivered](roadmap.md#phase-48-as-delivered), [api.md](api.md), [schema.md](schema.md).
+
 ## Not built yet
 
 **Phase 17** — everything above its unticked boxes: no QuickBooks sync.

@@ -3,8 +3,8 @@
 > Letting customers' own users write the email your server sends is a code-injection surface, unless the "template language" can only *name* values you chose to expose. And a link that opens someone's account with no login is a password: generate it with real entropy, store only its hash, and make every failure look the same.
 
 **Category:** Security & Auth
-**Introduced by:** Phase 39b — statement email templates (`utils/placeholders.ts`) and the "Review and pay" link (`statement_sends`, `statementLinkService.ts`). **Extended by Phase 40** — Xero-style `[Month]` placeholders across every document, one registry, a runtime legacy alias.
-**Verified against:** Node 22.23 (ICU 78.2; `String.prototype.replace` with a global regex, `node:crypto`), PostgreSQL 16; behaviour pinned by `statementEmail.test.ts`, `placeholders.test.ts` (server and client) and `documentPlaceholders.test.ts`
+**Introduced by:** Phase 39b — statement email templates (`utils/placeholders.ts`) and the "Review and pay" link (`statement_sends`, `statementLinkService.ts`). **Extended by Phase 48** — a second bearer-link type (`invoice_sends`, `/invoice/:token`) and a field-by-field public view. **Extended by Phase 40** — Xero-style `[Month]` placeholders across every document, one registry, a runtime legacy alias.
+**Verified against (Phase 48 section):** Node 22.23, PostgreSQL 16.15, Express 5; pinned by `publicInvoice.test.ts`. **Verified against (earlier sections):** Node 22.23 (ICU 78.2; `String.prototype.replace` with a global regex, `node:crypto`), PostgreSQL 16; behaviour pinned by `statementEmail.test.ts`, `placeholders.test.ts` (server and client) and `documentPlaceholders.test.ts`
 
 ---
 
@@ -94,6 +94,15 @@ Quote emails (`quote_email_templates`, one default per direction, built-in fallb
 
 Strictness differs from what one might assume. Statement templates refuse unknown `{{legacy}}` tokens; quote templates have no legacy syntax, so they refuse **any** `{{…}}` token (422) and treat `[Bracket text]` as ordinary prose, because a bracketed phrase like `[sic]` is legitimate writing and we only fill names we know. Quote emails are filled in `final` mode at send, inside the send transaction, and the result is stored in the outbox row's `template_data`; the mail renderer escapes it per paragraph, and falls back to the fixed wording for older outbox rows that have no subject/body. A preview endpoint renders the same context without sending. The same bearer-link rules apply to the public quote link; Phase 42 adds a second factor on acceptance (an emailed code — see [quotes-acceptance-evidence-and-revisions.md](../architecture/quotes-acceptance-evidence-and-revisions.md)).
 
+## Phase 48: a second bearer link, and mapping a public view field by field
+
+The emailed invoice link repeats the statement link's design on purpose: a 256-bit `randomUrlToken()`, only `sha256Hex(token)` stored (`invoice_sends.token_hash`, UNIQUE), `expires_at` (60 days), `revoked_at`, and one org-less lookup (`resolveLiveInvoiceSend`) whose row supplies the `org_id` that scopes every later read. Unknown, expired and revoked tokens all return the same 404 text. Two things are new:
+
+- **Token types do not cross.** Statement tokens live in `statement_sends` and invoice tokens in `invoice_sends`; each resolver queries only its own table, so a statement token presented at `/public/invoices/:token` is a 404, and the reverse. Tested in both directions. A shared table with a "kind" column would have made that a bug waiting for a missing predicate.
+- **The public view is built field by field.** `getPublicInvoice` returns an explicitly listed object, never a spread of the internal `Invoice`. The internal object carries account ids, a journal entry id, `createdBy`, the FX rate and base-currency amounts; a spread would leak each one the day someone adds a column, silently. A test asserts the serialised response contains none of those key names. Listing fields makes the default for a new column "not exposed".
+- **The browser never prices anything.** The payment start route reads no body: the server computes the whole outstanding amount and the amount shown is the amount charged. See the online-payment code for the exactly-once receipt.
+- "Viewed" is recorded by a plain `UPDATE ... SET last_viewed_at` on the send row, not on the invoice (which is immutable); it records that the link was fetched, which a mail scanner can also do. It is evidence of opening, not of reading.
+
 ## Interview Q&A
 
 **Q: Your users want to customise the emails your system sends. How do you avoid template injection?**
@@ -122,6 +131,12 @@ A: 53. ISO-8601 weeks start on Monday, and week 1 is the week containing the yea
 
 **Q: You add a new document type that needs its own placeholders. What do you touch, and how do you know the client and server still agree?**
 A: Add the surface to the registry and give each new key its `surfaces`; extend the context type; mirror the changes in the client registry; append fixture cases (input, surface, mode, expected) that both test suites run. If the two registries differ, one side's fixture case fails. Keys not on a surface stay literal, so a template copied from another surface degrades visibly rather than leaking a wrong value.
+
+**Q: You expose a document to an unauthenticated customer. How do you make sure internal fields do not leak?**
+A: Map the response field by field instead of spreading the internal object. The internal invoice has account ids, a journal id, who created it, and base-currency figures; none belong on a public page. An explicit object literal means a column added next year is not exposed until someone decides it should be. I also test it: serialise the response and assert the internal key names are absent. The rule of thumb is that a public DTO is an allow-list, not a deny-list.
+
+**Q: You have two kinds of emailed link, for statements and for invoices. Why separate tables rather than one with a type column?**
+A: So that a token of one kind cannot be redeemed as the other. With separate tables each resolver can only ever see its own rows, and the foreign keys point at the right parent (a statement send references a customer; an invoice send references an invoice). With one table the safety rests on every query remembering a `kind` predicate. The cost is a bit of duplicated code, which I accepted for a security boundary.
 
 ## Follow-ups they'll dig into
 

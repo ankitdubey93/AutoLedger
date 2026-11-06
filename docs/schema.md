@@ -969,6 +969,13 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 **`104_ledger-core_account_balance_sheet_class.sql`** (Phase 47)
 - `accounts.balance_sheet_class` TEXT NULL with **`chk_accounts_balance_sheet_class`** (`CURRENT`/`NON_CURRENT`, only on `Asset`/`Liability`): an override, `NULL` = derive it from the chart tree (`utils/balanceSheetClass.ts`: under `1400` / `2500` is non-current, otherwise current). A report attribute, not a sixth account type (rule 12). No backfill, no index.
 
+**`105_ledger-core_invoice_delivery.sql`** (Phase 48)
+- `email_outbox` gains `attachment_kind` / `attachment_ref_id` (a reference, never bytes) with **`ck_email_outbox_attachment`** (both null, or kind `INVOICE_PDF` with a ref and a non-null `org_id`); **`ck_email_outbox_template`** is replaced with 091's list plus `invoice_sent`, `invoice_reminder`.
+- **`invoice_sends`** — one row per email: `org_id` (CASCADE) · `invoice_id` (composite FK `(org_id, invoice_id)` RESTRICT) · `send_kind` (`MANUAL`/`REMINDER`/`RECURRING`) · `to_email` (lowercased) · `email_id` (SET NULL) · `sent_by` (RESTRICT, `NOT NULL`) · **`token_hash`** (`UNIQUE`; the token is never stored) · `expires_at` (> `created_at`) · `revoked_at` · `last_viewed_at`; `UNIQUE (org_id, id)`. **Not audited** (carries the hash). Sent/viewed state is derived from this table because `invoices` is immutable once issued.
+- **`invoice_reminders`** — `(org_id, invoice_id, offset_days -60..365, invoice_send_id)`, **`ux_invoice_reminders_offset UNIQUE (org_id, invoice_id, offset_days)`** is the exactly-once guard; composite FKs to `invoices` and `invoice_sends` RESTRICT.
+- `online_payments.statement_send_id` becomes nullable; new `invoice_send_id` (composite FK RESTRICT) and **`ck_online_payments_source`** (exactly one of the two).
+- `ledger_invoice_settings` gains `reminders_enabled` (default `false`) and `reminder_offsets_days INTEGER[]` (default `{7,14,30}`); `recurring_schedules` gains `auto_send` (default `false`) with **`ck_recurring_auto_send`** (`NOT auto_send OR (kind = 'INVOICE' AND mode = 'POST')`).
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

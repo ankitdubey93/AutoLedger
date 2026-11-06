@@ -398,6 +398,15 @@ export const QUOTE_ACCEPTANCE_CODE_TTL_MS = 10 * 60 * 1000;
 export const QUOTE_ACCEPTANCE_CODE_MAX_ATTEMPTS = 5;
 export const QUOTE_ACCEPTANCE_CODES_PER_HOUR = 5;
 
+/** Phase 48 — how long an emailed invoice's "View and pay" link works (60 days, as statements). */
+export const INVOICE_LINK_TTL_MS = 60 * 24 * 60 * 60 * 1000;
+
+/** Phase 48 — how often the worker looks for reminders that have come due. */
+export const INVOICE_REMINDER_SWEEP_INTERVAL_MS = 60 * 60 * 1000;
+
+/** Phase 48 — most invoices one reminder sweep considers per organization. */
+export const INVOICE_REMINDER_BATCH = 500;
+
 // ---- Phase 45 — GL exception report
 
 /** Months of history the exception baselines are computed from, before `from`. */

@@ -78,6 +78,8 @@ const INVOICE_SETTINGS_DEFAULTS: Omit<InvoiceSettings, 'configured'> = {
   quoteAcceptanceRequiresCode: false,
   customerDepositAccountId: null,
   supplierPrepaymentAccountId: null,
+  remindersEnabled: false,
+  reminderOffsetsDays: [7, 14, 30],
 };
 
 export interface UpdateInvoiceSettingsInput {
@@ -115,6 +117,8 @@ export interface UpdateInvoiceSettingsInput {
   quoteAcceptanceRequiresCode?: boolean | undefined;
   customerDepositAccountId?: string | null | undefined;
   supplierPrepaymentAccountId?: string | null | undefined;
+  remindersEnabled?: boolean | undefined;
+  reminderOffsetsDays?: number[] | undefined;
 }
 
 interface SettingsRow {
@@ -152,6 +156,8 @@ interface SettingsRow {
   quote_acceptance_requires_code: boolean;
   customer_deposit_account_id: string | null;
   supplier_prepayment_account_id: string | null;
+  reminders_enabled: boolean;
+  reminder_offsets_days: number[];
 }
 
 function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
@@ -190,6 +196,8 @@ function toInvoiceSettings(row: SettingsRow): InvoiceSettings {
     quoteAcceptanceRequiresCode: row.quote_acceptance_requires_code,
     customerDepositAccountId: row.customer_deposit_account_id,
     supplierPrepaymentAccountId: row.supplier_prepayment_account_id,
+    remindersEnabled: row.reminders_enabled,
+    reminderOffsetsDays: row.reminder_offsets_days,
     configured: true,
   };
 }
@@ -205,7 +213,8 @@ export async function getInvoiceSettings(orgId: string): Promise<InvoiceSettings
             show_payment_terms, show_due_date, bank_details,
             quote_prefix, quote_next_number, purchase_quote_prefix, purchase_quote_next_number,
             default_quote_validity_days, default_quote_terms, quote_acceptance_requires_code,
-            customer_deposit_account_id, supplier_prepayment_account_id
+            customer_deposit_account_id, supplier_prepayment_account_id,
+            reminders_enabled, reminder_offsets_days
        FROM ledger_invoice_settings
       WHERE org_id = $1`,
     [orgId],
@@ -258,6 +267,8 @@ export async function updateInvoiceSettings(
     quoteAcceptanceRequiresCode: 'quote_acceptance_requires_code',
     customerDepositAccountId: 'customer_deposit_account_id',
     supplierPrepaymentAccountId: 'supplier_prepayment_account_id',
+    remindersEnabled: 'reminders_enabled',
+    reminderOffsetsDays: 'reminder_offsets_days',
   } as const;
 
   const columns: string[] = [];
@@ -265,8 +276,10 @@ export async function updateInvoiceSettings(
   const updateAssignments: string[] = [];
 
   for (const key of Object.keys(COLUMNS) as (keyof typeof COLUMNS)[]) {
-    const value = input[key];
-    if (value === undefined) continue;
+    const raw = input[key];
+    if (raw === undefined) continue;
+    // Reminder days are stored ascending so the sweep and the UI read one order.
+    const value = key === 'reminderOffsetsDays' && Array.isArray(raw) ? [...(raw as number[])].sort((a, b) => a - b) : raw;
     columns.push(COLUMNS[key]);
     insertValues.push(value);
     updateAssignments.push(`${COLUMNS[key]} = EXCLUDED.${COLUMNS[key]}`);

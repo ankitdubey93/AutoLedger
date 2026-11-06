@@ -2,7 +2,8 @@ import type { ReactNode } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import StripePayPanel from '../Pages/public/StripePayPanel';
+import StripePayPanel, { type StripePayPanelProps } from '../Pages/public/StripePayPanel';
+import { confirmStatementPayment, startStatementPayment } from '../services/fetchServices';
 import type { PayPanelProps } from '../Pages/public/PublicStatementPage';
 import { sampleStatement } from '../Pages/statements/sampleStatement';
 
@@ -53,7 +54,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function props(overrides: Partial<PayPanelProps> = {}): PayPanelProps {
+function props(overrides: Partial<PayPanelProps> = {}): PayPanelProps & Pick<StripePayPanelProps, 'start' | 'confirm'> {
   const statement = sampleStatement('OUTSTANDING');
   const overdue = statement.openItems.filter((i) => i.daysOverdue > 0);
   return {
@@ -63,6 +64,8 @@ function props(overrides: Partial<PayPanelProps> = {}): PayPanelProps {
     totalCents: 145000,
     currency: 'USD',
     onPaid: vi.fn(),
+    start: () => startStatementPayment('tok', overdue.map((i) => i.documentId)),
+    confirm: (intentId: string) => confirmStatementPayment('tok', intentId),
     ...overrides,
   };
 }

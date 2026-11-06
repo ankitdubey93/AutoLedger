@@ -3,8 +3,8 @@
 > You cannot atomically commit a Postgres transaction and send an HTTP request — so instead you atomically commit the *fact that a request needs sending*, and let a separate process do the sending, as many times as it takes.
 
 **Category:** Architecture
-**Introduced by:** Phase 7 — `outbox_events`, `outboxService.emitEvent`, the outbox drain handler; extended Phase 38b — the email outbox (`email_outbox`, `services/mail/`)
-**Verified against:** PostgreSQL 16, BullMQ ^6.3.4; Mailpit v1.29 (send API, live); Brevo transactional API docs as of 2026-10-01 (not exercised live)
+**Introduced by:** Phase 7 — `outbox_events`, `outboxService.emitEvent`, the outbox drain handler; extended Phase 38b — the email outbox (`email_outbox`, `services/mail/`); extended Phase 48 — attachments by reference
+**Verified against:** PostgreSQL 16, BullMQ ^6.3.4; Mailpit v1.29 (send API, live); Brevo transactional API docs as of 2026-10-01 (not exercised live; the Phase 48 `attachment` array was checked against the docs only); Node 22.23, `pdfkit` 0.20.2, `pg` 8.22 for the Phase 48 section
 
 ---
 
@@ -126,6 +126,16 @@ The row is also kept out of the audit trail for the same reason `outbox_events` 
 - **Forgetting `ON CONFLICT DO NOTHING`.** Without it, a second drain pass over an event whose fan-out already happened would throw a unique-violation and abort that pass's transaction.
 - **A receiver that doesn't dedupe on `deliveryId`.** At-least-once means a receiver *will* eventually see a duplicate (a retried job that actually succeeded the first time, a stale-sweep re-enqueue racing a slow-but-successful original attempt). This is the receiver's responsibility, and it's why `deliveryId` rides in the request body.
 
+## Phase 48: an attachment is a reference, rendered at drain
+
+An emailed invoice carries a PDF. The outbox row stores **no bytes**, only `attachment_kind` (`INVOICE_PDF`) and `attachment_ref_id` (the invoice id); the drain asks for the file just before it calls the provider.
+
+- **Why a reference.** Bytes in the row would bloat a hot table, copy a customer document into a place with no retention story, and freeze a snapshot nobody asked for. An issued invoice is immutable (rule 6), so re-rendering on a retry produces the same document. The one thing that moves is the "Amount due" line, which shows the position at send time rather than at enqueue. A seconds-wide gap, accepted and written down.
+- **Mail must not import accounting.** `drainEmailOutbox` takes an injected `resolveAttachment(kind, orgId, refId)`; the worker's handler supplies one that switches on `kind` (with an exhaustive `never` default, so a new kind fails to compile until it is handled). The platform mail service never names a module.
+- **Permanent versus retryable.** Three outcomes, chosen so that an email which promises a PDF never goes out without it. No resolver configured, or a malformed reference: `MailSendError(..., permanent = true)`, row `FAILED`. The resolver throws `ApiError` 404 (the invoice is gone): also permanent, since retrying cannot change the answer. Any other resolver error (a database blip while rendering) propagates to the ordinary retry path with backoff. Sending the message "best effort" without the attachment was rejected: a silent email missing its PDF is exactly the bug this design prevents.
+- **A CHECK ties the pair together.** `ck_email_outbox_attachment` requires kind and ref both null or both set, and requires `org_id IS NOT NULL` when set, because the resolver is tenant-scoped (rule 1).
+- **Transport wire formats.** Mailpit's send API takes `Attachments: [{Content (base64), Filename, ContentType}]`; Brevo takes `attachment: [{content (base64), name}]`. The key is omitted entirely when there is nothing to attach. The log transport records filenames only, never content.
+
 ## Interview Q&A
 
 **Q: What is the dual-write problem, and why can't you just "be careful" to avoid it?**
@@ -154,6 +164,15 @@ A: The claim is a single statement: `UPDATE … SET status = 'SENDING', claimed_
 
 **Q: A password-reset link is a credential. How do you keep it safe while it sits in a queue table?**
 A: The token tables store only a hash, so the outbox row is the one place the raw link exists. I encrypt it with AES-256-GCM when a key is configured (and production refuses to boot without one if it is really sending mail), keep the table out of the append-only audit trail, and null the link the moment the row is SENT or FAILED. A CHECK constraint enforces that last part, so a finished row physically cannot carry a link. The window during which the link exists at rest is seconds.
+
+**Q: An outbox email needs a PDF attachment. Do you store the PDF in the outbox row?**
+A: No, I store a reference (kind plus id) and render the file when the drain sends. Bytes would bloat a table that is claimed and updated constantly, duplicate a customer document into a place with no retention policy, and snapshot something that does not need freezing: the invoice is immutable once issued, so a re-render on retry yields the same document. The trade-off is that the amount-due line reflects the moment of sending, not of enqueueing, and that the render cost moves to the worker. I accepted both and wrote them down.
+
+**Q: The drain is platform code and the PDF is an accounting concept. How do you resolve the file without the mail service importing accounting?**
+A: Dependency injection at the seam. `drainEmailOutbox` accepts an optional `resolveAttachment` function; the worker's handler passes one that dispatches on the attachment kind to the owning module. Mail depends on a function type, not on a module, so the dependency arrow points from the composition root inward. An exhaustive `switch` with a `never` default makes a new kind a compile error until someone handles it.
+
+**Q: What should happen when the attachment cannot be produced: retry, send without it, or fail?**
+A: It depends on why. If there is no resolver or the source no longer exists (a 404), retrying cannot help, so mark the row permanently failed. If the failure is transient (the database hiccuped while rendering), use the normal retry with backoff. Sending without the attachment is never right here, because the email's text says the invoice is attached. The classification matters because the retry path is shared: treating a 404 as retryable burns attempts, and treating a transient error as permanent drops a legitimate email.
 
 ## Follow-ups they'll dig into
 

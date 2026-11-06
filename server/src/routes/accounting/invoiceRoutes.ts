@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import * as invoiceController from '../../controllers/accounting/invoiceController.js';
+import * as invoiceSendController from '../../controllers/accounting/invoiceSendController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { requirePermission } from '../../middleware/rbac.js';
 
@@ -18,6 +19,7 @@ import { requirePermission } from '../../middleware/rbac.js';
 const router = Router();
 
 router.get('/', authenticate, requirePermission('invoices.view'), invoiceController.list);
+router.get('/:id/pdf', authenticate, requirePermission('invoices.view'), invoiceController.pdf);
 router.get('/:id', authenticate, requirePermission('invoices.view'), invoiceController.getOne);
 
 router.post('/', authenticate, requirePermission('invoices.edit'), invoiceController.create);
@@ -47,6 +49,20 @@ router.post(
   authenticate,
   requirePermission('invoices.issue'),
   invoiceController.applyDeposit,
+);
+
+router.post('/:id/send', authenticate, requirePermission('invoices.send'), invoiceSendController.send);
+router.get(
+  '/:id/sends',
+  authenticate,
+  requirePermission('invoices.view'),
+  invoiceSendController.listSends,
+);
+router.post(
+  '/:id/sends/:sendId/revoke',
+  authenticate,
+  requirePermission('invoices.send'),
+  invoiceSendController.revokeSend,
 );
 
 export default router;

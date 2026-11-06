@@ -12,11 +12,13 @@ import { handleRecurringGenerate } from './handlers/recurringGenerateHandler.js'
 import { handleEmailDrain } from './handlers/emailDrainHandler.js';
 import { handleInboundMailProcess } from './handlers/inboundMailProcessHandler.js';
 import { handleQuoteExpirySweep } from './handlers/quoteExpirySweepHandler.js';
+import { handleInvoiceReminderSweep } from './handlers/invoiceReminderSweepHandler.js';
 import { markFailed } from '../services/webhookDeliveryService.js';
 import {
   EMAIL_DRAIN_INTERVAL_MS,
   INTEGRATION_DRIVE_POLL_INTERVAL_MS,
   INTEGRITY_CHECK_CRON,
+  INVOICE_REMINDER_SWEEP_INTERVAL_MS,
   JOB_ATTEMPTS,
   OUTBOX_DRAIN_INTERVAL_MS,
   QUOTE_EXPIRY_SWEEP_INTERVAL_MS,
@@ -44,6 +46,7 @@ const HANDLERS: {
   'email-drain': handleEmailDrain,
   'quote-expiry-sweep': handleQuoteExpirySweep,
   'inbound-mail-process': handleInboundMailProcess,
+  'invoice-reminder-sweep': handleInvoiceReminderSweep,
 };
 
 let workers: Worker[] = [];
@@ -156,6 +159,14 @@ export async function startWorkers(): Promise<void> {
     'quote-expiry-sweep-tick',
     { every: QUOTE_EXPIRY_SWEEP_INTERVAL_MS },
     { name: 'quote-expiry-sweep', data: {}, opts: { attempts: 1 } },
+  );
+
+  // Phase 48 — invoice payment reminders. attempts: 1: exactly-once lives in
+  // the service (advisory lock + unique constraint), and the next tick re-checks.
+  await queues['invoice-reminder-sweep'].upsertJobScheduler(
+    'invoice-reminder-sweep-tick',
+    { every: INVOICE_REMINDER_SWEEP_INTERVAL_MS },
+    { name: 'invoice-reminder-sweep', data: {}, opts: { attempts: 1 } },
   );
 
   // Phase 19.3 — 19.2's scheduler lives in Redis independently of this code,

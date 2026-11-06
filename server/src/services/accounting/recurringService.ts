@@ -6,6 +6,8 @@ import { addDays, firstDayOfNextMonth, occurrenceDate } from '../../utils/recurr
 import { containsPlaceholders } from '../../utils/placeholders.js';
 import { RECURRING_MAX_CATCHUP_PER_RUN } from '../../config/constants.js';
 import * as invoiceService from './invoiceService.js';
+import { sendInvoiceOnClient } from './invoiceSendService.js';
+import * as historyService from '../historyService.js';
 import * as billService from './billService.js';
 import * as journalService from './journalService.js';
 import * as manualJournalService from './manualJournalService.js';
@@ -90,7 +92,7 @@ const SCHEDULE_SELECT = `SELECT s.id, s.kind, s.name,
                                  COALESCE(s.source_invoice_id, s.source_bill_id, s.source_journal_entry_id, s.source_manual_journal_id) AS source_id,
                                  s.source_manual_journal_id,
                                  s.frequency, s.interval_count, s.start_date, s.end_date,
-                                 s.next_run_date, s.next_occurrence_index, s.mode, s.auto_reverse, s.status,
+                                 s.next_run_date, s.next_occurrence_index, s.mode, s.auto_reverse, s.auto_send, s.status,
                                  s.last_error, s.last_error_at,
                                  (SELECT max(r.run_date) FROM recurring_runs r
                                    WHERE r.org_id = s.org_id AND r.schedule_id = s.id) AS last_run_date,
@@ -111,6 +113,7 @@ interface ScheduleRow {
   next_occurrence_index: number;
   mode: string;
   auto_reverse: boolean;
+  auto_send: boolean;
   status: string;
   last_error: string | null;
   last_error_at: Date | null;
@@ -139,6 +142,7 @@ function toSchedule(row: ScheduleRow): RecurringSchedule {
     nextOccurrenceIndex: row.next_occurrence_index,
     mode: toMode(row.mode, row.id),
     autoReverse: row.auto_reverse,
+    autoSend: row.auto_send,
     status: row.status,
     lastError: row.last_error,
     lastErrorAt: row.last_error_at === null ? null : row.last_error_at.toISOString(),
@@ -236,6 +240,7 @@ export interface CreateRecurringScheduleInput {
   endDate: string | null;
   mode: RecurringMode;
   autoReverse: boolean;
+  autoSend: boolean;
 }
 
 export async function createSchedule(
@@ -307,12 +312,16 @@ export async function createSchedule(
       throw new ApiError(422, 'Only a journal can auto-reverse');
     }
 
+    if (input.autoSend && (input.kind !== 'INVOICE' || input.mode !== 'POST')) {
+      throw new ApiError(422, 'Only an invoice that is issued automatically can be emailed automatically');
+    }
+
     const { rows: insertRows } = await client.query<{ id: string }>(
       `INSERT INTO recurring_schedules
          (org_id, kind, name, source_invoice_id, source_bill_id, source_journal_entry_id,
           frequency, interval_count, start_date, end_date, next_run_date, next_occurrence_index,
-          mode, auto_reverse, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, 0, $11, $12, $13)
+          mode, auto_reverse, auto_send, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $9, 0, $11, $12, $13, $14)
        RETURNING id`,
       [
         orgId,
@@ -327,6 +336,7 @@ export async function createSchedule(
         input.endDate,
         input.mode,
         input.autoReverse,
+        input.autoSend,
         createdBy,
       ],
     );
@@ -584,6 +594,7 @@ async function generateOccurrence(
   occurrence: number,
   mode: RecurringMode,
   autoReverse: boolean,
+  autoSend: boolean,
   scheduleId: string,
 ): Promise<OccurrenceResult> {
   if (template.kind === 'INVOICE') {
@@ -618,6 +629,26 @@ async function generateOccurrence(
 
     if (mode === 'POST') {
       await invoiceService.issueInvoiceOnClient(client, orgId, userId, invoiceId, null);
+
+      // Phase 48 — email it on the same transaction: a rolled-back occurrence
+      // sends nothing. A customer with no address is recorded, never an error:
+      // issuing must not fail because of email.
+      if (autoSend) {
+        const send = await sendInvoiceOnClient(client, orgId, userId, {
+          invoiceId,
+          sendKind: 'RECURRING',
+          toEmail: null,
+          message: null,
+        });
+        if (send === null) {
+          await historyService.recordEventOnClient(client, orgId, {
+            entityType: 'INVOICE',
+            entityId: invoiceId,
+            action: 'SEND_SKIPPED',
+            summary: 'Not emailed: the customer has no email address',
+          });
+        }
+      }
     }
 
     return { invoiceId, billId: null, journalEntryId: null, reversalEntryId: null };
@@ -723,6 +754,7 @@ interface LockedRow {
   interval_count: number;
   mode: string;
   auto_reverse: boolean;
+  auto_send: boolean;
 }
 
 /**
@@ -764,7 +796,7 @@ export async function runDueOccurrences(
       // worker) between the two reads.
       const { rows: lockedRows } = await client.query<LockedRow>(
         `SELECT next_run_date, next_occurrence_index, created_by, start_date, end_date,
-                frequency, interval_count, mode, auto_reverse
+                frequency, interval_count, mode, auto_reverse, auto_send
            FROM recurring_schedules
           WHERE id = $1 AND org_id = $2 AND status = 'ACTIVE' AND next_run_date <= current_date
           FOR UPDATE SKIP LOCKED`,
@@ -791,6 +823,7 @@ export async function runDueOccurrences(
         occurrenceNumber,
         mode,
         locked.auto_reverse,
+        locked.auto_send,
         scheduleId,
       );
 

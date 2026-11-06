@@ -1,4 +1,5 @@
 import type { Request, RequestHandler } from 'express';
+import * as invoicePdfService from '../../services/accounting/invoicePdfService.js';
 import * as creditNoteService from '../../services/accounting/creditNoteService.js';
 import {
   applyCreditNoteSchema,
@@ -113,4 +114,16 @@ export const apply: RequestHandler = async (req, res) => {
   const input = parseBody(applyCreditNoteSchema, req.body);
   const creditNote = await creditNoteService.applyCreditNote(user.orgId, user.id, id, input);
   res.status(201).json({ success: true, creditNote });
+};
+
+/** GET /credit-notes/:id/pdf — the document as a PDF download. */
+export const pdf: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const file = await invoicePdfService.getCreditNotePdf(user.orgId, requireParam(req, 'id'));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.setHeader('Content-Length', String(file.pdf.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.end(file.pdf);
 };

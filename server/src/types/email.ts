@@ -2,7 +2,7 @@
  * Phase 38b — outbound email types. Platform-scoped: any module may send.
  */
 
-/** Mirrors the CHECK on `email_outbox.template` (migrations 082, 085, 089, 091). */
+/** Mirrors the CHECK on `email_outbox.template` (migrations 082, 085, 089, 091, 105). */
 export const EMAIL_TEMPLATES = [
   'password_reset',
   'invitation',
@@ -15,11 +15,27 @@ export const EMAIL_TEMPLATES = [
   'quote_sent',
   'quote_responded',
   'quote_acceptance_code',
+  'invoice_sent',
+  'invoice_reminder',
 ] as const;
 export type EmailTemplate = (typeof EMAIL_TEMPLATES)[number];
 
 export function isEmailTemplate(value: string): value is EmailTemplate {
   return (EMAIL_TEMPLATES as readonly string[]).includes(value);
+}
+
+/** What an outbox row may carry as an attachment. Mirrors the CHECK `ck_email_outbox_attachment` (migration 105). */
+export const EMAIL_ATTACHMENT_KINDS = ['INVOICE_PDF'] as const;
+export type EmailAttachmentKind = (typeof EMAIL_ATTACHMENT_KINDS)[number];
+
+export function isEmailAttachmentKind(value: string): value is EmailAttachmentKind {
+  return (EMAIL_ATTACHMENT_KINDS as readonly string[]).includes(value);
+}
+
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  content: Buffer;
 }
 
 export const EMAIL_STATUSES = ['PENDING', 'SENDING', 'SENT', 'FAILED'] as const;
@@ -65,6 +81,7 @@ export interface OutgoingEmail extends RenderedEmail {
   to: { email: string; name: string | null };
   from: { email: string; name: string };
   replyTo: string | null;
+  attachments?: EmailAttachment[];
 }
 
 /** An organization's sender settings (`organization_email_settings`). */

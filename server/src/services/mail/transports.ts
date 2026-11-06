@@ -62,7 +62,12 @@ export function createLogTransport(): MailTransport {
         logger.warn({ to: message.to.email, subject: message.subject }, 'email due, but MAIL_TRANSPORT=log sends nothing');
       } else {
         logger.info(
-          { to: message.to.email, subject: message.subject, text: message.text },
+          {
+            to: message.to.email,
+            subject: message.subject,
+            text: message.text,
+            ...(message.attachments === undefined ? {} : { attachments: message.attachments.map((a) => a.filename) }),
+          },
           'email (development only — MAIL_TRANSPORT=log)',
         );
       }
@@ -87,6 +92,15 @@ export function createMailpitTransport(baseUrl = env.MAILPIT_URL, fetchImpl: Fet
             Subject: message.subject,
             Text: message.text,
             HTML: message.html,
+            ...(message.attachments === undefined || message.attachments.length === 0
+              ? {}
+              : {
+                  Attachments: message.attachments.map((a) => ({
+                    Content: a.content.toString('base64'),
+                    Filename: a.filename,
+                    ContentType: a.contentType,
+                  })),
+                }),
           }),
           signal: AbortSignal.timeout(10_000),
         });
@@ -116,6 +130,9 @@ export function createBrevoTransport(apiKey = env.BREVO_API_KEY, fetchImpl: Fetc
             subject: message.subject,
             htmlContent: message.html,
             textContent: message.text,
+            ...(message.attachments === undefined || message.attachments.length === 0
+              ? {}
+              : { attachment: message.attachments.map((a) => ({ content: a.content.toString('base64'), name: a.filename })) }),
           }),
           signal: AbortSignal.timeout(15_000),
         });

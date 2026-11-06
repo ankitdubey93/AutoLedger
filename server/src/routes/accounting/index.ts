@@ -13,6 +13,7 @@ import statementRoutes from './statementRoutes.js';
 import statementSendRoutes from './statementSendRoutes.js';
 import publicStatementRoutes from './publicStatementRoutes.js';
 import publicQuoteRoutes from './publicQuoteRoutes.js';
+import publicInvoiceRoutes from './publicInvoiceRoutes.js';
 import { buildQuoteRouter } from './quoteRoutes.js';
 import { buildOrderRouter } from './orderRoutes.js';
 import stripeWebhookRoutes from './stripeWebhookRoutes.js';
@@ -88,6 +89,8 @@ router.use('/statement-sends', statementSendRoutes);
 router.use('/public/statements', publicStatementRoutes);
 // Phase 41 — unauthenticated, token-scoped. See publicQuoteRoutes.ts.
 router.use('/public/quotes', publicQuoteRoutes);
+// Phase 48 — unauthenticated, token-scoped. See publicInvoiceRoutes.ts.
+router.use('/public/invoices', publicInvoiceRoutes);
 router.use('/public/stripe', stripeWebhookRoutes);
 router.use('/online-payments', onlinePaymentRoutes);
 router.use('/vendors', buildHistoryRouter('VENDOR', { view: 'vendors.view', note: 'vendors.manage' }));

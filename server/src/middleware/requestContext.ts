@@ -23,6 +23,7 @@ export const SECRET_PATH_PREFIXES: readonly string[] = Object.freeze([
   `${API_BASE_PATH}/auth/invitations/`,
   `${API_BASE_PATH}/public/quotes/`,
   `${API_BASE_PATH}/public/statements/`,
+  `${API_BASE_PATH}/public/invoices/`,
   `${API_BASE_PATH}/public/inbound-mail/brevo/`,
 ]);
 

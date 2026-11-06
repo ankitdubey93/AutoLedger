@@ -8,6 +8,7 @@ import * as stripeClient from '../payments/stripeClient.js';
 import type { StripeDeps } from '../payments/stripeClient.js';
 import { createPaymentOnClient } from './paymentService.js';
 import { settledCentsOnClient } from './settlementSql.js';
+import { resolveLiveInvoiceSend } from './invoiceLinkService.js';
 import { resolveLiveSend, type LiveSend, type PublicPaymentOptions } from './statementLinkService.js';
 import { todayIso } from './statementService.js';
 import {
@@ -120,6 +121,17 @@ export async function paymentOptionsFor(send: LiveSend, deps?: StripeDeps): Prom
   return { enabled, publishableKey: enabled ? config.publishableKey : null };
 }
 
+/**
+ * Whether card payment can be offered for an org's invoices: provider keys are
+ * configured, the org enabled it, and a deposit account is chosen. Read on the
+ * caller's client so the send transaction sees one consistent snapshot.
+ */
+export async function onlineCardAvailableOnClient(q: Queryable, orgId: string, deps?: StripeDeps): Promise<boolean> {
+  if (stripeClient.stripeConfig(deps) === null) return false;
+  const settings = await readSettings(q, orgId);
+  return settings.enabled && settings.deposit_account_id !== null;
+}
+
 // ------------------------------------------------------------------- starting
 
 export interface StartedPayment {
@@ -148,7 +160,52 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
   }
   const ids = [...new Set(invoiceIds)].sort();
   if (ids.length === 0) throw new ApiError(422, 'Choose at least one invoice to pay');
+  return startPaymentCore(
+    { orgId: send.orgId, customerId: send.partyId, statementSendId: send.id, invoiceSendId: null },
+    ids,
+    options.publishableKey,
+    'Statement payment',
+    deps,
+  );
+}
 
+/** POST /public/invoices/:token/payments — always the invoice's whole outstanding amount. */
+export async function startInvoicePayment(token: string, deps?: StripeDeps): Promise<StartedPayment> {
+  const send = await resolveLiveInvoiceSend(token);
+  const { rows } = await pool.query<{ customer_id: string }>(
+    'SELECT customer_id FROM invoices WHERE org_id = $1 AND id = $2',
+    [send.orgId, send.invoiceId],
+  );
+  const customerId = rows[0]?.customer_id;
+  if (customerId === undefined) throw new ApiError(404, 'Invoice not found');
+
+  const config = stripeClient.stripeConfig(deps);
+  if (config === null || !(await onlineCardAvailableOnClient(pool, send.orgId, deps))) {
+    throw new ApiError(409, 'Online payment is not available for this invoice');
+  }
+  return startPaymentCore(
+    { orgId: send.orgId, customerId, statementSendId: null, invoiceSendId: send.id },
+    [send.invoiceId],
+    config.publishableKey,
+    'Invoice payment',
+    deps,
+  );
+}
+
+interface PaymentSource {
+  orgId: string;
+  customerId: string;
+  statementSendId: string | null;
+  invoiceSendId: string | null;
+}
+
+async function startPaymentCore(
+  source: PaymentSource,
+  ids: string[],
+  publishableKey: string,
+  description: string,
+  deps?: StripeDeps,
+): Promise<StartedPayment> {
   const { onlinePaymentId, amountCents, currencyCode } = await withTransaction(async (client) => {
     // Sorted ids + FOR UPDATE: the same lock order paymentService uses, so a
     // concurrent receipt against the same invoices serialises, not deadlocks.
@@ -158,9 +215,9 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
         WHERE org_id = $1 AND id = ANY($2::uuid[])
         ORDER BY id
           FOR UPDATE`,
-      [send.orgId, ids],
+      [source.orgId, ids],
     );
-    if (rows.length !== ids.length || rows.some((r) => r.customer_id !== send.partyId)) {
+    if (rows.length !== ids.length || rows.some((r) => r.customer_id !== source.customerId)) {
       throw new ApiError(404, 'Invoice not found');
     }
     if (rows.some((r) => r.status !== 'ISSUED')) throw new ApiError(422, 'Only issued invoices can be paid');
@@ -173,7 +230,7 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
 
     const lines: { invoiceId: string; amountCents: number }[] = [];
     for (const invoice of rows) {
-      const { paidCents, noteAppliedCents, depositAppliedCents } = await settledCentsOnClient(client, send.orgId, 'invoice_id', invoice.id);
+      const { paidCents, noteAppliedCents, depositAppliedCents } = await settledCentsOnClient(client, source.orgId, 'invoice_id', invoice.id);
       const outstanding = parseCents(invoice.total_cents) - paidCents - noteAppliedCents - depositAppliedCents;
       if (outstanding <= 0) throw new ApiError(422, `Invoice ${invoice.invoice_number ?? invoice.id} is already paid`);
       lines.push({ invoiceId: invoice.id, amountCents: outstanding });
@@ -181,10 +238,10 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
     const total = lines.reduce((sum, l) => sum + l.amountCents, 0);
 
     const { rows: created } = await client.query<{ id: string }>(
-      `INSERT INTO online_payments (org_id, statement_send_id, customer_id, currency_code, amount_cents)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO online_payments (org_id, statement_send_id, invoice_send_id, customer_id, currency_code, amount_cents)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id`,
-      [send.orgId, send.id, send.partyId, currency, total],
+      [source.orgId, source.statementSendId, source.invoiceSendId, source.customerId, currency, total],
     );
     const id = created[0]?.id;
     if (id === undefined) throw new Error('INSERT ... RETURNING produced no row');
@@ -192,7 +249,7 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
       `INSERT INTO online_payment_invoices (org_id, online_payment_id, invoice_id, amount_cents)
        SELECT $1, $2, invoice_id, amount_cents
          FROM unnest($3::uuid[], $4::bigint[]) AS t(invoice_id, amount_cents)`,
-      [send.orgId, id, lines.map((l) => l.invoiceId), lines.map((l) => l.amountCents)],
+      [source.orgId, id, lines.map((l) => l.invoiceId), lines.map((l) => l.amountCents)],
     );
     return { onlinePaymentId: id, amountCents: total, currencyCode: currency };
   });
@@ -205,27 +262,27 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
       {
         amountCents,
         currencyCode,
-        description: `Statement payment ${onlinePaymentId}`,
-        metadata: { org_id: send.orgId, online_payment_id: onlinePaymentId },
+        description: `${description} ${onlinePaymentId}`,
+        metadata: { org_id: source.orgId, online_payment_id: onlinePaymentId },
         idempotencyKey: `online-payment-${onlinePaymentId}`,
       },
       deps,
     );
   } catch (err) {
-    await transition(pool, send.orgId, onlinePaymentId, 'FAILED', {
+    await transition(pool, source.orgId, onlinePaymentId, 'FAILED', {
       failureReason: err instanceof Error ? err.message.slice(0, 500) : 'Payment provider error',
     });
     throw err;
   }
   await pool.query(
     'UPDATE online_payments SET provider_intent_id = $3 WHERE org_id = $1 AND id = $2',
-    [send.orgId, onlinePaymentId, intent.id],
+    [source.orgId, onlinePaymentId, intent.id],
   );
   if (intent.clientSecret === null) throw new ApiError(502, 'Unexpected response from the payment provider');
   return {
     onlinePaymentId,
     clientSecret: intent.clientSecret,
-    publishableKey: options.publishableKey,
+    publishableKey,
     amountCents,
     currencyCode,
   };
@@ -236,7 +293,8 @@ export async function startPayment(token: string, invoiceIds: string[], deps?: S
 interface PaymentRow {
   id: string;
   org_id: string;
-  statement_send_id: string;
+  statement_send_id: string | null;
+  invoice_send_id: string | null;
   customer_id: string;
   currency_code: string;
   amount_cents: string;
@@ -305,8 +363,8 @@ export async function settleIntent(intentId: string, deps?: StripeDeps): Promise
 
   return withTransaction(async (client) => {
     const { rows } = await client.query<PaymentRow>(
-      `SELECT id, org_id, statement_send_id, customer_id, currency_code, amount_cents::text AS amount_cents,
-              status, payment_id
+      `SELECT id, org_id, statement_send_id, invoice_send_id, customer_id, currency_code,
+              amount_cents::text AS amount_cents, status, payment_id
          FROM online_payments
         WHERE provider = 'stripe' AND provider_intent_id = $1
           FOR UPDATE`,
@@ -345,8 +403,10 @@ export async function settleIntent(intentId: string, deps?: StripeDeps): Promise
       [row.org_id, row.id],
     );
     const { rows: sendRows } = await client.query<{ sent_by: string }>(
-      'SELECT sent_by FROM statement_sends WHERE org_id = $1 AND id = $2',
-      [row.org_id, row.statement_send_id],
+      row.statement_send_id !== null
+        ? 'SELECT sent_by FROM statement_sends WHERE org_id = $1 AND id = $2'
+        : 'SELECT sent_by FROM invoice_sends WHERE org_id = $1 AND id = $2',
+      [row.org_id, row.statement_send_id ?? row.invoice_send_id],
     );
     const settings = await readSettings(client, row.org_id);
     const sentBy = sendRows[0]?.sent_by;
@@ -370,7 +430,8 @@ export async function settleIntent(intentId: string, deps?: StripeDeps): Promise
         vendorId: null,
         method: 'CARD',
         reference: intent.id,
-        notes: 'Paid online from an emailed statement',
+        notes:
+          row.statement_send_id !== null ? 'Paid online from an emailed statement' : 'Paid online from an emailed invoice',
         allocations: lines.map((l) => ({ invoiceId: l.invoice_id, billId: null, amountCents: parseCents(l.amount_cents) })),
         entryDate: null,
       });
@@ -397,6 +458,18 @@ export async function confirmFromLink(token: string, intentId: string, deps?: St
   const { rows } = await pool.query<{ id: string }>(
     `SELECT id FROM online_payments
       WHERE org_id = $1 AND statement_send_id = $2 AND provider = 'stripe' AND provider_intent_id = $3`,
+    [send.orgId, send.id, intentId],
+  );
+  if (rows[0] === undefined) throw new ApiError(404, 'Payment not found');
+  return settleIntent(intentId, deps);
+}
+
+/** POST /public/invoices/:token/payments/:intentId/confirm — the browser's "I think it worked". */
+export async function confirmFromInvoiceLink(token: string, intentId: string, deps?: StripeDeps): Promise<SettleResult> {
+  const send = await resolveLiveInvoiceSend(token);
+  const { rows } = await pool.query<{ id: string }>(
+    `SELECT id FROM online_payments
+      WHERE org_id = $1 AND invoice_send_id = $2 AND provider = 'stripe' AND provider_intent_id = $3`,
     [send.orgId, send.id, intentId],
   );
   if (rows[0] === undefined) throw new ApiError(404, 'Payment not found');

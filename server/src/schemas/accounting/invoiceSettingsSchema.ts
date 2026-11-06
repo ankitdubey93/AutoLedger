@@ -42,5 +42,12 @@ export const updateInvoiceSettingsSchema = z
     quoteAcceptanceRequiresCode: z.boolean().optional(),
     customerDepositAccountId: z.uuid().nullable().optional(),
     supplierPrepaymentAccountId: z.uuid().nullable().optional(),
+    remindersEnabled: z.boolean().optional(),
+    reminderOffsetsDays: z
+      .array(z.int().min(-60).max(365))
+      .min(1)
+      .max(5)
+      .refine((a) => new Set(a).size === a.length, { message: 'Reminder days must be different from each other' })
+      .optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });

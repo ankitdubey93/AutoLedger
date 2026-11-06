@@ -429,6 +429,22 @@ export interface Invoice {
   salesOrderNumber: string | null;
   /** Phase 42 — applications where this document is the deposit or the target. Loaded by the one-document read only; `[]` in lists. */
   depositApplications: DepositApplication[];
+  /** Phase 48 — the newest non-failed send's creation time; null when never sent. Derived from invoice_sends. */
+  lastSentAt: string | null;
+  /** Phase 48 — the newest time any customer opened a send link; null when never opened. Derived from invoice_sends. */
+  lastViewedAt: string | null;
+}
+
+/* ------------------------------------------------------ Phase 48 — invoice delivery */
+
+export const INVOICE_SEND_KINDS = ['MANUAL', 'REMINDER', 'RECURRING'] as const;
+export type InvoiceSendKind = (typeof INVOICE_SEND_KINDS)[number];
+
+export interface InvoiceSend {
+  id: string; invoiceId: string; sendKind: InvoiceSendKind; toEmail: string;
+  sentByName: string | null; createdAt: string; expiresAt: string;
+  revokedAt: string | null; lastViewedAt: string | null;
+  deliveryStatus: 'PENDING' | 'SENDING' | 'SENT' | 'FAILED' | null;
 }
 
 export interface InvoiceSettings {
@@ -468,6 +484,10 @@ export interface InvoiceSettings {
   customerDepositAccountId: string | null;
   /** Phase 42 — Asset account for deposit bills; null falls back to code 1150. */
   supplierPrepaymentAccountId: string | null;
+  /** Phase 48 — payment reminders on/off; default false. */
+  remindersEnabled: boolean;
+  /** Phase 48 — days after the due date to remind (negative = before). Stored ascending. */
+  reminderOffsetsDays: number[];
   /** `false` until the organization has saved invoice settings at least once. */
   configured: boolean;
 }
@@ -1699,6 +1719,8 @@ export interface RecurringSchedule {
   /** null once ENDED. */
   nextRunDate: string | null; nextOccurrenceIndex: number;
   mode: RecurringMode; autoReverse: boolean; status: RecurringStatus;
+  /** Phase 48 — email each generated invoice to the customer; valid only for INVOICE + POST. */
+  autoSend: boolean;
   lastError: string | null; lastErrorAt: string | null;
   /** Latest recurring_runs.run_date, null before the first run. */
   lastRunDate: string | null;

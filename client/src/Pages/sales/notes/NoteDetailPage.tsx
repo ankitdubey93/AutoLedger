@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ApiRequestError } from '../../../services/fetchServices';
+import { ApiRequestError, getCreditNotePdf } from '../../../services/fetchServices';
+import { useCan } from '../../../context/AuthContext';
+import { saveBlob } from '../../../utils/saveBlob';
 import { formatCents, formatQuantity, formatRate, parseCentsInput } from '../../../utils/money';
 import BackLink from '../../../components/BackLink';
 import ConfirmDialog from '../../../components/ConfirmDialog';
@@ -147,6 +149,7 @@ function ApplyDialog({
 export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
   const { noteId } = useParams<{ noteId: string }>();
   const navigate = useNavigate();
+  const can = useCan();
   const [note, setNote] = useState<NoteView | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -188,6 +191,16 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
       setError(err instanceof Error ? err.message : `Could not ${action} the ${config.title.toLowerCase()}`);
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (note === null) return;
+    setError(null);
+    try {
+      saveBlob(await getCreditNotePdf(note.id), `${note.number ?? 'credit-note-draft'}.pdf`);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not download the PDF');
     }
   }
 
@@ -238,6 +251,11 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
           {note.status === 'ISSUED' && note.unappliedCents > 0 && (
             <button type="button" disabled={busy} onClick={() => setShowApply(true)} className={primaryClass}>
               Apply credit
+            </button>
+          )}
+          {config.kind === 'CREDIT_NOTE' && can('credit_notes.view') && (
+            <button type="button" disabled={busy} onClick={() => void handleDownloadPdf()} className={buttonClass}>
+              Download PDF
             </button>
           )}
           {note.status !== 'VOID' && (

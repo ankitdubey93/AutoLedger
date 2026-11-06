@@ -200,6 +200,41 @@ export function renderEmail(template: EmailTemplate, data: Record<string, unknow
         text: textBody(lines, null),
       };
     }
+    case 'invoice_sent':
+    case 'invoice_reminder': {
+      // Phase 48. The optional `message` is the sender's plain text; it is
+      // escaped paragraph by paragraph. The PDF is attached by the drain.
+      const reminder = template === 'invoice_reminder';
+      const org = str(data, 'organizationName');
+      const number = str(data, 'invoiceNumber');
+      const total = str(data, 'total');
+      const amountDue = str(data, 'amountDue');
+      const dueDate = str(data, 'dueDate');
+      const overdue = data.overdue === true;
+      const message = str(data, 'message')
+        .split(/\n\s*\n/)
+        .map((p) => p.trim())
+        .filter((p) => p !== '');
+      const lines = [
+        ...message,
+        reminder
+          ? `This is a reminder about invoice ${number} from ${org}.`
+          : `${org} has sent you invoice ${number} for ${total}.`,
+        `Amount due: ${amountDue}, due ${dueDate}.`,
+        'The invoice is attached as a PDF.',
+      ];
+      const action = { label: data.canPayOnline === true ? 'View and pay' : 'View invoice', url };
+      const subject = !reminder
+        ? `Invoice ${number} from ${org}`
+        : overdue
+          ? `Reminder: invoice ${number} is overdue`
+          : `Reminder: invoice ${number} is due on ${dueDate}`;
+      return {
+        subject,
+        html: layout(subject, lines.map((p) => esc(p).replace(/\n/g, '<br>')), action),
+        text: textBody(lines, action),
+      };
+    }
     case 'invitation_accepted': {
       const org = str(data, 'organizationName');
       const who = str(data, 'memberName');

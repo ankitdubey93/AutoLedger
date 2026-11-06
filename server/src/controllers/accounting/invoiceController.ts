@@ -1,4 +1,5 @@
 import type { RequestHandler } from 'express';
+import * as invoicePdfService from '../../services/accounting/invoicePdfService.js';
 import * as invoiceService from '../../services/accounting/invoiceService.js';
 import * as depositService from '../../services/accounting/depositService.js';
 import { applyDepositSchema } from '../../schemas/accounting/depositSchema.js';
@@ -145,4 +146,16 @@ export const applyDeposit: RequestHandler = async (req, res) => {
   const input = parseBody(applyDepositSchema, req.body);
   const application = await depositService.applyDeposit(user.orgId, user.id, 'SALES', id, input);
   res.status(201).json({ success: true, application });
+};
+
+/** GET /invoices/:id/pdf — the document as a PDF download. */
+export const pdf: RequestHandler = async (req, res) => {
+  const user = requireUser(req);
+  const file = await invoicePdfService.getInvoicePdf(user.orgId, requireParam(req, 'id'));
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+  res.setHeader('Content-Length', String(file.pdf.length));
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.end(file.pdf);
 };

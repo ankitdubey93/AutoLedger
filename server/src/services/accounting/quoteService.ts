@@ -1250,7 +1250,7 @@ export async function previewQuoteEmail(
 const PDF_LOGO_TYPES = new Set(['image/png', 'image/jpeg']);
 
 /** Reads the org logo from the Document Vault (tenant-scoped); PNG/JPEG only, anything else is no logo. */
-async function readLogoBytes(orgId: string, logoDocumentId: string | null): Promise<Buffer | null> {
+export async function readLogoBytes(orgId: string, logoDocumentId: string | null): Promise<Buffer | null> {
   if (logoDocumentId === null) return null;
   const { document, stream } = await documentService.openDocumentStream(orgId, logoDocumentId);
   if (!PDF_LOGO_TYPES.has(document.mimeType)) {

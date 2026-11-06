@@ -184,6 +184,8 @@ interface InvoiceRow {
   deposit_for_order_id: string | null;
   sales_order_id: string | null;
   sales_order_number: string | null;
+  last_sent_at: Date | null;
+  last_viewed_at: Date | null;
 }
 
 interface InvoiceLineRow {
@@ -221,7 +223,11 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 q.revision AS source_quote_revision,
                                 i.kind, i.deposit_for_order_id, i.sales_order_id,
                                 (SELECT o.order_number FROM orders o
-                                  WHERE o.org_id = i.org_id AND o.id = i.sales_order_id) AS sales_order_number
+                                  WHERE o.org_id = i.org_id AND o.id = i.sales_order_id) AS sales_order_number,
+                                (SELECT max(s.created_at) FROM invoice_sends s LEFT JOIN email_outbox e ON e.id = s.email_id
+                                  WHERE s.org_id = i.org_id AND s.invoice_id = i.id AND COALESCE(e.status, 'SENT') <> 'FAILED') AS last_sent_at,
+                                (SELECT max(s.last_viewed_at) FROM invoice_sends s
+                                  WHERE s.org_id = i.org_id AND s.invoice_id = i.id) AS last_viewed_at
                            FROM invoices i
                            JOIN customers c ON c.id = i.customer_id AND c.org_id = i.org_id
                            LEFT JOIN users u ON u.id = i.created_by
@@ -314,6 +320,8 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     salesOrderId: row.sales_order_id,
     salesOrderNumber: row.sales_order_number,
     depositApplications: [],
+    lastSentAt: row.last_sent_at === null ? null : row.last_sent_at.toISOString(),
+    lastViewedAt: row.last_viewed_at === null ? null : row.last_viewed_at.toISOString(),
   };
 }
 

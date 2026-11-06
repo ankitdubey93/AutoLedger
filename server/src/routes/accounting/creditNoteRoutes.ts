@@ -14,6 +14,7 @@ import { requirePermission } from '../../middleware/rbac.js';
 const router = Router();
 
 router.get('/', authenticate, requirePermission('credit_notes.view'), creditNoteController.list);
+router.get('/:id/pdf', authenticate, requirePermission('credit_notes.view'), creditNoteController.pdf);
 router.get('/:id', authenticate, requirePermission('credit_notes.view'), creditNoteController.getOne);
 
 router.post('/', authenticate, requirePermission('credit_notes.edit'), creditNoteController.create);

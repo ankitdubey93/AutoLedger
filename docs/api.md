@@ -722,6 +722,32 @@ Failure paths: `400` from the schema · `400 status must be one of DRAFT, AWAITI
 
 **Not built:** an expense-claim / employee-reimbursement document (there is none, by design — see [roadmap.md § Phase 3.9](roadmap.md#phase-39-as-delivered)), partial void. Credit notes and vendor credits (debit notes) landed in Phase 26 — see the next section.
 
+#### Invoice delivery — Phase 48
+
+Email an issued invoice with its PDF and a payment link; the customer opens `/invoice/:token` with no session.
+
+| Method | Path | Permission | Description |
+|---|---|---|---|
+| GET | `/invoices/:id/pdf` | `invoices.view` | The invoice as `application/pdf` (`Content-Disposition: attachment`, `Cache-Control: no-store`). One fixed layout (Helvetica, Latin text only); honours `showLogo`, `showOrgAddress`, `showPaymentTerms`, `showDueDate`, `bankDetails`, and does not reproduce the classic/modern/compact browser layouts. Another org's invoice is `404` |
+| GET | `/credit-notes/:id/pdf` | `credit_notes.view` | The credit note as a PDF, same renderer. Download only: no email or public page for credit notes |
+| POST | `/invoices/:id/send` | `invoices.send` | `{ toEmail?: string \| null (lowercased; defaults to the customer's email), message?: string \| null (≤ 2000) }`. Writes the send row, an outbox row (template `invoice_sent`, PDF attached at drain time) and a history event in one transaction — `201 { success, send }`. `422 Only an issued invoice can be sent` · `422 This customer has no email address. Enter one to send the invoice` · `404` |
+| GET | `/invoices/:id/sends` | `invoices.view` | Newest first, at most 50 — `{ success, sends }`; each `{ id, invoiceId, sendKind: MANUAL \| REMINDER \| RECURRING, toEmail, sentByName, createdAt, expiresAt, revokedAt, lastViewedAt, deliveryStatus: PENDING \| SENDING \| SENT \| FAILED \| null }` |
+| POST | `/invoices/:id/sends/:sendId/revoke` | `invoices.send` | The link stops working (idempotent) — `200 { success, send }`; `404 Invoice link not found` |
+
+`Invoice` responses gain `lastSentAt` (latest send whose email did not fail) and `lastViewedAt`, both derived from `invoice_sends`; nothing is written to `invoices`.
+
+**Public link — `/api/v1/public/invoices/:token`** (no `authenticate`; `publicLinkLimiter`; `Cache-Control: no-store`). An unknown, revoked or expired token is one `404 This invoice link is not valid or has expired`; a statement or quote token is also a `404` here.
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/public/invoices/:token` | `{ merchant: {name, addressLines, hasLogo}, invoice: {number, status, settlementStatus, issueDate, dueDate, currencyCode, customerName, notes, paymentTerms, lines[{description, quantityMilli, unitPriceCents, taxRateBp, netCents}], subtotalCents, taxCents, totalCents, paidCents, amountDueCents}, bankDetails, payment: {enabled, publishableKey}, expiresAt }`. Mapped field by field: no ids, accounts or journal references. A void invoice returns `status: 'VOID'`, `amountDueCents: 0`. Stamps `last_viewed_at` |
+| GET | `/public/invoices/:token/logo` | The org logo (PNG/JPEG/GIF/WebP only), or `404` |
+| GET | `/public/invoices/:token/pdf` | The same PDF as the staff route |
+| POST | `/public/invoices/:token/payments` | No body. Starts a card payment for the invoice's whole outstanding amount, priced by the server — `201 { success, payment }`. `409 Online payment is not available for this invoice` · `422` if void or already paid |
+| POST | `/public/invoices/:token/payments/:intentId/confirm` | The browser reports success; settles idempotently with the webhook (one receipt, `method 'CARD'`, created by the send's `sent_by`) — `200`; an intent from another link is `404` |
+
+**Settings and recurring fields.** `PATCH /settings/invoicing` accepts `remindersEnabled` (boolean, default `false`) and `reminderOffsetsDays` (1–5 distinct integers, −60 to 365; days after the due date, negative = before; stored ascending, default `[7, 14, 30]`); `400` otherwise. `POST /recurring` accepts `autoSend` (boolean, default `false`); `true` is `422 Only an invoice that is issued automatically can be emailed automatically` unless `kind` is `INVOICE` and `mode` is `POST`. Schedules return `autoSend`.
+
 #### Credit notes — `/api/v1/credit-notes` · Debit notes — `/api/v1/debit-notes` — Phase 26
 
 | Method | Path | Auth | Description |

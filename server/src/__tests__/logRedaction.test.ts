@@ -59,6 +59,18 @@ describe('request log redaction', () => {
   });
 });
 
+describe('invoice token redaction', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('redacts a public invoice token', async () => {
+    const spy = vi.spyOn(logger, 'info');
+    const token = 'inv-token-' + 'v'.repeat(30);
+    await request(app).get(`/api/v1/public/invoices/${token}/pdf`);
+    expect(loggedPaths(spy)).toContain('/api/v1/public/invoices/[redacted]/pdf');
+    expect(JSON.stringify(spy.mock.calls)).not.toContain(token);
+  });
+});
+
 describe('redactPath', () => {
   it.each([
     ['/api/v1/public/quotes/abc/pdf', '/api/v1/public/quotes/[redacted]/pdf'],
@@ -66,6 +78,10 @@ describe('redactPath', () => {
     [
       '/api/v1/public/statements/abc/payments/pi_1/confirm',
       '/api/v1/public/statements/[redacted]/payments/pi_1/confirm',
+    ],
+    [
+      '/api/v1/public/invoices/abc/payments/pi_1/confirm',
+      '/api/v1/public/invoices/[redacted]/payments/pi_1/confirm',
     ],
     ['/api/v1/auth/invitations/abc/accept', '/api/v1/auth/invitations/[redacted]/accept'],
     ['/api/v1/public/inbound-mail/brevo/s3cret', '/api/v1/public/inbound-mail/brevo/[redacted]'],
@@ -100,7 +116,7 @@ function collectPaths(router: unknown, out: string[]): void {
 // Adding a route with a `:token`/`:secret` param changes this count. Add the
 // route's mount to SECRET_PATH_PREFIXES in middleware/requestContext.ts, add a
 // row to the redactPath table above, then update the count.
-const CREDENTIAL_ROUTE_COUNT = 13;
+const CREDENTIAL_ROUTE_COUNT = 18;
 
 describe('credential routes', () => {
   it('every :token / :secret route is covered — update SECRET_PATH_PREFIXES when this count changes', () => {
@@ -108,6 +124,6 @@ describe('credential routes', () => {
     collectPaths(apiRouter, paths);
     const credential = paths.filter((path) => path.includes(':token') || path.includes(':secret'));
     expect(credential).toHaveLength(CREDENTIAL_ROUTE_COUNT);
-    expect(SECRET_PATH_PREFIXES).toHaveLength(4);
+    expect(SECRET_PATH_PREFIXES).toHaveLength(5);
   });
 });

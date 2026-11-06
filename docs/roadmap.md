@@ -1738,6 +1738,30 @@ A direct feature request (2026-10-17), numbered like 24/30/32/34/39-46, built to
 
 **Known trade-off (Phase 47):** the as-at balances query joins ledger lines once per date (13 times); fine at demo scale, a large organization would want a cumulative window sum over per-month totals. The ancestry CTE is copied from `cashFlowService.ts` rather than shared.
 
+## Phase 48, as delivered
+
+A direct feature request (2026-11-06), numbered like 24/30/32/34/39-47, built to `plans/phase-48-invoice-delivery.md`: get invoices out and get paid. Migration `105`.
+
+- **PDF:** `GET /invoices/:id/pdf` and `GET /credit-notes/:id/pdf`. **One layout** (Helvetica, Latin text only) honouring `showLogo`, `showOrgAddress`, `showPaymentTerms`, `showDueDate` and `bankDetails`; the classic/modern/compact browser layouts are not reproduced.
+- **Mail attachments:** the outbox stores a reference (`attachment_kind`, `attachment_ref_id`), not bytes; the PDF is rendered when the row drains, through a resolver the worker injects so platform mail never imports accounting. A missing resolver or a 404 source fails the row permanently; any other resolver error retries. Mailpit and Brevo wire formats implemented.
+- **Send:** `POST /invoices/:id/send` writes an `invoice_sends` row (token stored as a SHA-256 hash), an outbox row and a history event in one transaction. Sent/viewed state is derived from `invoice_sends`, never a column on the immutable `invoices`. New permission `invoices.send`.
+- **Public page and payment:** `/invoice/:token` shows the invoice and pays its whole outstanding amount by card, priced by the server, settling through the same exactly-once path as statements (`online_payments` gains `invoice_send_id`).
+- **Reminders:** off by default, offsets default 7/14/30 days after due; an invoice needs an earlier non-failed send; one reminder per tick at the largest passed offset; exactly once per offset (advisory lock + unique constraint). A reminder has **no per-customer opt-out**.
+- **Recurring auto-send:** `auto_send` on an invoice schedule in POST mode; no customer email means the invoice still issues and a `SEND_SKIPPED` history event is recorded.
+- **Stripe and Brevo are tested against fakes only.** The Stripe path (statement and invoice) has only run against a fake, and Brevo attachments were checked against its documentation only. No `STRIPE_*` keys were set, so the card-payment check (plan Step 27 item 3) was **NOT RUN**.
+- **End-to-end check (plan Step 27, 2026-11-06), against a real server, worker, Postgres, Redis and Mailpit with `MAIL_TRANSPORT=mailpit` set in the process environment; `server/.env` untouched.** Driven through the HTTP API with real sign-in, **not through the browser: the UI itself (send dialog, `/invoice/:token` page, Viewed badge) was not clicked, and the client dev server was not started.** The demo organization already existed, so `seed:demo` was not run. (1) Passed: sending issued invoice INV-000026 produced a Mailpit message with `Attachments: 1`, `INV-000026.pdf`, a valid one-page PDF (`pdftotext` shows the right number, dates, customer and line). (2) Passed at the API level: the emailed token opens `GET /public/invoices/:token` with no cookies (`200`, `Cache-Control: no-store`), and the staff invoice then shows `lastViewedAt` set. (3) NOT RUN: no Stripe test keys. (4) Passed: with reminders on for the demo organization only, `sendDueRemindersForOrg` sent exactly one reminder (offset 30, subject "Reminder: invoice INV-000026 is overdue", PDF attached) and a second run sent none; reminders were switched back off afterwards. (5) Passed: from a second organization, `GET`, `POST /send`, `GET /sends` and `GET /pdf` on the first organization's invoice all returned `404`, and no email was created.
+- **Plan corrections found while building:** `invoices.send` had to land with its route in Step 8, not Step 5, because `routePermissions.test.ts` fails on a catalogue key no route uses; the plan's lowercase history actions did not fit the closed uppercase `HISTORY_ACTIONS` set, so a send uses the existing `SENT` (a reminder is distinguished by its summary) and Step 18 adds `SEND_SKIPPED`. Found at the full-suite run: the access-log redaction guard (`logRedaction.test.ts`) caught five new `:token` routes the plan did not list; `/public/invoices/` was added to `SECRET_PATH_PREFIXES` so an invoice token never reaches the access log (rule 11). The plan's exactly-once reminder wording (`INSERT ... ON CONFLICT DO NOTHING RETURNING` first) could not be built because `invoice_send_id` is `NOT NULL`; an advisory transaction lock serialises check-send-insert and the unique constraint is the backstop.
+- **Tests:** 2581 server (2 skipped) + 730 client passing. `verify:integrity` clean. A guardrail review found one real violation (the unredacted invoice token in the access log, above), fixed. Study notes: `exactly-once-reminders.md` new; `transactional-outbox.md` and `user-authored-templates-and-bearer-links.md` extended.
+
+**Deliberately not built (Phase 48):**
+- Editable invoice email templates (fixed wording plus an optional sender message).
+- Credit-note email and public page.
+- A per-customer reminder opt-out.
+- Partial online payment.
+- The classic/modern/compact layouts in the PDF; non-Latin PDF text.
+- Statement-style bulk send.
+- A real Stripe run, a real Brevo run, and a click-through of the UI (see above).
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

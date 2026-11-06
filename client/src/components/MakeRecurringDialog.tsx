@@ -40,6 +40,7 @@ export default function MakeRecurringDialog({
   const [endDate, setEndDate] = useState('');
   const [mode, setMode] = useState<'DRAFT' | 'POST'>(kind === 'JOURNAL' ? 'POST' : 'DRAFT');
   const [autoReverse, setAutoReverse] = useState(false);
+  const [autoSend, setAutoSend] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,6 +71,7 @@ export default function MakeRecurringDialog({
         endDate: endDate || null,
         mode,
         autoReverse,
+        autoSend: kind === 'INVOICE' && mode === 'POST' && autoSend,
       });
       onCreated(result.schedule.id);
     } catch (err: unknown) {
@@ -155,10 +157,30 @@ export default function MakeRecurringDialog({
             {kind !== 'JOURNAL' && (
               <label className="flex flex-col gap-1 text-sm">
                 <span className="text-[var(--muted)]">Mode</span>
-                <select value={mode} onChange={(e) => setMode(e.target.value as 'DRAFT' | 'POST')} className={inputClass}>
+                <select
+                  value={mode}
+                  onChange={(e) => {
+                    const next = e.target.value as 'DRAFT' | 'POST';
+                    setMode(next);
+                    if (next === 'DRAFT') setAutoSend(false);
+                  }}
+                  className={inputClass}
+                >
                   <option value="DRAFT">Draft</option>
                   <option value="POST">Posted</option>
                 </select>
+              </label>
+            )}
+
+            {kind === 'INVOICE' && mode === 'POST' && (
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={autoSend}
+                  onChange={(e) => setAutoSend(e.target.checked)}
+                  className="cursor-pointer"
+                />
+                <span className="text-[var(--muted)]">Email each invoice to the customer</span>
               </label>
             )}
 

@@ -39,7 +39,7 @@ const BOLD = 'Helvetica-Bold';
 const MUTED = '#666666';
 
 /** Integer-cents amount with thousands grouping, no currency. */
-function money(cents: number): string {
+export function money(cents: number): string {
   const magnitude = Math.abs(cents);
   const major = String(Math.trunc(magnitude / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   const minor = String(magnitude % 100).padStart(2, '0');
@@ -47,14 +47,14 @@ function money(cents: number): string {
 }
 
 /** Quantity in thousandths, up to 3 decimals, trailing zeros trimmed. */
-function quantity(milli: number): string {
+export function quantity(milli: number): string {
   const whole = Math.trunc(milli / 1000);
   const frac = String(Math.abs(milli % 1000)).padStart(3, '0').replace(/0+$/, '');
   return frac === '' ? String(whole) : `${String(whole)}.${frac}`;
 }
 
 /** Basis points as a percentage, e.g. 1850 -> "18.5". */
-function rate(bp: number): string {
+export function rate(bp: number): string {
   const whole = Math.trunc(bp / 100);
   const frac = String(bp % 100).padStart(2, '0').replace(/0+$/, '');
   return frac === '' ? String(whole) : `${String(whole)}.${frac}`;

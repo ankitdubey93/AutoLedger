@@ -301,6 +301,11 @@ export default function InvoicesPage() {
                               {settlementLabel(invoice.settlementStatus)}
                             </span>
                           )}
+                          {invoice.lastViewedAt !== null ? (
+                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Viewed</span>
+                          ) : invoice.lastSentAt !== null ? (
+                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Sent</span>
+                          ) : null}
                         </div>
                       </td>
                       <td className="p-3 text-right tabular-nums">{formatCents(invoice.totalCents)}</td>

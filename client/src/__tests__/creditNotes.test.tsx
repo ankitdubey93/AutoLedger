@@ -98,6 +98,8 @@ function invoice(overrides: Partial<Invoice> = {}): Invoice {
     depositApplications: [],
     salesOrderId: null,
     salesOrderNumber: null,
+    lastSentAt: null,
+    lastViewedAt: null,
     ...overrides,
   };
 }

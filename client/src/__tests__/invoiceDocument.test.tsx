@@ -63,6 +63,8 @@ const invoiceSettings: InvoiceSettings = {
   purchaseQuoteNextNumber: 1,
   defaultQuoteValidityDays: 30,
   defaultQuoteTerms: null,
+  remindersEnabled: false,
+  reminderOffsetsDays: [7, 14, 30],
   quoteAcceptanceRequiresCode: false,
   customerDepositAccountId: null,
   supplierPrepaymentAccountId: null,
@@ -146,6 +148,8 @@ function makeInvoice(overrides: Partial<Invoice> = {}): Invoice {
     depositApplications: [],
     salesOrderId: null,
     salesOrderNumber: null,
+    lastSentAt: null,
+    lastViewedAt: null,
     ...overrides,
   };
 }

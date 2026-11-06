@@ -5,6 +5,7 @@ import { CreditCard, Lock } from 'lucide-react';
 import {
   confirmStatementPayment,
   startStatementPayment,
+  type OnlinePaymentStatus,
   type StartedStatementPayment,
 } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
@@ -27,6 +28,38 @@ import type { PayPanelProps } from './PublicStatementPage';
  * `?payment_intent=…`, which is settled on mount.
  */
 
+/**
+ * What the panel needs from its page. The page owns which endpoint prices and
+ * settles (statement or invoice link): `start` asks the server to price and
+ * create the intent, `confirm` asks it to settle once Stripe reports back.
+ */
+export interface StripePayPanelProps {
+  selected: ReadonlyArray<{ documentId: string }>;
+  totalCents: number;
+  currency: string | null;
+  start: () => Promise<StartedStatementPayment>;
+  confirm: (intentId: string) => Promise<{ status: OnlinePaymentStatus }>;
+  /** Called after a successful payment so the page reloads what is open. */
+  onPaid: () => void;
+  /** Label of the button that discards the started intent. */
+  cancelLabel?: string;
+}
+
+/** The statement page's panel: closes over the statement token and its selection. */
+export function StatementStripePayPanel({ token, selected, totalCents, currency, onPaid }: PayPanelProps) {
+  const ids = selected.map((i) => i.documentId);
+  return (
+    <StripePayPanel
+      selected={selected}
+      totalCents={totalCents}
+      currency={currency}
+      onPaid={onPaid}
+      start={() => startStatementPayment(token, ids)}
+      confirm={(intentId) => confirmStatementPayment(token, intentId)}
+    />
+  );
+}
+
 const stripeByKey = new Map<string, Promise<Stripe | null>>();
 
 /** One Stripe.js instance per publishable key, for the page's lifetime. */
@@ -43,7 +76,15 @@ function selectionKey(ids: string[]): string {
   return [...ids].sort().join(',');
 }
 
-export default function StripePayPanel({ token, selected, totalCents, currency, onPaid }: PayPanelProps) {
+export default function StripePayPanel({
+  selected,
+  totalCents,
+  currency,
+  start,
+  confirm,
+  onPaid,
+  cancelLabel = 'Change selection',
+}: StripePayPanelProps) {
   const [started, setStarted] = useState<(StartedStatementPayment & { key: string }) | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -61,23 +102,20 @@ export default function StripePayPanel({ token, selected, totalCents, currency, 
     const intentId = params.get('payment_intent');
     if (intentId === null) return;
     window.history.replaceState(null, '', window.location.pathname);
-    confirmStatementPayment(token, intentId)
+    confirm(intentId)
       .then((res) => {
         if (res.status === 'RECORDED' || res.status === 'NEEDS_REVIEW') onPaid();
         else if (params.get('redirect_status') === 'failed') setError('The card was not authorised. Please try again.');
       })
       .catch(() => setError('We could not confirm the payment. If you were charged, the merchant will see it.'));
-  }, [token, onPaid]);
+  }, [confirm, onPaid]);
 
   async function begin() {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      const next = await startStatementPayment(
-        token,
-        selected.map((i) => i.documentId),
-      );
+      const next = await start();
       setStarted({ ...next, key });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not start the payment');
@@ -125,7 +163,8 @@ export default function StripePayPanel({ token, selected, totalCents, currency, 
           options={{ clientSecret: active.clientSecret, appearance: { theme: 'stripe' } }}
         >
           <CardForm
-            token={token}
+            confirm={confirm}
+            cancelLabel={cancelLabel}
             amountLabel={`${formatCents(active.amountCents)} ${active.currencyCode}`}
             onCancel={() => setStarted(null)}
             onError={setError}
@@ -146,7 +185,8 @@ export default function StripePayPanel({ token, selected, totalCents, currency, 
 }
 
 function CardForm(props: {
-  token: string;
+  confirm: StripePayPanelProps['confirm'];
+  cancelLabel: string;
   amountLabel: string;
   onCancel: () => void;
   onError: (message: string | null) => void;
@@ -172,7 +212,7 @@ function CardForm(props: {
       return;
     }
     try {
-      const settled = await confirmStatementPayment(props.token, result.paymentIntent.id);
+      const settled = await props.confirm(result.paymentIntent.id);
       props.onDone(
         settled.status === 'NEEDS_REVIEW'
           ? 'Payment received — the merchant will apply it to your account shortly.'
@@ -194,7 +234,7 @@ function CardForm(props: {
         {paying ? 'Paying…' : `Pay ${props.amountLabel}`}
       </button>
       <button type="button" className={secondaryButtonClass} disabled={paying} onClick={props.onCancel}>
-        Change selection
+        {props.cancelLabel}
       </button>
     </form>
   );
