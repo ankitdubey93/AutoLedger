@@ -334,6 +334,7 @@ That restructure also **un-dropped four topics**. `WITH RECURSIVE` returns as Le
 | A new placeholder surface (`QUOTE`), strictness differing per surface | 42 (`user-authored-templates-and-bearer-links.md`) | ✅ |
 | Exactly-once reminders: advisory lock + unique constraint, decision vs delivery | 48 (`exactly-once-reminders.md`) | ✅ |
 | Jurisdiction packs, per-tenant region gating, calendar date vs instant, `Intl` time zones | 49a (`jurisdiction-packs-and-org-calendar.md`) | ✅ |
+| Tax-inclusive arithmetic, closed catalogue with a DB CHECK, snapshot over foreign key | 49b (`jurisdiction-packs-and-org-calendar.md`) | ✅ |
 | Outbox attachments by reference, injected resolver, permanent vs retryable; second bearer-link type with a field-by-field public view | 48 (`transactional-outbox.md`, `user-authored-templates-and-bearer-links.md`) | ✅ |
 
 ### Testing & tooling

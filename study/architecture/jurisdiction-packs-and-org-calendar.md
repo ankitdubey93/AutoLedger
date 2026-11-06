@@ -85,6 +85,33 @@ A posting date is a business fact, "the 1st of July", and must not move when vie
 **Q: Why re-read the region from the database per request when it could be in the JWT?**
 Tokens are valid until they expire, so a claim in one can't be revoked. A region or permission change would be ignored for up to 15 minutes. The cost is one indexed query, which is cheap against a request that will run several anyway. Identity belongs in the token, while mutable authorization facts belong in the database.
 
+## Phase 49b: tax codes and tax-inclusive arithmetic
+
+**A closed catalogue instead of a table.** Twelve GST codes live in `config/taxPacks/au.ts`, with the same list in a database CHECK. A `tax_codes` table would invite per-tenant editing, and a BAS mapping someone edited by mistake misstates a tax return. The cost is that adding a code takes a migration, which is the review we want for a change in tax law.
+
+**Snapshot, not a foreign key.** A posted line stores `tax_code` and `tax_rate_bp`. If the rate changes, old documents must still show the rate they were issued at, so a live lookup would be wrong.
+
+**The server decides the rate.** The client sends a code and any rate it sends is ignored. Otherwise a crafted request could label a line "GST-free" and charge 10%.
+
+**Dividing by 11.** With a price `g` that includes tax at rate `r`:
+
+```
+net = g / (1 + r)
+tax = g - net = g * r / (1 + r)
+```
+
+In basis points with `r = 1000`, `tax = g * 1000 / 11000 = g / 11`. We compute tax with rounding, then derive net by subtraction, never by rounding both. Rounding each independently can make `net + tax` differ from `g` by a cent. With subtraction it can't, and the database's `total = subtotal + tax` CHECK holds.
+
+Example: $19.99 inclusive gives tax = 1999 / 11 = 181.7, rounded to 182, so net is 1817.
+
+**A mode is a property of the document, and must travel.** `unit_price_cents` stores what was typed, so 11000 means $110 net in one mode and $100 net in the other. Any path that copies lines without the mode silently overcharges by 10%. Quote revision, conversion, recurring runs and notes all carry it, and one test walks the whole chain.
+
+**Q: Why not store all prices net and convert at display?**
+Because the printed price would then have to be recomputed, and a rounded net can't always reproduce the gross. $19.99 inclusive is 1817 net, and 1817 × 1.1 is 1998.7, which rounds to $19.99 here but not for every price and quantity. A customer who was quoted $19.99 must be charged exactly that. Storing what was typed, with the mode, keeps the number the customer agreed to.
+
+**Q: How do you keep a calculation identical on client and server without sharing code?**
+A shared JSON fixture that both test suites run. The client's preview and the server's arithmetic are separate functions in separate packages, and the fixture fails whichever one drifts. Only the server's result is ever stored, so a drift would be a display bug and not a money bug, but it would still confuse a user.
+
 ## Follow-ups
 
 - "What about a tenant who operates in several zones?" We store one zone per organization, because a BAS is per entity. The user's own display zone would be a separate concern, and audit timestamps stay instants.

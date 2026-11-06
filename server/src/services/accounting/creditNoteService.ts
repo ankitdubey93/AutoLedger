@@ -1,3 +1,5 @@
+import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
@@ -76,9 +78,13 @@ export interface CreditNoteLineInput {
   unitPriceCents: number;
   revenueAccountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
 }
 
 export interface CreateCreditNoteInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   invoiceId: string;
   issueDate: string;
   reasonCode: NoteReasonCode;
@@ -126,6 +132,7 @@ interface CreditNoteRow {
   notes: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   base_subtotal_cents: string;
   base_tax_cents: string;
@@ -151,6 +158,7 @@ interface CreditNoteLineRow {
   revenue_account_code: string;
   revenue_account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
 }
@@ -171,7 +179,7 @@ const CREDIT_NOTE_SELECT = `SELECT n.id, n.credit_note_number, n.status, n.custo
                                    n.fx_rate::text AS fx_rate, n.reason_code, n.reason,
                                    n.customer_name_snapshot, n.customer_address_snapshot,
                                    n.customer_tax_number_snapshot, n.notes,
-                                   n.subtotal_cents, n.tax_cents, n.total_cents,
+                                   n.subtotal_cents, n.tax_cents, n.tax_mode, n.total_cents,
                                    n.base_subtotal_cents, n.base_tax_cents, n.base_total_cents,
                                    n.journal_entry_id, n.void_journal_entry_id, n.issued_at, n.voided_at,
                                    n.created_by, u.name AS created_by_name, n.created_at, n.updated_at
@@ -191,6 +199,7 @@ function toLine(row: CreditNoteLineRow): CreditNoteLine {
     revenueAccountCode: row.revenue_account_code,
     revenueAccountName: row.revenue_account_name,
     taxRateBp: row.tax_rate_bp,
+    taxCode: row.tax_code,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
   };
@@ -243,6 +252,7 @@ function toCreditNote(
     notes: row.notes,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     totalCents,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
     baseTaxCents: parseCents(row.base_tax_cents),
@@ -274,7 +284,7 @@ async function loadChildren(
   const { rows: lineRows } = await pool.query<CreditNoteLineRow>(
     `SELECT l.id, l.credit_note_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents
        FROM credit_note_lines l
        JOIN accounts a ON a.id = l.revenue_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -485,14 +495,14 @@ async function insertLines(
   await client.query(
     `INSERT INTO credit_note_lines
        (org_id, credit_note_id, line_number, description, quantity_milli, unit_price_cents,
-        revenue_account_id, tax_rate_bp, net_cents, tax_cents)
+        revenue_account_id, tax_rate_bp, net_cents, tax_cents, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents
+            v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.tax_code
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    revenue_account_id, tax_rate_bp, net_cents, tax_cents)`,
+                    revenue_account_id, tax_rate_bp, net_cents, tax_cents, tax_code)`,
     [
       orgId,
       noteId,
@@ -504,6 +514,7 @@ async function insertLines(
       totals.map((t) => t.input.taxRateBp),
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -562,7 +573,8 @@ export async function createCreditNote(
   createdBy: string,
   input: CreateCreditNoteInput,
 ): Promise<CreditNote> {
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'SALES', input, (l) => l.revenueAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const { subtotalCents, taxCents, totalCents } = totalsOf(totals);
 
   const client = await pool.connect();
@@ -587,8 +599,8 @@ export async function createCreditNote(
          (org_id, customer_id, invoice_id, reason_code, reason, issue_date, currency_code, fx_rate,
           customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot, notes,
           subtotal_cents, tax_cents, total_cents, base_subtotal_cents, base_tax_cents, base_total_cents,
-          created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+          created_by, tax_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
        RETURNING id`,
       [
         orgId,
@@ -610,6 +622,7 @@ export async function createCreditNote(
         baseTaxCents,
         baseSubtotalCents + baseTaxCents,
         createdBy,
+        prepared.taxMode,
       ],
     );
     const noteId = rows[0]?.id;
@@ -640,7 +653,8 @@ export async function updateCreditNote(
   id: string,
   input: UpdateCreditNoteInput,
 ): Promise<CreditNote> {
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'SALES', input, (l) => l.revenueAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const { subtotalCents, taxCents, totalCents } = totalsOf(totals);
 
   const client = await pool.connect();
@@ -681,7 +695,7 @@ export async function updateCreditNote(
       `UPDATE credit_notes
           SET reason_code = $1, reason = $2, issue_date = $3, notes = $4,
               subtotal_cents = $5, tax_cents = $6, total_cents = $7,
-              base_subtotal_cents = $8, base_tax_cents = $9, base_total_cents = $10
+              base_subtotal_cents = $8, base_tax_cents = $9, base_total_cents = $10, tax_mode = $13
         WHERE id = $11 AND org_id = $12`,
       [
         input.reasonCode,
@@ -696,6 +710,7 @@ export async function updateCreditNote(
         baseSubtotalCents + baseTaxCents,
         id,
         orgId,
+        prepared.taxMode,
       ],
     );
 
@@ -780,6 +795,7 @@ export async function issueCreditNote(
     await beginTransaction(client);
 
     const note = await lockNote(client, orgId, id);
+    await assertLinesCodedOnClient(client, orgId, { table: 'credit_note_lines', fk: 'credit_note_id' }, id);
     const status = note.status;
     if (!canTransitionNote(status, 'ISSUED')) {
       throw new ApiError(409, `A credit note that is ${status} cannot be issued`);

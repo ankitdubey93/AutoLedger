@@ -1,3 +1,4 @@
+import { auTaxCode } from '../../config/taxPacks/au.js';
 import { z } from 'zod';
 import { ACCOUNT_TYPES, BALANCE_SHEET_CLASSES, BANK_ACCOUNT_KINDS, CASH_FLOW_CATEGORIES } from '../../types/accounting.js';
 
@@ -36,6 +37,7 @@ export const updateAccountSchema = z
     parentId: z.uuid().nullable().optional(),
     bankAccountKind: z.enum(BANK_ACCOUNT_KINDS).nullable().optional(),
     cashFlowCategory: z.enum(CASH_FLOW_CATEGORIES).nullable().optional(),
+    defaultTaxCode: z.string().refine((v) => auTaxCode(v) !== undefined, { message: 'Unknown GST code' }).nullable().optional(),
     balanceSheetClass: z.enum(BALANCE_SHEET_CLASSES).nullable().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, {

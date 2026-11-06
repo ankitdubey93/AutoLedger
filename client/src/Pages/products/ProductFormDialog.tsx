@@ -1,3 +1,5 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect from '../../components/TaxCodeSelect';
 import { orgToday } from '../../utils/date';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
@@ -152,6 +154,11 @@ export default function ProductFormDialog({
   );
   const [salePrice, setSalePrice] = useState(item?.salePriceCents == null ? '' : formatCents(item.salePriceCents));
   const [saleTax, setSaleTax] = useState(item === undefined || item.saleTaxRateBp === 0 ? '' : formatRate(item.saleTaxRateBp));
+  const salesGst = useGst('SALES');
+  const purchaseGst = useGst('PURCHASES');
+  const [saleTaxCode, setSaleTaxCode] = useState(item?.saleTaxCode ?? '');
+  const [purchaseTaxCode, setPurchaseTaxCode] = useState(item?.purchaseTaxCode ?? '');
+  const gstDefaults = salesGst.isAustralian ? { saleTaxCode: saleTaxCode === '' ? null : saleTaxCode, purchaseTaxCode: purchaseTaxCode === '' ? null : purchaseTaxCode } : {};
   const [revenueAccountId, setRevenueAccountId] = useState(
     item?.revenueAccountId ?? (context === 'sale' && accounts.some((a) => a.id === initialAccountId && a.type === 'Revenue') ? initialAccountId : ''),
   );
@@ -272,7 +279,7 @@ export default function ProductFormDialog({
         if (stock.item.ledgerItemId === null) throw new Error('The stock item was created without a product');
         let product = (await getItem(stock.item.ledgerItemId)).item;
         // The stock form has no description field of its own for the product.
-        if (desc !== null) product = (await updateItem(product.id, { description: desc })).item;
+        if (desc !== null || salesGst.isAustralian) product = (await updateItem(product.id, { description: desc, ...gstDefaults })).item;
         return product;
       }
       const created = await createWithCodeRetry(effectiveCode.trim(), !codeTouched, (candidate) =>
@@ -287,6 +294,7 @@ export default function ProductFormDialog({
           expenseAccountId: orNull(expenseAccountId),
           saleTaxRateBp: values.saleRate,
           purchaseTaxRateBp: values.purchaseRate,
+          ...gstDefaults,
         }),
       );
       return created.item;
@@ -305,6 +313,7 @@ export default function ProductFormDialog({
         revenueAccountId: orNull(revenueAccountId),
         saleTaxRateBp: values.saleRate,
         purchaseTaxRateBp: values.purchaseRate,
+        ...gstDefaults,
         ...(alreadyTracked
           ? { assetAccountId: orNull(assetAccountId), cogsAccountId: orNull(cogsAccountId) }
           : converting
@@ -428,7 +437,11 @@ export default function ProductFormDialog({
           </h4>
           <div className="flex flex-wrap gap-3">
             <MoneyInput label="Purchase price" value={purchasePrice} onChange={setPurchasePrice} />
-            <RateInput label="Tax %" value={purchaseTax} onChange={setPurchaseTax} />
+            {purchaseGst.isAustralian ? (
+              <TaxCodeSelect gst={purchaseGst} value={purchaseTaxCode} onChange={setPurchaseTaxCode} label="GST code when purchasing" className={inputClass} />
+            ) : (
+              <RateInput label="Tax %" value={purchaseTax} onChange={setPurchaseTax} />
+            )}
             {!track && (
               <AccountSelect
                 label="Expense account"
@@ -447,7 +460,11 @@ export default function ProductFormDialog({
           </h4>
           <div className="flex flex-wrap gap-3">
             <MoneyInput label="Sale price" value={salePrice} onChange={setSalePrice} />
-            <RateInput label="Tax %" value={saleTax} onChange={setSaleTax} />
+            {salesGst.isAustralian ? (
+              <TaxCodeSelect gst={salesGst} value={saleTaxCode} onChange={setSaleTaxCode} label="GST code when selling" className={inputClass} />
+            ) : (
+              <RateInput label="Tax %" value={saleTax} onChange={setSaleTax} />
+            )}
             <AccountSelect
               label="Revenue account"
               value={revenueAccountId}

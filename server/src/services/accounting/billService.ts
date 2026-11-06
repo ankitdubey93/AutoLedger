@@ -1,3 +1,5 @@
+import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
@@ -94,6 +96,8 @@ export interface BillLineInput {
   unitPriceCents: number;
   expenseAccountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
   /** Phase 24 — which catalogue item this line was picked from, if any. Not
    * used to fill any other field here — the client already copied the
    * item's defaults into description/unitPriceCents/account/taxRateBp. */
@@ -106,6 +110,8 @@ export interface BillLineInput {
 }
 
 export interface CreateBillInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   vendorId: string;
   vendorReference: string;
   billDate: string;
@@ -176,6 +182,7 @@ interface BillRow {
   payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   fx_rate: string;
   base_subtotal_cents: string;
@@ -216,6 +223,7 @@ interface BillLineRow {
   expense_account_code: string;
   expense_account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
@@ -228,7 +236,7 @@ const BILL_SELECT = `SELECT b.id, b.vendor_reference, b.status, b.vendor_id, v.n
                              b.vendor_name_snapshot, b.vendor_address_snapshot,
                              b.vendor_tax_number_snapshot, b.notes, b.notes_template, b.vendor_reference_template,
                              b.payment_terms, b.payment_terms_code,
-                             b.subtotal_cents, b.tax_cents, b.total_cents,
+                             b.subtotal_cents, b.tax_cents, b.tax_mode, b.total_cents,
                              b.fx_rate::text AS fx_rate, b.base_subtotal_cents,
                              b.base_tax_cents, b.base_total_cents,
                              b.journal_entry_id, b.void_journal_entry_id,
@@ -261,6 +269,7 @@ function toLine(row: BillLineRow): BillLine {
     expenseAccountCode: row.expense_account_code,
     expenseAccountName: row.expense_account_name,
     taxRateBp: row.tax_rate_bp,
+    taxCode: row.tax_code,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
@@ -309,6 +318,7 @@ function toBill(row: BillRow, lines: BillLine[]): Bill {
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     totalCents,
     fxRate: row.fx_rate,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
@@ -352,7 +362,7 @@ async function loadLines(orgId: string, billIds: string[]): Promise<Map<string, 
     `SELECT l.id, l.bill_id, l.line_number, l.description, l.description_template,
             l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
             l.order_line_id
        FROM bill_lines l
        JOIN accounts a ON a.id = l.expense_account_id AND a.org_id = l.org_id
@@ -576,17 +586,17 @@ async function insertBillLines(
     `INSERT INTO bill_lines
        (org_id, bill_id, line_number, description, quantity_milli, unit_price_cents,
         expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-        description_template, order_line_id)
+        description_template, order_line_id, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
             v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
-            v.description_template, v.order_line_id
+            v.description_template, v.order_line_id, v.tax_code
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
               $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[],
-              $14::uuid[]
+              $14::uuid[], $15::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
                     expense_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-                    description_template, order_line_id)`,
+                    description_template, order_line_id, tax_code)`,
     [
       orgId,
       billId,
@@ -602,6 +612,7 @@ async function insertBillLines(
       totals.map((t) => t.input.stockLocationId ?? null),
       totals.map((_, i) => descriptionTemplates[i] ?? null),
       totals.map((t) => t.input.orderLineId ?? null),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -699,6 +710,8 @@ interface InsertBillHeader {
   depositForOrderId?: string | undefined;
   /** Phase 43b — already validated by `assertOrderReferenceOnClient`. */
   purchaseOrderId?: string | null | undefined;
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
 }
 
 /**
@@ -791,9 +804,9 @@ async function insertBillOnClient(
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by,
         notes_template, vendor_reference_template, source_quote_id, source_quote_direction,
-        kind, deposit_for_order_id, purchase_order_id)
+        kind, deposit_for_order_id, purchase_order_id, tax_mode)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,
-             $23, $24, $25, $26, $27)
+             $23, $24, $25, $26, $27, $28)
      RETURNING id`,
     [
       orgId,
@@ -823,6 +836,7 @@ async function insertBillOnClient(
       header.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
       header.depositForOrderId ?? null,
       header.purchaseOrderId ?? null,
+      header.taxMode ?? 'EXCLUSIVE',
     ],
   );
   const billId = billRows[0]?.id;
@@ -878,7 +892,11 @@ export async function createBillOnClient(
   options: CreateBillOptions = {},
 ): Promise<string> {
   validateBillInput(input);
-  const totals = computeLineTotals(input.lines);
+  const prepared =
+    options.depositForOrderId === undefined
+      ? await prepareTaxOnClient(client, orgId, 'PURCHASES', input, (l) => l.expenseAccountId)
+      : { lines: input.lines, taxMode: 'EXCLUSIVE' as const };
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
 
   const resolvedDue = await resolveBillDueDate(client, orgId, input);
   if (input.purchaseOrderId !== undefined && input.purchaseOrderId !== null) {
@@ -901,6 +919,7 @@ export async function createBillOnClient(
       sourceQuoteId: options.sourceQuoteId,
       depositForOrderId: options.depositForOrderId,
       purchaseOrderId: input.purchaseOrderId,
+      taxMode: prepared.taxMode,
     },
     totals,
     options.equityAccountId ?? null,
@@ -983,6 +1002,8 @@ export async function createBill(
  * are already final cents, not a quantity*price computation.
  */
 export interface CapturedBillLineInput {
+  /** Phase 49b — set by postingService for an Australian organization. */
+  taxCode?: string | null | undefined;
   description: string;
   netCents: number;
   taxCents: number;
@@ -1014,6 +1035,7 @@ export async function createCapturedBillOnClient(
       taxRateBp: line.netCents === 0 ? 0 : Math.min(10000, Number(scaleCents(cents(line.taxCents), 10000, line.netCents))),
       // A captured (Capture) line never comes from the item catalogue.
       itemId: null,
+      taxCode: line.taxCode ?? null,
     },
     netCents: line.netCents,
     taxCents: line.taxCents,
@@ -1059,7 +1081,8 @@ export async function createCapturedBillOnClient(
 /** A draft/in-review edit replaces the whole document — the document is small and the client carries no line identity to diff against. */
 export async function updateBill(orgId: string, id: string, input: UpdateBillInput, userId: string): Promise<Bill> {
   validateBillInput(input);
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'PURCHASES', input, (l) => l.expenseAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
@@ -1126,7 +1149,7 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
               vendor_tax_number_snapshot = $8, notes = $9, payment_terms = $10, payment_terms_code = $11,
               subtotal_cents = $12, tax_cents = $13, total_cents = $14,
               fx_rate = $15, base_subtotal_cents = $16, base_tax_cents = $17, base_total_cents = $18,
-              notes_template = NULL, vendor_reference_template = NULL
+              notes_template = NULL, vendor_reference_template = NULL, tax_mode = $21
         WHERE id = $19 AND org_id = $20`,
       [
         input.vendorId,
@@ -1149,6 +1172,7 @@ export async function updateBill(orgId: string, id: string, input: UpdateBillInp
         baseTotalCents,
         id,
         orgId,
+        prepared.taxMode,
       ],
     );
 
@@ -1324,6 +1348,7 @@ export async function approveBillOnClient(
   );
   const billRow = billRows[0];
   if (billRow === undefined) throw new ApiError(404, 'Bill not found');
+  await assertLinesCodedOnClient(client, orgId, { table: 'bill_lines', fk: 'bill_id', parent: 'bills' }, id);
   if (!isBillStatus(billRow.status)) {
     throw new Error(`Unknown bill status "${billRow.status}" on bill ${id}`);
   }

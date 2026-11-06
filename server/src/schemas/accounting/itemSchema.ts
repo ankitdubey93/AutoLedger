@@ -23,6 +23,9 @@ const createItemShape = z.object({
   expenseAccountId: z.uuid().nullable().default(null),
   saleTaxRateBp: z.int().min(0).max(10_000).default(0),
   purchaseTaxRateBp: z.int().min(0).max(10_000).default(0),
+  // Phase 49b — default GST codes, for an Australian organization.
+  saleTaxCode: z.enum(['S_GST', 'S_EXPORT', 'S_FREE', 'S_INPUT_TAXED', 'S_EXCLUDED']).nullable().default(null),
+  purchaseTaxCode: z.enum(['P_GST', 'P_CAP_GST', 'P_FREE', 'P_CAP_FREE', 'P_INPUT_TAXED', 'P_PRIVATE', 'P_EXCLUDED']).nullable().default(null),
 });
 
 export const createItemSchema = createItemShape.transform((value, ctx) => {
@@ -53,6 +56,8 @@ export const updateItemSchema = z
     cogsAccountId: z.uuid().nullable().optional(),
     saleTaxRateBp: z.int().min(0).max(10_000).optional(),
     purchaseTaxRateBp: z.int().min(0).max(10_000).optional(),
+    saleTaxCode: z.enum(['S_GST', 'S_EXPORT', 'S_FREE', 'S_INPUT_TAXED', 'S_EXCLUDED']).nullable().optional(),
+    purchaseTaxCode: z.enum(['P_GST', 'P_CAP_GST', 'P_FREE', 'P_CAP_FREE', 'P_INPUT_TAXED', 'P_PRIVATE', 'P_EXCLUDED']).nullable().optional(),
     isActive: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, { message: 'No fields to update' });

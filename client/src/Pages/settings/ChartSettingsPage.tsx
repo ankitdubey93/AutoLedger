@@ -1,3 +1,5 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect from '../../components/TaxCodeSelect';
 import { useEffect, useMemo, useState } from 'react';
 import { Folder, Landmark, ListTree } from 'lucide-react';
 import {
@@ -50,6 +52,7 @@ function ChartRow({
   onToggleActive,
   onToggleBank,
   onSetCashFlow,
+  onSetDefaultTax,
   onSetBalanceSheetClass,
 }: {
   node: AccountNode;
@@ -58,6 +61,7 @@ function ChartRow({
   onToggleActive: (node: AccountNode) => Promise<void>;
   onToggleBank: (node: AccountNode) => Promise<void>;
   onSetCashFlow: (node: AccountNode, value: '' | CashFlowCategory) => Promise<void>;
+  onSetDefaultTax: (node: AccountNode, code: string) => Promise<void>;
   onSetBalanceSheetClass: (node: AccountNode, value: '' | BalanceSheetClass) => Promise<void>;
 }) {
   const Icon = node.isPostable ? Landmark : Folder;
@@ -138,6 +142,20 @@ function ChartRow({
       await onSetBalanceSheetClass(node, value);
     } catch (err) {
       setRowError(err instanceof Error ? err.message : 'Could not update the account');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const gst = useGst(node.type === 'Revenue' ? 'SALES' : 'PURCHASES');
+
+  async function handleDefaultTaxChange(code: string) {
+    setBusy(true);
+    setRowError(null);
+    try {
+      await onSetDefaultTax(node, code);
+    } catch (err) {
+      setRowError(err instanceof Error ? err.message : 'Could not save the GST code');
     } finally {
       setBusy(false);
     }
@@ -296,6 +314,16 @@ function ChartRow({
             ))}
           </select>
         )}
+
+        {gst.isAustralian && node.isPostable && (
+          <TaxCodeSelect
+            gst={gst}
+            value={node.defaultTaxCode ?? ''}
+            onChange={(code) => void handleDefaultTaxChange(code)}
+            label={`Default GST code ${node.code}`}
+            className="bg-[var(--bg)] border border-[var(--border)] rounded-md px-2 py-1 text-xs text-[var(--text)] shrink-0"
+          />
+        )}
       </li>
 
       {rowError !== null && (
@@ -313,6 +341,7 @@ function ChartRow({
           onToggleActive={onToggleActive}
           onToggleBank={onToggleBank}
           onSetCashFlow={onSetCashFlow}
+            onSetDefaultTax={onSetDefaultTax}
           onSetBalanceSheetClass={onSetBalanceSheetClass}
         />
       ))}
@@ -363,6 +392,11 @@ export default function ChartSettingsPage() {
     const kind: BankAccountKind | null =
       node.bankAccountKind !== null ? null : node.type === 'Asset' ? 'BANK' : 'CREDIT_CARD';
     await updateAccount(node.id, { bankAccountKind: kind });
+    setReloadToken((t) => t + 1);
+  }
+
+  async function handleSetDefaultTax(node: AccountNode, code: string) {
+    await updateAccount(node.id, { defaultTaxCode: code === '' ? null : code });
     setReloadToken((t) => t + 1);
   }
 
@@ -440,6 +474,7 @@ export default function ChartSettingsPage() {
                       onToggleActive={handleToggleActive}
                       onToggleBank={handleToggleBank}
                       onSetCashFlow={handleSetCashFlow}
+              onSetDefaultTax={handleSetDefaultTax}
                       onSetBalanceSheetClass={handleSetBalanceSheetClass}
                     />
                   ))}

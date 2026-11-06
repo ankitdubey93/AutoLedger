@@ -550,6 +550,8 @@ export interface Account {
   parentId: string | null;
   isPostable: boolean;
   isActive: boolean;
+  /** Phase 49b: the default GST code for lines on this account. */
+  defaultTaxCode?: string | null;
   description: string | null;
   /** Phase 44 — null unless the account is a bank (Asset) or credit card (Liability) account. */
   bankAccountKind: BankAccountKind | null;
@@ -701,6 +703,7 @@ export interface UpdateAccountInput {
   bankAccountKind?: BankAccountKind | null;
   /** Phase 45. */
   cashFlowCategory?: CashFlowCategory | null;
+  defaultTaxCode?: string | null;
   /** Phase 47. */
   balanceSheetClass?: BalanceSheetClass | null;
 }
@@ -1125,6 +1128,20 @@ export async function completeLedgerOnboarding(input: OnboardingInput): Promise<
 }
 
 /** PATCH /settings — refused with 409 until onboarding has completed once. */
+export interface TaxCode {
+  code: string;
+  label: string;
+  direction: 'SALES' | 'PURCHASES';
+  rateBp: number;
+  reported: boolean;
+}
+
+/** GET /tax-codes — the closed catalogue, for an Australian organization. */
+export async function getTaxCodes(): Promise<TaxCode[]> {
+  const body = await apiFetch<{ success: boolean; codes: TaxCode[] }>('/tax-codes');
+  return body.codes;
+}
+
 export async function activateAustralia(input: { gst: GstSettings; timezone: string }): Promise<LedgerSettings> {
   const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings/region/australia', {
     method: 'POST',
@@ -1544,6 +1561,9 @@ export interface Item {
   cogsAccountId: string | null;
   saleTaxRateBp: number;
   purchaseTaxRateBp: number;
+  /** Phase 49b: default GST codes, for an Australian organization. */
+  saleTaxCode?: string | null;
+  purchaseTaxCode?: string | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1580,6 +1600,8 @@ export function createItem(body: {
   revenueAccountId: string | null;
   expenseAccountId: string | null;
   saleTaxRateBp: number;
+  saleTaxCode?: string | null;
+  purchaseTaxCode?: string | null;
   purchaseTaxRateBp: number;
 }): Promise<{ success: boolean; item: Item }> {
   return apiFetch('/items', { method: 'POST', body: JSON.stringify(body) });
@@ -1599,6 +1621,8 @@ export function updateItem(
     assetAccountId: string | null;
     cogsAccountId: string | null;
     saleTaxRateBp: number;
+    saleTaxCode?: string | null;
+    purchaseTaxCode?: string | null;
     purchaseTaxRateBp: number;
     isActive: boolean;
   }>,
@@ -1619,6 +1643,8 @@ export interface InvoiceLine {
   revenueAccountCode: string;
   revenueAccountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
@@ -1670,6 +1696,7 @@ export interface Invoice {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency invoice. */
   fxRate: string;
@@ -1770,6 +1797,7 @@ export interface InvoiceLineInput {
   unitPriceCents: number;
   revenueAccountId: string;
   taxRateBp: number;
+  taxCode?: string | null;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
@@ -1788,6 +1816,7 @@ export interface InvoiceInput {
   notes: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   lines: InvoiceLineInput[];
   /** Phase 43b — vault documents to link to the invoice in the same transaction. */
   attachmentDocumentIds?: string[];
@@ -2556,6 +2585,8 @@ export interface BillLine {
   expenseAccountCode: string;
   expenseAccountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
@@ -2590,6 +2621,7 @@ export interface Bill {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency bill. */
   fxRate: string;
@@ -2684,6 +2716,7 @@ export interface BillLineInput {
   unitPriceCents: number;
   expenseAccountId: string;
   taxRateBp: number;
+  taxCode?: string | null;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
   itemId: string | null;
   /** Phase 32 — where an INVENTORY line moves stock; null = the default location. */
@@ -2703,6 +2736,7 @@ export interface BillInput {
   notes: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   lines: BillLineInput[];
   /** Phase 43b — vault documents to link to the bill in the same transaction. */
   attachmentDocumentIds?: string[];
@@ -5308,6 +5342,8 @@ export interface CreditNoteLine {
   revenueAccountCode: string;
   revenueAccountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
 }
@@ -5343,6 +5379,7 @@ export interface CreditNote {
   notes: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   baseSubtotalCents: number;
   baseTaxCents: number;
@@ -5372,6 +5409,8 @@ export interface DebitNoteLine {
   expenseAccountCode: string;
   expenseAccountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
 }
@@ -5408,6 +5447,7 @@ export interface DebitNote {
   notes: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   baseSubtotalCents: number;
   baseTaxCents: number;
@@ -5460,7 +5500,8 @@ export interface CreditNoteInput {
   reasonCode: NoteReasonCode;
   reason: string | null;
   notes: string | null;
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; revenueAccountId: string; taxRateBp: number }[];
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; revenueAccountId: string; taxRateBp: number; taxCode?: string | null }[];
 }
 
 export interface DebitNoteInput {
@@ -5470,7 +5511,8 @@ export interface DebitNoteInput {
   reason: string | null;
   vendorCreditReference: string | null;
   notes: string | null;
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; expenseAccountId: string; taxRateBp: number }[];
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; expenseAccountId: string; taxRateBp: number; taxCode?: string | null }[];
 }
 
 /** GET /credit-notes */
@@ -6447,6 +6489,8 @@ export interface QuoteLine {
   accountCode: string;
   accountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
   itemId: string | null;
@@ -6513,6 +6557,7 @@ export interface Quote extends QuoteSummary {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   /** Indicative only — never frozen; the invoice/bill uses the rate of its own date. */
   indicativeFxRate: string | null;
   indicativeBaseTotalCents: number | null;
@@ -6551,12 +6596,14 @@ export interface QuoteInput {
   paymentTermsCode: string | null;
   /** Phase 42 — basis points 1–10000; null or omitted = no deposit. */
   depositPercentBp?: number | null;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   lines: {
     description: string;
     quantityMilli: number;
     unitPriceCents: number;
     accountId: string;
     taxRateBp: number;
+    taxCode?: string | null;
     itemId: string | null;
   }[];
 }
@@ -7000,6 +7047,8 @@ export interface OrderLine {
   accountCode: string;
   accountName: string;
   taxRateBp: number;
+  /** Phase 49b: null for a GENERIC organization. */
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
   itemId: string | null;
@@ -7033,6 +7082,7 @@ export interface Order extends OrderSummary {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   sourceQuote: SourceQuoteRef | null;
   confirmedAt: string | null;
   closedAt: string | null;
@@ -7055,12 +7105,14 @@ export interface OrderInput {
   terms: string | null;
   paymentTerms: string | null;
   paymentTermsCode: string | null;
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   lines: {
     description: string;
     quantityMilli: number;
     unitPriceCents: number;
     accountId: string;
     taxRateBp: number;
+    taxCode?: string | null;
     itemId: string | null;
   }[];
 }

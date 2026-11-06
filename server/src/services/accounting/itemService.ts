@@ -38,7 +38,7 @@ function pgErrorCode(err: unknown): string | undefined {
 
 const ITEM_COLUMNS = `id, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
                        revenue_account_id, expense_account_id, asset_account_id, cogs_account_id,
-                       sale_tax_rate_bp, purchase_tax_rate_bp, is_active, created_at, updated_at`;
+                       sale_tax_rate_bp, purchase_tax_rate_bp, sale_tax_code, purchase_tax_code, is_active, created_at, updated_at`;
 
 interface ItemRow {
   id: string;
@@ -55,6 +55,8 @@ interface ItemRow {
   cogs_account_id: string | null;
   sale_tax_rate_bp: number;
   purchase_tax_rate_bp: number;
+  sale_tax_code: string | null;
+  purchase_tax_code: string | null;
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
@@ -104,6 +106,8 @@ function toItem(row: ItemRow): Item {
     cogsAccountId: row.cogs_account_id,
     saleTaxRateBp: row.sale_tax_rate_bp,
     purchaseTaxRateBp: row.purchase_tax_rate_bp,
+    saleTaxCode: row.sale_tax_code,
+    purchaseTaxCode: row.purchase_tax_code,
     isActive: row.is_active,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -126,6 +130,8 @@ export interface CreateItemInput {
   expenseAccountId: string | null;
   saleTaxRateBp: number;
   purchaseTaxRateBp: number;
+  saleTaxCode?: string | null | undefined;
+  purchaseTaxCode?: string | null | undefined;
 }
 
 export interface UpdateItemInput {
@@ -139,6 +145,8 @@ export interface UpdateItemInput {
   cogsAccountId?: string | null | undefined;
   saleTaxRateBp?: number | undefined;
   purchaseTaxRateBp?: number | undefined;
+  saleTaxCode?: string | null | undefined;
+  purchaseTaxCode?: string | null | undefined;
   isActive?: boolean | undefined;
 }
 
@@ -227,8 +235,8 @@ export async function createItemOnClient(
   const { rows } = await client.query<ItemRow>(
     `INSERT INTO items
        (org_id, created_by, code, name, description, kind, item_type, sale_price_cents, purchase_price_cents,
-        revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        revenue_account_id, expense_account_id, sale_tax_rate_bp, purchase_tax_rate_bp, sale_tax_code, purchase_tax_code)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
      RETURNING ${ITEM_COLUMNS}`,
     [
       orgId,
@@ -244,6 +252,8 @@ export async function createItemOnClient(
       input.expenseAccountId,
       input.saleTaxRateBp,
       input.purchaseTaxRateBp,
+      input.saleTaxCode ?? null,
+      input.purchaseTaxCode ?? null,
     ],
   );
   const row = rows[0];
@@ -354,6 +364,8 @@ export async function updateItem(orgId: string, userId: string, id: string, inpu
     cogsAccountId: 'cogs_account_id',
     saleTaxRateBp: 'sale_tax_rate_bp',
     purchaseTaxRateBp: 'purchase_tax_rate_bp',
+    saleTaxCode: 'sale_tax_code',
+    purchaseTaxCode: 'purchase_tax_code',
     isActive: 'is_active',
   } as const;
 

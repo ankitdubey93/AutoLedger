@@ -205,6 +205,17 @@ function buildColumns(side: DocSide): readonly ImportColumnDef[] {
       example: '10',
     }),
     col({
+      key: 'taxCode',
+      header: 'TaxCode',
+      label: 'GST code',
+      required: false,
+      type: 'text',
+      maxLength: 20,
+      synonyms: ['tax code', 'gst code'],
+      note: 'Australian organizations only: a code such as S_GST or P_FREE. Blank: the default for the product, account or organization.',
+      example: '',
+    }),
+    col({
       key: 'location',
       header: 'Location',
       label: 'Stock location',

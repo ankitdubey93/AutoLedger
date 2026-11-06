@@ -1,3 +1,5 @@
+import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
@@ -77,9 +79,13 @@ export interface DebitNoteLineInput {
   unitPriceCents: number;
   expenseAccountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
 }
 
 export interface CreateDebitNoteInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   billId: string;
   issueDate: string;
   reasonCode: NoteReasonCode;
@@ -130,6 +136,7 @@ interface DebitNoteRow {
   notes: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   base_subtotal_cents: string;
   base_tax_cents: string;
@@ -155,6 +162,7 @@ interface DebitNoteLineRow {
   expense_account_code: string;
   expense_account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
 }
@@ -175,7 +183,7 @@ const DEBIT_NOTE_SELECT = `SELECT n.id, n.debit_note_number, n.status, n.vendor_
                                    n.fx_rate::text AS fx_rate, n.reason_code, n.reason,
                                    n.vendor_name_snapshot, n.vendor_address_snapshot,
                                    n.vendor_tax_number_snapshot, n.notes,
-                                   n.subtotal_cents, n.tax_cents, n.total_cents,
+                                   n.subtotal_cents, n.tax_cents, n.tax_mode, n.total_cents,
                                    n.base_subtotal_cents, n.base_tax_cents, n.base_total_cents,
                                    n.journal_entry_id, n.void_journal_entry_id, n.issued_at, n.voided_at,
                                    n.created_by, u.name AS created_by_name, n.created_at, n.updated_at
@@ -195,6 +203,7 @@ function toLine(row: DebitNoteLineRow): DebitNoteLine {
     expenseAccountCode: row.expense_account_code,
     expenseAccountName: row.expense_account_name,
     taxRateBp: row.tax_rate_bp,
+    taxCode: row.tax_code,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
   };
@@ -248,6 +257,7 @@ function toDebitNote(
     notes: row.notes,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     totalCents,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
     baseTaxCents: parseCents(row.base_tax_cents),
@@ -279,7 +289,7 @@ async function loadChildren(
   const { rows: lineRows } = await pool.query<DebitNoteLineRow>(
     `SELECT l.id, l.debit_note_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.expense_account_id, a.code AS expense_account_code, a.name AS expense_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents
        FROM debit_note_lines l
        JOIN accounts a ON a.id = l.expense_account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1
@@ -491,14 +501,14 @@ async function insertLines(
   await client.query(
     `INSERT INTO debit_note_lines
        (org_id, debit_note_id, line_number, description, quantity_milli, unit_price_cents,
-        expense_account_id, tax_rate_bp, net_cents, tax_cents)
+        expense_account_id, tax_rate_bp, net_cents, tax_cents, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents
+            v.expense_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.tax_code
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
-              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[]
+              $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
-                    expense_account_id, tax_rate_bp, net_cents, tax_cents)`,
+                    expense_account_id, tax_rate_bp, net_cents, tax_cents, tax_code)`,
     [
       orgId,
       noteId,
@@ -510,6 +520,7 @@ async function insertLines(
       totals.map((t) => t.input.taxRateBp),
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -582,7 +593,8 @@ export async function createDebitNote(
   createdBy: string,
   input: CreateDebitNoteInput,
 ): Promise<DebitNote> {
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'PURCHASES', input, (l) => l.expenseAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const { subtotalCents, taxCents, totalCents } = totalsOf(totals);
 
   const client = await pool.connect();
@@ -608,8 +620,8 @@ export async function createDebitNote(
          (org_id, vendor_id, bill_id, reason_code, reason, vendor_credit_reference, issue_date, currency_code, fx_rate,
           vendor_name_snapshot, vendor_address_snapshot, vendor_tax_number_snapshot, notes,
           subtotal_cents, tax_cents, total_cents, base_subtotal_cents, base_tax_cents, base_total_cents,
-          created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+          created_by, tax_mode)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
        RETURNING id`,
       [
         orgId,
@@ -632,6 +644,7 @@ export async function createDebitNote(
         baseTaxCents,
         baseSubtotalCents + baseTaxCents,
         createdBy,
+        prepared.taxMode,
       ],
     );
     const noteId = rows[0]?.id;
@@ -662,7 +675,8 @@ export async function updateDebitNote(
   id: string,
   input: UpdateDebitNoteInput,
 ): Promise<DebitNote> {
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'PURCHASES', input, (l) => l.expenseAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const { subtotalCents, taxCents, totalCents } = totalsOf(totals);
 
   const client = await pool.connect();
@@ -705,7 +719,7 @@ export async function updateDebitNote(
           SET reason_code = $1, reason = $2, issue_date = $3, notes = $4,
               subtotal_cents = $5, tax_cents = $6, total_cents = $7,
               base_subtotal_cents = $8, base_tax_cents = $9, base_total_cents = $10,
-              vendor_credit_reference = $13
+              vendor_credit_reference = $13, tax_mode = $14
         WHERE id = $11 AND org_id = $12`,
       [
         input.reasonCode,
@@ -721,6 +735,7 @@ export async function updateDebitNote(
         id,
         orgId,
         input.vendorCreditReference,
+        prepared.taxMode,
       ],
     );
 
@@ -805,6 +820,7 @@ export async function issueDebitNote(
     await beginTransaction(client);
 
     const note = await lockNote(client, orgId, id);
+    await assertLinesCodedOnClient(client, orgId, { table: 'debit_note_lines', fk: 'debit_note_id' }, id);
     const status = note.status;
     if (!canTransitionNote(status, 'ISSUED')) {
       throw new ApiError(409, `A debit note that is ${status} cannot be issued`);

@@ -74,6 +74,8 @@ export interface Account {
   bankAccountKind: BankAccountKind | null;
   /** Phase 45 — explicit cash-flow override; null = derived (balance-sheet accounts only). */
   cashFlowCategory: CashFlowCategory | null;
+  /** Phase 49b — the default GST code for lines on this account. */
+  defaultTaxCode: string | null;
   /** Phase 47 — explicit current/non-current override; null = derived (Asset/Liability only). */
   balanceSheetClass: BalanceSheetClass | null;
   createdAt: string;
@@ -376,6 +378,8 @@ export interface InvoiceLine {
   revenueAccountName: string;
   /** Basis points — 1850 means 18.5%. */
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
@@ -406,6 +410,8 @@ export interface Invoice {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency invoice. */
   fxRate: string;
@@ -528,6 +534,8 @@ export interface Item {
   assetAccountId: string | null;
   cogsAccountId: string | null;
   saleTaxRateBp: number;
+  saleTaxCode: string | null;
+  purchaseTaxCode: string | null;
   purchaseTaxRateBp: number;
   isActive: boolean;
   createdAt: string;
@@ -592,6 +600,8 @@ export interface BillLine {
   expenseAccountName: string;
   /** Basis points — 1850 means 18.5%. */
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
   /** Phase 24 — which item catalogue entry this line was picked from, if any. */
@@ -624,6 +634,8 @@ export interface Bill {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   /** Phase 8. NUMERIC(18,8) as a string. '1.00000000' for a base-currency bill. */
   fxRate: string;
@@ -810,6 +822,8 @@ export interface CreditNoteLine {
   revenueAccountName: string;
   /** Basis points — 1850 means 18.5%. */
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
 }
@@ -846,6 +860,8 @@ export interface CreditNote {
   notes: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   baseSubtotalCents: number;
   baseTaxCents: number;
@@ -876,6 +892,8 @@ export interface DebitNoteLine {
   expenseAccountCode: string;
   expenseAccountName: string;
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
 }
@@ -912,6 +930,8 @@ export interface DebitNote {
   notes: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   totalCents: number;
   baseSubtotalCents: number;
   baseTaxCents: number;
@@ -1990,6 +2010,8 @@ export interface QuoteLine {
   accountCode: string;
   accountName: string;
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
   itemId: string | null;
@@ -2074,6 +2096,8 @@ export interface Quote extends QuoteSummary {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   /** Indicative only — NUMERIC(18,8) as a string; null when no rate existed on the quote date. */
   indicativeFxRate: string | null;
   indicativeBaseTotalCents: number | null;
@@ -2179,6 +2203,8 @@ export interface OrderLine {
   accountCode: string;
   accountName: string;
   taxRateBp: number;
+  /** Phase 49b: the GST code; null for a GENERIC organization. */
+  taxCode: string | null;
   netCents: number;
   taxCents: number;
   itemId: string | null;
@@ -2212,6 +2238,8 @@ export interface Order extends OrderSummary {
   paymentTermsCode: string | null;
   subtotalCents: number;
   taxCents: number;
+  /** Phase 49b: whether line prices include tax. */
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   sourceQuote: SourceQuoteRef | null;
   confirmedAt: string | null;
   closedAt: string | null;

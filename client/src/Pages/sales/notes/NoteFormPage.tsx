@@ -1,3 +1,6 @@
+import { useGst } from '../../../context/useGst';
+import TaxCodeSelect, { TaxModeSelect } from '../../../components/TaxCodeSelect';
+import { lineAmounts } from '../../../utils/lineTax';
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
@@ -39,6 +42,8 @@ interface DraftLine {
   unitPrice: string;
   accountId: string;
   taxRate: string;
+  /** Phase 49b: '' means the default. */
+  taxCode: string;
 }
 
 const inputClass =
@@ -49,16 +54,10 @@ function today(): string {
   return `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-function previewNet(unitPriceCents: number, quantityMilli: number): number {
-  return Math.round((unitPriceCents * quantityMilli) / 1000);
-}
-
-function previewTax(netCents: number, taxRateBp: number): number {
-  return Math.round((netCents * taxRateBp) / 10000);
-}
-
 export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
   const navigate = useNavigate();
+  const gst = useGst(config.kind === 'CREDIT_NOTE' ? 'SALES' : 'PURCHASES');
+  const [taxMode, setTaxMode] = useState<'EXCLUSIVE' | 'INCLUSIVE'>('EXCLUSIVE');
   const { noteId } = useParams<{ noteId?: string }>();
   const [params] = useSearchParams();
   const originalIdParam = params.get(config.originalParam);
@@ -102,6 +101,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
       setOriginal(originalView);
       if (note !== null) {
         setExisting(note);
+        setTaxMode(note.taxMode);
         setIssueDate(note.issueDate);
         setReasonCode(note.reasonCode);
         setReason(note.reason ?? '');
@@ -114,9 +114,12 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
             unitPrice: formatCents(l.unitPriceCents),
             accountId: l.accountId,
             taxRate: formatRate(l.taxRateBp),
+            taxCode: l.taxCode ?? '',
           })),
         );
       } else {
+        // The copied prices keep their meaning only in the original's mode.
+        setTaxMode(originalView.taxMode);
         setIssueDate(originalView.date > today() ? originalView.date : today());
         setLines(
           originalView.lines.map((l) => ({
@@ -125,6 +128,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
             unitPrice: formatCents(l.unitPriceCents),
             accountId: returnsAccount?.id ?? l.accountId,
             taxRate: formatRate(l.taxRateBp),
+            taxCode: l.taxCode ?? '',
           })),
         );
       }
@@ -142,13 +146,12 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
       lines.map((line) => {
         const quantityMilli = parseQuantityInput(line.quantity);
         const unitPriceCents = parseCentsInput(line.unitPrice);
-        const taxRateBp = parseRateInput(line.taxRate === '' ? '0' : line.taxRate);
+        const taxRateBp = gst.isAustralian ? gst.rateOf(line.taxCode) : parseRateInput(line.taxRate === '' ? '0' : line.taxRate);
         const valid = quantityMilli !== null && quantityMilli > 0 && unitPriceCents !== null && taxRateBp !== null;
-        const netCents = valid ? previewNet(unitPriceCents, quantityMilli) : 0;
-        const taxCents = valid ? previewTax(netCents, taxRateBp) : 0;
+        const { netCents, taxCents } = valid ? lineAmounts(unitPriceCents, quantityMilli, taxRateBp, taxMode) : { netCents: 0, taxCents: 0 };
         return { line, quantityMilli, unitPriceCents, taxRateBp, valid, netCents, taxCents };
       }),
-    [lines],
+    [lines, gst, taxMode],
   );
   const subtotal = parsed.reduce((sum, p) => sum + p.netCents, 0);
   const tax = parsed.reduce((sum, p) => sum + p.taxCents, 0);
@@ -177,12 +180,14 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
       vendorCreditReference:
         config.hasVendorCreditReference && vendorCreditReference.trim() !== '' ? vendorCreditReference.trim() : null,
       notes: notes.trim() === '' ? null : notes.trim(),
+      ...(gst.isAustralian ? { taxMode } : {}),
       lines: parsed.map((p) => ({
         description: p.line.description.trim(),
         quantityMilli: p.quantityMilli ?? 0,
         unitPriceCents: p.unitPriceCents ?? 0,
         accountId: p.line.accountId,
         taxRateBp: p.taxRateBp ?? 0,
+        ...(gst.isAustralian ? { taxCode: p.line.taxCode === '' ? null : p.line.taxCode } : {}),
       })),
     };
     setBusy(true);
@@ -311,6 +316,12 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
         </label>
       </div>
 
+      {gst.isAustralian && (
+        <div className="max-w-xs">
+          <TaxModeSelect value={taxMode} onChange={setTaxMode} className={inputClass} />
+        </div>
+      )}
+
       <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
         <table className="w-full border-collapse text-sm min-w-[48rem]">
           <thead>
@@ -368,12 +379,22 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
                   </select>
                 </td>
                 <td className="p-2">
+                  {gst.isAustralian ? (
+                    <TaxCodeSelect
+                      gst={gst}
+                      value={p.line.taxCode}
+                      onChange={(taxCode) => updateLine(index, { taxCode })}
+                      label={`GST code for line ${String(index + 1)}`}
+                      className={inputClass}
+                    />
+                  ) : (
                   <input
-                    aria-label={`Line ${String(index + 1)} tax rate`}
-                    value={p.line.taxRate}
-                    onChange={(e) => updateLine(index, { taxRate: e.target.value })}
-                    className={inputClass}
-                  />
+                      aria-label={`Line ${String(index + 1)} tax rate`}
+                      value={p.line.taxRate}
+                      onChange={(e) => updateLine(index, { taxRate: e.target.value })}
+                      className={inputClass}
+                    />
+                  )}
                 </td>
                 <td className="p-2 text-right tabular-nums">{formatCents(p.netCents + p.taxCents)}</td>
                 <td className="p-2">
@@ -397,7 +418,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
           onClick={() =>
             setLines((current) => [
               ...current,
-              { description: '', quantity: '1', unitPrice: '', accountId: accounts[0]?.id ?? '', taxRate: '0' },
+              { description: '', quantity: '1', unitPrice: '', accountId: accounts[0]?.id ?? '', taxRate: '0', taxCode: '' },
             ])
           }
           className="btn btn--ghost flex items-center gap-1.5"

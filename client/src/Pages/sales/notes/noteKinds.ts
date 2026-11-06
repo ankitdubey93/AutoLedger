@@ -47,6 +47,7 @@ export interface NoteLineView {
   accountCode: string;
   accountName: string;
   taxRateBp: number;
+  taxCode?: string | null;
   netCents: number;
   taxCents: number;
 }
@@ -60,6 +61,7 @@ export interface NoteAllocationView {
 }
 
 export interface NoteView {
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   id: string;
   number: string | null;
   status: NoteStatus;
@@ -86,6 +88,7 @@ export interface NoteView {
 
 /** The invoice or bill a note corrects — or a candidate to apply leftover credit to. */
 export interface OriginalView {
+  taxMode: 'EXCLUSIVE' | 'INCLUSIVE';
   id: string;
   label: string;
   /** True for an ISSUED invoice / POSTED bill — the only state a note can be raised against. */
@@ -98,17 +101,18 @@ export interface OriginalView {
   amountDueCents: number;
   /** Already credited (invoice) / debited (bill) by earlier notes. */
   adjustedCents: number;
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; accountId: string; taxRateBp: number }[];
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; accountId: string; taxRateBp: number; taxCode?: string | null }[];
 }
 
 export interface NoteInputView {
+  taxMode?: 'EXCLUSIVE' | 'INCLUSIVE';
   originalId: string;
   issueDate: string;
   reasonCode: NoteReasonCode;
   reason: string | null;
   vendorCreditReference: string | null;
   notes: string | null;
-  lines: { description: string; quantityMilli: number; unitPriceCents: number; accountId: string; taxRateBp: number }[];
+  lines: { description: string; quantityMilli: number; unitPriceCents: number; accountId: string; taxRateBp: number; taxCode?: string | null }[];
 }
 
 export interface NoteKindConfig {
@@ -150,6 +154,7 @@ export interface NoteKindConfig {
 
 function fromCreditNote(n: CreditNote): NoteView {
   return {
+    taxMode: n.taxMode ?? 'EXCLUSIVE',
     id: n.id,
     number: n.creditNoteNumber,
     status: n.status,
@@ -177,6 +182,7 @@ function fromCreditNote(n: CreditNote): NoteView {
       accountCode: l.revenueAccountCode,
       accountName: l.revenueAccountName,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
       netCents: l.netCents,
       taxCents: l.taxCents,
     })),
@@ -194,6 +200,7 @@ function fromCreditNote(n: CreditNote): NoteView {
 
 function fromDebitNote(n: DebitNote): NoteView {
   return {
+    taxMode: n.taxMode ?? 'EXCLUSIVE',
     id: n.id,
     number: n.debitNoteNumber,
     status: n.status,
@@ -221,6 +228,7 @@ function fromDebitNote(n: DebitNote): NoteView {
       accountCode: l.expenseAccountCode,
       accountName: l.expenseAccountName,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
       netCents: l.netCents,
       taxCents: l.taxCents,
     })),
@@ -238,6 +246,7 @@ function fromDebitNote(n: DebitNote): NoteView {
 
 function fromInvoice(i: Invoice): OriginalView {
   return {
+    taxMode: i.taxMode ?? 'EXCLUSIVE',
     id: i.id,
     label: i.invoiceNumber ?? 'Draft invoice',
     isOpen: i.status === 'ISSUED',
@@ -254,12 +263,14 @@ function fromInvoice(i: Invoice): OriginalView {
       unitPriceCents: l.unitPriceCents,
       accountId: l.revenueAccountId,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
     })),
   };
 }
 
 function fromBill(b: Bill): OriginalView {
   return {
+    taxMode: b.taxMode ?? 'EXCLUSIVE',
     id: b.id,
     label: b.vendorReference,
     isOpen: b.status === 'POSTED',
@@ -276,6 +287,7 @@ function fromBill(b: Bill): OriginalView {
       unitPriceCents: l.unitPriceCents,
       accountId: l.expenseAccountId,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
     })),
   };
 }
@@ -287,12 +299,14 @@ function creditInput(input: NoteInputView) {
     reasonCode: input.reasonCode,
     reason: input.reason,
     notes: input.notes,
+    ...(input.taxMode === undefined ? {} : { taxMode: input.taxMode }),
     lines: input.lines.map((l) => ({
       description: l.description,
       quantityMilli: l.quantityMilli,
       unitPriceCents: l.unitPriceCents,
       revenueAccountId: l.accountId,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
     })),
   };
 }
@@ -305,12 +319,14 @@ function debitInput(input: NoteInputView) {
     reason: input.reason,
     vendorCreditReference: input.vendorCreditReference,
     notes: input.notes,
+    ...(input.taxMode === undefined ? {} : { taxMode: input.taxMode }),
     lines: input.lines.map((l) => ({
       description: l.description,
       quantityMilli: l.quantityMilli,
       unitPriceCents: l.unitPriceCents,
       expenseAccountId: l.accountId,
       taxRateBp: l.taxRateBp,
+      taxCode: l.taxCode ?? null,
     })),
   };
 }

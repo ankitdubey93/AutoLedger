@@ -47,13 +47,14 @@ interface AccountRow {
   description: string | null;
   bank_account_kind: string | null;
   cash_flow_category: string | null;
+  default_tax_code: string | null;
   balance_sheet_class: string | null;
   created_at: Date;
   updated_at: Date;
 }
 
 const ACCOUNT_COLUMNS = `id, code, name, type, parent_id, is_postable, is_active,
-                         description, bank_account_kind, cash_flow_category, balance_sheet_class, created_at, updated_at`;
+                         description, bank_account_kind, cash_flow_category, default_tax_code, balance_sheet_class, created_at, updated_at`;
 
 /** Only balance-sheet accounts carry a cash-flow category (Revenue/Expense flow through net income). */
 function assertCashFlowCategoryMatchesType(category: CashFlowCategory | null, type: AccountType): void {
@@ -105,6 +106,7 @@ function toAccount(row: AccountRow): Account {
     description: row.description,
     bankAccountKind: row.bank_account_kind,
     cashFlowCategory: row.cash_flow_category,
+    defaultTaxCode: row.default_tax_code,
     balanceSheetClass: row.balance_sheet_class,
     createdAt: row.created_at.toISOString(),
     updatedAt: row.updated_at.toISOString(),
@@ -337,6 +339,7 @@ export async function updateAccount(
     parentId?: string | null | undefined;
     bankAccountKind?: BankAccountKind | null | undefined;
     cashFlowCategory?: CashFlowCategory | null | undefined;
+    defaultTaxCode?: string | null | undefined;
     balanceSheetClass?: BalanceSheetClass | null | undefined;
   },
 ): Promise<Account> {
@@ -381,6 +384,7 @@ export async function updateAccount(
     parentId: 'parent_id',
     bankAccountKind: 'bank_account_kind',
     cashFlowCategory: 'cash_flow_category',
+    defaultTaxCode: 'default_tax_code',
     balanceSheetClass: 'balance_sheet_class',
   } as const;
 

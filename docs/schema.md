@@ -983,6 +983,14 @@ Migration `106_platform_region_gst_settings.sql`.
 - `organizations.region` `TEXT NOT NULL DEFAULT 'GENERIC'`, CHECK in `('GENERIC', 'AU')`. Separate from `organization_profiles.country_code`, which is a postal address.
 - `gst_settings`: `org_id` PK, `registered`, `basis` (`CASH`/`ACCRUAL`), `bas_cycle` (`QUARTERLY`/`MONTHLY`), `bas_method` (`SIMPLER`/`FULL`), `time_zone`, audited. A row exists only for an AU organization. Its own table because an organization that skips the wizard has no `ledger_settings` row, and that row's fiscal columns are `NOT NULL`.
 
+## Phase 49b — GST codes and tax-inclusive pricing (accounting) — applied
+
+Migration `107_ledger-core_gst_codes.sql`. Adding these columns rewrites no rows and fires no immutability trigger.
+
+- `tax_code` (nullable, CHECK against the catalogue) on `invoice_lines`, `credit_note_lines`, `bill_lines`, `debit_note_lines`, `quote_lines`, `order_lines`. NULL means a `GENERIC` organization or a pre-switch draft.
+- `tax_mode` (`EXCLUSIVE` by default, or `INCLUSIVE`) on `invoices`, `credit_notes`, `bills`, `debit_notes`, `quotes`, `orders`.
+- `items.sale_tax_code`, `items.purchase_tax_code`, `accounts.default_tax_code`.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

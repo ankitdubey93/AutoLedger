@@ -16,6 +16,7 @@ const debitNoteLineSchema = z.object({
   unitPriceCents: z.int().min(0).max(1_000_000_000_000),
   expenseAccountId: z.uuid(),
   taxRateBp: z.int().min(0).max(10_000).default(0),
+  taxCode: z.string().trim().max(20).nullable().default(null),
 });
 
 export const createDebitNoteSchema = z.object({
@@ -25,6 +26,7 @@ export const createDebitNoteSchema = z.object({
   reason: z.string().trim().max(500).nullable().default(null),
   vendorCreditReference: z.string().trim().max(100).nullable().default(null),
   notes: z.string().trim().max(1000).nullable().default(null),
+  taxMode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).default('EXCLUSIVE'),
   lines: z.array(debitNoteLineSchema).min(1, 'A debit note needs at least one line'),
 });
 

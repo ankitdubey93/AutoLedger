@@ -1203,6 +1203,12 @@ Customer and vendor statements are a **read** over the Phase 25 subledger, with 
 
 `GET /settings` gains `region` and `gst` (`null` unless `AU`). `POST /settings/onboarding` accepts `australia: {gst}`, which requires `baseCurrency: 'AUD'` and an `Australia/*` `timezone`, and activates in the same transaction.
 
+### GST codes — Phase 49b ✅
+
+`GET /tax-codes` (any member, region `AU`, otherwise `403`) returns `{codes: [{code, label, direction, rateBp, reported}]}`.
+
+Invoices, bills, credit and debit notes, quotes and orders accept a header `taxMode` (`EXCLUSIVE` by default, `INCLUSIVE`) and a line `taxCode`, and return both. For an AU organization the code decides the rate and any `taxRateBp` sent is ignored. For a `GENERIC` organization a code or `INCLUSIVE` is `422`. `POST /invoices/:id/issue`, bill approval and note issue are `422` on an uncoded AU line. Items accept `saleTaxCode` and `purchaseTaxCode`; `PATCH /accounts/:id` accepts `defaultTaxCode`. The `INVOICES` and `BILLS` imports accept a `TaxCode` column.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

@@ -1845,3 +1845,11 @@ A direct decision by the owner on 2026-11-06: focus on Australian businesses, wi
 
 2595 server (2 skipped) + 741 client tests at the time.
 
+### 49b: GST codes and tax-inclusive pricing
+
+A closed catalogue of twelve codes, `taxCodeService.prepareTaxOnClient`, and `computeLineTotals(lines, mode)`, threaded through invoices, bills, notes, quotes, orders, conversions, recurring runs, CSV imports and captured bills. Migration `107`, `GET /tax-codes`, a GST picker replacing the free-typed rate on all five document forms, default codes on products and accounts. A shared fixture keeps the client preview and server arithmetic in parity.
+
+2617 server (2 skipped) + 749 client tests at the time.
+
+**Corrected from the plan:** the catalogue lives in code with a database CHECK, as planned, but a captured bill gets a provisional code here (`P_GST` when it has tax, otherwise `P_FREE`), since approval would otherwise refuse it. 49f replaces that with a real decision.
+

@@ -9,6 +9,7 @@ import manualJournalRoutes from './manualJournalRoutes.js';
 import paymentRoutes from './paymentRoutes.js';
 import reportRoutes from './reportRoutes.js';
 import settingsRoutes from './settingsRoutes.js';
+import taxCodeRoutes from './taxCodeRoutes.js';
 import statementRoutes from './statementRoutes.js';
 import statementSendRoutes from './statementSendRoutes.js';
 import publicStatementRoutes from './publicStatementRoutes.js';
@@ -42,6 +43,7 @@ import { buildHistoryRouter } from '../historyRoutes.js';
 const router = Router();
 
 router.use('/accounts', accountRoutes);
+router.use('/tax-codes', taxCodeRoutes);
 router.use('/bank-imports', bankImportRoutes);
 router.use('/bank-rules', bankRuleRoutes);
 // Phase 46c — History & notes for bank lines. Mounted before the resource router.

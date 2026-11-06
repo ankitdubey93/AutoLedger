@@ -1,3 +1,6 @@
+import { useGst } from '../../context/useGst';
+import TaxCodeSelect, { TaxModeSelect } from '../../components/TaxCodeSelect';
+import { lineAmounts } from '../../utils/lineTax';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
@@ -68,6 +71,8 @@ interface DraftLine {
   unitPrice: string;
   revenueAccountId: string;
   taxRate: string;
+  /** Phase 49b: '' means the default. */
+  taxCode: string;
   itemId: string;
   stockLocationId: string;
   orderLineId: string;
@@ -80,6 +85,7 @@ function emptyLine(defaults: { revenueAccountId: string; taxRate: string }): Dra
     unitPrice: '',
     revenueAccountId: defaults.revenueAccountId,
     taxRate: defaults.taxRate,
+    taxCode: '',
     itemId: '',
     stockLocationId: '',
     orderLineId: '',
@@ -101,15 +107,6 @@ function addDays(isoDate: string, days: number): string {
 }
 
 /** unitPriceCents * quantityMilli / 1000, rounded half up — a preview, never what is saved. */
-function previewNetCents(unitPriceCents: number, quantityMilli: number): number {
-  return Math.round((unitPriceCents * quantityMilli) / 1000);
-}
-
-/** netCents * taxRateBp / 10000, rounded half up. */
-function previewTaxCents(netCents: number, taxRateBp: number): number {
-  return Math.round((netCents * taxRateBp) / 10000);
-}
-
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 
@@ -119,6 +116,8 @@ export default function NewInvoicePage() {
   const placeholderTarget = usePlaceholderTarget('notes');
   const { invoiceId } = useParams<{ invoiceId?: string }>();
   const ledgerSettings = useLedgerSettings();
+  const gst = useGst('SALES');
+  const [taxMode, setTaxMode] = useState<'EXCLUSIVE' | 'INCLUSIVE'>('EXCLUSIVE');
   const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : 'USD';
 
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -224,6 +223,7 @@ export default function NewInvoicePage() {
         }
         setCurrencyCode(invoice.currencyCode);
         setNotes(invoice.notes ?? '');
+        setTaxMode(invoice.taxMode ?? 'EXCLUSIVE');
         setLines(
           invoice.lines.map((line) => ({
             description: line.description,
@@ -231,6 +231,7 @@ export default function NewInvoicePage() {
             unitPrice: formatCents(line.unitPriceCents),
             revenueAccountId: line.revenueAccountId,
             taxRate: line.taxRateBp === 0 ? '' : formatRate(line.taxRateBp),
+            taxCode: line.taxCode ?? '',
             itemId: line.itemId ?? '',
             stockLocationId: line.stockLocationId ?? '',
             orderLineId: line.orderLineId ?? '',
@@ -301,20 +302,19 @@ export default function NewInvoicePage() {
     for (const line of lines) {
       const quantityMilli = parseQuantityInput(line.quantity);
       const unitPriceCents = parseCentsInput(line.unitPrice);
-      const taxRateBp = line.taxRate.trim() === '' ? 0 : parseRateInput(line.taxRate);
+      const taxRateBp = gst.isAustralian ? gst.rateOf(line.taxCode) : line.taxRate.trim() === '' ? 0 : parseRateInput(line.taxRate);
 
       if (quantityMilli === null || unitPriceCents === null || taxRateBp === null) {
         malformed = true;
         continue;
       }
-      const netCents = previewNetCents(unitPriceCents, quantityMilli);
-      const taxCents = previewTaxCents(netCents, taxRateBp);
+      const { netCents, taxCents } = lineAmounts(unitPriceCents, quantityMilli, taxRateBp, taxMode);
       subtotal += netCents;
       tax += taxCents;
     }
 
     return { subtotal, tax, total: subtotal + tax, malformed };
-  }, [lines]);
+  }, [lines, gst, taxMode]);
 
   // Resolves the display-only rate/base-total preview whenever a foreign
   // currency is selected — the server resolves and freezes its own rate on
@@ -381,6 +381,7 @@ export default function NewInvoicePage() {
       unitPrice: formatCents(item.salePriceCents ?? 0),
       revenueAccountId: item.revenueAccountId ?? '',
       taxRate: item.saleTaxRateBp === 0 ? '' : formatRate(item.saleTaxRateBp),
+      taxCode: item.saleTaxCode ?? '',
       stockLocationId: '',
     });
   }
@@ -418,12 +419,14 @@ export default function NewInvoicePage() {
         paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
         salesOrderId: salesOrderId === '' ? null : salesOrderId,
         ...(pending.length > 0 ? { attachmentDocumentIds: pending.map((d) => d.id) } : {}),
+        ...(gst.isAustralian ? { taxMode } : {}),
         lines: lines.map((line) => ({
           description: line.description.trim(),
           quantityMilli: parseQuantityInput(line.quantity) ?? 0,
           unitPriceCents: parseCentsInput(line.unitPrice) ?? 0,
           revenueAccountId: line.revenueAccountId,
           taxRateBp: line.taxRate.trim() === '' ? 0 : (parseRateInput(line.taxRate) ?? 0),
+          ...(gst.isAustralian ? { taxCode: line.taxCode === '' ? null : line.taxCode } : {}),
           itemId: line.itemId === '' ? null : line.itemId,
           // Only an INVENTORY line moves stock; a location on any other line is a 422.
           stockLocationId:
@@ -614,6 +617,12 @@ export default function NewInvoicePage() {
           </p>
         </div>
 
+        {gst.isAustralian && (
+          <div className="max-w-xs">
+            <TaxModeSelect value={taxMode} onChange={setTaxMode} className={inputClass} />
+          </div>
+        )}
+
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
           <table className="w-full border-collapse text-sm min-w-[56rem]">
             <thead>
@@ -623,7 +632,7 @@ export default function NewInvoicePage() {
                 <th className="p-3 font-medium w-24 text-right">Qty</th>
                 <th className="p-3 font-medium w-28 text-right">Unit price</th>
                 <th className="p-3 font-medium">Account</th>
-                <th className="p-3 font-medium w-20 text-right">Tax %</th>
+                <th className={`p-3 font-medium ${gst.isAustralian ? 'w-44' : 'w-20 text-right'}`}>{gst.isAustralian ? 'GST' : 'Tax %'}</th>
                 <th className="p-3 font-medium w-28 text-right">Amount</th>
                 <th className="p-3 w-10" />
               </tr>
@@ -632,9 +641,8 @@ export default function NewInvoicePage() {
               {lines.map((line, index) => {
                 const quantityMilli = parseQuantityInput(line.quantity) ?? 0;
                 const unitPriceCents = parseCentsInput(line.unitPrice) ?? 0;
-                const taxRateBp = line.taxRate.trim() === '' ? 0 : (parseRateInput(line.taxRate) ?? 0);
-                const netCents = previewNetCents(unitPriceCents, quantityMilli);
-                const taxCents = previewTaxCents(netCents, taxRateBp);
+                const taxRateBp = gst.isAustralian ? gst.rateOf(line.taxCode) : line.taxRate.trim() === '' ? 0 : (parseRateInput(line.taxRate) ?? 0);
+                const { netCents, taxCents } = lineAmounts(unitPriceCents, quantityMilli, taxRateBp, taxMode);
 
                 return (
                   <tr key={index} className="border-t border-[var(--border)]">
@@ -706,14 +714,24 @@ export default function NewInvoicePage() {
                       </select>
                     </td>
                     <td className="p-2">
+                      {gst.isAustralian ? (
+                        <TaxCodeSelect
+                          gst={gst}
+                          value={line.taxCode}
+                          onChange={(taxCode) => updateLine(index, { taxCode })}
+                          label={`GST code for line ${String(index + 1)}`}
+                          className={inputClass}
+                        />
+                      ) : (
                       <input
-                        inputMode="decimal"
-                        value={line.taxRate}
-                        onChange={(e) => updateLine(index, { taxRate: e.target.value })}
-                        placeholder="0"
-                        aria-label={`Tax rate for line ${String(index + 1)}`}
-                        className={`${inputClass} text-right tabular-nums`}
-                      />
+                          inputMode="decimal"
+                          value={line.taxRate}
+                          onChange={(e) => updateLine(index, { taxRate: e.target.value })}
+                          placeholder="0"
+                          aria-label={`Tax rate for line ${String(index + 1)}`}
+                          className={`${inputClass} text-right tabular-nums`}
+                        />
+                      )}
                     </td>
                     <td className="p-2 text-right tabular-nums">{formatCents(netCents + taxCents)}</td>
                     <td className="p-2 text-center">

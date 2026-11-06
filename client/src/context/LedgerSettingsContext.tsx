@@ -90,3 +90,9 @@ export function useRegion(): string {
   const context = useContext(LedgerSettingsContext);
   return context?.status === 'ready' ? context.settings.region : 'GENERIC';
 }
+
+/** Phase 49b: the settings when loaded, else null, including outside the provider. */
+export function useLoadedLedgerSettings(): LedgerSettings | null {
+  const context = useContext(LedgerSettingsContext);
+  return context?.status === 'ready' ? context.settings : null;
+}

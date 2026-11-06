@@ -1,3 +1,5 @@
+import { assertLinesCodedOnClient, prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { beginTransaction, withTransaction } from '../../db/transaction.js';
@@ -82,6 +84,8 @@ export interface InvoiceLineInput {
   unitPriceCents: number;
   revenueAccountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
   /** Phase 24 — which catalogue item this line was picked from, if any. Not
    * used to fill any other field here — the client already copied the
    * item's defaults into description/unitPriceCents/account/taxRateBp. */
@@ -93,6 +97,8 @@ export interface InvoiceLineInput {
 }
 
 export interface CreateInvoiceInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   customerId: string;
   issueDate: string;
   /** Omitted when paymentTermsCode is set — resolveDueDate derives it. */
@@ -161,6 +167,7 @@ interface InvoiceRow {
   payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   fx_rate: string;
   base_subtotal_cents: string;
@@ -200,6 +207,7 @@ interface InvoiceLineRow {
   revenue_account_code: string;
   revenue_account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
@@ -211,7 +219,7 @@ const INVOICE_SELECT = `SELECT i.id, i.invoice_number, i.status, i.customer_id, 
                                 i.issue_date, i.due_date, i.currency_code,
                                 i.customer_name_snapshot, i.customer_address_snapshot,
                                 i.customer_tax_number_snapshot, i.notes, i.notes_template, i.payment_terms, i.payment_terms_code,
-                                i.subtotal_cents, i.tax_cents, i.total_cents,
+                                i.subtotal_cents, i.tax_cents, i.tax_mode, i.total_cents,
                                 i.fx_rate::text AS fx_rate, i.base_subtotal_cents,
                                 i.base_tax_cents, i.base_total_cents,
                                 i.journal_entry_id, i.void_journal_entry_id, i.issued_at, i.voided_at,
@@ -245,6 +253,7 @@ function toLine(row: InvoiceLineRow): InvoiceLine {
     revenueAccountCode: row.revenue_account_code,
     revenueAccountName: row.revenue_account_name,
     taxRateBp: row.tax_rate_bp,
+    taxCode: row.tax_code,
     netCents: parseCents(row.net_cents),
     taxCents: parseCents(row.tax_cents),
     itemId: row.item_id,
@@ -292,6 +301,7 @@ function toInvoice(row: InvoiceRow, lines: InvoiceLine[]): Invoice {
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     totalCents,
     fxRate: row.fx_rate,
     baseSubtotalCents: parseCents(row.base_subtotal_cents),
@@ -337,7 +347,7 @@ async function loadLines(
     `SELECT l.id, l.invoice_id, l.line_number, l.description, l.description_template,
             l.quantity_milli, l.unit_price_cents,
             l.revenue_account_id, a.code AS revenue_account_code, a.name AS revenue_account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents, l.item_id, l.stock_location_id,
             l.order_line_id
        FROM invoice_lines l
        JOIN accounts a ON a.id = l.revenue_account_id AND a.org_id = l.org_id
@@ -560,17 +570,17 @@ async function insertInvoiceLines(
     `INSERT INTO invoice_lines
        (org_id, invoice_id, line_number, description, quantity_milli, unit_price_cents,
         revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-        description_template, order_line_id)
+        description_template, order_line_id, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
             v.revenue_account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.stock_location_id,
-            v.description_template, v.order_line_id
+            v.description_template, v.order_line_id, v.tax_code
        FROM unnest(
               $3::smallint[], $4::text[], $5::bigint[], $6::bigint[],
               $7::uuid[], $8::int[], $9::bigint[], $10::bigint[], $11::uuid[], $12::uuid[], $13::text[],
-              $14::uuid[]
+              $14::uuid[], $15::text[]
             ) AS v(line_number, description, quantity_milli, unit_price_cents,
                     revenue_account_id, tax_rate_bp, net_cents, tax_cents, item_id, stock_location_id,
-                    description_template, order_line_id)`,
+                    description_template, order_line_id, tax_code)`,
     [
       orgId,
       invoiceId,
@@ -586,6 +596,7 @@ async function insertInvoiceLines(
       totals.map((t) => t.input.stockLocationId ?? null),
       totals.map((_, i) => descriptionTemplates[i] ?? null),
       totals.map((t) => t.input.orderLineId ?? null),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -652,7 +663,12 @@ export async function createInvoiceOnClient(
   options: CreateInvoiceOptions = {},
 ): Promise<string> {
   validateInvoiceInput(input);
-  let totals = computeLineTotals(input.lines);
+  // A deposit is a 0% liability movement, not a supply with a GST code (GST on advances is not built).
+  const prepared =
+    options.depositForOrderId === undefined
+      ? await prepareTaxOnClient(client, orgId, 'SALES', input, (l) => l.revenueAccountId)
+      : { lines: input.lines, taxMode: 'EXCLUSIVE' as const };
+  let totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
@@ -721,9 +737,9 @@ export async function createInvoiceOnClient(
         customer_name_snapshot, customer_address_snapshot, customer_tax_number_snapshot,
         notes, payment_terms, payment_terms_code, subtotal_cents, tax_cents, total_cents,
         fx_rate, base_subtotal_cents, base_tax_cents, base_total_cents, created_by, invoice_number,
-        notes_template, source_quote_id, source_quote_direction, kind, deposit_for_order_id, sales_order_id)
+        notes_template, source_quote_id, source_quote_direction, kind, deposit_for_order_id, sales_order_id, tax_mode)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21,
-             $22, $23, $24, $25, $26)
+             $22, $23, $24, $25, $26, $27)
      RETURNING id`,
     [
       orgId,
@@ -752,6 +768,7 @@ export async function createInvoiceOnClient(
       options.depositForOrderId === undefined ? 'STANDARD' : 'DEPOSIT',
       options.depositForOrderId ?? null,
       input.salesOrderId ?? null,
+      prepared.taxMode,
     ],
   );
   const invoiceId = invoiceRows[0]?.id;
@@ -835,7 +852,8 @@ export async function updateInvoice(
   userId: string,
 ): Promise<Invoice> {
   validateInvoiceInput(input);
-  const totals = computeLineTotals(input.lines);
+  const prepared = await prepareTaxOnClient(pool, orgId, 'SALES', input, (l) => l.revenueAccountId);
+  const totals = computeLineTotals(prepared.lines, prepared.taxMode);
   const subtotalCents = sumCents(totals.map((t) => cents(t.netCents)));
   const taxCents = sumCents(totals.map((t) => cents(t.taxCents)));
   const totalCents = subtotalCents + taxCents;
@@ -905,7 +923,7 @@ export async function updateInvoice(
               customer_tax_number_snapshot = $7, notes = $8, payment_terms = $9, payment_terms_code = $10,
               subtotal_cents = $11, tax_cents = $12, total_cents = $13,
               fx_rate = $14, base_subtotal_cents = $15, base_tax_cents = $16, base_total_cents = $17,
-              notes_template = NULL
+              notes_template = NULL, tax_mode = $20
         WHERE id = $18 AND org_id = $19`,
       [
         input.customerId,
@@ -927,6 +945,7 @@ export async function updateInvoice(
         baseTotalCents,
         id,
         orgId,
+        prepared.taxMode,
       ],
     );
 
@@ -1089,6 +1108,7 @@ export async function issueInvoiceOnClient(
     );
     const invoiceRow = invoiceRows[0];
     if (invoiceRow === undefined) throw new ApiError(404, 'Invoice not found');
+    await assertLinesCodedOnClient(client, orgId, { table: 'invoice_lines', fk: 'invoice_id', parent: 'invoices' }, id);
     if (!isInvoiceStatus(invoiceRow.status)) {
       throw new Error(`Unknown invoice status "${invoiceRow.status}" on invoice ${id}`);
     }

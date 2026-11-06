@@ -1,3 +1,5 @@
+import { prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -109,10 +111,14 @@ export interface QuoteLineInput {
   unitPriceCents: number;
   accountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
   itemId: string | null;
 }
 
 export interface CreateQuoteInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   partyId: string;
   quoteDate: string;
   validUntil?: string | undefined;
@@ -196,6 +202,7 @@ interface QuoteRow {
   payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   deposit_percent_bp: number | null;
   indicative_fx_rate: string | null;
@@ -223,7 +230,7 @@ const QUOTE_SELECT = `SELECT q.id, q.direction, q.customer_id, q.vendor_id,
                              q.party_name_snapshot, q.party_address_snapshot, q.party_tax_number_snapshot,
                              q.party_email_snapshot, q.party_reference, q.title, q.notes, q.terms,
                              q.payment_terms, q.payment_terms_code,
-                             q.subtotal_cents, q.tax_cents, q.total_cents, q.deposit_percent_bp,
+                             q.subtotal_cents, q.tax_cents, q.tax_mode, q.total_cents, q.deposit_percent_bp,
                              q.indicative_fx_rate::text AS indicative_fx_rate, q.indicative_base_total_cents,
                              q.content_sha256, q.sent_at, q.sent_by, q.accepted_at, q.declined_at, q.expired_at,
                              q.voided_at, q.void_reason, q.superseded_at, q.converted_at,
@@ -273,6 +280,7 @@ interface QuoteLineRow {
   account_code: string;
   account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
@@ -282,7 +290,7 @@ async function loadLines(q: Queryable, orgId: string, quoteId: string): Promise<
   const { rows } = await q.query<QuoteLineRow>(
     `SELECT l.id, l.quote_id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.account_id, a.code AS account_code, a.name AS account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents, l.item_id
        FROM quote_lines l
        JOIN accounts a ON a.id = l.account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1 AND l.quote_id = $2
@@ -299,6 +307,7 @@ async function loadLines(q: Queryable, orgId: string, quoteId: string): Promise<
     accountCode: r.account_code,
     accountName: r.account_name,
     taxRateBp: r.tax_rate_bp,
+    taxCode: r.tax_code,
     netCents: parseCents(r.net_cents),
     taxCents: parseCents(r.tax_cents),
     itemId: r.item_id,
@@ -454,6 +463,7 @@ async function loadQuote(q: Queryable, orgId: string, direction: QuoteDirection,
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     depositPercentBp: row.deposit_percent_bp,
     indicativeFxRate: row.indicative_fx_rate,
     indicativeBaseTotalCents:
@@ -598,6 +608,7 @@ async function readPartyOnClient(
 }
 
 interface PreparedQuote {
+  taxMode: TaxMode;
   totals: LineTotal<QuoteLineInput>[];
   subtotalCents: number;
   taxCents: number;
@@ -626,7 +637,8 @@ async function prepareOnClient(
   input: CreateQuoteInput,
 ): Promise<PreparedQuote> {
   if (input.lines.length === 0) throw new ApiError(422, 'A quote needs at least one line');
-  const totals = computeLineTotals(input.lines);
+  const tax = await prepareTaxOnClient(client, orgId, direction === 'SALES' ? 'SALES' : 'PURCHASES', input, (l) => l.accountId);
+  const totals = computeLineTotals(tax.lines, tax.taxMode);
   const { subtotalCents, taxCents, totalCents } = sumDocumentTotals(totals);
 
   const { rows: orgRows } = await client.query<{ base_currency: string }>(
@@ -689,6 +701,7 @@ async function prepareOnClient(
   }
 
   return {
+    taxMode: tax.taxMode,
     totals,
     subtotalCents,
     taxCents,
@@ -714,13 +727,13 @@ async function insertLinesOnClient(
   await client.query(
     `INSERT INTO quote_lines
        (org_id, quote_id, line_number, description, quantity_milli, unit_price_cents,
-        account_id, tax_rate_bp, net_cents, tax_cents, item_id)
+        account_id, tax_rate_bp, net_cents, tax_cents, item_id, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
+            v.account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.tax_code
        FROM unnest($3::smallint[], $4::text[], $5::bigint[], $6::bigint[], $7::uuid[], $8::int[],
-                   $9::bigint[], $10::bigint[], $11::uuid[])
+                   $9::bigint[], $10::bigint[], $11::uuid[], $12::text[])
             AS v(line_number, description, quantity_milli, unit_price_cents, account_id, tax_rate_bp,
-                 net_cents, tax_cents, item_id)`,
+                 net_cents, tax_cents, item_id, tax_code)`,
     [
       orgId,
       quoteId,
@@ -733,6 +746,7 @@ async function insertLinesOnClient(
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -793,9 +807,9 @@ export async function createQuote(
           party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
           party_reference, title, notes, terms, payment_terms, payment_terms_code,
           subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by,
-          deposit_percent_bp)
+          deposit_percent_bp, tax_mode)
        VALUES ($1, $2, $3, $4, $5, $1, 1, 'DRAFT', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-               $19, $20, $21, $22, $23, $24, $25)`,
+               $19, $20, $21, $22, $23, $24, $25, $26)`,
       [
         quoteId,
         orgId,
@@ -822,6 +836,7 @@ export async function createQuote(
         prepared.indicativeBaseTotalCents,
         userId,
         prepared.depositPercentBp,
+        prepared.taxMode,
       ],
     );
     await insertLinesOnClient(client, orgId, quoteId, prepared.totals);
@@ -928,7 +943,7 @@ export async function updateQuote(
               party_email_snapshot = $9, party_reference = $10, title = $11, notes = $12, terms = $13,
               payment_terms = $14, payment_terms_code = $15,
               subtotal_cents = $16, tax_cents = $17, total_cents = $18,
-              indicative_fx_rate = $19, indicative_base_total_cents = $20, deposit_percent_bp = $21
+              indicative_fx_rate = $19, indicative_base_total_cents = $20, deposit_percent_bp = $21, tax_mode = $24
         WHERE id = $22 AND org_id = $23`,
       [
         direction === 'SALES' ? input.partyId : null,
@@ -954,6 +969,7 @@ export async function updateQuote(
         prepared.depositPercentBp,
         id,
         orgId,
+        prepared.taxMode,
       ],
     );
     await insertLinesOnClient(client, orgId, id, prepared.totals);
@@ -1349,22 +1365,22 @@ export async function reviseQuote(
           party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
           party_reference, title, notes, terms, payment_terms, payment_terms_code,
           subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, created_by,
-          deposit_percent_bp)
+          deposit_percent_bp, tax_mode)
        SELECT $1, org_id, direction, customer_id, vendor_id, root_quote_id, id, revision + 1, 'DRAFT',
               $2::date, $2::date + (valid_until - quote_date), currency_code,
               party_name_snapshot, party_address_snapshot, party_tax_number_snapshot, party_email_snapshot,
               party_reference, title, notes, terms, payment_terms, payment_terms_code,
               subtotal_cents, tax_cents, total_cents, indicative_fx_rate, indicative_base_total_cents, $3,
-              deposit_percent_bp
+              deposit_percent_bp, tax_mode
          FROM quotes WHERE id = $4 AND org_id = $5`,
       [quoteId, quoteDate, userId, id, orgId],
     );
     await client.query(
       `INSERT INTO quote_lines
          (org_id, quote_id, line_number, description, quantity_milli, unit_price_cents,
-          account_id, tax_rate_bp, net_cents, tax_cents, item_id)
+          account_id, tax_rate_bp, net_cents, tax_cents, item_id, tax_code)
        SELECT org_id, $1, line_number, description, quantity_milli, unit_price_cents,
-              account_id, tax_rate_bp, net_cents, tax_cents, item_id
+              account_id, tax_rate_bp, net_cents, tax_cents, item_id, tax_code
          FROM quote_lines WHERE quote_id = $2 AND org_id = $3`,
       [quoteId, id, orgId],
     );
@@ -1599,12 +1615,14 @@ export async function convertQuote(
           notes: quote.notes,
           paymentTerms: quote.paymentTerms,
           paymentTermsCode: quote.paymentTermsCode,
+          taxMode: quote.taxMode,
           lines: quote.lines.map((l) => ({
             description: l.description,
             quantityMilli: l.quantityMilli,
             unitPriceCents: l.unitPriceCents,
             revenueAccountId: l.accountId,
             taxRateBp: l.taxRateBp,
+            taxCode: l.taxCode,
             itemId: l.itemId,
             stockLocationId: null,
           })),
@@ -1627,12 +1645,14 @@ export async function convertQuote(
           notes: quote.notes,
           paymentTerms: quote.paymentTerms,
           paymentTermsCode: quote.paymentTermsCode,
+          taxMode: quote.taxMode,
           lines: quote.lines.map((l) => ({
             description: l.description,
             quantityMilli: l.quantityMilli,
             unitPriceCents: l.unitPriceCents,
             expenseAccountId: l.accountId,
             taxRateBp: l.taxRateBp,
+            taxCode: l.taxCode,
             itemId: l.itemId,
             stockLocationId: null,
           })),

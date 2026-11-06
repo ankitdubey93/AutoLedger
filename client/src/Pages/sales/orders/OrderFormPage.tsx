@@ -1,3 +1,6 @@
+import { useGst } from '../../../context/useGst';
+import TaxCodeSelect, { TaxModeSelect } from '../../../components/TaxCodeSelect';
+import { lineAmounts } from '../../../utils/lineTax';
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { Plus, Trash2 } from 'lucide-react';
@@ -52,6 +55,8 @@ interface DraftLine {
   unitPrice: string;
   accountId: string;
   taxRate: string;
+  /** Phase 49b: '' means the default. */
+  taxCode: string;
 }
 
 function today(): string {
@@ -59,16 +64,8 @@ function today(): string {
   return `${String(now.getFullYear())}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 }
 
-function previewNet(unitPriceCents: number, quantityMilli: number): number {
-  return Math.round((unitPriceCents * quantityMilli) / 1000);
-}
-
-function previewTax(netCents: number, taxRateBp: number): number {
-  return Math.round((netCents * taxRateBp) / 10000);
-}
-
 function blankLine(accountId: string, taxRate: string): DraftLine {
-  return { itemId: '', description: '', quantity: '1', unitPrice: '', accountId, taxRate };
+  return { itemId: '', description: '', quantity: '1', unitPrice: '', accountId, taxRate, taxCode: '' };
 }
 
 function textOrNull(value: string): string | null {
@@ -78,6 +75,8 @@ function textOrNull(value: string): string | null {
 
 export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
   const navigate = useNavigate();
+  const gst = useGst(config.direction === 'SALES' ? 'SALES' : 'PURCHASES');
+  const [taxMode, setTaxMode] = useState<'EXCLUSIVE' | 'INCLUSIVE'>('EXCLUSIVE');
   const { orderId } = useParams<{ orderId?: string }>();
   const ledgerSettings = useLedgerSettings();
   const baseCurrency = ledgerSettings.status === 'ready' ? ledgerSettings.settings.baseCurrency : 'USD';
@@ -144,6 +143,7 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
         setPaymentTermsCode(order.paymentTermsCode ?? '');
         setNotes(order.notes ?? '');
         setTerms(order.terms ?? '');
+        setTaxMode(order.taxMode ?? 'EXCLUSIVE');
         setLines(
           order.lines.map((l) => ({
             itemId: l.itemId ?? '',
@@ -152,6 +152,7 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
             unitPrice: formatCents(l.unitPriceCents),
             accountId: l.accountId,
             taxRate: l.taxRateBp === 0 ? '' : formatRate(l.taxRateBp),
+            taxCode: l.taxCode ?? '',
           })),
         );
       }
@@ -172,13 +173,12 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
       lines.map((line) => {
         const quantityMilli = parseQuantityInput(line.quantity);
         const unitPriceCents = parseCentsInput(line.unitPrice);
-        const taxRateBp = line.taxRate.trim() === '' ? 0 : parseRateInput(line.taxRate);
+        const taxRateBp = gst.isAustralian ? gst.rateOf(line.taxCode) : line.taxRate.trim() === '' ? 0 : parseRateInput(line.taxRate);
         const valid = quantityMilli !== null && quantityMilli > 0 && unitPriceCents !== null && taxRateBp !== null;
-        const netCents = valid ? previewNet(unitPriceCents, quantityMilli) : 0;
-        const taxCents = valid ? previewTax(netCents, taxRateBp) : 0;
+        const { netCents, taxCents } = valid ? lineAmounts(unitPriceCents, quantityMilli, taxRateBp, taxMode) : { netCents: 0, taxCents: 0 };
         return { line, quantityMilli, unitPriceCents, taxRateBp, valid, netCents, taxCents };
       }),
-    [lines],
+    [lines, gst, taxMode],
   );
   const subtotal = parsed.reduce((sum, p) => sum + p.netCents, 0);
   const tax = parsed.reduce((sum, p) => sum + p.taxCents, 0);
@@ -201,6 +201,7 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
       unitPrice: formatCents(defaults.unitPriceCents),
       accountId: defaults.accountId,
       taxRate: defaults.taxRateBp === 0 ? '' : formatRate(defaults.taxRateBp),
+      taxCode: (config.direction === 'SALES' ? item.saleTaxCode : item.purchaseTaxCode) ?? '',
     });
   }
 
@@ -234,12 +235,14 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
       terms: textOrNull(terms),
       paymentTerms: null,
       paymentTermsCode: paymentTermsCode === '' ? null : paymentTermsCode,
+      ...(gst.isAustralian ? { taxMode } : {}),
       lines: parsed.map((p) => ({
         description: p.line.description.trim(),
         quantityMilli: p.quantityMilli ?? 0,
         unitPriceCents: p.unitPriceCents ?? 0,
         accountId: p.line.accountId,
         taxRateBp: p.taxRateBp ?? 0,
+        ...(gst.isAustralian ? { taxCode: p.line.taxCode === '' ? null : p.line.taxCode } : {}),
         itemId: p.line.itemId === '' ? null : p.line.itemId,
       })),
     };
@@ -354,6 +357,12 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
         </p>
       )}
 
+      {gst.isAustralian && (
+        <div className="max-w-xs">
+          <TaxModeSelect value={taxMode} onChange={setTaxMode} className={inputClass} />
+        </div>
+      )}
+
       <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
         <table className="w-full border-collapse text-sm min-w-[56rem]">
           <thead>
@@ -425,14 +434,24 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
                   </select>
                 </td>
                 <td className="p-2">
+                  {gst.isAustralian ? (
+                    <TaxCodeSelect
+                      gst={gst}
+                      value={p.line.taxCode}
+                      onChange={(taxCode) => updateLine(index, { taxCode })}
+                      label={`GST code for line ${String(index + 1)}`}
+                      className={inputClass}
+                    />
+                  ) : (
                   <input
-                    inputMode="decimal"
-                    aria-label={`Tax rate for line ${String(index + 1)}`}
-                    value={p.line.taxRate}
-                    placeholder="0"
-                    onChange={(e) => updateLine(index, { taxRate: e.target.value })}
-                    className={`${inputClass} text-right tabular-nums`}
-                  />
+                      inputMode="decimal"
+                      aria-label={`Tax rate for line ${String(index + 1)}`}
+                      value={p.line.taxRate}
+                      placeholder="0"
+                      onChange={(e) => updateLine(index, { taxRate: e.target.value })}
+                      className={`${inputClass} text-right tabular-nums`}
+                    />
+                  )}
                 </td>
                 <td className="p-2 text-right tabular-nums">{formatCents(p.netCents + p.taxCents)}</td>
                 <td className="p-2 text-center">

@@ -1,3 +1,4 @@
+import { auDefaultTaxCode, auTaxCode } from '../../config/taxPacks/au.js';
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, scaleCents } from '../../utils/money.js';
@@ -34,6 +35,7 @@ export interface ResolvedDocLine {
   unitPriceCents: number;
   accountId: string;
   taxRateBp: number;
+  taxCode: string | null;
   itemId: string | null;
   stockLocationId: string | null;
   netCents: number;
@@ -144,6 +146,12 @@ export async function resolveDocumentsOnClient(
     [orgId],
   );
   const booksStartDate = settingsRows[0]?.books_start ?? null;
+
+  const { rows: gstRows } = await client.query<{ registered: boolean }>(
+    'SELECT registered FROM gst_settings WHERE org_id = $1',
+    [orgId],
+  );
+  const gst = gstRows[0] ?? null;
 
   let equityAccountId: string | null = null;
   if (opts.conversionMode) {
@@ -264,7 +272,25 @@ export async function resolveDocumentsOnClient(
     const itemPrice = usable === undefined ? null : sales ? usable.salePriceCents : usable.purchasePriceCents;
     const unitPriceCents = num(v, 'unitAmount') ?? itemPrice;
     const itemTax = usable === undefined ? null : sales ? usable.saleTaxRateBp : usable.purchaseTaxRateBp;
-    const taxRateBp = num(v, 'taxRate') ?? itemTax ?? 0;
+    // Phase 49b — for an Australian organization the code decides the rate, and
+    // conversion-mode open items are BAS-excluded: GST was reported when they arose.
+    const typedTaxCode = text(v, 'taxCode');
+    const direction = sales ? 'SALES' : 'PURCHASES';
+    let taxCode: string | null = null;
+    if (gst === null) {
+      if (typedTaxCode !== null) errors.push('GST codes are for Australian organizations');
+    } else if (opts.conversionMode) {
+      taxCode = sales ? 'S_EXCLUDED' : 'P_EXCLUDED';
+    } else if (typedTaxCode !== null) {
+      const known = auTaxCode(typedTaxCode.toUpperCase());
+      if (known?.direction !== direction) errors.push(`"${typedTaxCode}" is not a GST code for ${sales ? 'sales' : 'purchases'}`);
+      else taxCode = known.code;
+    }
+    const codeRate = taxCode === null ? null : (auTaxCode(taxCode)?.rateBp ?? null);
+    const taxRateBp =
+      gst === null
+        ? (num(v, 'taxRate') ?? itemTax ?? 0)
+        : (codeRate ?? auTaxCode(auDefaultTaxCode(direction, gst.registered))?.rateBp ?? 0);
     let defaultsOk = true;
     if (description === null) {
       errors.push('Description is required (or an ItemCode)');
@@ -342,6 +368,7 @@ export async function resolveDocumentsOnClient(
         unitPriceCents,
         accountId,
         taxRateBp,
+        taxCode,
         itemId: usable?.id ?? null,
         stockLocationId,
         netCents,

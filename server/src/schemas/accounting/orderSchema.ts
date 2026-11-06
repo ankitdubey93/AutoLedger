@@ -19,6 +19,7 @@ const orderLineSchema = z.object({
   // service checks the type against the route's direction.
   accountId: z.uuid(),
   taxRateBp: z.int().min(0).max(10_000).default(0),
+  taxCode: z.string().trim().max(20).nullable().default(null),
   itemId: z.uuid().nullable().default(null),
 });
 
@@ -34,6 +35,7 @@ export const createOrderSchema = z
     terms: z.string().trim().max(5000).nullable().default(null),
     paymentTerms: z.string().trim().max(500).nullable().default(null),
     paymentTermsCode: z.string().trim().max(30).nullable().default(null),
+    taxMode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).default('EXCLUSIVE'),
     lines: z.array(orderLineSchema).min(1, 'An order needs at least one line').max(QUOTE_MAX_LINES),
   })
   .refine((v) => v.expectedDate === null || v.expectedDate >= v.orderDate, {

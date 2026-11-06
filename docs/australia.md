@@ -9,7 +9,7 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | Slice | Scope | State |
 |---|---|---|
 | 49a | Region, GST settings, Australian chart, organization calendar, DD/MM/YYYY | ✅ |
-| 49b | GST codes and tax-inclusive pricing | Not built |
+| 49b | GST codes and tax-inclusive pricing | ✅ |
 | 49c | GST on bank lines and journals | Not built |
 | 49d | BAS engine and workflow | Not built |
 | 49e | Tax invoices | Not built |
@@ -60,6 +60,41 @@ A `GENERIC` organization keeps UTC exactly as before, even if it set a timezone 
 - A document's displayed paid/overdue status, and the "overdue" list filter, can lag by up to 11 hours.
 - Background sweeps (recurring runs, quote expiry, invoice reminders) decide what is due on the UTC date. Documents they create carry their scheduled date, so nothing lands in the wrong period.
 - Inventory's lot-expiry window on the dashboard uses the database's `CURRENT_DATE`.
+
+## GST codes
+
+A closed catalogue in `config/taxPacks/au.ts`, served by `GET /tax-codes`, with the same list in a database CHECK (migration `107`). Not org-editable, because a BAS mapping edited by mistake would misstate a return.
+
+| Code | Meaning | Rate | Worksheet |
+|---|---|---|---|
+| `S_GST` | GST on sales | 10% | G1 |
+| `S_EXPORT` | GST-free exports | 0 | G1, G2 |
+| `S_FREE` | GST-free sales | 0 | G1, G3 |
+| `S_INPUT_TAXED` | Input-taxed sales | 0 | G1, G4 |
+| `S_EXCLUDED` | BAS excluded | 0 | None |
+| `P_GST` | GST on purchases | 10% | G11 |
+| `P_CAP_GST` | GST on capital purchases | 10% | G10 |
+| `P_FREE` | GST-free purchases | 0 | G11, G14 |
+| `P_CAP_FREE` | GST-free capital purchases | 0 | G10, G14 |
+| `P_INPUT_TAXED` | Purchases for input-taxed sales, no credit | 0 | G11, G13 |
+| `P_PRIVATE` | Private or non-deductible, no credit | 0 | G11, G15 |
+| `P_EXCLUDED` | BAS excluded | 0 | None |
+
+`taxCodeService.prepareTaxOnClient` is the one place a line's GST is decided, before totals:
+
+- **Which code:** what was sent, else the item's default, else the account's, else the region's. An unregistered organization only gets BAS-excluded codes.
+- **Which rate:** always the code's. A rate the client sends is ignored, so a line can't be "GST-free" at 10%.
+- **Snapshot:** the line stores `tax_code` and `tax_rate_bp`, so a later catalogue change can't alter history.
+- **Posting:** issue and approve refuse an uncoded line, which can only be a draft from before the organization became Australian.
+- **Deposits:** exempt. They are a 0% liability movement, because GST on advances is not built.
+
+### Tax-inclusive pricing
+
+`tax_mode` on the document header: `EXCLUSIVE` or `INCLUSIVE`. Inclusive tax is `gross × rate ÷ (10000 + rate)`, which at 10% is divide-by-11, and net is the remainder, so net + tax always equals what is paid. `unit_price_cents` stores the price as typed. A shared fixture (`lineTaxCases.json`) holds the client preview and the server to the same arithmetic.
+
+The mode travels with the document through quote revision, quote and order conversion, recurring runs and credit or debit notes. Without that, a gross price would silently become a net one on the next document.
+
+**Known limits:** a line left on "Default" previews the region's rate, while the server may apply an item or account default, and the saved document is what counts. A CSV import has no tax-inclusive option, and its preview shows the region's rate for a line with no code.
 
 ## Not built in this edition
 

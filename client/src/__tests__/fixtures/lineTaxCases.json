@@ -1,0 +1,10 @@
+[
+  { "unitPriceCents": 11000, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "INCLUSIVE", "netCents": 10000, "taxCents": 1000 },
+  { "unitPriceCents": 10000, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "EXCLUSIVE", "netCents": 10000, "taxCents": 1000 },
+  { "unitPriceCents": 1999, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "INCLUSIVE", "netCents": 1817, "taxCents": 182 },
+  { "unitPriceCents": 1999, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "EXCLUSIVE", "netCents": 1999, "taxCents": 200 },
+  { "unitPriceCents": 333, "quantityMilli": 2500, "taxRateBp": 1000, "mode": "INCLUSIVE", "netCents": 757, "taxCents": 76 },
+  { "unitPriceCents": 5000, "quantityMilli": 1000, "taxRateBp": 0, "mode": "INCLUSIVE", "netCents": 5000, "taxCents": 0 },
+  { "unitPriceCents": 5, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "INCLUSIVE", "netCents": 5, "taxCents": 0 },
+  { "unitPriceCents": 6, "quantityMilli": 1000, "taxRateBp": 1000, "mode": "INCLUSIVE", "netCents": 5, "taxCents": 1 }
+]

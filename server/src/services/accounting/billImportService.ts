@@ -87,6 +87,7 @@ export async function commitOnClient(
             unitPriceCents: l.unitPriceCents,
             expenseAccountId: l.accountId,
             taxRateBp: l.taxRateBp,
+            taxCode: l.taxCode,
             itemId: l.itemId,
             stockLocationId: l.stockLocationId,
           })),

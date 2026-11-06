@@ -25,6 +25,7 @@ const billLineSchema = z.object({
   unitPriceCents: z.int().min(0).max(1_000_000_000_000),
   expenseAccountId: z.uuid(),
   taxRateBp: z.int().min(0).max(10_000).default(0),
+  taxCode: z.string().trim().max(20).nullable().default(null),
   itemId: z.uuid().nullable().default(null),
   // Phase 32: where an INVENTORY line moves stock. Null = Inventory's default location.
   stockLocationId: z.uuid().nullable().default(null),
@@ -50,6 +51,7 @@ export const createBillSchema = z
     // (omitted on an edit = leave the link alone; null = clear it).
     attachmentDocumentIds: z.array(z.uuid()).max(20).optional(),
     purchaseOrderId: z.uuid().nullable().optional(),
+    taxMode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).default('EXCLUSIVE'),
     lines: z.array(billLineSchema).min(1, 'A bill needs at least one line'),
   });
 

@@ -1,3 +1,5 @@
+import { prepareTaxOnClient } from './taxCodeService.js';
+import type { TaxMode } from '../../utils/documentTotals.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -92,10 +94,14 @@ export interface OrderLineInput {
   unitPriceCents: number;
   accountId: string;
   taxRateBp: number;
+  /** Phase 49b — resolved by prepareTaxOnClient. */
+  taxCode?: string | null | undefined;
   itemId: string | null;
 }
 
 export interface CreateOrderInput {
+  /** Phase 49b — whether line prices include tax. */
+  taxMode?: TaxMode | undefined;
   partyId: string;
   orderDate: string;
   expectedDate: string | null;
@@ -162,6 +168,7 @@ interface OrderRow {
   payment_terms_code: string | null;
   subtotal_cents: string;
   tax_cents: string;
+  tax_mode: TaxMode;
   total_cents: string;
   source_quote_id: string | null;
   source_quote_number: string | null;
@@ -182,7 +189,7 @@ const ORDER_SELECT = `SELECT o.id, o.direction, o.customer_id, o.vendor_id,
                              o.expected_date::text AS expected_date, o.currency_code,
                              o.party_name_snapshot, o.party_address_snapshot, o.party_tax_number_snapshot,
                              o.party_reference, o.notes, o.terms, o.payment_terms, o.payment_terms_code,
-                             o.subtotal_cents, o.tax_cents, o.total_cents,
+                             o.subtotal_cents, o.tax_cents, o.tax_mode, o.total_cents,
                              o.source_quote_id, q.quote_number AS source_quote_number,
                              q.revision AS source_quote_revision,
                              o.confirmed_at, o.closed_at, o.cancelled_at, o.cancel_reason,
@@ -275,6 +282,7 @@ interface OrderLineRow {
   account_code: string;
   account_name: string;
   tax_rate_bp: number;
+  tax_code: string | null;
   net_cents: string;
   tax_cents: string;
   item_id: string | null;
@@ -284,7 +292,7 @@ async function loadLines(q: Queryable, orgId: string, orderId: string): Promise<
   const { rows } = await q.query<OrderLineRow>(
     `SELECT l.id, l.line_number, l.description, l.quantity_milli, l.unit_price_cents,
             l.account_id, a.code AS account_code, a.name AS account_name,
-            l.tax_rate_bp, l.net_cents, l.tax_cents, l.item_id
+            l.tax_rate_bp, l.tax_code, l.net_cents, l.tax_cents, l.item_id
        FROM order_lines l
        JOIN accounts a ON a.id = l.account_id AND a.org_id = l.org_id
       WHERE l.org_id = $1 AND l.order_id = $2
@@ -305,6 +313,7 @@ async function loadLines(q: Queryable, orgId: string, orderId: string): Promise<
       accountCode: r.account_code,
       accountName: r.account_name,
       taxRateBp: r.tax_rate_bp,
+      taxCode: r.tax_code,
       netCents: parseCents(r.net_cents),
       taxCents: parseCents(r.tax_cents),
       itemId: r.item_id,
@@ -386,6 +395,7 @@ async function loadOrder(q: Queryable, orgId: string, direction: QuoteDirection,
     paymentTermsCode: row.payment_terms_code,
     subtotalCents: parseCents(row.subtotal_cents),
     taxCents: parseCents(row.tax_cents),
+    taxMode: row.tax_mode,
     sourceQuote:
       row.source_quote_id === null || row.source_quote_number === null || row.source_quote_revision === null
         ? null
@@ -508,6 +518,7 @@ async function readPartyOnClient(
 }
 
 interface PreparedOrder {
+  taxMode: TaxMode;
   totals: LineTotal<OrderLineInput>[];
   subtotalCents: number;
   taxCents: number;
@@ -531,7 +542,8 @@ async function prepareOnClient(
   input: CreateOrderInput,
 ): Promise<PreparedOrder> {
   if (input.lines.length === 0) throw new ApiError(422, 'An order needs at least one line');
-  const totals = computeLineTotals(input.lines);
+  const tax = await prepareTaxOnClient(client, orgId, direction === 'SALES' ? 'SALES' : 'PURCHASES', input, (l) => l.accountId);
+  const totals = computeLineTotals(tax.lines, tax.taxMode);
   const { subtotalCents, taxCents, totalCents } = sumDocumentTotals(totals);
 
   const { rows: orgRows } = await client.query<{ base_currency: string }>(
@@ -576,7 +588,7 @@ async function prepareOnClient(
     totals.map((t, i) => ({ lineNumber: i + 1, itemId: t.input.itemId, stockLocationId: null, quantityMilli: t.input.quantityMilli })),
   );
 
-  return { totals, subtotalCents, taxCents, totalCents, currencyCode, paymentTerms, paymentTermsCode, party };
+  return { taxMode: tax.taxMode, totals, subtotalCents, taxCents, totalCents, currencyCode, paymentTerms, paymentTermsCode, party };
 }
 
 async function insertLinesOnClient(
@@ -588,13 +600,13 @@ async function insertLinesOnClient(
   await client.query(
     `INSERT INTO order_lines
        (org_id, order_id, line_number, description, quantity_milli, unit_price_cents,
-        account_id, tax_rate_bp, net_cents, tax_cents, item_id)
+        account_id, tax_rate_bp, net_cents, tax_cents, item_id, tax_code)
      SELECT $1, $2, v.line_number, v.description, v.quantity_milli, v.unit_price_cents,
-            v.account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id
+            v.account_id, v.tax_rate_bp, v.net_cents, v.tax_cents, v.item_id, v.tax_code
        FROM unnest($3::smallint[], $4::text[], $5::bigint[], $6::bigint[], $7::uuid[], $8::int[],
-                   $9::bigint[], $10::bigint[], $11::uuid[])
+                   $9::bigint[], $10::bigint[], $11::uuid[], $12::text[])
             AS v(line_number, description, quantity_milli, unit_price_cents, account_id, tax_rate_bp,
-                 net_cents, tax_cents, item_id)`,
+                 net_cents, tax_cents, item_id, tax_code)`,
     [
       orgId,
       orderId,
@@ -607,6 +619,7 @@ async function insertLinesOnClient(
       totals.map((t) => t.netCents),
       totals.map((t) => t.taxCents),
       totals.map((t) => t.input.itemId),
+      totals.map((t) => t.input.taxCode ?? null),
     ],
   );
 }
@@ -664,8 +677,8 @@ export async function createOrder(
          (id, org_id, direction, customer_id, vendor_id, status, order_date, expected_date, currency_code,
           party_name_snapshot, party_address_snapshot, party_tax_number_snapshot,
           party_reference, notes, terms, payment_terms, payment_terms_code,
-          subtotal_cents, tax_cents, total_cents, created_by)
-       VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)`,
+          subtotal_cents, tax_cents, total_cents, created_by, tax_mode)
+       VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
       [
         orderId,
         orgId,
@@ -687,6 +700,7 @@ export async function createOrder(
         prepared.taxCents,
         prepared.totalCents,
         userId,
+        prepared.taxMode,
       ],
     );
     await insertLinesOnClient(client, orgId, orderId, prepared.totals);
@@ -758,7 +772,7 @@ export async function updateOrder(
           SET customer_id = $1, vendor_id = $2, order_date = $3, expected_date = $4, currency_code = $5,
               party_name_snapshot = $6, party_address_snapshot = $7, party_tax_number_snapshot = $8,
               party_reference = $9, notes = $10, terms = $11, payment_terms = $12, payment_terms_code = $13,
-              subtotal_cents = $14, tax_cents = $15, total_cents = $16
+              subtotal_cents = $14, tax_cents = $15, total_cents = $16, tax_mode = $19
         WHERE id = $17 AND org_id = $18`,
       [
         direction === 'SALES' ? input.partyId : null,
@@ -779,6 +793,7 @@ export async function updateOrder(
         prepared.totalCents,
         id,
         orgId,
+        prepared.taxMode,
       ],
     );
     await insertLinesOnClient(client, orgId, id, prepared.totals);
@@ -1080,12 +1095,14 @@ export async function convertOrder(
         paymentTerms: order.paymentTerms,
         paymentTermsCode: order.paymentTermsCode,
         salesOrderId: id,
+        taxMode: order.taxMode,
         lines: billLines.map(({ line, quantityMilli }) => ({
           description: line.description,
           quantityMilli,
           unitPriceCents: line.unitPriceCents,
           revenueAccountId: line.accountId,
           taxRateBp: line.taxRateBp,
+          taxCode: line.taxCode,
           itemId: line.itemId,
           stockLocationId: null,
           orderLineId: line.id,
@@ -1122,12 +1139,14 @@ export async function convertOrder(
       paymentTerms: order.paymentTerms,
       paymentTermsCode: order.paymentTermsCode,
       purchaseOrderId: id,
+      taxMode: order.taxMode,
       lines: billLines.map(({ line, quantityMilli }) => ({
         description: line.description,
         quantityMilli,
         unitPriceCents: line.unitPriceCents,
         expenseAccountId: line.accountId,
         taxRateBp: line.taxRateBp,
+        taxCode: line.taxCode,
         itemId: line.itemId,
         stockLocationId: null,
         orderLineId: line.id,
@@ -1165,9 +1184,9 @@ export async function createOrderFromQuoteOnClient(
        (id, org_id, direction, customer_id, vendor_id, status, order_date, expected_date, currency_code,
         party_name_snapshot, party_address_snapshot, party_tax_number_snapshot,
         party_reference, notes, terms, payment_terms, payment_terms_code,
-        subtotal_cents, tax_cents, total_cents, source_quote_id, source_quote_direction, created_by)
+        subtotal_cents, tax_cents, total_cents, source_quote_id, source_quote_direction, created_by, tax_mode)
      VALUES ($1, $2, $3, $4, $5, 'DRAFT', $6, NULL, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
-             $19, $3, $20)`,
+             $19, $3, $20, $21)`,
     [
       orderId,
       orgId,
@@ -1189,6 +1208,7 @@ export async function createOrderFromQuoteOnClient(
       quote.totalCents,
       quote.id,
       userId,
+      quote.taxMode,
     ],
   );
   await insertLinesOnClient(
@@ -1202,6 +1222,7 @@ export async function createOrderFromQuoteOnClient(
         unitPriceCents: l.unitPriceCents,
         accountId: l.accountId,
         taxRateBp: l.taxRateBp,
+        taxCode: l.taxCode,
         itemId: l.itemId,
       },
       netCents: l.netCents,

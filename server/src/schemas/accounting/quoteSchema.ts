@@ -20,6 +20,7 @@ const quoteLineSchema = z.object({
   // service checks the type against the route's direction.
   accountId: z.uuid(),
   taxRateBp: z.int().min(0).max(10_000).default(0),
+  taxCode: z.string().trim().max(20).nullable().default(null),
   itemId: z.uuid().nullable().default(null),
 });
 
@@ -40,6 +41,7 @@ export const createQuoteSchema = z
     paymentTermsCode: z.string().trim().max(30).nullable().default(null),
     /** Phase 42 — deposit asked for on acceptance, in basis points of the total; null = none. */
     depositPercentBp: z.int().min(1).max(10_000).nullable().default(null),
+    taxMode: z.enum(['EXCLUSIVE', 'INCLUSIVE']).default('EXCLUSIVE'),
     lines: z.array(quoteLineSchema).min(1, 'A quote needs at least one line').max(QUOTE_MAX_LINES),
   })
   .refine((v) => v.validUntil === undefined || v.validUntil >= v.quoteDate, {

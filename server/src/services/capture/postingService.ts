@@ -177,6 +177,12 @@ export async function postCaptureDocument(
           )
         : lineItemRows.map(() => 0);
 
+    const { rows: gstRows } = await client.query<{ registered: boolean }>(
+      'SELECT registered FROM gst_settings WHERE org_id = $1',
+      [orgId],
+    );
+    const gstRegistered = gstRows[0]?.registered ?? null;
+
     const dueDate =
       doc.due_date !== null && doc.due_date >= doc.invoice_date
         ? doc.due_date
@@ -195,6 +201,8 @@ export async function postCaptureDocument(
           description: row.description.trim() === '' ? `Line ${String(row.line_index + 1)}` : row.description.slice(0, 500),
           netCents: parseCents(row.amount_cents),
           taxCents: lineTaxes[index] ?? 0,
+          // Phase 49b — a provisional code from the amounts; the bill stays an editable draft.
+          taxCode: gstRegistered === null ? null : !gstRegistered ? 'P_EXCLUDED' : (lineTaxes[index] ?? 0) > 0 ? 'P_GST' : 'P_FREE',
           // account_id === null is refused above; the non-null assertion here
           // is safe by that check, not by TypeScript's own narrowing.
           expenseAccountId: row.account_id as string,
