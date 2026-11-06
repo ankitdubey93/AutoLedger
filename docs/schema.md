@@ -1015,6 +1015,10 @@ Migration `111_ap-flow_gst_capture.sql`. `ap_flow_extractions.supplier_abn`, `ap
 
 Migration `112_ledger-core_aba_pay_runs.sql`. `bank_account_details` (1:1 with an account) and `vendor_bank_details` (1:1 with a vendor), with `bsb`, `account_number_enc`, `account_number_last3`, `account_name`; audited. `payment_batches` and `payment_batch_items`, linking payments to a run.
 
+## Phase 49h — TPAR (accounting) — applied
+
+Migration `113_ledger-core_tpar.sql`. `vendors.tpar_reportable` (default false). `tpar_returns`: `financial_year`, `lodged_on`, `ato_reference`, `rows` (JSONB, as lodged), unique per organization and year.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

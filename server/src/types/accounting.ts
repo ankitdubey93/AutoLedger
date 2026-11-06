@@ -555,6 +555,8 @@ export interface Vendor {
   phone: string | null;
   billingAddress: string | null;
   taxNumber: string | null;
+  /** Phase 49h */
+  tparReportable: boolean;
   paymentTerms: string | null;
   /** Phase 43a. `null` = use the organization's purchase default. */
   defaultPaymentTermId: string | null;

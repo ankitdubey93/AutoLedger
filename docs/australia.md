@@ -15,8 +15,8 @@ An organization with `organizations.region = 'AU'` gets GST, BAS and Australian 
 | 49e | Tax invoices | ✅ |
 | 49f | ABN tools and capture | ✅ |
 | 49g | Bank details, ABA files, bank CSV presets | ✅ |
-| 49h | TPAR | Not built |
-| 49i | Australian demo and walkthrough | Not built |
+| 49h | TPAR | ✅ |
+| 49i | Australian demo and walkthrough | ✅ |
 
 ## Becoming Australian
 
@@ -223,6 +223,23 @@ The extraction prompt asks every organization's documents for a supplier number 
 | Currency | AUD only |
 
 **Bank statement presets** for CBA, ANZ, Westpac and NAB fill the column mapping and date format on the import screen, and add a header row for a bank whose export has none. **Written from memory of published examples, not real exports.** Banks change these, so the mapping stays visible and editable.
+
+## TPAR
+
+**BAS → TPAR** reports amounts paid in a financial year to vendors flagged `tpar_reportable` (migration `113`). It is always on a cash basis, whatever the GST basis, because the report is of payments made. It reads the same event stream as the BAS, so a part-paid bill counts for what was paid and a debit note reduces it. Recording it as lodged is refused while a contractor lacks a valid ABN or an address, and stores the rows as they stood. It is due 28 August.
+
+**Known limits, to confirm with an agent:**
+
+- Flagging is per vendor, so a materials-only bill from a flagged contractor counts. The page says to check these.
+- Payment through a bank-line journal, with no bill, has no vendor, so it isn't counted.
+- The TPAR e-lodgment file is not built. The figures are entered through ATO Online.
+- Lines coded `P_EXCLUDED` are not counted.
+
+## Demo and walkthrough
+
+`npm run seed:demo -- --region au` builds Wattle & Ash Bakehouse through the API: two quarters, every GST code that matters, an inclusive invoice, credit and debit notes against earlier periods, bank-line GST, a bank rule, a pay run, PAYG, TPAR, one lodged BAS and one draft. [walkthrough/australia/README.md](../walkthrough/australia/README.md) has the transactions, the answers worked by hand on both bases, and things to try. `auDemo.test.ts` proves the product reaches those figures through its API, and that the GST accounts clear to zero after lodging.
+
+The bill inbox isn't replayed, because capture needs a real vision model; `gstCapture.test.ts` covers it. The USD walkthrough is untouched.
 
 ## Not built in this edition
 

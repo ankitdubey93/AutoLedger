@@ -1981,6 +1981,8 @@ export interface Vendor {
   phone: string | null;
   billingAddress: string | null;
   taxNumber: string | null;
+  /** Phase 49h */
+  tparReportable?: boolean;
   paymentTerms: string | null;
   notes: string | null;
   /** Phase 43a. `null` means "use the organization default". */
@@ -7613,4 +7615,40 @@ export function createPayRun(body: {
 export async function downloadPayRunAba(id: string): Promise<void> {
   const { blob, filename } = await apiDownloadBlob(`/pay-runs/${id}/aba`);
   saveBlob(blob, filename !== 'download' ? filename : 'pay-run.aba');
+}
+
+/* ------------------------------------------- Phase 49h — TPAR */
+
+export interface TparRow {
+  vendorId: string;
+  name: string;
+  abn: string | null;
+  address: string | null;
+  grossPaidCents: number;
+  gstCents: number;
+  problems: string[];
+}
+
+export interface TparReport {
+  financialYear: number;
+  from: string;
+  to: string;
+  dueDate: string;
+  rows: TparRow[];
+  totalGrossCents: number;
+  totalGstCents: number;
+  uncodedLineCount: number;
+  lodgment: { lodgedOn: string; atoReference: string | null } | null;
+}
+
+export function getTpar(year: number): Promise<{ success: boolean; report: TparReport }> {
+  return apiFetch(`/tpar/${String(year)}`);
+}
+
+export function lodgeTpar(year: number, body: { lodgedOn: string; atoReference: string | null }): Promise<{ success: boolean; report: TparReport }> {
+  return apiFetch(`/tpar/${String(year)}/lodge`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function setVendorTparReportable(vendorId: string, tparReportable: boolean): Promise<{ success: boolean; vendor: Vendor }> {
+  return apiFetch(`/vendors/${vendorId}`, { method: 'PATCH', body: JSON.stringify({ tparReportable }) });
 }

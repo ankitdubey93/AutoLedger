@@ -1,3 +1,4 @@
+import type { TparReport } from './tparService.js';
 import type { BasDetail, BasEventRow } from './basService.js';
 import { wholeDollars, WORKSHEET_LABELS } from '../../utils/basWorksheet.js';
 import {
@@ -891,5 +892,36 @@ export function basEventsTable(ctx: ReportContext, bas: BasDetail, events: reado
     ],
     footnotes: bas.basis === 'CASH' ? ['Cash basis: a document shows the share paid in this period, dated at the period end.'] : [],
     filenameStem: `gst-audit-${bas.periodStart}${label === null ? '' : `-${label.toLowerCase()}`}`,
+  };
+}
+
+/** Phase 49h — the taxable payments annual report. */
+export function tparTable(ctx: ReportContext, report: TparReport): ReportTable {
+  return {
+    title: 'Taxable payments annual report',
+    subtitle: `${ctx.organizationName} · ${dateLabel(report.from)} – ${dateLabel(report.to)} · ${ctx.baseCurrency}`,
+    columns: [
+      { key: 'abn', label: 'ABN', align: 'left', widthChars: 16 },
+      { key: 'name', label: 'Contractor', align: 'left', widthChars: 30 },
+      { key: 'address', label: 'Address', align: 'left', widthChars: 36 },
+      { key: 'gross', label: 'Gross paid', align: 'right', widthChars: 14 },
+      { key: 'gst', label: 'GST', align: 'right', widthChars: 12 },
+    ],
+    rows: [
+      ...report.rows.map((r): ReportRow => ({
+        style: 'detail',
+        indent: 0,
+        cells: {
+          abn: text(r.abn ?? ''),
+          name: text(r.name),
+          address: text((r.address ?? '').replace(/\s*\n\s*/g, ', ')),
+          gross: money(r.grossPaidCents),
+          gst: money(r.gstCents),
+        },
+      })),
+      { style: 'total', indent: 0, cells: { abn: text('Total'), gross: money(report.totalGrossCents), gst: money(report.totalGstCents) } },
+    ],
+    footnotes: [`Due ${dateLabel(report.dueDate)}. Prepared for review and manual lodgment; not lodged with the ATO by this software.`],
+    filenameStem: `tpar-${String(report.financialYear)}`,
   };
 }

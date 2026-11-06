@@ -40,6 +40,7 @@ interface VendorRow {
   phone: string | null;
   billing_address: string | null;
   tax_number: string | null;
+  tpar_reportable: boolean;
   payment_terms: string | null;
   notes: string | null;
   default_payment_term_id: string | null;
@@ -48,7 +49,7 @@ interface VendorRow {
   updated_at: Date;
 }
 
-const VENDOR_COLUMNS = `id, name, email, phone, billing_address, tax_number, payment_terms, notes,
+const VENDOR_COLUMNS = `id, name, email, phone, billing_address, tax_number, tpar_reportable, payment_terms, notes,
                          default_payment_term_id, is_active, created_at, updated_at`;
 
 function toVendor(row: VendorRow): Vendor {
@@ -59,6 +60,7 @@ function toVendor(row: VendorRow): Vendor {
     phone: row.phone,
     billingAddress: row.billing_address,
     taxNumber: row.tax_number,
+    tparReportable: row.tpar_reportable,
     paymentTerms: row.payment_terms,
     notes: row.notes,
     defaultPaymentTermId: row.default_payment_term_id,
@@ -74,6 +76,7 @@ export interface CreateVendorInput {
   phone: string | null;
   billingAddress: string | null;
   taxNumber: string | null;
+  tparReportable?: boolean | undefined;
   paymentTerms: string | null;
   notes: string | null;
   defaultPaymentTermId?: string | null | undefined;
@@ -85,6 +88,7 @@ export interface UpdateVendorInput {
   phone?: string | null | undefined;
   billingAddress?: string | null | undefined;
   taxNumber?: string | null | undefined;
+  tparReportable?: boolean | undefined;
   paymentTerms?: string | null | undefined;
   notes?: string | null | undefined;
   defaultPaymentTermId?: string | null | undefined;
@@ -137,8 +141,8 @@ export async function createVendor(
   const rows = await withTransaction(async (client) => {
     if (defaultTermId !== null) await paymentTermService.assertActiveTermOnClient(client, orgId, defaultTermId);
     const result = await client.query<VendorRow>(
-      `INSERT INTO vendors (org_id, created_by, name, email, phone, billing_address, tax_number, payment_terms, notes, default_payment_term_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO vendors (org_id, created_by, name, email, phone, billing_address, tax_number, payment_terms, notes, default_payment_term_id, tpar_reportable)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING ${VENDOR_COLUMNS}`,
       [
         orgId,
@@ -151,6 +155,7 @@ export async function createVendor(
         input.paymentTerms,
         input.notes,
         defaultTermId,
+        input.tparReportable ?? false,
       ],
     );
     const created = result.rows[0];
@@ -186,6 +191,7 @@ export async function updateVendor(
     phone: 'phone',
     billingAddress: 'billing_address',
     taxNumber: 'tax_number',
+    tparReportable: 'tpar_reportable',
     paymentTerms: 'payment_terms',
     notes: 'notes',
     defaultPaymentTermId: 'default_payment_term_id',

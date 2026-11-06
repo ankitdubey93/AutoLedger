@@ -132,6 +132,7 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
     tone: 'tone-violet',
     items: [
       { to: '/bas', label: 'BAS', icon: CalendarClock, end: false, permission: 'bas.view', region: 'AU' },
+      { to: '/tpar', label: 'TPAR', icon: ScrollText, end: false, permission: 'bas.view', region: 'AU' },
       { to: '/reports', label: 'Reports', icon: FileBarChart, end: false, permission: 'reports.view' },
       { to: '/trial-balance', label: 'Trial balance', icon: Scale, end: false, permission: 'reports.view' },
       { to: '/reports/account-transactions', label: 'Account transactions', icon: ListTree, end: false, permission: 'reports.view' },

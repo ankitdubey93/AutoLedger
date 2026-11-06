@@ -1256,6 +1256,10 @@ All need `payments.export_aba` and region `AU`.
 | `POST /pay-runs` | `{bankAccountId, paymentDate, description, items: [{billId, amountCents}]}`. One payment per vendor, all or nothing. `422` names any vendor with no details |
 | `GET /pay-runs/:id/aba` | The file, built on request and excluding voided payments. `409` if all are voided |
 
+### TPAR — `/api/v1/tpar` — Phase 49h ✅
+
+`GET /tpar/:year` (`bas.view`) returns `{report}`, where 2026 is the year ending June 2026. `?format=` exports it. `POST /tpar/:year/lodge` (`bas.finalise`) takes `{lodgedOn, atoReference}`, `422` if a contractor lacks details or before the year ends, `409` if already recorded. Both need region `AU`. Vendors accept `tparReportable`.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.
