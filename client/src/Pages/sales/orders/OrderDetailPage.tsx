@@ -37,7 +37,7 @@ import type { OrderKindConfig } from './orderKinds';
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 const primaryClass =
-  'px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
+  'px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
 const secondaryClass =
   'px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40 no-underline';
 
@@ -59,7 +59,7 @@ function Modal({ title, children }: { title: string; children: ReactNode }) {
       className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div className="animate-pop-in w-full max-w-lg rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
-        <h3 className="text-base font-semibold m-0">{title}</h3>
+        <h3 className="section-title m-0">{title}</h3>
         {children}
       </div>
     </div>
@@ -191,7 +191,7 @@ export default function OrderDetailPage({ config }: { config: OrderKindConfig })
 
       <header className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0 flex items-center gap-2">
+          <h2 className="page-title m-0 flex items-center gap-2">
             {orderLabel(order)} <OrderStatusPill status={order.status} />
           </h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
@@ -310,7 +310,7 @@ export default function OrderDetailPage({ config }: { config: OrderKindConfig })
 
       {order.documents.length > 0 && (
         <section className="flex flex-col gap-2" aria-label="Documents">
-          <h3 className="text-base font-semibold m-0">Documents</h3>
+          <h3 className="section-title m-0">Documents</h3>
           <ul className="m-0 pl-5 text-sm flex flex-col gap-1">
             {order.documents.map((doc) => (
               <li key={doc.id}>

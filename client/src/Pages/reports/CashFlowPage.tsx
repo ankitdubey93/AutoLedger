@@ -149,7 +149,7 @@ export default function CashFlowPage() {
 
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Cash flow statement</h2>
+          <h2 className="page-title m-0">Cash flow statement</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Indirect method, computed from ledger lines on every request.
           </p>
@@ -234,7 +234,7 @@ export default function CashFlowPage() {
             </table>
           </div>
 
-          <h3 className="text-sm font-semibold m-0">Cash accounts</h3>
+          <h3 className="section-title m-0">Cash accounts</h3>
           <CashAccountsTable accounts={report.cashAccounts} />
         </>
       )}

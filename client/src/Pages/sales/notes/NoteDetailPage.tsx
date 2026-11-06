@@ -95,7 +95,7 @@ function ApplyDialog({
   return (
     <div role="dialog" aria-modal="true" aria-labelledby="apply-title" className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="animate-pop-in w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
-        <h3 id="apply-title" className="text-base font-semibold m-0">
+        <h3 id="apply-title" className="section-title m-0">
           Apply credit — {formatCents(note.unappliedCents)} available
         </h3>
         <p className="text-sm text-[var(--muted)] m-0">
@@ -136,7 +136,7 @@ function ApplyDialog({
             type="button"
             onClick={() => void handleApply()}
             disabled={busy || targets === null || targets.length === 0}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
           >
             Apply
           </button>
@@ -221,14 +221,14 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
   const buttonClass =
     'px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40';
   const primaryClass =
-    'px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
+    'px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
 
   return (
     <section className="flex flex-col gap-6">
       {backLink}
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{note.number ?? `Draft ${config.title.toLowerCase()}`}</h2>
+          <h2 className="page-title m-0">{note.number ?? `Draft ${config.title.toLowerCase()}`}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1 flex items-center gap-2">
             {noteStatusPill(note.status)} {config.title} against{' '}
             <Link to={`/${config.originalPath}/${note.originalId}`}>{note.originalLabel}</Link>
@@ -376,7 +376,7 @@ export default function NoteDetailPage({ config }: { config: NoteKindConfig }) {
 
       {note.allocations.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">
+          <h3 className="section-title m-0">
             Applied to{note.status === 'VOID' ? ' (no longer counting — this note is void)' : ''}
           </h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">

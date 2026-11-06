@@ -1762,6 +1762,38 @@ A direct feature request (2026-11-06), numbered like 24/30/32/34/39-47, built to
 - Statement-style bulk send.
 - A real Stripe run, a real Brevo run, and a click-through of the UI (see above).
 
+## Warm Current redesign (2026-11-06, not a numbered phase)
+
+A direct request: redesign the whole app to be airy and friendly, with vibrant colours, clear warning colours and fluid animation. Designed first on a Claude Design canvas, approved, then built. Client only: no migration, no route, no server file, no new dependency (all motion is CSS plus browser APIs).
+
+**What changed:**
+- **Tokens** (`client/src/index.css`): magenta and coral lead, violet/blue/teal support, on near-white with borderless cards. Crimson (`--bad`) and amber (`--warn`) are reserved for things that need action. Bricolage Grotesque for headings, Inter for body and figures. The token names are unchanged, so pages using them followed automatically.
+- **Tailwind's palette remapped in `@theme`** (`amber`, `emerald`, `rose`, `red`, `sky`, `violet`, `indigo`) onto semantic tokens, fixing about 200 status badge classes whose fixed shades were unreadable in light mode.
+- **Sidebar:** accordion groups with one colour-coded icon each. The group holding the current page stays open, plus the one last opened by hand. The old per-group collapse persistence (`autoledger.sidebarGroups.*`) is gone.
+- **Dashboard:** an attention row, an animated cash hero (`FluidBackdrop`, `CountUp`), tiles, flowing bars. Net income moved from the two period cards to the hero. All previous content stays.
+- **New shared UI:** `Alert`, `StatusPill`, `SlidingTabs` (also behind `TabBar`), `CountUp`, `FluidBackdrop`, `utils/motion.ts`.
+- **Lists:** invoices and expenses show one status pill instead of a stacked status and settlement label, and overdue rows are tinted. An issued invoice now reads as its settlement state (Awaiting payment, Overdue, Paid).
+- **Motion:** route entrance, staggered rows, a sliding tab pill, pouring bars, count-up figures, and a view transition on bank lines. All of it stops under `prefers-reduced-motion`.
+- **Sign-in:** a full fluid panel beside the form, with the form first and the demo entry below it.
+- **Print** stays plain whatever the screen theme, with animation off.
+
+**Defects fixed in passing:**
+- Unlayered `dl` and `.grid` rules were beating Tailwind utilities, which caused the dashboard's sideways rows and tiles ignoring `grid-cols-*`. Both moved into layers. Pages asking for specific columns now get them.
+- `--warning-bg`, `--warning-text`, `--warning-border`, `--success-bg`, `--success-text`, `--muted-bg`, `--muted-text` and `--hover-bg` were used but never defined. They are now aliases.
+- The mobile drawer closed when a group heading was tapped.
+- `PageHeader` actions could not wrap, which caused horizontal scrolling on a phone.
+- Amber used as text was unreadable in light mode; `--warn-ink` is the text colour now.
+
+**Form contrast follow-up (same day):** field edges measured 1.2:1 against the page, under the 3:1 WCAG 1.4.11 asks of a control. New `--input-bg`, `--input-border` (above 4:1 in both themes) and `--input-border-hover` tokens are applied by one unlayered rule, because more than 30 pages carry their own copy of the field classes; a field that must have no box opts out with `.input-bare`. `formContrast.test.ts` reads the tokens from `index.css` and fails if the ratios drop. Field labels are dark and semibold, 99 small section headings became `.section-title`, table headers are dark, placeholders are no longer faded by Tailwind's reset, and disabled fields have a dashed edge. Also fixed: `.btn` knocking a button row out of line, and the tab row's hidden scrollbar.
+
+**Verified:** typecheck, lint and production build. 732 client tests, with a caveat: on a loaded machine (load about 5-7 on 4 cores) about half of full runs had one failing test, a different one each time (`dashboard`, `navigation`, `bills`), each passing on rerun. It is at least partly pre-existing: run in a loop, `dashboard.test.tsx` and `navigation.test.tsx` failed 4 of 16 at the previous commit and 2 of 12 with the redesign, on the same dashboard test. The full suite was not looped at the previous commit, so a contribution from this change to the `navigation` and `bills` failures is not ruled out. In Chrome 153 against the dev stack: light and dark at 1440px, phone width at 390px with no horizontal scroll on the pages checked, and animations measured mid-flight with and without reduced motion. Only about a dozen screens were viewed; the rest inherit tokens and shared components and were not individually checked. The view transition was confirmed to fire on a status-tab change; how a row settling looks was not judged by eye. Printing was not test-printed.
+
+**Deliberately not built:**
+- An overdue count badge in the sidebar, shown in the mockup. It needs a new fetch on every page, and the dashboard summary has amounts, not a document count, which is also why its alerts state amounts.
+- Unified status pills on quotes, orders, notes, bank lines and the remaining lists. They use the remapped tints rather than `StatusPill`.
+- Redesigned PDF output, and the printed invoice, quote and statement layouts, which keep their own template colours.
+- The mockup's brand in the sidebar: the top bar keeps it, because the setup wizard renders inside the top bar with no sidebar.
+
 ## Cross-cutting infrastructure
 
 **Audit trail & CDC (Phase 5) ✅ delivered — see [Phase 5, as delivered](#phase-5-as-delivered).** System-wide PostgreSQL triggers capturing `OLD` and `NEW` row states into a centralized, immutable `audit_logs` table as `JSONB`, alongside `org_id`, actor `user_id`, client IP, table name, operation, and timestamp — shared across every app. A trigger cannot see `req`, so the actor and IP reach it through `set_config('app.current_user_id'/'app.client_ip', ..., true)` set inside the same transaction and read back with `current_setting(..., true)`. This is distinct from `updated_at` timestamp triggers — write both, but do not confuse one for the other.

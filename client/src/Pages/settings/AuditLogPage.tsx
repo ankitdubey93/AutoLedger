@@ -192,7 +192,7 @@ export default function AuditLogPage() {
   if (forbidden) {
     return (
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold m-0">Audit trail</h2>
+        <h2 className="page-title m-0">Audit trail</h2>
         <p className="status status--bad">Only an owner or admin can view the audit trail.</p>
       </section>
     );
@@ -203,7 +203,7 @@ export default function AuditLogPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">Audit trail</h2>
+        <h2 className="page-title m-0">Audit trail</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Every record change across the suite, captured at the database.
         </p>

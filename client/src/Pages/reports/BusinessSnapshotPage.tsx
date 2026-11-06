@@ -106,7 +106,7 @@ export default function BusinessSnapshotPage() {
 
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Business snapshot</h2>
+          <h2 className="page-title m-0">Business snapshot</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             How the business is performing, and its financial position, computed from ledger lines on every request.
           </p>
@@ -204,12 +204,12 @@ export default function BusinessSnapshotPage() {
           </div>
 
           <div className="card">
-            <h3 className="m-0 mb-3 text-sm font-semibold">Profitability — last 12 months</h3>
+            <h3 className="m-0 mb-3 section-title">Profitability — last 12 months</h3>
             <ProfitabilityChart points={report.trend} />
           </div>
 
           <div className="card">
-            <h3 className="m-0 mb-3 text-sm font-semibold">Ratios</h3>
+            <h3 className="m-0 mb-3 section-title">Ratios</h3>
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-sm min-w-[24rem]">
                 <thead>
@@ -247,11 +247,11 @@ export default function BusinessSnapshotPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="card">
-              <h3 className="m-0 mb-3 text-sm font-semibold">Financial position</h3>
+              <h3 className="m-0 mb-3 section-title">Financial position</h3>
               <PositionChart position={report.position.current} />
             </div>
             <div className="card">
-              <h3 className="m-0 mb-3 text-sm font-semibold">Aged receivables & payables</h3>
+              <h3 className="m-0 mb-3 section-title">Aged receivables & payables</h3>
               <AgingStackChart receivables={report.receivables} payables={report.payables} />
               <div className="flex gap-4 mt-3 text-sm">
                 <Link to="/reports/aged-receivables" className="text-[var(--accent)]">

@@ -93,7 +93,7 @@ export default function ExceptionReportPage() {
       <BackLink to="/reports" label="Back to reports" />
 
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <h2 className="text-lg font-semibold m-0">Ledger exceptions</h2>
+        <h2 className="page-title m-0">Ledger exceptions</h2>
         <div className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">From</span>

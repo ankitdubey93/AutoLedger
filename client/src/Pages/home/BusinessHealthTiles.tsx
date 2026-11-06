@@ -47,14 +47,14 @@ export default function BusinessHealthTiles() {
   return (
     <section aria-labelledby="business-health-heading" className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h3 id="business-health-heading" className="m-0 text-sm font-semibold">
+        <h3 id="business-health-heading" className="m-0 text-[1.1875rem] font-semibold">
           Business health
         </h3>
-        <Link to="/reports/business-snapshot" className="text-xs">
+        <Link to="/reports/business-snapshot" className="text-sm font-semibold text-[var(--accent)]">
           View business snapshot →
         </Link>
       </div>
-      <div className="grid">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
         <StatTile
           label="Gross margin (YTD)"
           icon={Percent}

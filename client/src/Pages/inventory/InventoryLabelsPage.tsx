@@ -79,7 +79,7 @@ export default function InventoryLabelsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-lg font-semibold text-[var(--text)] no-print">Labels</h1>
+      <h1 className="page-title text-[var(--text)] no-print">Labels</h1>
 
       <div className="no-print space-y-4">
         {error !== null ? (
@@ -149,7 +149,7 @@ export default function InventoryLabelsPage() {
             type="button"
             disabled={targets.length === 0 || generating}
             onClick={() => void handleGenerate()}
-            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-60"
           >
             Generate
           </button>

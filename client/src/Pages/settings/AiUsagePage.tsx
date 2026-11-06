@@ -52,7 +52,7 @@ export default function AiUsagePage() {
       <BackLink to="/settings" label="Back to settings" />
 
       <header>
-        <h2 className="text-lg font-semibold m-0">AI usage</h2>
+        <h2 className="page-title m-0">AI usage</h2>
       </header>
 
       <div className="flex flex-wrap items-end gap-3">

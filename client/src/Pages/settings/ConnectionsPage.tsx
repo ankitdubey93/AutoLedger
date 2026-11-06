@@ -160,7 +160,7 @@ export default function ConnectionsPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">Connections</h2>
+        <h2 className="page-title m-0">Connections</h2>
         <p className="text-sm text-[var(--muted)] m-0">
           Connect a Google Drive folder and files dropped into it are picked up automatically — vendor bills go to
           the bill inbox, bank statements to banking.
@@ -183,7 +183,7 @@ export default function ConnectionsPage() {
 
       {loaded && !notConfigured && (
         <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3">
-          <h3 className="text-sm font-semibold m-0">Google Drive</h3>
+          <h3 className="section-title m-0">Google Drive</h3>
           <p className="text-sm m-0">{connectionStatusLabel(connection)}</p>
 
           {connection === null && modes.serviceAccount && modes.serviceAccountEmail !== null && (

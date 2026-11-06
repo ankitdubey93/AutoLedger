@@ -177,7 +177,7 @@ export default function WebhookDeliveriesPage() {
     return (
       <section className="flex flex-col gap-4">
         <BackLink to="/settings/webhooks" label="Back to webhooks" />
-        <h2 className="text-lg font-semibold m-0">Deliveries</h2>
+        <h2 className="page-title m-0">Deliveries</h2>
         <p className="status status--bad">Only an owner or admin can view deliveries.</p>
       </section>
     );
@@ -190,7 +190,7 @@ export default function WebhookDeliveriesPage() {
       <BackLink to="/settings/webhooks" label="Back to webhooks" />
 
       <header>
-        <h2 className="text-lg font-semibold m-0">Deliveries</h2>
+        <h2 className="page-title m-0">Deliveries</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">Every attempt to reach a subscribed endpoint.</p>
       </header>
 

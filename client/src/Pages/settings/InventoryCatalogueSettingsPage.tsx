@@ -205,7 +205,7 @@ export default function InventoryCatalogueSettingsPage() {
       ) : null}
 
       <section aria-label="Units of measure" className="space-y-3">
-        <h2 className="text-sm font-medium text-[var(--text)]">Units of measure</h2>
+        <h2 className="section-title">Units of measure</h2>
         <ul className="space-y-1">
           {uoms.map((uom) => (
             <li key={uom.id} className="flex items-center justify-between text-sm">
@@ -251,7 +251,7 @@ export default function InventoryCatalogueSettingsPage() {
             <button
               type="button"
               onClick={() => void handleCreateUom()}
-              className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]"
             >
               Add unit
             </button>
@@ -260,7 +260,7 @@ export default function InventoryCatalogueSettingsPage() {
       </section>
 
       <section aria-label="Categories" className="space-y-3">
-        <h2 className="text-sm font-medium text-[var(--text)]">Categories</h2>
+        <h2 className="section-title">Categories</h2>
         <ul className="space-y-1">
           {categories.map((category) => (
             <li key={category.id} style={{ paddingLeft: `${(category.depth - 1) * 16}px` }}>
@@ -357,7 +357,7 @@ export default function InventoryCatalogueSettingsPage() {
             <button
               type="button"
               onClick={() => void handleCreateCategory()}
-              className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
+              className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]"
             >
               Add category
             </button>
@@ -366,7 +366,7 @@ export default function InventoryCatalogueSettingsPage() {
       </section>
 
       <section aria-label="Custom fields" className="space-y-3">
-        <h2 className="text-sm font-medium text-[var(--text)]">
+        <h2 className="section-title">
           Custom fields{selectedCategory !== null ? ` — ${selectedCategory.name}` : ''}
         </h2>
         {selectedCategory === null ? (
@@ -460,7 +460,7 @@ export default function InventoryCatalogueSettingsPage() {
                 <button
                   type="button"
                   onClick={() => void handleCreateAttribute()}
-                  className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white"
+                  className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]"
                 >
                   Add field
                 </button>

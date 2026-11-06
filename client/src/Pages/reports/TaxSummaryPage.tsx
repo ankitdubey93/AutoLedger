@@ -54,7 +54,7 @@ function DirectionSection({ title, direction, reconcile, checkLabel }: {
 }) {
   return (
     <section className="flex flex-col gap-3">
-      <h3 className="text-base font-semibold m-0">{title}</h3>
+      <h3 className="section-title m-0">{title}</h3>
 
       <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
         <table className="w-full border-collapse text-sm min-w-[30rem]">
@@ -138,7 +138,7 @@ export default function TaxSummaryPage() {
 
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Tax summary</h2>
+          <h2 className="page-title m-0">Tax summary</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Tax collected on sales and paid on purchases, by rate, for the period.
           </p>

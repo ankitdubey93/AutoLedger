@@ -243,10 +243,10 @@ export default function BillDetailPage() {
 
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{bill.vendorReference}</h2>
+          <h2 className="page-title m-0">{bill.vendorReference}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(bill.status)}</p>
           {bill.kind === 'DEPOSIT' && (
-            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
+            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border-strong)] text-[var(--muted)]">
               Deposit
             </span>
           )}
@@ -297,7 +297,7 @@ export default function BillDetailPage() {
               type="button"
               onClick={() => void startApprove()}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Approve
             </button>
@@ -317,7 +317,7 @@ export default function BillDetailPage() {
               type="button"
               onClick={() => setShowPaymentDialog(true)}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Record payment
             </button>
@@ -476,7 +476,7 @@ export default function BillDetailPage() {
 
       {payments.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Payments</h3>
+          <h3 className="section-title m-0">Payments</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -506,7 +506,7 @@ export default function BillDetailPage() {
 
       {bill.depositApplications.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Deposits applied</h3>
+          <h3 className="section-title m-0">Deposits applied</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -547,7 +547,7 @@ export default function BillDetailPage() {
 
       {debitNotes.length > 0 && (
         <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Debit notes</h3>
+          <h3 className="section-title m-0">Debit notes</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -738,7 +738,7 @@ function ApplyPrepaymentDialog({
       className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div className="animate-pop-in w-full max-w-lg rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
-        <h3 className="text-base font-semibold m-0">Apply prepayment</h3>
+        <h3 className="section-title m-0">Apply prepayment</h3>
         {prepayments === null ? (
           <p className="text-sm text-[var(--muted)] m-0">Loading prepayments…</p>
         ) : prepayments.length === 0 ? (
@@ -787,7 +787,7 @@ function ApplyPrepaymentDialog({
           {prepayments !== null && prepayments.length > 0 && (
             <button
               type="button"
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
               disabled={busy || !ready}
               onClick={() => void submit()}
             >

@@ -12,51 +12,118 @@
 @import "tailwindcss";
 
 /*
- * Phase 31 token set. Three selectors carry the same variable names so every
- * class and utility below stays theme-agnostic:
- *   :root                                               → dark (the default)
+ * Tailwind's stock palette, pointed at the semantic tokens. About 200 status
+ * badges across the app were written `bg-amber-500/10 text-amber-400`, and those
+ * fixed shades were unreadable on a light background. Redefining the colours
+ * here fixes all of them at once. Crimson and amber mean "act on this", so the
+ * families below are the only route to them. Tailwind resolves `/10` opacity
+ * through color-mix, which accepts a var().
+ */
+@theme {
+  --color-amber-400: var(--warn-ink);
+  --color-amber-500: var(--warn);
+  --color-emerald-400: var(--good);
+  --color-emerald-500: var(--good);
+  --color-rose-400: var(--bad);
+  --color-rose-500: var(--bad);
+  --color-red-400: var(--bad);
+  --color-red-500: var(--bad);
+  --color-sky-400: var(--info-ink);
+  --color-sky-500: var(--info);
+  --color-violet-400: var(--violet-ink);
+  --color-violet-500: var(--violet);
+  --color-indigo-400: var(--violet-ink);
+  --color-indigo-500: var(--violet);
+}
+
+/*
+ * The "Warm Current" token set. Three selectors carry the same variable names so
+ * every class and utility below stays theme-agnostic:
+ *   :root                                               → dark (the unconditional fallback)
  *   :root[data-theme="light"]                           → light, forced
  *   @media (prefers-color-scheme: light) :not([data-theme="dark"]) → "system"
  * `index.html` sets `data-theme` from localStorage before first paint (see
  * its inline script) so there is no flash; ThemeContext keeps it in sync
- * after that. A page that never mounts ThemeContext (tests, print) still
- * renders correctly because :root's dark values are the unconditional
- * fallback.
+ * after that.
+ *
+ * Colour rules: magenta and coral are the brand. Crimson (--bad) and amber
+ * (--warn) are reserved for things that need action. Amber is too light to
+ * read as text: use --warn-ink for text and --warn only as a fill under --warn-fg.
  */
 :root {
-  --bg: #0b0d12;
-  --bg-subtle: #0e1118;
-  --panel: #12151c;
-  --panel-2: #1a1e28;
-  --border: #262b38;
-  --border-strong: #383f4f;
-  --text: #e9eaf0;
-  --muted: #8b93a7;
+  --bg: #170f1a;
+  --bg-subtle: #1c1320;
+  --panel: #221826;
+  --panel-2: #2c2031;
+  --border: #392b3f;
+  --border-strong: #5c4a63;
+  --input-bg: #120b15;
+  --input-border: #94809a;
+  --input-border-hover: #bcabb6;
+  --text: #fbf1f6;
+  --muted: #bcabb6;
 
-  --accent: #7c6cf6;
-  --accent-hover: #6d5cf0;
-  --accent-soft: color-mix(in srgb, #7c6cf6 16%, transparent);
-  --accent-fg: #ffffff;
+  --accent: #ff5cb0;
+  --accent-hover: #ff7fc1;
+  --accent-soft: #4a1c3a;
+  --accent-fg: #2a0a1c;
+  --accent-glow: rgba(255, 92, 176, 0.3);
 
-  --good: #3fb950;
-  --good-soft: color-mix(in srgb, #3fb950 16%, transparent);
-  --bad: #f85149;
-  --bad-soft: color-mix(in srgb, #f85149 16%, transparent);
-  --warn: #d29922;
-  --warn-soft: color-mix(in srgb, #d29922 16%, transparent);
+  --coral: #ff8a6e;
+  --coral-soft: #4a2720;
+  --coral-ink: #ffb09c;
+  --violet: #a98bff;
+  --violet-soft: #33284f;
+  --violet-ink: #c4b0ff;
+  --info: #6bb3ff;
+  --info-soft: #1c3048;
+  --info-ink: #9accff;
 
-  --radius-sm: 0.375rem;
-  --radius-md: 0.625rem;
-  --radius-lg: 1rem;
+  --good: #4fe0cc;
+  --good-bright: #2fd6be;
+  --good-soft: #143a37;
+  --bad: #ff6a76;
+  --bad-soft: #4b1a22;
+  --bad-fg: #2a0a10;
+  --bad-glow: rgba(255, 106, 118, 0.45);
+  --warn: #ffc23d;
+  --warn-soft: #43321a;
+  --warn-ink: #ffd47a;
+  --warn-fg: #2a1320;
 
-  --shadow-sm: 0 1px 2px color-mix(in srgb, black 30%, transparent);
-  --shadow-md: 0 4px 16px color-mix(in srgb, black 28%, transparent);
-  --shadow-lg: 0 12px 40px color-mix(in srgb, black 40%, transparent);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 24px rgba(0, 0, 0, 0.22);
+  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 18px 44px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.4), 0 28px 64px rgba(0, 0, 0, 0.5);
 
-  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --dur: 160ms;
+  /* Older names some pages still use; several were referenced but never defined. */
+  --warning-bg: var(--warn-soft);
+  --warning-text: var(--warn-ink);
+  --warning-border: var(--warn);
+  --success-bg: var(--good-soft);
+  --success-text: var(--good);
+  --muted-bg: var(--panel-2);
+  --muted-text: var(--muted);
+  --hover-bg: var(--panel-2);
 
-  color-scheme: dark light;
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.5rem;
+  --radius-xl: 2rem;
+
+  /* The hero stays magenta in both themes; it carries its own white text. */
+  --hero: #c4127f;
+  --hero-deep: #a50c6a;
+  --hero-plum: #8a0d78;
+  --hero-coral: #ff6f4f;
+
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur: 280ms;
+
+  --font-display: "Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  accent-color: var(--accent);
+  color-scheme: dark;
   font-family:
     "Inter",
     ui-sans-serif,
@@ -64,61 +131,104 @@
     -apple-system,
     "Segoe UI",
     sans-serif;
+  font-feature-settings: "tnum" 1, "cv11" 1;
 }
 
 :root[data-theme="light"] {
-  --bg: #f6f7fa;
-  --bg-subtle: #eef0f4;
-  --panel: #ffffff;
-  --panel-2: #f2f3f7;
-  --border: #e2e5ec;
-  --border-strong: #c9ced9;
-  --text: #191c22;
-  --muted: #5f6673;
+    --bg: #fffdfc;
+    --bg-subtle: #fff8f5;
+    --panel: #ffffff;
+    --panel-2: #fff5f2;
+    --border: #f4e6e6;
+    --border-strong: #d9c2c9;
+    --input-bg: #ffffff;
+    --input-border: #85707c;
+    --input-border-hover: #2a1320;
+    --text: #2a1320;
+    --muted: #6f5c68;
 
-  --accent: #5b4be0;
-  --accent-hover: #4d3ed6;
-  --accent-soft: color-mix(in srgb, #5b4be0 12%, transparent);
-  --accent-fg: #ffffff;
+    --accent: #c4127f;
+    --accent-hover: #a50c6a;
+    --accent-soft: #fde7f3;
+    --accent-fg: #ffffff;
+    --accent-glow: rgba(196, 18, 127, 0.28);
 
-  --good: #1a7f37;
-  --good-soft: color-mix(in srgb, #1a7f37 12%, transparent);
-  --bad: #cf222e;
-  --bad-soft: color-mix(in srgb, #cf222e 12%, transparent);
-  --warn: #9a6700;
-  --warn-soft: color-mix(in srgb, #9a6700 12%, transparent);
+    --coral: #ff6f4f;
+    --coral-soft: #ffece6;
+    --coral-ink: #ad3819;
+    --violet: #6d3beb;
+    --violet-soft: #eee8fe;
+    --violet-ink: #5527c9;
+    --info: #0b6bd3;
+    --info-soft: #e3f0fe;
+    --info-ink: #0a5cb5;
 
-  --shadow-sm: 0 1px 2px color-mix(in srgb, #191c22 8%, transparent);
-  --shadow-md: 0 4px 16px color-mix(in srgb, #191c22 10%, transparent);
-  --shadow-lg: 0 12px 40px color-mix(in srgb, #191c22 16%, transparent);
+    --good: #067a6e;
+    --good-bright: #12b5a2;
+    --good-soft: #ddf7f2;
+    --bad: #ce1126;
+    --bad-soft: #ffe6e8;
+    --bad-fg: #ffffff;
+    --bad-glow: rgba(206, 17, 38, 0.45);
+    --warn: #ffb81c;
+    --warn-soft: #fff3d1;
+    --warn-ink: #734900;
+    --warn-fg: #2a1320;
+
+    --shadow-sm: 0 1px 2px rgba(90, 20, 60, 0.05), 0 8px 24px rgba(90, 20, 60, 0.05);
+    --shadow-md: 0 2px 4px rgba(90, 20, 60, 0.06), 0 18px 44px rgba(90, 20, 60, 0.12);
+    --shadow-lg: 0 4px 8px rgba(90, 20, 60, 0.08), 0 28px 64px rgba(90, 20, 60, 0.18);
+
+    color-scheme: light;
 }
 
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
-    --bg: #f6f7fa;
-    --bg-subtle: #eef0f4;
+    --bg: #fffdfc;
+    --bg-subtle: #fff8f5;
     --panel: #ffffff;
-    --panel-2: #f2f3f7;
-    --border: #e2e5ec;
-    --border-strong: #c9ced9;
-    --text: #191c22;
-    --muted: #5f6673;
+    --panel-2: #fff5f2;
+    --border: #f4e6e6;
+    --border-strong: #d9c2c9;
+    --input-bg: #ffffff;
+    --input-border: #85707c;
+    --input-border-hover: #2a1320;
+    --text: #2a1320;
+    --muted: #6f5c68;
 
-    --accent: #5b4be0;
-    --accent-hover: #4d3ed6;
-    --accent-soft: color-mix(in srgb, #5b4be0 12%, transparent);
+    --accent: #c4127f;
+    --accent-hover: #a50c6a;
+    --accent-soft: #fde7f3;
     --accent-fg: #ffffff;
+    --accent-glow: rgba(196, 18, 127, 0.28);
 
-    --good: #1a7f37;
-    --good-soft: color-mix(in srgb, #1a7f37 12%, transparent);
-    --bad: #cf222e;
-    --bad-soft: color-mix(in srgb, #cf222e 12%, transparent);
-    --warn: #9a6700;
-    --warn-soft: color-mix(in srgb, #9a6700 12%, transparent);
+    --coral: #ff6f4f;
+    --coral-soft: #ffece6;
+    --coral-ink: #ad3819;
+    --violet: #6d3beb;
+    --violet-soft: #eee8fe;
+    --violet-ink: #5527c9;
+    --info: #0b6bd3;
+    --info-soft: #e3f0fe;
+    --info-ink: #0a5cb5;
 
-    --shadow-sm: 0 1px 2px color-mix(in srgb, #191c22 8%, transparent);
-    --shadow-md: 0 4px 16px color-mix(in srgb, #191c22 10%, transparent);
-    --shadow-lg: 0 12px 40px color-mix(in srgb, #191c22 16%, transparent);
+    --good: #067a6e;
+    --good-bright: #12b5a2;
+    --good-soft: #ddf7f2;
+    --bad: #ce1126;
+    --bad-soft: #ffe6e8;
+    --bad-fg: #ffffff;
+    --bad-glow: rgba(206, 17, 38, 0.45);
+    --warn: #ffb81c;
+    --warn-soft: #fff3d1;
+    --warn-ink: #734900;
+    --warn-fg: #2a1320;
+
+    --shadow-sm: 0 1px 2px rgba(90, 20, 60, 0.05), 0 8px 24px rgba(90, 20, 60, 0.05);
+    --shadow-md: 0 2px 4px rgba(90, 20, 60, 0.06), 0 18px 44px rgba(90, 20, 60, 0.12);
+    --shadow-lg: 0 4px 8px rgba(90, 20, 60, 0.08), 0 28px 64px rgba(90, 20, 60, 0.18);
+
+    color-scheme: light;
   }
 }
 
@@ -149,10 +259,10 @@ body {
 
 .card {
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 1.25rem;
+  border-radius: var(--radius-lg);
+  padding: 1.75rem;
   box-shadow: var(--shadow-sm);
+  animation: rise 600ms var(--ease) both;
   transition:
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease),
@@ -162,9 +272,8 @@ body {
 /* Opt-in: a card that is itself a link or a clickable surface. */
 .card--interactive:hover,
 .card--interactive:focus-visible {
-  border-color: var(--accent);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
+  transform: translateY(-4px);
 }
 
 .status {
@@ -173,35 +282,27 @@ body {
   font-weight: 600;
 }
 
+.status--good,
+.status--bad {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-md);
+  animation: rise 400ms var(--ease) both;
+}
+
 .status--good {
   color: var(--good);
+  background: var(--good-soft);
 }
 
 .status--bad {
   color: var(--bad);
+  background: var(--bad-soft);
 }
 
 .muted {
   color: var(--muted);
   font-size: 0.875rem;
   margin: 0.375rem 0 0;
-}
-
-dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.4rem 1rem;
-  margin: 0;
-  font-size: 0.875rem;
-}
-
-dt {
-  color: var(--muted);
-}
-
-dd {
-  margin: 0;
-  font-variant-numeric: tabular-nums;
 }
 
 code {
@@ -212,10 +313,6 @@ code {
   border-radius: 0.25rem;
 }
 
-footer {
-  border-top: 1px solid var(--border);
-  padding-top: 1rem;
-}
 
 /* ------------------------------------------------------- Phase 1: app chrome */
 
@@ -260,12 +357,17 @@ footer {
   gap: 1.5rem;
 }
 
-/* auto-fit + minmax keeps this responsive without a media query. */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
-  gap: 1rem;
-  align-items: start;
+/*
+  auto-fit + minmax keeps this responsive without a media query. In a layer
+  because `.grid` is also Tailwind's own class: unlayered, this silently beat every
+  `grid-cols-*` written next to it.
+*/
+@layer components {
+  .grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr));
+    gap: 1.25rem;
+    align-items: stretch;
+  }
 }
 
 .chip {
@@ -368,25 +470,21 @@ a.app-card:focus-visible {
 }
 
 .form label {
-  font-size: 0.8125rem;
-  color: var(--muted);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
   margin-top: 0.5rem;
 }
 
 .form input {
   font: inherit;
-  padding: 0.5rem 0.625rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg);
+  min-height: 3rem;
+  padding: 0 1rem;
+  border-radius: var(--radius-md);
   color: var(--text);
   transition:
     border-color var(--dur) var(--ease),
     box-shadow var(--dur) var(--ease);
-}
-
-.form input:hover {
-  border-color: var(--border-strong);
 }
 
 .form input:focus-visible,
@@ -401,10 +499,13 @@ button:focus-visible,
 
 .btn {
   font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
   margin-top: 1rem;
-  padding: 0.5rem 0.875rem;
+  min-height: 2.5rem;
+  padding: 0.375rem 1.125rem;
   border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  border-radius: 999px;
   background: var(--accent);
   color: var(--accent-fg);
   cursor: pointer;
@@ -416,7 +517,8 @@ button:focus-visible,
 
 .btn:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px var(--accent-glow);
 }
 
 .btn:active:not(:disabled) {
@@ -431,20 +533,20 @@ button:focus-visible,
 .btn--ghost {
   background: transparent;
   color: var(--text);
-  border-color: var(--border);
+  border-color: var(--border-strong);
 }
 
 .btn--ghost:hover:not(:disabled) {
-  background: var(--panel-2);
-  border-color: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
   box-shadow: none;
 }
 
 select {
   font: inherit;
-  padding: 0.3rem 1.75rem 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  border-radius: var(--radius-md);
   background:
     var(--bg)
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%238b93a7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")
@@ -453,10 +555,6 @@ select {
   appearance: none;
   -webkit-appearance: none;
   transition: border-color var(--dur) var(--ease);
-}
-
-select:hover {
-  border-color: var(--border-strong);
 }
 
 /* ------------------------------------------------------------------ tables */
@@ -495,19 +593,63 @@ select:hover {
   */
   h1 {
     margin: 0;
-    font-size: 1.75rem;
+    font-family: var(--font-display);
+    font-size: 2.125rem;
     letter-spacing: -0.02em;
+  }
+
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
   }
 
   h2 {
     margin: 0 0 0.75rem;
   }
 
+  h2 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+
   h2:not([class]) {
-    font-size: 0.8125rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+    font-size: 1.1875rem;
+    font-weight: 600;
+  }
+
+  input,
+  select,
+  textarea {
+    transition:
+      border-color var(--dur) var(--ease),
+      box-shadow var(--dur) var(--ease),
+      background-color var(--dur) var(--ease);
+  }
+
+  input:focus-visible,
+  select:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 0;
+    box-shadow: 0 0 0 5px var(--accent-soft);
+  }
+
+  /* In this layer for the same reason: unlayered, `dl` beat `flex` on every list. */
+  dl {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.4rem 1rem;
+    margin: 0;
+    font-size: 0.875rem;
+  }
+
+  dt {
     color: var(--muted);
+  }
+
+  dd {
+    margin: 0;
+    font-variant-numeric: tabular-nums;
   }
 
   table {
@@ -519,22 +661,49 @@ select:hover {
   th,
   td {
     text-align: left;
-    padding: 0.4rem 0.75rem 0.4rem 0;
+    padding: 0.75rem 1rem 0.75rem 0;
     border-bottom: 1px solid var(--border);
     white-space: nowrap;
   }
 
   th {
-    color: var(--muted);
-    font-weight: 500;
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.8125rem;
   }
 
+  input[type="file"]::file-selector-button {
+    min-height: 2.5rem;
+    margin-right: 0.75rem;
+    padding: 0 1.125rem;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  /* A plain text link looks clickable. Anything with its own classes styles itself. */
+  a:not([class]) {
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  /* New rows rise in, staggered; sorting keeps its keys, so it replays nothing. */
   tbody tr {
     transition: background var(--dur) var(--ease);
+    animation: rise 500ms var(--ease) both;
   }
+
+  tbody tr:nth-child(2) { animation-delay: 40ms; }
+  tbody tr:nth-child(3) { animation-delay: 80ms; }
+  tbody tr:nth-child(4) { animation-delay: 120ms; }
+  tbody tr:nth-child(5) { animation-delay: 160ms; }
+  tbody tr:nth-child(6) { animation-delay: 200ms; }
+  tbody tr:nth-child(n + 7) { animation-delay: 240ms; }
 
   tbody tr:hover {
     background: var(--panel-2);
@@ -570,7 +739,7 @@ select:hover {
   because it holds the eventual layout, so the page does not jump.
 */
 .skeleton {
-  background: linear-gradient(90deg, var(--panel), var(--panel-2), var(--panel));
+  background: linear-gradient(90deg, var(--panel-2), var(--accent-soft), var(--panel-2));
   background-size: 200% 100%;
   border-radius: var(--radius-md);
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
@@ -644,14 +813,17 @@ select:hover {
 
 /* Respect a reduced-motion preference rather than animating regardless. */
 @media (prefers-reduced-motion: reduce) {
-  .skeleton,
-  .animate-pop-in,
-  .animate-fade-in,
-  .animate-slide-in-left,
-  * {
+  *,
+  *::before,
+  *::after,
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
     animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
   }
 }
 
@@ -689,9 +861,33 @@ select:hover {
   .no-print {
     display: none !important;
   }
+  /* Paper stays plain whatever theme is on screen, and never mid-animation. */
+  :root,
+  :root[data-theme],
+  :root:not([data-theme="dark"]) {
+    --bg: #fff;
+    --bg-subtle: #fff;
+    --panel: #fff;
+    --panel-2: #f6f6f6;
+    --border: #ddd;
+    --border-strong: #bbb;
+    --text: #000;
+    --muted: #555;
+    color-scheme: light;
+  }
   body {
     background: #fff;
     color: #000;
+  }
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .card {
+    box-shadow: none;
+    border: 1px solid #ddd;
   }
 }
 
@@ -727,4 +923,611 @@ select:hover {
 .label-lg {
   width: 100mm;
   height: 50mm;
+}
+
+/* ------------------------------------------- Warm Current: shared components */
+
+/*
+  Unlayered on purpose (see the note at the top of this file): every link and
+  button gets the same fluid transition, including the 80-odd that ask for
+  Tailwind's `transition-colors`, which only covers colour.
+*/
+a,
+button {
+  transition:
+    color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease),
+    border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease),
+    transform 400ms var(--spring);
+}
+
+button:active:not(:disabled),
+a[class*="rounded-full"]:active {
+  transform: scale(0.96);
+}
+
+/* The 70-odd filled accent buttons written with utilities lift like `.btn`. */
+button[class*="bg-[var(--accent)]"]:hover:not(:disabled),
+a[class*="bg-[var(--accent)]"]:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 24px var(--accent-glow);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.625rem, 2.6vw, 2.25rem);
+  font-weight: 700;
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+}
+
+/* A money figure in the display face, the same width digit to digit. */
+.display-figure {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Header actions */
+.action-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 2.75rem;
+  padding: 0 1.125rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  color: var(--text);
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.action-pill:hover {
+  background: var(--accent-soft);
+  border-color: transparent;
+  color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.action-pill--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--accent-fg);
+}
+
+.action-pill--primary:hover {
+  background: var(--accent-hover);
+  color: var(--accent-fg);
+  box-shadow: 0 10px 24px var(--accent-glow);
+}
+
+/* Tone chips, one colour per area of the product */
+.tone-accent { background: var(--accent-soft); color: var(--accent); }
+.tone-coral { background: var(--coral-soft); color: var(--coral-ink); }
+.tone-violet { background: var(--violet-soft); color: var(--violet-ink); }
+.tone-info { background: var(--info-soft); color: var(--info-ink); }
+.tone-good { background: var(--good-soft); color: var(--good); }
+.tone-bad { background: var(--bad-soft); color: var(--bad); }
+.tone-plain { background: var(--panel-2); color: var(--muted); }
+
+/* Status pills always pair the colour with an icon and a word. */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 1.75rem;
+  padding: 0 0.75rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-pill--danger { background: var(--bad); color: var(--bad-fg); }
+.status-pill--warn { background: var(--warn); color: var(--warn-fg); }
+.status-pill--good { background: var(--good-soft); color: var(--good); }
+.status-pill--info { background: var(--info-soft); color: var(--info-ink); }
+.status-pill--neutral { background: var(--panel-2); color: var(--muted); }
+
+/* Alerts */
+.alert {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  padding: 1rem 1.25rem;
+  border-radius: 1.25rem;
+  color: var(--text);
+  animation: rise 600ms var(--ease) both;
+  transition: background-color 600ms var(--ease);
+}
+
+.alert--danger { background: var(--bad-soft); }
+.alert--warn { background: var(--warn-soft); }
+.alert--good { background: var(--good-soft); }
+
+.alert__mark {
+  flex: none;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+}
+
+.alert--danger .alert__mark {
+  background: var(--bad);
+  color: var(--bad-fg);
+  animation: pulse-danger 2.4s ease-out infinite;
+}
+
+.alert--warn .alert__mark { background: var(--warn); color: var(--warn-fg); }
+
+.alert--good .alert__mark {
+  background: var(--good);
+  color: var(--panel);
+  animation: pop 700ms var(--spring) both;
+}
+
+.alert__action {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2.25rem;
+  padding: 0 0.875rem;
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.alert--danger .alert__action { background: var(--bad); color: var(--bad-fg); }
+.alert--warn .alert__action { background: var(--warn); color: var(--warn-fg); }
+.alert--good .alert__action { background: var(--good); color: var(--panel); }
+.alert__action:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+/* The sliding pill behind a row of tabs (SlidingTabs and TabBar) */
+.tab-track {
+  position: relative;
+  display: flex;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  gap: 0.125rem;
+  padding: 0.25rem;
+  border-radius: 999px;
+  background: var(--panel-2);
+}
+
+.tab-track__thumb {
+  position: absolute;
+  top: 0.25rem;
+  bottom: 0.25rem;
+  left: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  transition:
+    transform 600ms var(--ease),
+    width 600ms var(--ease);
+}
+
+.tab-track__item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  flex: none;
+  min-height: 2.5rem;
+  padding: 0 1rem;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.tab-track__item:hover { color: var(--text); }
+
+.tab-track__item[aria-current="page"],
+.tab-track__item[aria-selected="true"],
+.tab-track__item[aria-current="page"]:hover,
+.tab-track__item[aria-selected="true"]:hover {
+  color: var(--accent-fg);
+}
+
+/* Sidebar */
+.nav-group__button,
+.nav-flat {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 0.75rem;
+  border: 0;
+  border-radius: 0.875rem;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.nav-group__button:hover,
+.nav-flat:hover {
+  background: var(--panel-2);
+  transform: translateX(3px);
+}
+
+.nav-flat[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.nav-icon {
+  flex: none;
+  width: 1.875rem;
+  height: 1.875rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.625rem;
+  transition: transform 500ms var(--spring);
+}
+
+.nav-group__button:hover .nav-icon,
+.nav-flat:hover .nav-icon {
+  transform: rotate(-6deg) scale(1.08);
+}
+
+.nav-group__chevron {
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 500ms var(--ease);
+}
+
+.nav-group--open .nav-group__chevron { transform: rotate(90deg); }
+
+/* A grid row from 0fr to 1fr animates to the content's natural height. */
+.nav-group__panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 500ms var(--ease);
+}
+
+.nav-group--open .nav-group__panel { grid-template-rows: 1fr; }
+
+.nav-group__inner {
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  transition: visibility 500ms;
+}
+
+.nav-group--open .nav-group__inner { visibility: visible; }
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  margin: 0.125rem 0 0.125rem 2.625rem;
+  padding: 0 0.75rem;
+  border-radius: 0.75rem;
+  color: var(--muted);
+  font-size: 0.875rem;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav-link:hover {
+  background: var(--panel-2);
+  color: var(--text);
+  transform: translateX(3px);
+}
+
+.nav-link[aria-current="page"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-rail-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.5rem;
+  border-radius: 0.75rem;
+  color: var(--muted);
+}
+
+.nav-rail-link:hover { background: var(--panel-2); color: var(--text); }
+.nav-rail-link[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+
+/* The logo's shape never quite settles. */
+.brand-blob {
+  background: var(--accent);
+  color: var(--accent-fg);
+  border-radius: 46% 54% 58% 42% / 48% 42% 58% 52%;
+  animation: morph 9s ease-in-out infinite alternate;
+}
+
+.brand-blob--inverse {
+  background: #ffffff;
+  color: var(--hero);
+}
+
+/*
+  Form fields. Unlayered on purpose: more than 30 pages carry their own copy of
+  the field classes, all asking for the faint `--border`, which measures 1.2:1
+  against the page. A control's edge needs 3:1 (WCAG 1.4.11), and
+  --input-border is above 4:1 in both themes; formContrast.test.ts holds it there.
+  A field that must have no box, like the command palette's, opts out with
+  `.input-bare`.
+*/
+input:not([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"], [type="hidden"], .input-bare),
+select:not(.input-bare),
+textarea:not(.input-bare) {
+  background-color: var(--input-bg);
+  border: 1px solid var(--input-border);
+  color: var(--text);
+  font-weight: 400;
+}
+
+input:not([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"], [type="hidden"], .input-bare):hover:not(:disabled),
+select:not(.input-bare):hover:not(:disabled),
+textarea:not(.input-bare):hover:not(:disabled) {
+  border-color: var(--input-border-hover);
+}
+
+input:not([type="checkbox"], [type="radio"], [type="file"], [type="color"], [type="range"], [type="hidden"], .input-bare):focus-visible,
+select:not(.input-bare):focus-visible,
+textarea:not(.input-bare):focus-visible {
+  border-color: var(--accent);
+}
+
+/* Read-only values look read-only, rather than simply fainter. */
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background-color: var(--panel-2);
+  border-style: dashed;
+  opacity: 1;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+/* Tailwind's reset fades placeholders to half strength; these must still be read. */
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/*
+  Field labels. About 290 labels wrap their text in a muted span, as the first
+  child of a stacked label. Dark and semibold reads as a label; helper text after
+  it stays regular.
+*/
+label.flex-col {
+  color: var(--text);
+  font-weight: 600;
+}
+
+label.flex-col > span:first-child {
+  color: var(--text);
+}
+
+label.flex-col > span:not(:first-child) {
+  font-weight: 400;
+}
+
+/* The same, for a label tied to its field by `for`, or wrapping one in another layout. */
+label.block,
+label[for]:not(input + label),
+label:has(> select, > textarea, > input:not([type="checkbox"], [type="radio"], [type="file"])) {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* `.btn`'s top margin suits a stacked form; beside another button it knocks the row out of line. */
+.flex > .btn {
+  margin-top: 0;
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-size: 1.1875rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* The fluid hero: slow morphing shapes over two looping waves. */
+.fluid-hero {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--hero);
+  color: #ffffff;
+}
+
+.fluid-hero__blob {
+  position: absolute;
+  z-index: -1;
+  border-radius: 42% 58% 63% 37% / 45% 38% 62% 55%;
+  animation:
+    morph 13s ease-in-out infinite alternate,
+    drift 19s ease-in-out infinite alternate;
+}
+
+.fluid-hero__wave {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fluid-hero__wave svg {
+  display: block;
+  width: 200%;
+  height: 100%;
+  animation: wave 11s linear infinite;
+}
+
+.fluid-hero__wave--back svg {
+  animation-duration: 17s;
+  animation-direction: reverse;
+}
+
+a.fluid-hero {
+  transition: transform 500ms var(--ease), box-shadow 500ms var(--ease);
+}
+
+a.fluid-hero:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 24px 56px var(--accent-glow);
+}
+
+/* In a narrow hero the shapes would sit behind the text; white on coral is unreadable. */
+@media (max-width: 64rem) {
+  .fluid-hero__blob {
+    right: -9rem !important;
+    top: -11rem !important;
+  }
+}
+
+/* Bars that pour in */
+.flow-bar {
+  display: flex;
+  gap: 0.25rem;
+  width: 100%;
+  height: 0.875rem;
+}
+
+.flow-bar__segment {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  animation: pour 1300ms var(--ease) both;
+}
+
+.flow-bar__segment:nth-child(2) { animation-delay: 140ms; }
+.flow-bar__segment:nth-child(3) { animation-delay: 280ms; }
+
+/* SVG bars grow from their baseline. */
+.chart-bar {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: grow-up 900ms var(--ease) both;
+}
+
+/* A section's children arrive one after another. */
+.stagger > * { animation: rise 700ms var(--ease) both; }
+.stagger > :nth-child(2) { animation-delay: 60ms; }
+.stagger > :nth-child(3) { animation-delay: 120ms; }
+.stagger > :nth-child(4) { animation-delay: 180ms; }
+.stagger > :nth-child(5) { animation-delay: 240ms; }
+.stagger > :nth-child(6) { animation-delay: 300ms; }
+.stagger > :nth-child(n + 7) { animation-delay: 360ms; }
+
+/* The default view transition, slowed to match everything else. */
+::view-transition-group(*) {
+  animation-duration: 450ms;
+  animation-timing-function: var(--ease);
+}
+
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: 300ms;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* No `to`: each element pours to its own inline width. */
+@keyframes pour {
+  from {
+    width: 0;
+    opacity: 0.4;
+  }
+}
+
+@keyframes grow-up {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes wave {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@keyframes morph {
+  0% {
+    border-radius: 42% 58% 63% 37% / 45% 38% 62% 55%;
+  }
+  50% {
+    border-radius: 63% 37% 41% 59% / 58% 62% 38% 42%;
+  }
+  100% {
+    border-radius: 37% 63% 55% 45% / 39% 55% 45% 61%;
+  }
+}
+
+@keyframes drift {
+  to {
+    transform: translate(28px, -18px) rotate(14deg) scale(1.08);
+  }
+}
+
+@keyframes pulse-danger {
+  0% {
+    box-shadow: 0 0 0 0 var(--bad-glow);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 14px transparent;
+  }
 }

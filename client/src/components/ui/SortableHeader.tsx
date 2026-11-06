@@ -30,8 +30,8 @@ export default function SortableHeader<K extends string>({
       <button
         type="button"
         onClick={() => onSort(sortKey)}
-        className={`inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer uppercase tracking-wide text-xs font-medium ${
-          active ? 'text-[var(--text)]' : 'text-[var(--muted)] hover:text-[var(--text)]'
+        className={`inline-flex items-center gap-1 bg-transparent border-0 p-0 cursor-pointer uppercase tracking-wide text-xs font-semibold ${
+          active ? 'text-[var(--text)]' : 'text-[var(--text)] hover:text-[var(--accent)]'
         } ${align === 'right' ? 'flex-row-reverse' : ''}`}
       >
         {label}

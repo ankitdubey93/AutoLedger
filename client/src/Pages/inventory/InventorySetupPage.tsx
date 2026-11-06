@@ -92,7 +92,7 @@ export default function InventorySetupPage() {
   if (created !== null) {
     return (
       <div className="space-y-4">
-        <h1 className="text-lg font-semibold text-[var(--text)]">Inventory is set up</h1>
+        <h1 className="page-title text-[var(--text)]">Inventory is set up</h1>
         <ul className="text-sm text-[var(--muted)] space-y-1">
           <li>{created.uoms} units of measure</li>
           <li>{created.categories} categories</li>
@@ -104,14 +104,14 @@ export default function InventorySetupPage() {
           {returnTo !== null ? (
             <Link
               to={returnTo}
-              className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
+              className="inline-block rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-[var(--accent-fg)] no-underline"
             >
               Continue where you left off
             </Link>
           ) : (
             <Link
               to="/products?new=1"
-              className="inline-block rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white no-underline"
+              className="inline-block rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-[var(--accent-fg)] no-underline"
             >
               Add your first product
             </Link>
@@ -132,7 +132,7 @@ export default function InventorySetupPage() {
     const current = profiles.find((p) => p.key === settings.industryProfile);
     return (
       <div className="space-y-4">
-        <h1 className="text-lg font-semibold text-[var(--text)]">Inventory setup</h1>
+        <h1 className="page-title text-[var(--text)]">Inventory setup</h1>
         <p className="text-sm text-[var(--text)]">
           Currently configured for <strong>{current?.name ?? settings.industryProfile}</strong>.
         </p>
@@ -153,7 +153,7 @@ export default function InventorySetupPage() {
     <div className="space-y-6">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text)] m-0">{welcome ? 'Do you keep stock?' : 'Inventory setup'}</h1>
+          <h1 className="page-title text-[var(--text)] m-0">{welcome ? 'Do you keep stock?' : 'Inventory setup'}</h1>
           {welcome && (
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
               Step 4 of 4, optional. Set up inventory now if you buy and sell goods you count, or skip it and set it up
@@ -169,7 +169,7 @@ export default function InventorySetupPage() {
       </header>
 
       <section aria-label="Choose your industry">
-        <h2 className="text-sm font-medium text-[var(--text)] mb-2">1. Choose your industry</h2>
+        <h2 className="section-title mb-2">1. Choose your industry</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {profiles.map((profile) => {
             const isSuggested = profile.key === settings.suggestedProfile;
@@ -200,7 +200,7 @@ export default function InventorySetupPage() {
 
       {selectedProfile !== null ? (
         <section aria-label="Preview">
-          <h2 className="text-sm font-medium text-[var(--text)] mb-2">2. Preview</h2>
+          <h2 className="section-title mb-2">2. Preview</h2>
           <p className="text-xs text-[var(--muted)] mb-2">You can add, rename or deactivate any of this later.</p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
@@ -246,13 +246,13 @@ export default function InventorySetupPage() {
       ) : null}
 
       <section aria-label="Apply">
-        <h2 className="text-sm font-medium text-[var(--text)] mb-2">3. Apply</h2>
+        <h2 className="section-title mb-2">3. Apply</h2>
         {canWrite ? (
           <button
             type="button"
             disabled={applying || selectedKey === null}
             onClick={() => void handleApply()}
-            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-4 py-2 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-60"
           >
             Set up inventory
           </button>

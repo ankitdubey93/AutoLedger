@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { BookCheck, Boxes, ScanLine } from 'lucide-react';
 import BrandMark from '../../components/BrandMark';
+import FluidBackdrop from '../../components/ui/FluidBackdrop';
 
 const HIGHLIGHTS = [
   {
@@ -28,31 +29,32 @@ const HIGHLIGHTS = [
 export default function AuthLayout({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
   return (
     <div className="min-h-screen grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-      <aside className="hidden lg:flex lg:min-h-screen flex-col justify-between gap-10 p-12 bg-[var(--bg-subtle)] border-r border-[var(--border)]">
-        <BrandMark size="lg" />
-        <div className="flex flex-col gap-8 max-w-md">
-          <p className="m-0 text-3xl font-semibold leading-tight tracking-tight text-[var(--text)]">
+      <aside className="fluid-hero hidden lg:flex lg:min-h-screen flex-col justify-between gap-10 p-14 rounded-r-[2.5rem]">
+        <FluidBackdrop waveHeight={170} />
+        <BrandMark size="lg" inverse />
+        <div className="flex flex-col gap-8 max-w-lg animate-[rise_800ms_var(--ease)_both]">
+          <p className="display-figure m-0 text-[clamp(2.25rem,3.6vw,3.5rem)]">
             Accounting, bill capture and inventory — one ledger.
           </p>
           <ul className="m-0 p-0 list-none flex flex-col gap-5">
             {HIGHLIGHTS.map(({ icon: Icon, title: heading, body }) => (
               <li key={heading} className="flex gap-3">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-[var(--accent-soft)] text-[var(--accent)]">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-[var(--hero-plum)] text-white">
                   <Icon size={16} aria-hidden="true" />
                 </span>
                 <span>
-                  <span className="block text-sm font-semibold text-[var(--text)]">{heading}</span>
-                  <span className="block text-sm text-[var(--muted)] mt-0.5">{body}</span>
+                  <span className="block font-semibold">{heading}</span>
+                  <span className="block text-sm mt-0.5">{body}</span>
                 </span>
               </li>
             ))}
           </ul>
         </div>
-        <p className="m-0 text-xs text-[var(--muted)]">© {new Date().getFullYear()} AutoLedger</p>
+        <p className="m-0 text-xs pb-8">© {new Date().getFullYear()} AutoLedger</p>
       </aside>
 
-      <main className="flex flex-col justify-center px-4 py-12 sm:px-8">
-        <div className="w-full max-w-sm mx-auto flex flex-col gap-6">
+      <main className="flex flex-col justify-center px-4 py-12 sm:px-8 stagger">
+        <div className="w-full max-w-[25rem] mx-auto flex flex-col gap-7">
           <div className="lg:hidden">
             <BrandMark size="lg" />
           </div>

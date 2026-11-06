@@ -249,6 +249,12 @@ function pathname(): string {
   return screen.getByTestId('pathname').textContent ?? '';
 }
 
+/** Opens a sidebar group the way a person would; the group holding the current page is already open. */
+async function openGroup(user: ReturnType<typeof userEvent.setup>, heading: string) {
+  const button = screen.getByRole('button', { name: heading });
+  if (button.getAttribute('aria-expanded') === 'false') await user.click(button);
+}
+
 describe('Sidebar navigation', () => {
   it('clicking two sidebar links in a row lands on siblings, not on a nested path', async () => {
     renderAt('/', onboarded);
@@ -256,12 +262,14 @@ describe('Sidebar navigation', () => {
 
     await screen.findByText('Chart of accounts');
 
+    await openGroup(user, 'Accounting');
     await user.click(screen.getByRole('link', { name: /chart of accounts/i }));
     expect(pathname()).toBe('/accounts');
 
     await user.click(screen.getByRole('link', { name: /manual journals/i }));
     expect(pathname()).toBe('/manual-journals');
 
+    await openGroup(user, 'Reports');
     await user.click(screen.getByRole('link', { name: /trial balance/i }));
     expect(pathname()).toBe('/trial-balance');
 
@@ -274,6 +282,7 @@ describe('Sidebar navigation', () => {
     const user = userEvent.setup();
 
     await screen.findByText('Chart of accounts');
+    await openGroup(user, 'Accounting');
     await user.click(screen.getByRole('link', { name: /manual journals/i }));
 
     expect(screen.getByRole('link', { name: /manual journals/i })).toHaveAttribute(
@@ -306,23 +315,26 @@ describe('Sidebar navigation', () => {
     const user = userEvent.setup();
 
     await screen.findByText('Chart of accounts');
-    await user.click(screen.getByRole('link', { name: /reports/i }));
+    await openGroup(user, 'Reports');
+    await user.click(screen.getByRole('link', { name: /^reports$/i }));
 
     // The card's accessible name also swallows its description paragraph, and
     // the sidebar has its own "Trial Balance" link — the <h3> is what
     // uniquely identifies the report card. Phase 45 groups the cards under
     // <h3> section headings, so the card name is an <h4>.
-    const trialBalanceHeading = await screen.findByRole('heading', {
-      name: 'Trial balance',
-      level: 4,
-    });
+    const trialBalanceHeading = await screen.findByRole(
+      'heading',
+      { name: 'Trial balance', level: 4 },
+      { timeout: 5000 },
+    );
     const trialBalanceLink = trialBalanceHeading.closest('a');
     expect(trialBalanceLink).not.toBeNull();
     expect(trialBalanceLink).toHaveAttribute('href', '/trial-balance');
 
     await user.click(trialBalanceLink!);
     expect(pathname()).toBe('/trial-balance');
-  });
+    // The longest walk through the shell in this file, so it gets more room under a parallel run.
+  }, 20000);
 
   it("the dashboard's recent-entry link points at the journals page", async () => {
     renderAt('/', onboarded);

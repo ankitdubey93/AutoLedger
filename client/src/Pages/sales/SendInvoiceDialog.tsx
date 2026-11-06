@@ -62,7 +62,7 @@ export default function SendInvoiceDialog({ invoice, onClose, onSent }: SendInvo
         onSubmit={(e) => void handleSubmit(e)}
         className="animate-pop-in w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]"
       >
-        <h3 className="text-base font-semibold m-0">Email invoice {invoice.invoiceNumber ?? ''}</h3>
+        <h3 className="section-title m-0">Email invoice {invoice.invoiceNumber ?? ''}</h3>
         <p className="text-sm text-[var(--muted)] m-0">
           The customer gets the invoice as a PDF and a link to view it, and to pay online if card payments are enabled.
         </p>

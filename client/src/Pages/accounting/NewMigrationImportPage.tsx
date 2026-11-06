@@ -143,7 +143,7 @@ export default function NewMigrationImportPage() {
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="flex flex-col gap-4">
           <header>
-            <h2 className="text-lg font-semibold m-0">
+            <h2 className="page-title m-0">
               {locked !== undefined ? `Import ${meta.label.toLowerCase()}` : 'New import'}
             </h2>
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
@@ -175,7 +175,7 @@ export default function NewMigrationImportPage() {
 
               <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-3 flex flex-col gap-2">
                 <div className="flex items-center justify-between gap-4">
-                  <h3 className="text-sm font-medium m-0">{`${meta.label} template`}</h3>
+                  <h3 className="section-title m-0">{`${meta.label} template`}</h3>
                   <button
                     type="button"
                     onClick={downloadTemplate}

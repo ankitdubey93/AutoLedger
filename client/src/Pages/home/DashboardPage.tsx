@@ -1,22 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  Banknote,
   BookPlus,
-  CheckCircle2,
-  Clock,
   CreditCard,
   FilePlus2,
   LayoutDashboard,
-  LineChart,
   PiggyBank,
   ReceiptText,
-  Scale,
   TrendingDown,
   TrendingUp,
   Upload,
   Wallet,
-  XCircle,
   Inbox,
 } from 'lucide-react';
 import { useOrg } from '../../context/OrgContext';
@@ -33,6 +27,9 @@ import EquationBar from './EquationBar';
 import ProportionBar from './ProportionBar';
 import BarChart from './BarChart';
 import PageHeader from '../../components/ui/PageHeader';
+import Alert from '../../components/ui/Alert';
+import CountUp from '../../components/ui/CountUp';
+import FluidBackdrop from '../../components/ui/FluidBackdrop';
 import { formatDate } from '../../utils/date';
 
 /**
@@ -69,7 +66,7 @@ function RoleHome() {
         subtitle={roleName === null ? undefined : `Your role: ${roleName}`}
       />
       <div className="card">
-        <h3 className="m-0 mb-3 text-sm font-semibold">Where you can go</h3>
+        <h3 className="m-0 mb-3 section-title">Where you can go</h3>
         {sections.length === 0 ? (
           <p className="muted m-0">Your role does not include any sections yet. Ask an owner or admin for access.</p>
         ) : (
@@ -91,6 +88,19 @@ function RoleHome() {
 export default function DashboardPage() {
   const { can } = useOrg();
   return can('reports.view') ? <FullDashboard /> : <RoleHome />;
+}
+
+function NetIncome({ label, cents }: { label: string; cents: number }) {
+  const Icon = cents < 0 ? TrendingDown : TrendingUp;
+  return (
+    <div>
+      <span className="text-sm">{label}</span>
+      <span className="flex items-center gap-1.5 text-xl font-bold tabular-nums">
+        <Icon size={18} aria-hidden="true" />
+        {formatCents(cents)}
+      </span>
+    </div>
+  );
 }
 
 function FullDashboard() {
@@ -133,44 +143,64 @@ function FullDashboard() {
 
   const { position, performance, activity, integrity, trend, fiscalYear, receivables, payables } = dashboard;
 
+  // What needs doing, most urgent first. Only money that is really late is crimson.
+  const payablesNotOverdueCents = payables.outstandingCents - payables.overdueCents;
+  const attention: Array<{ tone: 'danger' | 'warn'; title: string; body: string; action: { label: string; to: string } }> = [];
+  if (receivables.overdueCents > 0) {
+    attention.push({
+      tone: 'danger',
+      title: 'Invoices are overdue',
+      body: `${formatCents(receivables.overdueCents)} ${currency} is late`,
+      action: { label: 'Review invoices', to: '/invoices?status=ISSUED&settlement=OVERDUE' },
+    });
+  }
+  if (payables.overdueCents > 0) {
+    attention.push({
+      tone: 'danger',
+      title: 'Expenses are overdue',
+      body: `${formatCents(payables.overdueCents)} ${currency} is late`,
+      action: { label: 'Review expenses', to: '/expenses?status=POSTED&settlement=OVERDUE' },
+    });
+  }
+  if (payables.awaitingReviewCents > 0) {
+    attention.push({
+      tone: 'warn',
+      title: 'Expenses need your review',
+      body: `${formatCents(payables.awaitingReviewCents)} ${currency} is not approved yet`,
+      action: { label: 'See expenses', to: '/expenses?status=AWAITING_APPROVAL' },
+    });
+  }
+  if (payablesNotOverdueCents > 0) {
+    attention.push({
+      tone: 'warn',
+      title: 'Expenses waiting to be paid',
+      body: `${formatCents(payablesNotOverdueCents)} ${currency} coming up, none of it late`,
+      action: { label: 'See expenses', to: '/expenses?status=POSTED&settlement=OUTSTANDING' },
+    });
+  }
+
   return (
-    <section className="flex flex-col gap-6">
+    <section className="stagger flex flex-col gap-7">
       <PageHeader
         as="h2"
-        icon={LayoutDashboard}
         title={organization?.name ?? 'Dashboard'}
         subtitle={fiscalYear.label}
         actions={
           <>
-            <Link
-              to="/invoices/new"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-            >
-              <FilePlus2 size={13} aria-hidden="true" /> New invoice
+            <Link to="/invoices/new" className="action-pill action-pill--primary">
+              <FilePlus2 size={16} aria-hidden="true" /> New invoice
             </Link>
-            <Link
-              to="/expenses/new"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-            >
-              <ReceiptText size={13} aria-hidden="true" /> New expense
+            <Link to="/expenses/new" className="action-pill">
+              <ReceiptText size={16} aria-hidden="true" /> New expense
             </Link>
-            <Link
-              to="/journals/new"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-            >
-              <BookPlus size={13} aria-hidden="true" /> New journal entry
+            <Link to="/journals/new" className="action-pill">
+              <BookPlus size={16} aria-hidden="true" /> New journal entry
             </Link>
-            <Link
-              to="/bank/import"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-            >
-              <Upload size={13} aria-hidden="true" /> Import bank statement
+            <Link to="/bank/import" className="action-pill">
+              <Upload size={16} aria-hidden="true" /> Import bank statement
             </Link>
-            <Link
-              to="/inbox"
-              className="flex items-center gap-1.5 rounded-full border border-[var(--border)] px-3 py-1.5 text-xs font-medium no-underline text-[var(--text)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
-            >
-              <Inbox size={13} aria-hidden="true" /> Upload a bill
+            <Link to="/inbox" className="action-pill">
+              <Inbox size={16} aria-hidden="true" /> Upload a bill
             </Link>
           </>
         }
@@ -184,51 +214,51 @@ function FullDashboard() {
         </p>
       )}
 
-      <div className="grid">
-        <MetricTile
-          label="Assets"
-          valueCents={position.assetsCents}
-          currency={currency}
-          icon={Wallet}
-          tone="neutral"
-          to="/trial-balance?type=Asset"
-          hint={null}
-        />
-        <MetricTile
-          label="Liabilities"
-          valueCents={position.liabilitiesCents}
-          currency={currency}
-          icon={CreditCard}
-          tone="neutral"
-          to="/trial-balance?type=Liability"
-          hint={null}
-        />
-        <MetricTile
-          label="Equity"
-          valueCents={position.equityCents}
-          currency={currency}
-          icon={PiggyBank}
-          tone="neutral"
-          to="/trial-balance?type=Equity"
-          hint={null}
-        />
-        <MetricTile
-          label="Cash"
-          valueCents={position.cashCents}
-          currency={currency}
-          icon={Banknote}
-          tone="good"
-          to={position.cashCents === null ? '/settings/general' : '/trial-balance?type=Asset'}
-          hint={
-            position.cashCents === null ? 'No cash account configured — set one in Settings.' : null
-          }
-        />
+      {attention.length > 0 && (
+        <div aria-label="Needs your attention" role="group" className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {attention.map((item) => (
+            <Alert key={item.title} tone={item.tone} title={item.title} action={item.action}>
+              {item.body}
+            </Alert>
+          ))}
+        </div>
+      )}
+
+      <Link
+        to={position.cashCents === null ? '/settings/general' : '/trial-balance?type=Asset'}
+        className="fluid-hero rounded-[2rem] p-8 md:p-9 no-underline flex flex-col justify-between gap-10 min-h-[17.5rem]"
+        style={{ color: '#ffffff' }}
+      >
+        <FluidBackdrop />
+        <div>
+          <p className="m-0 font-semibold">Cash in the bank</p>
+          <p className="display-figure m-0 mt-2 text-[clamp(2.5rem,6vw,4.5rem)]">
+            {position.cashCents === null ? (
+              '—'
+            ) : (
+              <>
+                <CountUp cents={position.cashCents} /> <span className="font-sans text-base font-semibold opacity-80">{currency}</span>
+              </>
+            )}
+          </p>
+          {position.cashCents === null && <p className="m-0 mt-2 text-sm">No cash account configured — set one in Settings.</p>}
+        </div>
+        <div className="flex flex-wrap gap-x-10 gap-y-2 pb-5">
+          <NetIncome label="Net income, year to date" cents={performance.yearToDate.netIncomeCents} />
+          <NetIncome label="Net income, month to date" cents={performance.currentMonth.netIncomeCents} />
+        </div>
+      </Link>
+
+      <div className="grid grid-cols-1 sm:grid-cols-3">
+        <MetricTile label="Assets" valueCents={position.assetsCents} currency="" icon={Wallet} tone="accent" to="/trial-balance?type=Asset" hint={null} />
+        <MetricTile label="Liabilities" valueCents={position.liabilitiesCents} currency="" icon={CreditCard} tone="coral" to="/trial-balance?type=Liability" hint={null} />
+        <MetricTile label="Equity" valueCents={position.equityCents} currency="" icon={PiggyBank} tone="violet" to="/trial-balance?type=Equity" hint={null} />
       </div>
 
       <BusinessHealthTiles />
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Scale size={14} aria-hidden="true" className="text-[var(--muted)]" /> Accounting equation</p>
+        <h3 className="text-[1.1875rem] font-semibold m-0 mb-4">Accounting equation</h3>
         <EquationBar
           assetsCents={position.assetsCents}
           liabilitiesCents={position.liabilitiesCents}
@@ -239,10 +269,10 @@ function FullDashboard() {
         />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2">
         <div className="card">
-          <p className="text-sm font-medium m-0 mb-3">This fiscal year</p>
-          <dl className="flex flex-col gap-1.5 text-sm">
+          <h3 className="text-[1.1875rem] font-semibold m-0 mb-4">This fiscal year</h3>
+          <dl className="flex flex-col gap-2">
             <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Revenue</dt>
               <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.revenueCents)}</dd>
@@ -251,34 +281,20 @@ function FullDashboard() {
               <dt className="text-[var(--muted)]">Expenses</dt>
               <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.yearToDate.expenseCents)}</dd>
             </div>
-            <div className="flex justify-between gap-4 font-medium">
-              <dt>Net income</dt>
-              <dd
-                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
-                style={{ color: performance.yearToDate.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
-              >
-                {performance.yearToDate.netIncomeCents < 0 ? (
-                  <TrendingDown size={15} aria-hidden="true" />
-                ) : (
-                  <TrendingUp size={15} aria-hidden="true" />
-                )}
-                {formatCents(performance.yearToDate.netIncomeCents)}
-              </dd>
-            </div>
           </dl>
-          <div className="mt-3">
+          <div className="mt-5">
             <ProportionBar
               segments={[
-                { label: 'Revenue', valueCents: performance.yearToDate.revenueCents, color: 'var(--good)' },
-                { label: 'Expenses', valueCents: performance.yearToDate.expenseCents, color: 'var(--bad)' },
+                { label: 'Revenue', valueCents: performance.yearToDate.revenueCents, color: 'var(--good-bright)' },
+                { label: 'Expenses', valueCents: performance.yearToDate.expenseCents, color: 'var(--coral)' },
               ]}
               currency={currency}
             />
           </div>
         </div>
         <div className="card">
-          <p className="text-sm font-medium m-0 mb-3">This month</p>
-          <dl className="flex flex-col gap-1.5 text-sm">
+          <h3 className="text-[1.1875rem] font-semibold m-0 mb-4">This month</h3>
+          <dl className="flex flex-col gap-2">
             <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">Revenue</dt>
               <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.revenueCents)}</dd>
@@ -287,26 +303,12 @@ function FullDashboard() {
               <dt className="text-[var(--muted)]">Expenses</dt>
               <dd className="m-0 tabular-nums whitespace-nowrap">{formatCents(performance.currentMonth.expenseCents)}</dd>
             </div>
-            <div className="flex justify-between gap-4 font-medium">
-              <dt>Net income</dt>
-              <dd
-                className="m-0 tabular-nums flex items-center gap-1.5 justify-end whitespace-nowrap"
-                style={{ color: performance.currentMonth.netIncomeCents < 0 ? 'var(--bad)' : undefined }}
-              >
-                {performance.currentMonth.netIncomeCents < 0 ? (
-                  <TrendingDown size={15} aria-hidden="true" />
-                ) : (
-                  <TrendingUp size={15} aria-hidden="true" />
-                )}
-                {formatCents(performance.currentMonth.netIncomeCents)}
-              </dd>
-            </div>
           </dl>
-          <div className="mt-3">
+          <div className="mt-5">
             <ProportionBar
               segments={[
-                { label: 'Revenue', valueCents: performance.currentMonth.revenueCents, color: 'var(--good)' },
-                { label: 'Expenses', valueCents: performance.currentMonth.expenseCents, color: 'var(--bad)' },
+                { label: 'Revenue', valueCents: performance.currentMonth.revenueCents, color: 'var(--good-bright)' },
+                { label: 'Expenses', valueCents: performance.currentMonth.expenseCents, color: 'var(--coral)' },
               ]}
               currency={currency}
             />
@@ -314,14 +316,14 @@ function FullDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2">
         <div className="card">
-          <p className="text-sm font-medium m-0 mb-1">Invoices owed to you</p>
-          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+          <h3 className="text-[1.1875rem] font-semibold m-0 mb-1">Invoices owed to you</h3>
+          <p className="display-figure text-[1.875rem] m-0 mt-3">
             {formatCents(receivables.outstandingCents)}{' '}
             <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
           </p>
-          <dl className="flex flex-col gap-1 text-sm mt-3">
+          <dl className="flex flex-col gap-2 mt-4">
             <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
                 <Link to="/invoices?status=ISSUED&settlement=OUTSTANDING">Awaiting payment</Link>
@@ -359,12 +361,12 @@ function FullDashboard() {
         </div>
 
         <div className="card">
-          <p className="text-sm font-medium m-0 mb-1">Expenses you need to pay</p>
-          <p className="text-2xl font-semibold m-0 mt-1 tabular-nums">
+          <h3 className="text-[1.1875rem] font-semibold m-0 mb-1">Expenses you need to pay</h3>
+          <p className="display-figure text-[1.875rem] m-0 mt-3">
             {formatCents(payables.outstandingCents)}{' '}
             <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
           </p>
-          <dl className="flex flex-col gap-1 text-sm mt-3">
+          <dl className="flex flex-col gap-2 mt-4">
             <div className="flex justify-between gap-4">
               <dt className="text-[var(--muted)]">
                 <Link to="/expenses?status=POSTED&settlement=OUTSTANDING">Awaiting payment</Link>
@@ -414,12 +416,12 @@ function FullDashboard() {
       <InventoryOverview />
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><LineChart size={14} aria-hidden="true" className="text-[var(--muted)]" /> Last 6 months</p>
+        <h3 className="text-[1.1875rem] font-semibold m-0 mb-4">Last 6 months</h3>
         <TrendChart points={trend} />
       </div>
 
       <div className="card">
-        <p className="text-sm font-medium m-0 mb-3 flex items-center gap-1.5"><Clock size={14} aria-hidden="true" className="text-[var(--muted)]" /> Recent entries</p>
+        <h3 className="text-[1.1875rem] font-semibold m-0 mb-4">Recent entries</h3>
         {activity.recentEntries.length === 0 ? (
           <p className="text-sm text-[var(--muted)] m-0">No activity yet.</p>
         ) : (
@@ -454,28 +456,15 @@ function FullDashboard() {
         )}
       </div>
 
-      <div
-        className="flex items-center gap-2.5 rounded-lg px-4 py-3 text-sm ring-1 ring-inset"
-        style={
-          integrity.isBalanced
-            ? { background: 'var(--good-soft)', color: 'var(--good)', boxShadow: 'inset 0 0 0 1px var(--good-soft)' }
-            : { background: 'var(--bad-soft)', color: 'var(--bad)', boxShadow: 'inset 0 0 0 1px var(--bad-soft)' }
-        }
+      <Alert
+        tone={integrity.isBalanced ? 'good' : 'danger'}
         role="status"
-      >
-        {integrity.isBalanced ? (
-          <CheckCircle2 size={17} aria-hidden="true" />
-        ) : (
-          <XCircle size={17} aria-hidden="true" />
-        )}
-        <span>
-          {integrity.isBalanced
+        title={
+          integrity.isBalanced
             ? 'Debits equal credits exactly.'
-            : `Books are not balanced — out by ${formatCents(
-                Math.abs(integrity.totalDebitCents - integrity.totalCreditCents),
-              )}.`}
-        </span>
-      </div>
+            : `Books are not balanced — out by ${formatCents(Math.abs(integrity.totalDebitCents - integrity.totalCreditCents))}.`
+        }
+      />
     </section>
   );
 }

@@ -1,3 +1,4 @@
+import SlidingTabs from '../../../components/ui/SlidingTabs';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
@@ -81,37 +82,20 @@ export default function QuoteListPage({ config }: { config: QuoteKindConfig }) {
     <section className="flex flex-col gap-4">
       <header className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{config.plural}</h2>
+          <h2 className="page-title m-0">{config.plural}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1 max-w-2xl">{config.listHint}</p>
         </div>
         {can(config.permissions.edit) && (
           <Link
             to={`/${config.path}/new`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)]"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)]"
           >
             <Plus size={14} aria-hidden="true" /> New {config.title.toLowerCase()}
           </Link>
         )}
       </header>
 
-      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label={`${config.title} status`}>
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => selectTab(tab.status)}
-            aria-current={status === tab.status ? 'page' : undefined}
-            className={[
-              'px-3 py-2 text-sm border-0 border-b-2 bg-transparent cursor-pointer -mb-px',
-              status === tab.status
-                ? 'border-[var(--text)] text-[var(--text)] font-medium'
-                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <SlidingTabs ariaLabel={`${config.title} status`} tabs={TABS} isActive={(tab) => status === tab.status} onSelect={(tab) => selectTab(tab.status)} />
 
       {error !== null && <p className="status status--bad">{error}</p>}
       {!loaded && error === null && <LoadingState />}

@@ -33,7 +33,7 @@ export default function AppTopBar() {
   const ThemeIcon = resolvedTheme === 'light' ? Sun : Moon;
 
   return (
-    <header className="app-topbar no-print sticky top-0 z-30 h-14 flex items-center gap-2 px-3 md:px-4 border-b border-[var(--border)] bg-[var(--panel)]">
+    <header className="app-topbar no-print sticky top-0 z-30 h-16 flex items-center gap-3 px-4 md:px-7 bg-[color-mix(in_srgb,var(--bg)_82%,transparent)] backdrop-blur-xl">
       <button
         type="button"
         onClick={() => setMobileOpen(true)}
@@ -55,11 +55,11 @@ export default function AppTopBar() {
       <button
         type="button"
         onClick={openPalette}
-        className="hidden md:flex items-center gap-2 ml-2 px-3 py-1.5 rounded-md border border-[var(--border)] text-sm text-[var(--muted)] hover:border-[var(--border-strong)] hover:text-[var(--text)] transition-colors"
+        className="hidden md:flex items-center gap-2.5 ml-[9.5rem] min-h-11 w-full max-w-sm px-4 rounded-full bg-[var(--panel-2)] text-sm text-[var(--muted)] hover:text-[var(--text)] hover:shadow-[0_0_0_5px_var(--accent-soft)]"
       >
-        <Search size={14} aria-hidden="true" />
+        <Search size={16} aria-hidden="true" />
         <span>Search or jump to…</span>
-        <kbd className="ml-2 text-[10px] border border-[var(--border)] rounded px-1 py-0.5">⌘K</kbd>
+        <kbd className="ml-auto text-xs bg-[var(--panel)] rounded-lg px-2 py-0.5">⌘K</kbd>
       </button>
       <button
         type="button"
@@ -84,9 +84,9 @@ export default function AppTopBar() {
               {...buttonProps}
               type="button"
               aria-label="Change theme"
-              className="p-1.5 rounded-md text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)] transition-colors"
+              className="flex size-11 items-center justify-center rounded-full bg-[var(--panel-2)] text-[var(--text)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent)]"
             >
-              <ThemeIcon size={16} aria-hidden="true" />
+              <ThemeIcon size={18} aria-hidden="true" />
             </button>
           )}
         />
@@ -106,9 +106,9 @@ export default function AppTopBar() {
             <button
               {...buttonProps}
               type="button"
-              className="flex items-center gap-2 pl-1 pr-2 py-1 rounded-md hover:bg-[var(--panel-2)] transition-colors"
+              className="flex items-center gap-2 pl-1 pr-3 py-1 rounded-full hover:bg-[var(--panel-2)]"
             >
-              <span className="flex size-7 items-center justify-center rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-xs font-semibold">
+              <span className="flex size-9 items-center justify-center rounded-full bg-[var(--coral)] text-[#2a1320] text-xs font-bold">
                 {initials(name, email)}
               </span>
               <span className="hidden lg:flex flex-col items-start leading-tight">

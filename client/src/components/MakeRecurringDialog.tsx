@@ -207,7 +207,7 @@ export default function MakeRecurringDialog({
             <button
               type="submit"
               disabled={!canSave}
-              className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-1"
+              className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-1"
             >
               {busy ? 'Creating…' : 'Create schedule'}
             </button>

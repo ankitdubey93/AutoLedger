@@ -14,7 +14,7 @@ export default function MatchScoreBadge({ score }: { score: number }) {
 
   const classesByBand: Record<typeof band, string> = {
     auto: 'bg-[var(--good)]/10 text-[var(--good)] ring-1 ring-inset ring-[var(--good)]/30',
-    mid: 'bg-amber-500/10 text-amber-500 ring-1 ring-inset ring-amber-500/30',
+    mid: 'bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/30',
     low: 'bg-[var(--muted)]/10 text-[var(--muted)] ring-1 ring-inset ring-[var(--muted)]/30',
   };
 

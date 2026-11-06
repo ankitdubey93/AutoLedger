@@ -57,7 +57,7 @@ export default function PendingAttachments({ value, onChange }: PendingAttachmen
         if (!busy) void handleFiles([...e.dataTransfer.files]);
       }}
     >
-      <h3 className="text-sm font-semibold m-0">Attachments</h3>
+      <h3 className="section-title m-0">Attachments</h3>
       {error !== null && <p className="status status--bad">{error}</p>}
 
       {value.length > 0 && (
@@ -65,7 +65,7 @@ export default function PendingAttachments({ value, onChange }: PendingAttachmen
           {value.map((document) => (
             <li
               key={document.id}
-              className="flex items-center gap-1.5 text-sm border border-[var(--border)] rounded-full pl-3 pr-1.5 py-1"
+              className="flex items-center gap-1.5 text-sm border border-[var(--border-strong)] rounded-full pl-3 pr-1.5 py-1"
             >
               <span>{document.originalFilename}</span>
               <button

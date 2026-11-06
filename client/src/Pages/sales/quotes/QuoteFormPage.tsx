@@ -298,7 +298,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
     <section className="flex flex-col gap-5">
       <BackLink {...(existing === null ? listLink : { to: `/${config.path}/${existing.id}`, label: 'Back to the quote' })} />
       <header>
-        <h2 className="text-lg font-semibold m-0">
+        <h2 className="page-title m-0">
           {existing === null
             ? `New ${config.title.toLowerCase()}`
             : isRevision
@@ -548,7 +548,7 @@ export default function QuoteFormPage({ config }: { config: QuoteKindConfig }) {
           type="button"
           onClick={() => void handleSave()}
           disabled={busy}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+          className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
         >
           {busy ? 'Saving…' : existing === null ? 'Save draft' : 'Save changes'}
         </button>

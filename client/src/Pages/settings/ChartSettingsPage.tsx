@@ -383,7 +383,7 @@ export default function ChartSettingsPage() {
       <SettingsTabs />
 
       <div>
-        <h3 className="text-base font-semibold m-0">Chart of accounts</h3>
+        <h3 className="section-title m-0">Chart of accounts</h3>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Rename an account or retire it — accounts are never deleted, so history stays intact.
         </p>
@@ -409,7 +409,7 @@ export default function ChartSettingsPage() {
                 <button
                   type="button"
                   onClick={() => setAddFormType(addFormType === type ? null : type)}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+                  className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
                 >
                   Add account
                 </button>

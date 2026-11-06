@@ -132,7 +132,7 @@ export default function FiscalPeriodsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Fiscal periods</h2>
+          <h2 className="page-title m-0">Fiscal periods</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Closing a period stops new postings dated inside it; locking is permanent.
           </p>
@@ -151,7 +151,7 @@ export default function FiscalPeriodsPage() {
             type="button"
             onClick={() => void handleGenerate()}
             disabled={busyId === 'generate'}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busyId === 'generate' ? 'Generating…' : 'Generate periods for this fiscal year'}
           </button>

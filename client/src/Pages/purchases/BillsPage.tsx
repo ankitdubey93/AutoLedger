@@ -1,3 +1,5 @@
+import StatusPill from '../../components/ui/StatusPill';
+import SlidingTabs from '../../components/ui/SlidingTabs';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
@@ -48,37 +50,15 @@ const TABS: Tab[] = [
   { key: 'void', label: 'Void', status: 'VOID', settlement: '' },
 ];
 
-function statusPill(status: BillStatus) {
-  if (status === 'DRAFT') {
-    return <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Draft</span>;
-  }
-  if (status === 'AWAITING_APPROVAL') {
-    return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-400 ring-1 ring-inset ring-sky-500/20">
-        In review
-      </span>
-    );
-  }
-  if (status === 'POSTED') {
-    return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
-        Posted
-      </span>
-    );
-  }
-  return (
-    <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">
-      Void
-    </span>
-  );
-}
-
-function settlementLabel(status: SettlementStatus): string | null {
-  if (status === 'OVERDUE') return 'Overdue';
-  if (status === 'PARTIALLY_PAID') return 'Partially paid';
-  if (status === 'PAID') return 'Paid';
-  if (status === 'UNPAID') return 'Unpaid';
-  return null;
+function statusPill(status: BillStatus, settlement: SettlementStatus) {
+  if (status === 'DRAFT') return <StatusPill tone="neutral" label="Draft" />;
+  if (status === 'AWAITING_APPROVAL') return <StatusPill tone="warn" label="In review" />;
+  if (status === 'VOID') return <StatusPill tone="neutral" label="Void" voided />;
+  if (settlement === 'OVERDUE') return <StatusPill tone="danger" label="Overdue" />;
+  if (settlement === 'PAID') return <StatusPill tone="good" label="Paid" />;
+  if (settlement === 'PARTIALLY_PAID') return <StatusPill tone="info" label="Partially paid" />;
+  if (settlement === 'UNPAID') return <StatusPill tone="info" label="Awaiting payment" />;
+  return <StatusPill tone="good" label="Posted" />;
 }
 
 export default function BillsPage() {
@@ -181,7 +161,7 @@ export default function BillsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Expenses</h2>
+          <h2 className="page-title m-0">Expenses</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Expenses entered against vendors. Approving one posts a balanced journal entry; correcting one
             means voiding it.
@@ -191,31 +171,14 @@ export default function BillsPage() {
           <ImportButton kind="BILLS" returnTo="/expenses" />
           <Link
             to="/expenses/new"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             <Plus size={15} /> New expense
           </Link>
         </div>
       </header>
 
-      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Expense status">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => selectTab(tab)}
-            aria-current={activeTab === tab.key ? 'page' : undefined}
-            className={[
-              'px-3 py-2 text-sm border-0 border-b-2 bg-transparent cursor-pointer -mb-px',
-              activeTab === tab.key
-                ? 'border-[var(--text)] text-[var(--text)] font-medium'
-                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <SlidingTabs ariaLabel="Expense status" tabs={TABS} isActive={(tab) => activeTab === tab.key} onSelect={(tab) => selectTab(tab)} />
 
       <label className="flex flex-col gap-1 text-sm max-w-xs">
         <span className="text-[var(--muted)]">Search</span>
@@ -260,22 +223,14 @@ export default function BillsPage() {
                 </thead>
                 <tbody>
                   {bills.map((bill) => {
-                    const label = settlementLabel(bill.settlementStatus);
                     return (
-                      <tr key={bill.id} className="border-t border-[var(--border)]">
+                      <tr key={bill.id} className={`border-t border-[var(--border)] ${bill.settlementStatus === 'OVERDUE' ? 'bg-[var(--bad-soft)] hover:!bg-[var(--bad-soft)]' : ''}`}>
                         <td className="p-3">{bill.vendorNameSnapshot}</td>
                         <td className="p-3 font-mono text-xs">{bill.vendorReference}</td>
                         <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(bill.billDate)}</td>
                         <td className="p-3 tabular-nums whitespace-nowrap">{formatDate(bill.dueDate)}</td>
                         <td className="p-3">
-                          <div className="flex flex-col gap-1">
-                            {statusPill(bill.status)}
-                            {label !== null && (
-                              <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                                {label}
-                              </span>
-                            )}
-                          </div>
+                          {statusPill(bill.status, bill.settlementStatus)}
                         </td>
                         <td className="p-3 text-right tabular-nums">{formatCents(bill.totalCents)}</td>
                         <td className="p-3 text-right tabular-nums">

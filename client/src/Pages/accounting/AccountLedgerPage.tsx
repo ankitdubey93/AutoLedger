@@ -132,7 +132,7 @@ export default function AccountLedgerPage() {
 
       <header className="flex flex-col gap-1">
         <div className="flex items-center gap-2.5 mt-1">
-          <h2 className="text-lg font-semibold m-0">
+          <h2 className="page-title m-0">
             {ledger.account.code} · {ledger.account.name}
           </h2>
           <span

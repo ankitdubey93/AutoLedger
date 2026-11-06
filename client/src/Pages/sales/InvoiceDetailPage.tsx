@@ -290,10 +290,10 @@ export default function InvoiceDetailPage() {
 
       <header className="no-print flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{invoice.invoiceNumber ?? 'Draft invoice'}</h2>
+          <h2 className="page-title m-0">{invoice.invoiceNumber ?? 'Draft invoice'}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{statusLabel(invoice.status)}</p>
           {invoice.kind === 'DEPOSIT' && (
-            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border)] text-[var(--muted)]">
+            <span className="inline-block mt-1 text-xs px-2 py-0.5 rounded-full border border-[var(--border-strong)] text-[var(--muted)]">
               Deposit
             </span>
           )}
@@ -324,7 +324,7 @@ export default function InvoiceDetailPage() {
               type="button"
               onClick={() => void startIssue()}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Issue
             </button>
@@ -334,7 +334,7 @@ export default function InvoiceDetailPage() {
               type="button"
               onClick={() => setShowPaymentDialog(true)}
               disabled={busy}
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
             >
               Record payment
             </button>
@@ -454,7 +454,7 @@ export default function InvoiceDetailPage() {
 
       {payments.length > 0 && (
         <div className="no-print flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Payments</h3>
+          <h3 className="section-title m-0">Payments</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -484,7 +484,7 @@ export default function InvoiceDetailPage() {
 
       {sends.length > 0 && (
         <div className="no-print flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Sent</h3>
+          <h3 className="section-title m-0">Sent</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -535,7 +535,7 @@ export default function InvoiceDetailPage() {
 
       {invoice.depositApplications.length > 0 && (
         <div className="no-print flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Deposits applied</h3>
+          <h3 className="section-title m-0">Deposits applied</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -576,7 +576,7 @@ export default function InvoiceDetailPage() {
 
       {creditNotes.length > 0 && (
         <div className="no-print flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Credit notes</h3>
+          <h3 className="section-title m-0">Credit notes</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[30rem]">
               <thead>
@@ -790,7 +790,7 @@ function ApplyDepositDialog({
       className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div className="animate-pop-in w-full max-w-lg rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
-        <h3 className="text-base font-semibold m-0">Apply deposit</h3>
+        <h3 className="section-title m-0">Apply deposit</h3>
         {deposits === null ? (
           <p className="text-sm text-[var(--muted)] m-0">Loading deposits…</p>
         ) : deposits.length === 0 ? (
@@ -835,7 +835,7 @@ function ApplyDepositDialog({
           {deposits !== null && deposits.length > 0 && (
             <button
               type="button"
-              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
               disabled={busy || !ready}
               onClick={() => void submit()}
             >

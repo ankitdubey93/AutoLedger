@@ -144,7 +144,7 @@ export default function QuoteDocument({ quote, merchantName, merchantAddressLine
         </div>
       </section>
 
-      {quote.title !== null && <h3 className="m-0 text-base font-semibold">{quote.title}</h3>}
+      {quote.title !== null && <h3 className="m-0 section-title">{quote.title}</h3>}
 
       <div className="overflow-x-auto">
         <table className="w-full border-collapse min-w-[36rem]">

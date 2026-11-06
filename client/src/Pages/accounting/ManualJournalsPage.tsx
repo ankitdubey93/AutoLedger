@@ -164,7 +164,7 @@ export default function ManualJournalsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Manual journals</h2>
+          <h2 className="page-title m-0">Manual journals</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Journals you enter by hand. A posted journal is never edited; void it to post a reversal.
           </p>
@@ -179,7 +179,7 @@ export default function ManualJournalsPage() {
           </Link>
           <Link
             to="/manual-journals/new"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             New journal
           </Link>

@@ -59,8 +59,9 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
                 y={CHART_BOTTOM - revenueHeight}
                 width={barWidth}
                 height={revenueHeight}
-                fill="var(--good)"
-                rx={2}
+                fill="var(--good-bright)"
+                rx={4}
+                className="chart-bar"
               />
               <rect
                 data-bar
@@ -68,8 +69,9 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
                 y={CHART_BOTTOM - expenseHeight}
                 width={barWidth}
                 height={expenseHeight}
-                fill="var(--bad)"
-                rx={2}
+                fill="var(--coral)"
+                rx={4}
+                className="chart-bar"
               />
               <text
                 x={x + groupWidth / 2}
@@ -116,11 +118,11 @@ export default function TrendChart({ points }: { points: TrendPoint[] }) {
 
       <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--good)' }} />
+          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--good-bright)' }} />
           Revenue
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--bad)' }} />
+          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--coral)' }} />
           Expenses
         </span>
       </div>

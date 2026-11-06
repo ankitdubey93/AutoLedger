@@ -174,7 +174,7 @@ export default function AttachmentsPanel({
         if (file !== undefined && !busy) void handleAttach(file);
       }}
     >
-      <h3 className="text-sm font-semibold m-0">Attachments</h3>
+      <h3 className="section-title m-0">Attachments</h3>
 
       {error !== null && <p className="status status--bad">{error}</p>}
 

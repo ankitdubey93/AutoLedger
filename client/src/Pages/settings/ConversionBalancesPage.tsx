@@ -266,7 +266,7 @@ export default function ConversionBalancesPage() {
       <SettingsTabs />
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Conversion date</h3>
+        <h3 className="section-title m-0">Conversion date</h3>
         <div className="flex items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Conversion date</span>
@@ -303,7 +303,7 @@ export default function ConversionBalancesPage() {
 
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-4">
-          <h3 className="text-base font-semibold m-0">Opening balances</h3>
+          <h3 className="section-title m-0">Opening balances</h3>
           <button type="button" onClick={handleLoadChart} className={ghostButtonClass}>
             Load chart
           </button>

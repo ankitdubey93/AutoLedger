@@ -204,7 +204,7 @@ export default function MigrationImportDetailPage() {
       <div className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{imp.fileName}</h2>
+          <h2 className="page-title m-0">{imp.fileName}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             {meta.label} · {imp.status} ·{' '}
             {imp.rowCount} row{imp.rowCount === 1 ? '' : 's'}, {imp.errorCount} error
@@ -237,7 +237,7 @@ export default function MigrationImportDetailPage() {
 
       {preview !== null && !readOnly && (
         <div className="card flex flex-col gap-2">
-          <h3 className="text-sm font-semibold m-0">Preview</h3>
+          <h3 className="section-title m-0">Preview</h3>
           {preview.summary.length > 0 ? (
             <dl className="text-sm m-0 grid grid-cols-[auto_auto] gap-x-4 gap-y-1 justify-start">
               {preview.summary.map((item) => (
@@ -348,7 +348,7 @@ export default function MigrationImportDetailPage() {
               type="button"
               disabled={!preview.canCommit}
               onClick={() => setShowCommitConfirm(true)}
-              className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+              className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Commit
             </button>

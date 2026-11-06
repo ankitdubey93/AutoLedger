@@ -92,7 +92,7 @@ export default function InboxSettingsPage() {
 
       {loaded && (
         <div className="card flex flex-col gap-3">
-          <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">
+          <h3 className="section-title m-0 flex items-center gap-1.5">
             <Sparkles size={14} aria-hidden="true" className="text-[var(--muted)]" /> Auto-posting
           </h3>
           <p className="text-sm text-[var(--muted)] m-0">
@@ -147,7 +147,7 @@ export default function InboxSettingsPage() {
       <InboxEmailInCard />
 
       <div className="card flex flex-col gap-2">
-        <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">
+        <h3 className="section-title m-0 flex items-center gap-1.5">
           <FolderSync size={14} aria-hidden="true" className="text-[var(--muted)]" /> Google Drive intake
         </h3>
         <p className="text-sm text-[var(--muted)] m-0">

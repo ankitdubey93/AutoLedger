@@ -243,7 +243,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
     <section className="flex flex-col gap-5">
       <BackLink to={backTo.to} label={backTo.label} />
       <header>
-        <h2 className="text-lg font-semibold m-0">
+        <h2 className="page-title m-0">
           {existing === null ? `New ${config.title.toLowerCase()}` : `Edit ${config.title.toLowerCase()}`}
         </h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">{config.postingHint}</p>
@@ -452,7 +452,7 @@ export default function NoteFormPage({ config }: { config: NoteKindConfig }) {
           type="button"
           onClick={() => void handleSave()}
           disabled={busy}
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+          className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
         >
           {existing === null ? 'Save draft' : 'Save changes'}
         </button>

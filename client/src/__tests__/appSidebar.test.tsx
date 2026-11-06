@@ -20,14 +20,14 @@ const groups = [
   },
 ];
 
-function Harness({ path = '/app/test' }: { path?: string }) {
+function Harness() {
   const { mobileOpen, setMobileOpen } = useShell();
   return (
     <>
       <button type="button" onClick={() => setMobileOpen(!mobileOpen)}>
         toggle drawer
       </button>
-      <AppSidebar ariaLabel="TestApp" storageKey={`test-${path}`} groups={groups} />
+      <AppSidebar ariaLabel="TestApp" groups={groups} />
     </>
   );
 }
@@ -36,7 +36,7 @@ function renderSidebar(path = '/app/test') {
   return render(
     <MemoryRouter initialEntries={[path]}>
       <ShellProvider>
-        <Harness path={path} />
+        <Harness />
       </ShellProvider>
     </MemoryRouter>,
   );
@@ -59,18 +59,43 @@ describe('AppSidebar', () => {
     expect(screen.getByRole('link', { name: 'Dashboard' })).not.toHaveAttribute('aria-current');
   });
 
-  it('a group heading toggles aria-expanded and hides its items', async () => {
+  it('a group away from the current page starts closed, and its heading opens and closes it', async () => {
     const user = userEvent.setup();
     renderSidebar('/app/test');
 
     const heading = screen.getByRole('button', { name: /group two/i });
+    expect(heading).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('link', { name: 'Other' })).not.toBeInTheDocument();
+
+    await user.click(heading);
     expect(heading).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('link', { name: 'Other' })).toBeInTheDocument();
 
     await user.click(heading);
-
     expect(heading).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('link', { name: 'Other' })).not.toBeInTheDocument();
+  });
+
+  it('a group opened by hand stays open only until another one is opened', async () => {
+    const user = userEvent.setup();
+    renderSidebar('/app/test');
+    await user.click(screen.getByRole('button', { name: /group two/i }));
+    expect(screen.getByRole('link', { name: 'Other' })).toBeInTheDocument();
+
+    // Group one holds the current page, so it stays open throughout.
+    expect(screen.getByRole('link', { name: 'Items' })).toBeInTheDocument();
+  });
+
+  it('a flat group renders its links with no heading to open', () => {
+    render(
+      <MemoryRouter>
+        <ShellProvider>
+          <AppSidebar ariaLabel="TestApp" groups={[{ heading: 'Overview', flat: true, items: [{ to: '/', label: 'Home', icon: Landmark, end: true }] }]} />
+        </ShellProvider>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.queryByRole('button', { name: /overview/i })).not.toBeInTheDocument();
   });
 
   it('the group holding the active route cannot be collapsed away', async () => {

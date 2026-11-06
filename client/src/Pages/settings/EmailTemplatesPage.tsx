@@ -325,7 +325,7 @@ export default function EmailTemplatesPage() {
               <p className="m-0 whitespace-pre-line" data-testid="preview-body">
                 {fillPlaceholders(draft.body, 'STATEMENT', sample)}
               </p>
-              <span className="self-start rounded-md bg-[var(--accent)] text-[var(--accent-fg)] px-3 py-1.5 text-xs font-semibold">
+              <span className="self-start rounded-full bg-[var(--accent)] text-[var(--accent-fg)] px-3 py-1.5 text-xs font-semibold">
                 {kind === 'CUSTOMER' ? 'Review and pay' : 'View statement'}
               </span>
             </div>

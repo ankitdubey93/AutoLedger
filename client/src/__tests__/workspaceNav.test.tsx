@@ -52,14 +52,20 @@ describe('the product sidebar', () => {
     }
   });
 
-  it('puts the bill inbox under Purchases and stock under Products & inventory', () => {
+  it('puts the bill inbox under Purchases and stock under Products & inventory', async () => {
+    const user = userEvent.setup();
     renderSidebar();
     const nav = within(desktopNav());
 
+    await user.click(nav.getByRole('button', { name: 'Purchases' }));
     expect(nav.getByRole('link', { name: 'Bill inbox' })).toHaveAttribute('href', '/inbox');
     expect(nav.getByRole('link', { name: 'Review queue' })).toHaveAttribute('href', '/inbox/review');
+
+    await user.click(nav.getByRole('button', { name: 'Products & inventory' }));
     expect(nav.getByRole('link', { name: 'Products & services' })).toHaveAttribute('href', '/products');
     expect(nav.getByRole('link', { name: 'Stock on hand' })).toHaveAttribute('href', '/inventory/items');
+
+    await user.click(nav.getByRole('button', { name: 'Workspace' }));
     expect(nav.getByRole('link', { name: 'Settings' })).toHaveAttribute('href', '/settings');
   });
 

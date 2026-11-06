@@ -129,7 +129,7 @@ export default function PublicInvoicePage() {
       <div className="max-w-4xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <section className="flex flex-col gap-4 min-w-0" aria-label="Invoice">
           <div>
-            <h1 className="text-xl font-semibold m-0">Invoice {invoice.number ?? ''}</h1>
+            <h1 className="page-title m-0">Invoice {invoice.number ?? ''}</h1>
             <p className="text-sm text-[var(--muted)] m-0 mt-1">For {invoice.customerName}</p>
           </div>
 

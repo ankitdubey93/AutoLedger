@@ -41,7 +41,7 @@ import type { QuoteKindConfig } from './quoteKinds';
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 const primaryClass =
-  'px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
+  'px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40';
 const secondaryClass =
   'px-3 py-1.5 rounded-md text-sm text-[var(--muted)] hover:text-[var(--text)] bg-transparent border border-[var(--border)] cursor-pointer disabled:opacity-40 no-underline';
 
@@ -99,7 +99,7 @@ function Modal({ title, children }: { title: string; children: ReactNode }) {
       className="animate-fade-in fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
     >
       <div className="animate-pop-in w-full max-w-md rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]">
-        <h3 className="text-base font-semibold m-0">{title}</h3>
+        <h3 className="section-title m-0">{title}</h3>
         {children}
       </div>
     </div>
@@ -241,7 +241,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
 
       <header className="no-print flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0 flex items-center gap-2">
+          <h2 className="page-title m-0 flex items-center gap-2">
             {quoteLabel(quote)} <QuoteStatusPill status={status} />
           </h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
@@ -373,7 +373,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
 
       {quote.response !== null && (
         <section className="no-print rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-2 text-sm" aria-label="Response">
-          <h3 className="text-base font-semibold m-0">
+          <h3 className="section-title m-0">
             {quote.response.response === 'ACCEPTED' ? 'Acceptance' : 'Decline'} record
           </h3>
           <dl className="grid grid-cols-[10rem_minmax(0,1fr)] gap-x-4 gap-y-1 m-0">
@@ -428,7 +428,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
 
       {quote.links.length > 0 && (
         <section className="no-print flex flex-col gap-2" aria-label="Review links">
-          <h3 className="text-base font-semibold m-0">Review links</h3>
+          <h3 className="section-title m-0">Review links</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[36rem]">
               <thead>
@@ -479,7 +479,7 @@ export default function QuoteDetailPage({ config }: { config: QuoteKindConfig })
 
       {quote.revisions.length > 1 && (
         <section className="no-print flex flex-col gap-2" aria-label="Revisions">
-          <h3 className="text-base font-semibold m-0">Revisions</h3>
+          <h3 className="section-title m-0">Revisions</h3>
           <ul className="m-0 pl-5 text-sm flex flex-col gap-1">
             {quote.revisions.map((r) => (
               <li key={r.id}>

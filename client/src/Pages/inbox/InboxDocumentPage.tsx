@@ -224,7 +224,7 @@ export default function InboxDocumentPage() {
 
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold m-0">{document.originalFilename}</h2>
+          <h2 className="page-title m-0">{document.originalFilename}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             {statusLabel(document.status)}
             {document.pageCount !== null && ` · ${String(document.pageCount)} page(s)`}

@@ -92,7 +92,7 @@ function BankRuleForm({
       onSubmit={(e) => void handleSubmit(e)}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
     >
-      <h3 className="text-sm font-semibold m-0">New bank rule</h3>
+      <h3 className="section-title m-0">New bank rule</h3>
 
       <div className="flex flex-wrap gap-3">
         <label className="flex flex-col gap-1 text-sm w-32">
@@ -228,7 +228,7 @@ function BankRuleForm({
         <button
           type="submit"
           disabled={busy || name.trim() === '' || memoContains.trim() === '' || targetAccountId === ''}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy ? 'Creating…' : 'Create rule'}
         </button>
@@ -335,7 +335,7 @@ export default function BankRulesPage() {
         <button
           type="button"
           onClick={() => setShowForm((open) => !open)}
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           New rule
         </button>
@@ -343,7 +343,7 @@ export default function BankRulesPage() {
           type="button"
           onClick={() => void handleApplyRules()}
           disabled={applyBusy}
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+          className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
         >
           {applyBusy ? 'Applying…' : 'Apply to unmatched lines'}
         </button>

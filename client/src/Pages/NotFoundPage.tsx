@@ -10,7 +10,7 @@ import EmptyState from '../components/ui/EmptyState';
 export default function NotFoundPage() {
   return (
     <section className="flex flex-col gap-4 max-w-xl mx-auto py-10 px-4">
-      <h1 className="text-lg font-semibold m-0">Page not found</h1>
+      <h1 className="page-title m-0">Page not found</h1>
       <EmptyState
         icon={Compass}
         title="That page does not exist"

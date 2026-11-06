@@ -163,7 +163,7 @@ export default function ManualJournalFormPage() {
   const inputClass =
     'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
   const primaryClass =
-    'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+    'px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
   const secondaryClass =
     'px-4 py-2 rounded-md text-sm font-medium border border-[var(--border)] cursor-pointer bg-transparent text-[var(--text)] hover:bg-[var(--panel)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
@@ -191,7 +191,7 @@ export default function ManualJournalFormPage() {
         className="flex flex-col gap-4"
       >
         <header>
-          <h2 className="text-lg font-semibold m-0">
+          <h2 className="page-title m-0">
             {editing
               ? isTemplate
                 ? 'Edit repeating journal template'

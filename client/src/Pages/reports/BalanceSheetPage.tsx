@@ -94,7 +94,7 @@ export default function BalanceSheetPage() {
 
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Balance sheet</h2>
+          <h2 className="page-title m-0">Balance sheet</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Computed from raw ledger lines on every request — no stored balances.
           </p>

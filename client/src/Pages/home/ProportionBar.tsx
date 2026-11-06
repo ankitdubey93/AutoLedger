@@ -29,12 +29,13 @@ export default function ProportionBar({
   return (
     <div className="flex flex-col gap-1.5">
       {total === 0 ? (
-        <div className="h-2 rounded-full bg-[var(--border)]" />
+        <div className="h-3.5 rounded-full bg-[var(--panel-2)]" />
       ) : (
-        <div className="flex h-2 w-full overflow-hidden rounded-full bg-[var(--border)]" aria-hidden="true">
+        <div className="flow-bar" aria-hidden="true">
           {segments.map((s) => (
-            <div
+            <span
               key={s.label}
+              className="flow-bar__segment"
               title={`${s.label}: ${formatCents(s.valueCents)} ${currency}`}
               style={{ width: `${String((Math.abs(s.valueCents) / total) * 100)}%`, background: s.color }}
             />
@@ -44,7 +45,7 @@ export default function ProportionBar({
       <div className="flex items-center gap-4 text-xs text-[var(--muted)]">
         {segments.map((s) => (
           <span key={s.label} className="flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} />
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
             {s.label}
           </span>
         ))}

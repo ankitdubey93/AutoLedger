@@ -110,7 +110,7 @@ export default function NewRepeatingJournalPage() {
   const inputClass =
     'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
   const primaryClass =
-    'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+    'px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 
   return (
     <section className="flex flex-col gap-4">
@@ -123,7 +123,7 @@ export default function NewRepeatingJournalPage() {
         className="flex flex-col gap-4"
       >
         <header>
-          <h2 className="text-lg font-semibold m-0">New repeating journal</h2>
+          <h2 className="page-title m-0">New repeating journal</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Each run posts a journal from this template on its date. Nothing is posted until the first run.
           </p>

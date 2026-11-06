@@ -28,14 +28,14 @@ export default function FxRevaluationsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Revaluations</h2>
+          <h2 className="page-title m-0">Revaluations</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Every period-end FX revaluation ever posted, each with an automatic next-day reversal.
           </p>
         </div>
         <Link
           to="/fx-exposure"
-          className="px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          className="px-3 py-1.5 rounded-full text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           Post a revaluation
         </Link>

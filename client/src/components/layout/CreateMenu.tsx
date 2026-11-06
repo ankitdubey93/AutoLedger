@@ -42,7 +42,7 @@ export default function CreateMenu() {
         <button
           {...buttonProps}
           type="button"
-          className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          className="flex w-full items-center justify-center gap-1.5 px-3 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           <Plus size={15} aria-hidden="true" /> New
         </button>

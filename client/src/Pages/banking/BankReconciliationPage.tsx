@@ -4,6 +4,7 @@ import { listAccounts, getBankReconciliation, type Account, type BankReconciliat
 import { formatCents } from '../../utils/money';
 import MetricTile from '../../components/ui/MetricTile';
 import BackLink from '../../components/BackLink';
+import Alert from '../../components/ui/Alert';
 import LoadingState from '../../components/ui/LoadingState';
 
 /**
@@ -78,7 +79,7 @@ export default function BankReconciliationPage() {
       <BackLink to="/bank" label="Back to bank lines" />
 
       <header>
-        <h2 className="text-lg font-semibold m-0">Bank reconciliation</h2>
+        <h2 className="page-title m-0">Bank reconciliation</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Compares the ledger's cash balance against every imported statement line.
         </p>
@@ -106,34 +107,14 @@ export default function BankReconciliationPage() {
 
       {loaded && report !== null && (
         <>
-          <div
-            className={[
-              'rounded-lg border p-4 flex items-center gap-3',
-              report.reconciles
-                ? 'border-[var(--good)]/30 bg-[var(--good)]/10'
-                : 'border-amber-500/30 bg-amber-500/10',
-            ].join(' ')}
+          <Alert
+            tone={report.reconciles ? 'good' : 'danger'}
+            title={report.reconciles ? 'The bank and the books agree' : `Difference of ${formatCents(Math.abs(report.differenceCents))}`}
           >
-            {report.reconciles ? (
-              <CheckCircle2 size={20} className="text-[var(--good)]" aria-hidden="true" />
-            ) : (
-              <XCircle size={20} className="text-amber-500" aria-hidden="true" />
-            )}
-            <div>
-              <p className="text-sm font-medium m-0">
-                {report.reconciles
-                  ? 'The bank and the books agree'
-                  : `Difference of ${formatCents(Math.abs(report.differenceCents))}`}
-              </p>
-              <p className="text-xs text-[var(--muted)] m-0 mt-1">
-                This compares the imported statement against the ledger — it is a completeness check,
-                not a correctness proof. A gap means a cash movement was never imported, or a statement
-                period is missing, not necessarily that the books are wrong.
-              </p>
-            </div>
-          </div>
+            This compares the imported statement against the ledger — it is a completeness check, not a correctness proof. A gap means a cash movement was never imported, or a statement period is missing, not necessarily that the books are wrong.
+          </Alert>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4">
             <MetricTile
               label="GL balance"
               valueCents={report.glBalanceCents}

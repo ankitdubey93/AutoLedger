@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { formatCents } from '../../utils/money';
+import CountUp from './CountUp';
 import StatTile from './StatTile';
 
 /**
@@ -22,7 +22,7 @@ export interface MetricTileProps {
   /** Base currency code, e.g. "USD". Rendered as its own muted <span>. */
   currency: string;
   icon: LucideIcon;
-  tone: 'neutral' | 'good' | 'bad';
+  tone: 'neutral' | 'good' | 'bad' | 'accent' | 'coral' | 'violet';
   /** Absolute path. `null` renders a non-interactive <div> instead of a <Link>. */
   to: string | null;
   /** Small caption under the value. `null` renders nothing. */
@@ -35,7 +35,7 @@ export default function MetricTile({ label, valueCents, currency, icon, tone, to
       '—'
     ) : (
       <>
-        <span>{formatCents(valueCents)}</span> <span className="text-xs font-normal text-[var(--muted)]">{currency}</span>
+        <span><CountUp cents={valueCents} /></span> <span className="font-sans text-xs font-semibold text-[var(--muted)]">{currency}</span>
       </>
     );
 

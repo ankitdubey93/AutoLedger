@@ -125,7 +125,7 @@ export default function JournalDetailPage() {
 
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{entry.description ?? 'Journal entry'}</h2>
+          <h2 className="page-title m-0">{entry.description ?? 'Journal entry'}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">{formatDate(entry.entryDate)}</p>
         </div>
         {canReverse && (

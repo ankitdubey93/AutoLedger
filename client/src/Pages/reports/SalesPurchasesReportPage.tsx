@@ -172,7 +172,7 @@ export default function SalesPurchasesReportPage({ kind }: { kind: SalesPurchase
 
       <header className="flex items-end justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{TITLES[kind]}</h2>
+          <h2 className="page-title m-0">{TITLES[kind]}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">Net, tax and gross for the period.</p>
         </div>
 

@@ -6,7 +6,7 @@ import { cx } from '../../utils/cx';
 export interface StatTileProps {
   label: string;
   icon: LucideIcon;
-  tone?: 'neutral' | 'good' | 'bad';
+  tone?: 'neutral' | 'good' | 'bad' | 'accent' | 'coral' | 'violet';
   value: ReactNode;
   hint?: ReactNode;
   /** Absolute path. Omit for a non-interactive tile. */
@@ -14,9 +14,12 @@ export interface StatTileProps {
 }
 
 const TONE_CLASS: Record<NonNullable<StatTileProps['tone']>, string> = {
-  neutral: 'text-[var(--muted)] bg-[var(--panel-2)]',
-  good: 'text-[var(--good)] bg-[var(--good-soft)]',
-  bad: 'text-[var(--bad)] bg-[var(--bad-soft)]',
+  neutral: 'tone-plain',
+  good: 'tone-good',
+  bad: 'tone-bad',
+  accent: 'tone-accent',
+  coral: 'tone-coral',
+  violet: 'tone-violet',
 };
 
 /**
@@ -28,14 +31,14 @@ const TONE_CLASS: Record<NonNullable<StatTileProps['tone']>, string> = {
 export default function StatTile({ label, icon: Icon, tone = 'neutral', value, hint, to }: StatTileProps) {
   const content = (
     <>
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">{label}</p>
-        <span aria-hidden="true" className={cx('flex size-7 items-center justify-center rounded-md', TONE_CLASS[tone])}>
-          <Icon size={15} />
+      <div className="flex items-center gap-3">
+        <span aria-hidden="true" className={cx('nav-icon', TONE_CLASS[tone])}>
+          <Icon size={16} />
         </span>
+        <p className="text-sm font-medium text-[var(--muted)] m-0">{label}</p>
       </div>
-      <div className="mt-2 text-2xl font-semibold tabular-nums">{value}</div>
-      {hint !== undefined && <p className="text-xs text-[var(--muted)] m-0 mt-1.5">{hint}</p>}
+      <div className="display-figure mt-4 text-[1.75rem]">{value}</div>
+      {hint !== undefined && <p className="text-sm text-[var(--muted)] m-0 mt-2">{hint}</p>}
     </>
   );
 

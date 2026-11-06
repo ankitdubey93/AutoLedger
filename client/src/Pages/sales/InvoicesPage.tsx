@@ -1,3 +1,5 @@
+import StatusPill from '../../components/ui/StatusPill';
+import SlidingTabs from '../../components/ui/SlidingTabs';
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { Plus } from 'lucide-react';
@@ -45,30 +47,14 @@ const TABS: Tab[] = [
   { key: 'void', label: 'Void', status: 'VOID', settlement: '' },
 ];
 
-function settlementLabel(status: SettlementStatus): string | null {
-  if (status === 'OVERDUE') return 'Overdue';
-  if (status === 'PARTIALLY_PAID') return 'Partially paid';
-  if (status === 'PAID') return 'Paid';
-  if (status === 'UNPAID') return 'Unpaid';
-  return null;
-}
-
-function statusPill(status: InvoiceStatus) {
-  if (status === 'DRAFT') {
-    return <span className="text-[11px] uppercase tracking-wide text-[var(--muted)]">Draft</span>;
-  }
-  if (status === 'ISSUED') {
-    return (
-      <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 ring-1 ring-inset ring-emerald-500/20">
-        Issued
-      </span>
-    );
-  }
-  return (
-    <span className="text-[11px] uppercase tracking-wide px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 ring-1 ring-inset ring-amber-500/20">
-      Void
-    </span>
-  );
+function statusPill(status: InvoiceStatus, settlement: SettlementStatus) {
+  if (status === 'DRAFT') return <StatusPill tone="neutral" label="Draft" />;
+  if (status === 'VOID') return <StatusPill tone="neutral" label="Void" voided />;
+  if (settlement === 'OVERDUE') return <StatusPill tone="danger" label="Overdue" />;
+  if (settlement === 'PAID') return <StatusPill tone="good" label="Paid" />;
+  if (settlement === 'PARTIALLY_PAID') return <StatusPill tone="info" label="Partially paid" />;
+  if (settlement === 'UNPAID') return <StatusPill tone="info" label="Awaiting payment" />;
+  return <StatusPill tone="good" label="Issued" />;
 }
 
 export default function InvoicesPage() {
@@ -179,7 +165,7 @@ export default function InvoicesPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Invoices</h2>
+          <h2 className="page-title m-0">Invoices</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Sales invoices. Issuing one posts a balanced journal entry; correcting one means
             voiding it.
@@ -189,31 +175,14 @@ export default function InvoicesPage() {
           <ImportButton kind="INVOICES" returnTo="/invoices" />
           <Link
             to="/invoices/new"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium no-underline bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             <Plus size={15} /> New invoice
           </Link>
         </div>
       </header>
 
-      <nav className="flex flex-wrap gap-1 border-b border-[var(--border)]" aria-label="Invoice status">
-        {TABS.map((tab) => (
-          <button
-            key={tab.key}
-            type="button"
-            onClick={() => selectTab(tab)}
-            aria-current={activeTab === tab.key ? 'page' : undefined}
-            className={[
-              'px-3 py-2 text-sm border-0 border-b-2 bg-transparent cursor-pointer -mb-px',
-              activeTab === tab.key
-                ? 'border-[var(--text)] text-[var(--text)] font-medium'
-                : 'border-transparent text-[var(--muted)] hover:text-[var(--text)]',
-            ].join(' ')}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+      <SlidingTabs ariaLabel="Invoice status" tabs={TABS} isActive={(tab) => activeTab === tab.key} onSelect={(tab) => selectTab(tab)} />
 
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
@@ -284,7 +253,7 @@ export default function InvoicesPage() {
                 </thead>
                 <tbody>
                   {invoices.map((invoice) => (
-                    <tr key={invoice.id} className="border-t border-[var(--border)]">
+                    <tr key={invoice.id} className={`border-t border-[var(--border)] ${invoice.settlementStatus === 'OVERDUE' ? 'bg-[var(--bad-soft)] hover:!bg-[var(--bad-soft)]' : ''}`}>
                       <td className="p-3 font-mono text-xs">
                         {invoice.invoiceNumber ?? (
                           <span className="text-[var(--muted)] uppercase tracking-wide">Draft</span>
@@ -295,16 +264,11 @@ export default function InvoicesPage() {
                       <td className="p-3">{invoice.customerNameSnapshot}</td>
                       <td className="p-3">
                         <div className="flex flex-col gap-1">
-                          {statusPill(invoice.status)}
-                          {settlementLabel(invoice.settlementStatus) !== null && (
-                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">
-                              {settlementLabel(invoice.settlementStatus)}
-                            </span>
-                          )}
+                          <span>{statusPill(invoice.status, invoice.settlementStatus)}</span>
                           {invoice.lastViewedAt !== null ? (
-                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Viewed</span>
+                            <span className="text-xs text-[var(--muted)]">Viewed</span>
                           ) : invoice.lastSentAt !== null ? (
-                            <span className="text-[10px] uppercase tracking-wide text-[var(--muted)]">Sent</span>
+                            <span className="text-xs text-[var(--muted)]">Sent</span>
                           ) : null}
                         </div>
                       </td>

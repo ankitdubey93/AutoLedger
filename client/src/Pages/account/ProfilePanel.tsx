@@ -147,7 +147,7 @@ function ChangeEmailForm({ currentEmail }: { currentEmail: string }) {
         </button>
       ) : (
         <form className="flex flex-col gap-3 max-w-md" onSubmit={(e) => void onSubmit(e)}>
-          <h3 className="m-0 text-sm font-semibold">Change sign-in email</h3>
+          <h3 className="m-0 section-title">Change sign-in email</h3>
           <label className="flex flex-col gap-1 text-sm">
             New email
             <input

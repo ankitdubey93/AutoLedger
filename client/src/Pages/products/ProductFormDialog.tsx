@@ -339,7 +339,7 @@ export default function ProductFormDialog({
         onSubmit={(e) => void handleSubmit(e)}
         className="animate-pop-in w-full max-w-xl rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-4 shadow-[var(--shadow-lg)]"
       >
-        <h3 id="product-form-title" className="text-base font-semibold m-0">
+        <h3 id="product-form-title" className="section-title m-0">
           {title}
         </h3>
 

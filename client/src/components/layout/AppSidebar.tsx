@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
-import { ChevronDown, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
+import { ChevronRight, PanelLeftClose, PanelLeftOpen, X } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useShell } from './ShellContext';
 import { cx } from '../../utils/cx';
@@ -18,13 +18,17 @@ export interface SidebarNavItem {
 export interface SidebarNavGroup {
   heading: string;
   items: readonly SidebarNavItem[];
+  /** The group's own icon; defaults to its first item's. */
+  icon?: LucideIcon;
+  /** A `.tone-*` class colouring that icon. */
+  tone?: string;
+  /** Render the items as top-level links with no heading to open. */
+  flat?: boolean;
 }
 
 export interface AppSidebarProps {
   /** The <nav> accessible name — 'Accounting', 'Inventory', 'Capture'. */
   ariaLabel: string;
-  /** Namespaces this app's group-collapse persistence in localStorage. */
-  storageKey: string;
   groups: readonly SidebarNavGroup[];
   /** CreateMenu, or nothing — rendered above the nav, hidden while the rail is collapsed to icons. */
   header?: ReactNode;
@@ -34,43 +38,26 @@ function isItemActive(pathname: string, item: SidebarNavItem): boolean {
   return item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`);
 }
 
-function readCollapsedGroups(storageKey: string): Set<string> {
-  try {
-    const raw = localStorage.getItem(`autoledger.sidebarGroups.${storageKey}`);
-    return raw === null ? new Set() : new Set<string>(JSON.parse(raw) as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-const linkClass = (isActive: boolean, collapsed: boolean) =>
-  cx(
-    'group/link flex items-center gap-2.5 px-3 py-2 text-sm no-underline rounded-md whitespace-nowrap transition-colors',
-    collapsed && 'justify-center px-0',
-    isActive
-      ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-medium shadow-[inset_2px_0_0_var(--accent)]'
-      : 'text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)]',
-  );
-
 /**
  * The shared rail behind AccountingSidebar, StockSidebar and CaptureSidebar —
- * grouped links, a collapsible icon rail on desktop, and an off-canvas
- * drawer on mobile that replaces the old horizontal scroll strip.
+ * groups that open like an accordion, a collapsible icon rail on desktop, and an
+ * off-canvas drawer on mobile. Only the group holding the current page and the one
+ * last opened are expanded, so forty links read as seven headings.
  *
  * Two markup blocks, not one responsive block: the desktop `<nav>` is always
  * in the DOM (hidden below `md` by CSS only), so `getByRole('link', …)`
  * keeps finding a unique match with the same accessible name whether the
  * rail is expanded or collapsed to icons — collapsing hides labels visually
- * with `sr-only`, never from the accessibility tree. The mobile drawer is a
+ * with `sr-only`, never from the accessibility tree. A closed group's links stay
+ * mounted so its panel can animate; `inert` and `aria-hidden` keep them out of
+ * reach until it opens. The mobile drawer is a
  * SEPARATE tree, mounted only while `mobileOpen` is true, so the two never
  * both exist in the DOM at once and a test never sees a duplicate link.
  */
-export default function AppSidebar({ ariaLabel, storageKey, groups, header }: AppSidebarProps) {
+export default function AppSidebar({ ariaLabel, groups, header }: AppSidebarProps) {
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useShell();
   const location = useLocation();
-  const [manuallyCollapsedGroups, setManuallyCollapsedGroups] = useState<Set<string>>(() =>
-    readCollapsedGroups(storageKey),
-  );
+  const [openedGroup, setOpenedGroup] = useState<string | null>(null);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -81,58 +68,53 @@ export default function AppSidebar({ ariaLabel, storageKey, groups, header }: Ap
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [mobileOpen, setMobileOpen]);
 
-  function toggleGroup(heading: string) {
-    setManuallyCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(heading)) next.delete(heading);
-      else next.add(heading);
-      try {
-        localStorage.setItem(`autoledger.sidebarGroups.${storageKey}`, JSON.stringify([...next]));
-      } catch {
-        // in-memory state still applies for this session
-      }
-      return next;
-    });
+  function renderRail() {
+    return groups.flatMap((group) =>
+      group.items.map((item) => (
+        <NavLink key={item.label} to={item.to} end={item.end} title={item.label} className="nav-rail-link no-underline">
+          <item.icon size={17} aria-hidden="true" />
+          <span className="sr-only">{item.label}</span>
+        </NavLink>
+      )),
+    );
   }
 
-  function isGroupActive(group: SidebarNavGroup): boolean {
-    return group.items.some((item) => isItemActive(location.pathname, item));
-  }
-
-  function renderGroups(collapseToIcons: boolean, showHeadings: boolean) {
+  function renderGroups(onNavigate?: () => void) {
     return groups.map((group) => {
-      const active = isGroupActive(group);
-      const open = active || !manuallyCollapsedGroups.has(group.heading);
+      if (group.flat === true) {
+        return group.items.map((item) => (
+          <NavLink key={item.label} to={item.to} end={item.end} className="nav-flat" onClick={onNavigate}>
+            <span className={cx('nav-icon', group.tone)}>
+              <item.icon size={17} aria-hidden="true" />
+            </span>
+            {item.label}
+          </NavLink>
+        ));
+      }
+      const active = group.items.some((item) => isItemActive(location.pathname, item));
+      const open = active || openedGroup === group.heading;
+      const GroupIcon = group.icon ?? group.items[0]?.icon;
       return (
-        <div key={group.heading} className="flex flex-col gap-1">
-          {showHeadings && (
-            <button
-              type="button"
-              onClick={() => toggleGroup(group.heading)}
-              aria-expanded={open}
-              className="flex items-center justify-between gap-1 px-3 py-1 mt-0 text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--muted)] hover:text-[var(--text)] transition-colors"
-            >
-              {group.heading}
-              <ChevronDown
-                size={12}
-                aria-hidden="true"
-                className={cx('transition-transform duration-150', !open && '-rotate-90')}
-              />
-            </button>
-          )}
-          {(open || !showHeadings) &&
-            group.items.map((item) => (
-              <NavLink
-                key={item.label}
-                to={item.to}
-                end={item.end}
-                title={collapseToIcons ? item.label : undefined}
-                className={({ isActive }) => linkClass(isActive, collapseToIcons)}
-              >
-                <item.icon size={16} aria-hidden="true" className="shrink-0" />
-                <span className={collapseToIcons ? 'sr-only' : undefined}>{item.label}</span>
-              </NavLink>
-            ))}
+        <div key={group.heading} className={cx('nav-group', open && 'nav-group--open')}>
+          <button
+            type="button"
+            onClick={() => setOpenedGroup((current) => (current === group.heading ? null : group.heading))}
+            aria-expanded={open}
+            className="nav-group__button"
+          >
+            <span className={cx('nav-icon', group.tone ?? 'tone-plain')}>{GroupIcon !== undefined && <GroupIcon size={17} aria-hidden="true" />}</span>
+            {group.heading}
+            <ChevronRight size={16} aria-hidden="true" className="nav-group__chevron" />
+          </button>
+          <div className="nav-group__panel">
+            <div className="nav-group__inner" inert={!open} aria-hidden={!open}>
+              {group.items.map((item) => (
+                <NavLink key={item.label} to={item.to} end={item.end} className="nav-link" onClick={onNavigate}>
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         </div>
       );
     });
@@ -144,20 +126,18 @@ export default function AppSidebar({ ariaLabel, storageKey, groups, header }: Ap
       <nav
         aria-label={ariaLabel}
         className={cx(
-          'no-print hidden md:flex md:flex-col md:shrink-0 md:sticky md:top-14 md:h-[calc(100vh-3.5rem)] border-r border-[var(--border)] py-5 transition-[width] duration-200',
-          collapsed ? 'md:w-16 md:px-2' : 'md:w-60 md:pr-3',
+          'no-print hidden md:flex md:flex-col md:shrink-0 md:sticky md:top-16 md:h-[calc(100vh-4rem)] py-5 transition-[width] duration-500',
+          collapsed ? 'md:w-16 md:px-1' : 'md:w-72',
         )}
         style={{ transitionTimingFunction: 'var(--ease)' }}
       >
         {header !== undefined && !collapsed && <div className="mb-4 px-1">{header}</div>}
-        <div className="flex-1 flex flex-col gap-6 overflow-y-auto overflow-x-hidden">
-          {renderGroups(collapsed, !collapsed)}
-        </div>
+        <div className="flex-1 flex flex-col gap-1 overflow-y-auto overflow-x-hidden">{collapsed ? renderRail() : renderGroups()}</div>
         <button
           type="button"
           onClick={toggleCollapsed}
           className={cx(
-            'mt-3 flex items-center gap-2.5 px-3 py-2 text-sm rounded-md text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)] transition-colors',
+            'mt-3 flex items-center gap-3 px-3 min-h-11 text-sm rounded-[0.875rem] text-[var(--muted)] hover:text-[var(--text)] hover:bg-[var(--panel-2)] transition-colors',
             collapsed && 'justify-center px-0',
           )}
         >
@@ -177,11 +157,11 @@ export default function AppSidebar({ ariaLabel, storageKey, groups, header }: Ap
             type="button"
             aria-label="Close menu"
             onClick={() => setMobileOpen(false)}
-            className="animate-fade-in absolute inset-0 bg-black/50 border-0 p-0 cursor-pointer"
+            className="animate-fade-in absolute inset-0 bg-black/50 backdrop-blur-sm border-0 p-0 cursor-pointer"
           />
           <nav
             aria-label={ariaLabel}
-            className="animate-slide-in-left absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-[var(--panel)] border-r border-[var(--border)] p-4 flex flex-col overflow-y-auto shadow-[var(--shadow-lg)]"
+            className="animate-slide-in-left absolute inset-y-0 left-0 w-72 max-w-[85vw] bg-[var(--bg)] rounded-r-[2rem] p-4 flex flex-col overflow-y-auto shadow-[var(--shadow-lg)]"
           >
             <div className="flex items-center justify-between mb-3">
               <span className="text-sm font-semibold">{ariaLabel}</span>
@@ -195,9 +175,7 @@ export default function AppSidebar({ ariaLabel, storageKey, groups, header }: Ap
               </button>
             </div>
             {header !== undefined && <div className="mb-4">{header}</div>}
-            <div className="flex flex-col gap-6" onClick={() => setMobileOpen(false)}>
-              {renderGroups(false, true)}
-            </div>
+            <div className="flex flex-col gap-1">{renderGroups(() => setMobileOpen(false))}</div>
           </nav>
         </div>
       )}

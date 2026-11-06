@@ -459,7 +459,7 @@ export default function NewInvoicePage() {
 
       <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
         <header>
-          <h2 className="text-lg font-semibold m-0">
+          <h2 className="page-title m-0">
             {invoiceId === undefined ? 'New invoice' : 'Edit draft invoice'}
           </h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
@@ -794,7 +794,7 @@ export default function NewInvoicePage() {
           <button
             type="submit"
             disabled={!canSave}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? 'Saving…' : 'Save draft'}
           </button>

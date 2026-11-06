@@ -68,21 +68,21 @@ export default function MigrationImportsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Data migration</h2>
+          <h2 className="page-title m-0">Data migration</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Bring your data in from another system — stage a CSV, fix what's wrong, then commit.
           </p>
         </div>
         <Link
           to="/migration-imports/new"
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
         >
           <Plus size={15} aria-hidden="true" /> New import
         </Link>
       </header>
 
       <div className="card flex flex-col gap-2">
-        <h3 className="text-sm font-semibold m-0">Migration checklist</h3>
+        <h3 className="section-title m-0">Migration checklist</h3>
         <ol className="list-none p-0 m-0 flex flex-col gap-1 text-sm">
           {MIGRATION_STEPS.map((step) => (
             <li key={step.key} className="flex items-baseline gap-2">
@@ -104,7 +104,7 @@ export default function MigrationImportsPage() {
           <p className="text-sm text-[var(--muted)] m-0">No imports yet.</p>
           <Link
             to="/migration-imports/new"
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
           >
             Start the first import
           </Link>

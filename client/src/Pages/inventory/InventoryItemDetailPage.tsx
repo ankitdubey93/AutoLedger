@@ -185,7 +185,7 @@ export default function InventoryItemDetailPage() {
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-[var(--text)]">
+          <h1 className="page-title text-[var(--text)]">
             {item.code} — {item.name}
           </h1>
           <p className="text-sm text-[var(--muted)]">
@@ -221,7 +221,7 @@ export default function InventoryItemDetailPage() {
       </div>
 
       <section aria-label="Products and services" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Products &amp; Services</h2>
+        <h2 className="section-title">Products &amp; Services</h2>
         {item.ledgerItemId !== null ? (
           <p className="text-sm text-[var(--muted)]">
             Linked to Products &amp; Services. Stock movements of this item post to your inventory account, and it can be bought on
@@ -252,14 +252,14 @@ export default function InventoryItemDetailPage() {
       </section>
 
       <section aria-label="Custom fields" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Custom fields</h2>
+        <h2 className="section-title">Custom fields</h2>
         <AttributeFields definitions={attributeDefs} value={attributes} onChange={setAttributes} idPrefix="item-detail-attr" />
         {canWrite ? (
           <button
             type="button"
             disabled={saving}
             onClick={() => void handleSaveAttributes()}
-            className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)] disabled:opacity-60"
           >
             Save
           </button>
@@ -267,7 +267,7 @@ export default function InventoryItemDetailPage() {
       </section>
 
       <section aria-label="On hand" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">On hand</h2>
+        <h2 className="section-title">On hand</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>
@@ -297,7 +297,7 @@ export default function InventoryItemDetailPage() {
 
       {item.tracking === 'LOT' ? (
         <section aria-label="Lots" className="space-y-2">
-          <h2 className="text-sm font-medium text-[var(--text)]">Lots</h2>
+          <h2 className="section-title">Lots</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm border-collapse">
               <thead>
@@ -324,7 +324,7 @@ export default function InventoryItemDetailPage() {
       {item.tracking === 'SERIAL' ? (
         <section aria-label="Serials" className="space-y-2">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-medium text-[var(--text)]">Serials</h2>
+            <h2 className="section-title">Serials</h2>
             {selectedSerialIds.length > 0 ? (
               <button type="button" onClick={printSelectedSerialLabels} className="text-xs text-[var(--muted)]">
                 Print labels for selected
@@ -399,7 +399,7 @@ export default function InventoryItemDetailPage() {
       ) : null}
 
       <section aria-label="Movement history" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Movement history</h2>
+        <h2 className="section-title">Movement history</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-sm border-collapse">
             <thead>

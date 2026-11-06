@@ -88,7 +88,7 @@ export default function HistoryAndNotes({
 
   return (
     <section aria-label="History and notes" className="rounded-lg border border-[var(--border)] bg-[var(--panel)]">
-      <h3 className="text-sm font-semibold m-0">
+      <h3 className="section-title m-0">
         <button
           type="button"
           aria-expanded={open}

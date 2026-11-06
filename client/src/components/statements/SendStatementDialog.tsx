@@ -114,7 +114,7 @@ export default function SendStatementDialog(props: SendStatementDialogProps) {
         aria-labelledby="send-statement-title"
         className="animate-pop-in w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-4 shadow-[var(--shadow-lg)]"
       >
-        <h3 id="send-statement-title" className="text-base font-semibold m-0">
+        <h3 id="send-statement-title" className="section-title m-0">
           {single !== undefined ? `Email statement to ${single.name}` : `Email ${String(recipients.length)} statements`}
         </h3>
 
@@ -186,7 +186,7 @@ export default function SendStatementDialog(props: SendStatementDialogProps) {
                 <>
                   <p className="m-0 font-semibold">{preview.subject}</p>
                   <p className="m-0 whitespace-pre-line">{preview.body}</p>
-                  <span className="self-start rounded-md bg-[var(--accent)] text-[var(--accent-fg)] px-3 py-1 text-xs font-semibold">
+                  <span className="self-start rounded-full bg-[var(--accent)] text-[var(--accent-fg)] px-3 py-1 text-xs font-semibold">
                     {kind === 'CUSTOMER' ? 'Review and pay' : 'View statement'}
                   </span>
                 </>

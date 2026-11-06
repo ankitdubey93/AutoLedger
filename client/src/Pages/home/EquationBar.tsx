@@ -10,9 +10,10 @@ import { formatCents } from '../../utils/money';
  * the `equationHolds` warning already shown above it, not a second alert.
  */
 
-const LIABILITIES_COLOR = '#f0883e';
-const EQUITY_COLOR = '#6e7bff';
-const EARNINGS_COLOR = 'var(--good)';
+const ASSETS_COLOR = 'var(--accent)';
+const LIABILITIES_COLOR = 'var(--coral)';
+const EQUITY_COLOR = 'var(--violet)';
+const EARNINGS_COLOR = 'var(--good-bright)';
 
 export default function EquationBar({
   assetsCents,
@@ -39,36 +40,38 @@ export default function EquationBar({
   ];
 
   const body = (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1">
-        <p className="text-xs text-[var(--muted)] m-0">Assets</p>
-        <div className="h-2.5 rounded-full bg-[var(--border)] overflow-hidden flex">
-          <div
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1.5">
+        <p className="text-sm text-[var(--muted)] m-0">Assets</p>
+        <div className="flow-bar">
+          <span
+            className="flow-bar__segment"
             title={`Assets: ${formatCents(assetsCents)} ${currency}`}
-            style={{ width: `${String((Math.abs(assetsCents) / scale) * 100)}%`, background: 'var(--good)' }}
+            style={{ width: `${String((Math.abs(assetsCents) / scale) * 100)}%`, background: ASSETS_COLOR }}
           />
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <p className="text-xs text-[var(--muted)] m-0">Liabilities + Equity + Earnings</p>
-        <div className="h-2.5 rounded-full bg-[var(--border)] overflow-hidden flex">
+        <p className="text-sm text-[var(--muted)] m-0">Liabilities + Equity + Earnings</p>
+        <div className="flow-bar">
           {rightSegments.map((s) => (
-            <div
+            <span
               key={s.label}
+              className="flow-bar__segment"
               title={`${s.label}: ${formatCents(s.valueCents)} ${currency}`}
               style={{ width: `${String((Math.abs(s.valueCents) / scale) * 100)}%`, background: s.color }}
             />
           ))}
         </div>
       </div>
-      <div className="flex flex-wrap items-center gap-4 text-xs text-[var(--muted)]">
+      <div className="flex flex-wrap items-center gap-4 text-sm text-[var(--muted)]">
         <span className="flex items-center gap-1.5">
-          <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: 'var(--good)' }} />
+          <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: ASSETS_COLOR }} />
           Assets
         </span>
         {rightSegments.map((s) => (
           <span key={s.label} className="flex items-center gap-1.5">
-            <span className="inline-block w-2.5 h-2.5 rounded-sm" style={{ background: s.color }} />
+            <span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
             {s.label}
           </span>
         ))}

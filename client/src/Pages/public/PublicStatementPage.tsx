@@ -144,7 +144,7 @@ export default function PublicStatementPage({ renderPayPanel }: PublicStatementP
       <div className="max-w-6xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="no-print flex flex-col gap-4 min-w-0">
           <div>
-            <h1 className="text-xl font-semibold m-0">Hi {view.partyName}</h1>
+            <h1 className="page-title m-0">Hi {view.partyName}</h1>
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
               {isCustomer
                 ? `Here is what is open on your account with ${view.merchant.name} today.`
@@ -256,7 +256,7 @@ export default function PublicStatementPage({ renderPayPanel }: PublicStatementP
         </aside>
 
         <section className="lg:col-span-2 flex flex-col gap-2" aria-label="Statement">
-          <h2 className="no-print text-base font-semibold m-0">Statement as sent</h2>
+          <h2 className="no-print section-title m-0">Statement as sent</h2>
           <StatementDocument
             statement={view.statement}
             settings={view.settings}

@@ -36,7 +36,7 @@ export default function InboxSummaryCard() {
           <Inbox size={17} />
         </span>
         <div>
-          <h2 className="text-base font-semibold m-0">Bill inbox</h2>
+          <h2 className="section-title m-0">Bill inbox</h2>
           <p className="muted m-0">
             {waiting === 0
               ? 'Nothing waiting for review. Upload a bill or receipt and it is read for you.'

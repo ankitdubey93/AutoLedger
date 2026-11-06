@@ -17,7 +17,7 @@ Underneath: double-entry enforced by database triggers (an unbalanced or edited 
 
 ## Screenshots
 
-The demo company (`npm run seed:demo`): four months of a fabrication business, entered through the real API.
+The demo company (`npm run seed:demo`): seven months of a fabrication business, entered through the real API.
 
 | | |
 |---|---|

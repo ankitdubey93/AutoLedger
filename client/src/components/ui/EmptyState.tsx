@@ -14,14 +14,14 @@ export interface EmptyStateProps {
  */
 export default function EmptyState({ icon: Icon, title, body, action }: EmptyStateProps) {
   return (
-    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-[var(--border)] px-6 py-10 text-center">
+    <div className="flex flex-col items-center gap-3 rounded-lg bg-[var(--bg-subtle)] px-6 py-14 text-center animate-[rise_600ms_var(--ease)_both]">
       <span
         aria-hidden="true"
-        className="flex size-10 items-center justify-center rounded-full bg-[var(--panel-2)] text-[var(--muted)]"
+        className="brand-blob flex size-16 items-center justify-center !bg-[var(--accent-soft)] !text-[var(--accent)]"
       >
-        <Icon size={20} />
+        <Icon size={26} />
       </span>
-      <p className="m-0 text-sm font-medium">{title}</p>
+      <p className="m-0 text-lg font-semibold [font-family:var(--font-display)]">{title}</p>
       {body !== undefined && <p className="muted m-0">{body}</p>}
       {action !== undefined && <div className="mt-1.5">{action}</div>}
     </div>

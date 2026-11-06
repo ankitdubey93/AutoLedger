@@ -83,7 +83,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
       onSubmit={(e) => void handleSubmit(e)}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
     >
-      <h3 className="text-sm font-semibold m-0">New vendor</h3>
+      <h3 className="section-title m-0">New vendor</h3>
 
       <div className="flex flex-wrap gap-3">
         <label className="flex flex-col gap-1 text-sm flex-1 min-w-48">
@@ -174,7 +174,7 @@ function VendorForm({ onCreated, onCancel }: { onCreated: () => void; onCancel: 
         <button
           type="submit"
           disabled={busy || name.trim() === ''}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy ? 'Creating…' : 'Create vendor'}
         </button>
@@ -268,7 +268,7 @@ export default function VendorsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Vendors</h2>
+          <h2 className="page-title m-0">Vendors</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">The parties expenses are entered against.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -276,7 +276,7 @@ export default function VendorsPage() {
           <button
             type="button"
             onClick={() => setShowForm((open) => !open)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             <Plus size={15} aria-hidden="true" /> New vendor
           </button>
@@ -308,7 +308,7 @@ export default function VendorsPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             Create the first vendor
           </button>

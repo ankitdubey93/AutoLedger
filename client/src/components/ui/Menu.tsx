@@ -137,7 +137,7 @@ export default function Menu({ trigger, items, align = 'left', panelLabel, panel
           aria-label={panelLabel}
           onKeyDown={handlePanelKeyDown}
           className={cx(
-            'animate-pop-in absolute z-30 mt-1.5 min-w-[12rem] rounded-lg border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[var(--shadow-lg)]',
+            'animate-pop-in absolute z-30 mt-1.5 min-w-[12rem] rounded-[1.125rem] bg-[var(--panel)] p-1.5 shadow-[var(--shadow-lg)]',
             align === 'right' ? 'right-0' : 'left-0',
             panelClassName,
           )}
@@ -155,7 +155,7 @@ export default function Menu({ trigger, items, align = 'left', panelLabel, panel
               </>
             );
             const itemClassName = cx(
-              'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-sm transition-colors',
+              'flex w-full items-center gap-2 rounded-[0.75rem] px-3 py-2 text-sm transition-colors',
               item.disabled
                 ? 'cursor-not-allowed opacity-50'
                 : item.danger

@@ -279,7 +279,7 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
     <section className="flex flex-col gap-5">
       <BackLink {...(existing === null ? listLink : { to: `/${config.path}/${existing.id}`, label: 'Back to the order' })} />
       <header>
-        <h2 className="text-lg font-semibold m-0">
+        <h2 className="page-title m-0">
           {existing === null ? `New ${config.title.toLowerCase()}` : `Edit draft ${config.title.toLowerCase()}`}
         </h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">{config.formHint}</p>
@@ -496,7 +496,7 @@ export default function OrderFormPage({ config }: { config: OrderKindConfig }) {
           type="button"
           onClick={() => void handleSave()}
           disabled={busy}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+          className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
         >
           {busy ? 'Saving…' : existing === null ? 'Save draft' : 'Save changes'}
         </button>

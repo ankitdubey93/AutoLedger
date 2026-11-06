@@ -54,7 +54,7 @@ function RateForm({
       onSubmit={(e) => void handleSubmit(e)}
       className="flex flex-col gap-3 rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4"
     >
-      <h3 className="text-sm font-semibold m-0">New rate</h3>
+      <h3 className="section-title m-0">New rate</h3>
       <p className="text-xs text-[var(--muted)] m-0">
         Rates are always recorded foreign → base — every rate here converts into{' '}
         <strong>{baseCurrency}</strong>, the organization&rsquo;s base currency.
@@ -106,7 +106,7 @@ function RateForm({
         <button
           type="submit"
           disabled={busy || rate.trim() === '' || fromCode === ''}
-          className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {busy ? 'Saving…' : 'Save rate'}
         </button>
@@ -172,7 +172,7 @@ export default function FxRatesPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Exchange rates</h2>
+          <h2 className="page-title m-0">Exchange rates</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Every rate here converts a foreign currency into {baseCurrency}, this organization&rsquo;s base
             currency.
@@ -181,7 +181,7 @@ export default function FxRatesPage() {
         <button
           type="button"
           onClick={() => setShowForm((open) => !open)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
         >
           <Plus size={15} aria-hidden="true" /> New rate
         </button>
@@ -208,7 +208,7 @@ export default function FxRatesPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             Record the first rate
           </button>

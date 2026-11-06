@@ -141,7 +141,7 @@ export default function ItemCodesSettingsPage() {
 
   return (
     <div className="space-y-8">
-      <h1 className="text-lg font-semibold text-[var(--text)]">Item codes</h1>
+      <h1 className="page-title text-[var(--text)]">Item codes</h1>
 
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--bad)]">
@@ -150,7 +150,7 @@ export default function ItemCodesSettingsPage() {
       ) : null}
 
       <section aria-label="Saved schemes" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Saved schemes</h2>
+        <h2 className="section-title">Saved schemes</h2>
         <ul className="space-y-1">
           {schemes.map((scheme) => (
             <li key={scheme.id} className="flex items-center gap-2 text-sm">
@@ -171,7 +171,7 @@ export default function ItemCodesSettingsPage() {
 
       {canWrite ? (
         <section aria-label="Builder" className="space-y-3">
-          <h2 className="text-sm font-medium text-[var(--text)]">Builder</h2>
+          <h2 className="section-title">Builder</h2>
           <div className="flex flex-wrap gap-2">
             <button type="button" onClick={() => appendToken('{CAT}')} className="rounded-md border border-[var(--border)] px-2.5 py-1 text-sm text-[var(--text)]">
               Category
@@ -218,7 +218,7 @@ export default function ItemCodesSettingsPage() {
                   className={`${inputClass} w-16 ml-1`}
                 />
               </label>
-              <button type="button" onClick={handleInsertAttribute} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
+              <button type="button" onClick={handleInsertAttribute} className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]">
                 Insert
               </button>
             </div>
@@ -238,7 +238,7 @@ export default function ItemCodesSettingsPage() {
                   className={`${inputClass} w-16 ml-1`}
                 />
               </label>
-              <button type="button" onClick={handleInsertSequence} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
+              <button type="button" onClick={handleInsertSequence} className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]">
                 Insert
               </button>
             </div>
@@ -291,7 +291,7 @@ export default function ItemCodesSettingsPage() {
               <input type="checkbox" checked={schemeIsDefault} onChange={(e) => setSchemeIsDefault(e.target.checked)} />
               Make default
             </label>
-            <button type="button" onClick={() => void handleSave()} className="rounded-md bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-white">
+            <button type="button" onClick={() => void handleSave()} className="rounded-full bg-[var(--accent)] hover:bg-[var(--accent-hover)] transition-colors px-3 py-1.5 text-sm font-medium text-[var(--accent-fg)]">
               Save
             </button>
           </div>
@@ -299,7 +299,7 @@ export default function ItemCodesSettingsPage() {
       ) : null}
 
       <section aria-label="Presets" className="space-y-2">
-        <h2 className="text-sm font-medium text-[var(--text)]">Presets</h2>
+        <h2 className="section-title">Presets</h2>
         <ul className="space-y-1">
           {presets.map((preset) => (
             <li key={preset.name} className="flex items-center gap-2 text-sm">

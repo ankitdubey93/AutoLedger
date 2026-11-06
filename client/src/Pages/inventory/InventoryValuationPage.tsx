@@ -134,7 +134,7 @@ export default function InventoryValuationPage() {
         <>
           <div
             className={`rounded-lg px-4 py-3 text-sm font-medium ${
-              valuation.tiesOut ? 'bg-[var(--good-soft)] text-[var(--good)]' : 'bg-[var(--warn-soft)] text-[var(--warn)]'
+              valuation.tiesOut ? 'bg-[var(--good-soft)] text-[var(--good)]' : 'bg-[var(--warn-soft)] text-[var(--warn-ink)]'
             }`}
           >
             {valuation.tiesOut
@@ -221,7 +221,7 @@ export default function InventoryValuationPage() {
 
           {valuation.misplaced.length > 0 && (
             <section className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold m-0">Value on an old account</h3>
+              <h3 className="section-title m-0">Value on an old account</h3>
               {reclassError !== null && (
                 <p role="alert" className="text-sm text-[var(--bad)]">
                   {reclassError}
@@ -259,7 +259,7 @@ export default function InventoryValuationPage() {
                     type="button"
                     onClick={() => void handleReclass()}
                     disabled={reclassBusy}
-                    className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                   >
                     {reclassBusy ? 'Moving…' : 'Move to current accounts'}
                   </button>
@@ -270,7 +270,7 @@ export default function InventoryValuationPage() {
 
           {valuation.unlinkedItemCount > 0 && (
             <section className="flex flex-col gap-2">
-              <h3 className="text-sm font-semibold m-0">Items not linked to Products &amp; Services</h3>
+              <h3 className="section-title m-0">Items not linked to Products &amp; Services</h3>
               <p className="muted m-0">
                 {valuation.unlinkedItemCount} items holding {formatCents(valuation.unlinkedValueCents)} {currency} post
                 nothing to the ledger.
@@ -300,7 +300,7 @@ export default function InventoryValuationPage() {
                     type="button"
                     onClick={() => void handleLinkAll()}
                     disabled={linkAllBusy}
-                    className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+                    className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                   >
                     {linkAllBusy ? 'Linking…' : 'Link all'}
                   </button>

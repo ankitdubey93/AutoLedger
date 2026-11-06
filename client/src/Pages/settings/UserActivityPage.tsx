@@ -34,7 +34,7 @@ export default function UserActivityPage() {
   if (forbidden) {
     return (
       <section className="flex flex-col gap-4">
-        <h2 className="text-lg font-semibold m-0">User activity</h2>
+        <h2 className="page-title m-0">User activity</h2>
         <p className="status status--bad">Only an owner or admin can view member activity.</p>
       </section>
     );
@@ -43,7 +43,7 @@ export default function UserActivityPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">User activity</h2>
+        <h2 className="page-title m-0">User activity</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           When each member last signed in to this organization, and what they changed.
         </p>

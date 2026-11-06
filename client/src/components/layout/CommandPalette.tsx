@@ -123,7 +123,7 @@ export default function CommandPalette() {
             placeholder="Search or jump to…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            className="flex-1 bg-transparent border-0 outline-none text-sm text-[var(--text)] placeholder:text-[var(--muted)]"
+            className="input-bare flex-1 bg-transparent border-0 outline-none text-sm text-[var(--text)] placeholder:text-[var(--muted)]"
           />
           <kbd className="text-[10px] text-[var(--muted)] border border-[var(--border)] rounded px-1.5 py-0.5">
             Esc

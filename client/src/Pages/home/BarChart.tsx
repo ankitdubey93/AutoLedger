@@ -55,8 +55,10 @@ export default function BarChart({
                 y={CHART_BOTTOM - height}
                 width={barWidth}
                 height={height}
-                fill={datum.emphasis === true ? 'var(--bad)' : 'var(--good)'}
-                rx={2}
+                fill={datum.emphasis === true ? 'var(--bad)' : 'var(--info)'}
+                rx={4}
+                className="chart-bar"
+                style={{ animationDelay: `${String(index * 70)}ms` }}
               />
               <text
                 x={x + groupWidth / 2}

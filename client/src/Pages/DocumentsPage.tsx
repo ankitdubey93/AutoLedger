@@ -131,7 +131,7 @@ export default function DocumentsPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">Document Vault</h2>
+        <h2 className="page-title m-0">Document Vault</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Every file uploaded to AutoLedger, across every app.
         </p>

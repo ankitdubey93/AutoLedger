@@ -303,7 +303,7 @@ export default function FinancialSettingsPage() {
       <SettingsTabs />
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Fiscal year</h3>
+        <h3 className="section-title m-0">Fiscal year</h3>
         <div className="flex gap-3">
           <label className="flex flex-col gap-1 text-sm flex-1">
             <span className="text-[var(--muted)]">Fiscal year starts in</span>
@@ -336,7 +336,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Books start date</h3>
+        <h3 className="section-title m-0">Books start date</h3>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Books start date</span>
           <input
@@ -353,7 +353,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Default posting accounts</h3>
+        <h3 className="section-title m-0">Default posting accounts</h3>
         <AccountSelect
           label="Cash account"
           value={cashAccountId}
@@ -386,7 +386,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div id="inventory" className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Inventory accounting</h3>
+        <h3 className="section-title m-0">Inventory accounting</h3>
         <p className="text-sm text-[var(--muted)] m-0">
           Stock value posts to these accounts. Leave a field blank to use the default chart account. Changing the inventory account moves existing stock value to the new account with a journal dated today.
         </p>
@@ -425,7 +425,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-base font-semibold m-0">Payment terms</h3>
+        <h3 className="section-title m-0">Payment terms</h3>
         <p className="text-sm text-[var(--muted)] m-0">
           Used for a new invoice or bill when the customer or vendor has no default of their own.
         </p>
@@ -434,7 +434,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <h3 className="text-base font-semibold m-0">System accounts</h3>
+        <h3 className="section-title m-0">System accounts</h3>
         <p className="text-sm text-[var(--muted)] m-0">
           Accounts the system posts to. They can be renamed but not retired.
         </p>
@@ -465,7 +465,7 @@ export default function FinancialSettingsPage() {
       </div>
 
       <div className="flex flex-col gap-2">
-        <h3 className="text-base font-semibold m-0">Fiscal periods</h3>
+        <h3 className="section-title m-0">Fiscal periods</h3>
         {periodCounts !== null && (
           <p className="text-sm text-[var(--muted)] m-0">
             {periodCounts.OPEN} open · {periodCounts.CLOSED} closed · {periodCounts.LOCKED} locked

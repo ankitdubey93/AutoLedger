@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { fluidUpdate } from '../../utils/motion';
+import { TabThumb, useSlidingThumb } from '../../components/ui/SlidingTabs';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import {
   listBankTransactions,
@@ -64,6 +66,8 @@ interface PendingConfirm {
 
 export default function BankTransactionsPage() {
   const [params, setParams] = useSearchParams();
+  const tabTrackRef = useRef<HTMLDivElement>(null);
+  const tabThumb = useSlidingThumb(tabTrackRef);
   const [transactions, setTransactions] = useState<BankTransaction[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -108,11 +112,13 @@ export default function BankTransactionsPage() {
     listBankTransactions(filters)
       .then((res) => {
         if (ignore) return;
-        setTransactions(res.transactions);
-        setTotalCount(res.totalCount);
-        setTotalPages(res.totalPages);
-        setSelectedIds(new Set());
-        setLoaded(true);
+        fluidUpdate(() => {
+          setTransactions(res.transactions);
+          setTotalCount(res.totalCount);
+          setTotalPages(res.totalPages);
+          setSelectedIds(new Set());
+          setLoaded(true);
+        });
       })
       .catch((err: unknown) => {
         if (!ignore) setError(err instanceof Error ? err.message : 'Could not load bank lines');
@@ -260,21 +266,22 @@ export default function BankTransactionsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-center justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">Bank lines</h2>
+          <h2 className="page-title m-0">Bank lines</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Imported statement lines, scored against open invoices and bills.
           </p>
         </div>
         <Link
           to="/bank/import"
-          className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
+          className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors no-underline"
         >
           Import statement
         </Link>
       </header>
 
       <div className="flex flex-wrap items-end gap-3">
-        <div className="flex gap-1" role="tablist">
+        <div ref={tabTrackRef} className="tab-track" role="tablist" aria-label="Bank line status">
+          <TabThumb thumb={tabThumb} />
           {TABS.map((tab) => (
             <button
               key={tab.label}
@@ -282,10 +289,7 @@ export default function BankTransactionsPage() {
               role="tab"
               aria-selected={status === tab.value}
               onClick={() => setFilter('status', tab.value)}
-              className={[
-                'px-3 py-1.5 rounded-md text-sm border-0 cursor-pointer',
-                status === tab.value ? 'bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors' : 'bg-transparent text-[var(--muted)]',
-              ].join(' ')}
+              className="tab-track__item"
             >
               {tab.label}
             </button>
@@ -353,7 +357,7 @@ export default function BankTransactionsPage() {
                 const isExpanded = expandedId === txn.id;
                 const busy = busyId === txn.id;
                 return (
-                  <div key={txn.id} className="rounded-lg border border-[var(--border)] bg-[var(--panel)]">
+                  <div key={txn.id} className="rounded-[1.25rem] bg-[var(--panel)] shadow-[var(--shadow-sm)]" style={{ viewTransitionName: `bank-line-${txn.id}` }}>
                     <div className="flex items-center gap-3 p-3 flex-wrap">
                       {txn.status === 'UNMATCHED' && (
                         <input
@@ -516,7 +520,7 @@ export default function BankTransactionsPage() {
                             type="button"
                             disabled={busy}
                             onClick={() => void submitPostJournal(txn)}
-                            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+                            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                           >
                             Post
                           </button>
@@ -562,7 +566,7 @@ export default function BankTransactionsPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => handleAccept(txn.id, suggestion.id, suggestion.score)}
-                              className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
+                              className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40"
                             >
                               {suggestion.score >= AUTO_MATCH_THRESHOLD ? 'Accept' : 'Match'}
                             </button>

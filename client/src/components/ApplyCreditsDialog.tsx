@@ -127,7 +127,7 @@ export default function ApplyCreditsDialog({
         aria-labelledby="apply-credits-title"
         className="animate-pop-in w-full max-w-2xl rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]"
       >
-        <h3 id="apply-credits-title" className="text-base font-semibold m-0">
+        <h3 id="apply-credits-title" className="section-title m-0">
           Apply available credit?
         </h3>
         <p className="text-sm text-[var(--muted)] m-0">
@@ -196,7 +196,7 @@ export default function ApplyCreditsDialog({
             type="button"
             onClick={confirm}
             disabled={!canConfirm}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {busy ? '…' : primaryLabel}
           </button>

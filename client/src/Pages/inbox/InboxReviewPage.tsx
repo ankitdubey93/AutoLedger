@@ -68,7 +68,7 @@ export default function InboxReviewPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">Review queue</h2>
+        <h2 className="page-title m-0">Review queue</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Extracted documents awaiting approval, the ones needing the most attention first.
         </p>

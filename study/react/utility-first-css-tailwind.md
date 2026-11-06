@@ -4,7 +4,7 @@
 
 **Category:** React
 **Introduced by:** Phase 3 — LedgerCore's first real UI: a chart-of-accounts tree, a multi-line journal entry form, a trial balance grid
-**Extended by:** a 2026-09-03 client-only UX revision — the cascade-layer rule below bit a second time, on the new app top bar; Phase 31 — a design-token rewrite and a three-way light/dark/system theme, covered in "Theming: custom properties, `data-theme`, and the no-flash inline script" below
+**Extended by:** the 2026-11-06 Warm Current redesign (remapping Tailwind's palette in `@theme`, and a fourth unlayered-rule bug); a 2026-09-03 client-only UX revision — the cascade-layer rule below bit a second time, on the new app top bar; Phase 31 — a design-token rewrite and a three-way light/dark/system theme, covered in "Theming: custom properties, `data-theme`, and the no-flash inline script" below
 **Verified against:** Tailwind CSS 4.3.3, `@tailwindcss/vite` 4.3.3, Vite 8, React 19
 
 ---
@@ -137,6 +137,27 @@ Utility-first is not "inline styles with extra steps" — inline styles cannot d
 
 ---
 
+### Remapping the palette instead of rewriting the pages (2026-11-06)
+
+About 200 status badge classes were written `bg-amber-500/10 text-amber-400 ring-amber-500/20`. Those fixed shades were chosen for a dark background and were unreadable in light mode. A codemod could have replaced them, but `@theme` was a one-place fix:
+
+```css
+@theme {
+  --color-amber-400: var(--warn-ink);
+  --color-amber-500: var(--warn);
+}
+```
+
+v4 emits every theme colour as a custom property and each utility reads it: `text-amber-400` is `color: var(--color-amber-400)`, and `bg-amber-500/10` is a `color-mix()` over `var(--color-amber-500)`. So pointing the theme variable at our own token changes all those utilities, in both themes, with the opacity modifiers still working. The cost is honesty of naming: `text-amber-400` no longer means Tailwind's amber 400. It is acceptable here because the family means "warning" everywhere it is used, and the mapping is documented where it is defined.
+
+### A fourth unlayered-rule bug: `dl` and `.grid`
+
+The redesign found the same trap twice more. An unlayered `dl { display: grid }` beat `flex flex-col` on every definition list, which is why the dashboard's rows ran sideways. An unlayered `.grid { grid-template-columns: ... }` collided with Tailwind's own `grid` class and beat every `grid-cols-*` written beside it, so tiles ignored their column counts. Both moved into layers (`base`, `components`), so utilities win and the bare defaults still apply where nothing competes.
+
+### When an unlayered rule is the right tool (2026-11-06)
+
+Everything above warns about unlayered CSS beating utilities. Form fields used that deliberately. Field edges were 1.2:1 against the page, and more than 30 pages each carried a copy of the same classes asking for the faint border, so no single edit could reach them. An unlayered `input, select, textarea` rule overrides them all and catches fields written later. The same power that caused four bugs needs an explicit way out, so a field that truly has no box, like the command palette's, carries `.input-bare`. A test reads the tokens out of `index.css` through Vite's `?raw` import and computes the WCAG ratio, because jsdom does not apply this stylesheet and could never catch the regression.
+
 ## Where it lives in this codebase
 
 - `client/vite.config.ts` — `tailwindcss()` in the plugins array; **there is no `tailwind.config.js`**
@@ -163,6 +184,15 @@ Utility-first is not "inline styles with extra steps" — inline styles cannot d
 ---
 
 ## Interview Q&A
+
+**Q: You said unlayered CSS is a trap. Why did you use it for form fields?**
+A: Because the trap is the behaviour I wanted. Over 30 pages had hard-coded the same faint border utility, measuring 1.2:1 against the 3:1 that WCAG 1.4.11 asks of a control. One unlayered rule corrected all of them and every future field, with an opt-out class for the one field that legitimately has no box. The better long-term shape is a single shared field component, but that is a much larger refactor than the problem needed. I guarded it with a test that computes the contrast ratio from the tokens themselves.
+
+**Q: You need to change 200 hard-coded colour utilities. Codemod or theme override?**
+A: Here, a theme override. Tailwind v4 exposes each colour as a custom property that the utilities read, so redefining `--color-amber-400` in `@theme` to point at a semantic token fixes every use in one place, keeps opacity modifiers working through `color-mix`, and follows the theme at runtime. The trade-off is that the class name now lies a little. I would pick a codemod if the same family were used with several meanings, because one mapping could not serve them all.
+
+**Q: Why did `grid-cols-4` have no effect on an element with `class="grid grid-cols-4"`?**
+A: We had our own unlayered `.grid` rule setting `grid-template-columns`, sharing a name with Tailwind's utility. Tailwind's utilities live in a cascade layer, and unlayered CSS beats layered CSS regardless of specificity or order, so ours always won. Moving our rule into `@layer components`, which comes before `utilities`, made it a default the utility can override.
 
 **Q: How does Tailwind actually generate CSS?**
 A: It's a build step that scans source files for strings that look like class names and emits CSS only for the ones it finds — so the output is bounded by the number of distinct utilities you actually use, not by the size of the codebase. It doesn't parse the JSX or understand the code; it's essentially a text extractor. The important consequence is that a class name assembled at runtime doesn't exist at build time, so `` `text-${color}-500` `` produces no CSS at all. Every utility has to appear as a complete literal somewhere in the scanned source, which is why conditional styling uses a lookup of full class strings.

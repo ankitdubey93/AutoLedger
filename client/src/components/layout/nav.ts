@@ -50,10 +50,14 @@ import type { SidebarNavGroup } from './AppSidebar';
 export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   {
     heading: 'Overview',
+    flat: true,
+    tone: 'tone-accent',
     items: [{ to: '/', label: 'Dashboard', icon: LayoutDashboard, end: true }],
   },
   {
     heading: 'Sales',
+    icon: FileText,
+    tone: 'tone-accent',
     items: [
       { to: '/quotes', label: 'Quotes', icon: FileSignature, end: false, permission: 'quotes.view' },
       { to: '/sales-orders', label: 'Sales orders', icon: ClipboardList, end: false, permission: 'sales_orders.view' },
@@ -66,6 +70,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Purchases',
+    icon: Inbox,
+    tone: 'tone-coral',
     items: [
       { to: '/purchase-quotes', label: 'Purchase quotes', icon: FileSignature, end: false, permission: 'purchase_quotes.view' },
       { to: '/purchase-orders', label: 'Purchase orders', icon: ClipboardList, end: false, permission: 'purchase_orders.view' },
@@ -79,6 +85,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Products & inventory',
+    icon: Package,
+    tone: 'tone-violet',
     items: [
       { to: '/products', label: 'Products & services', icon: Package, end: false, permission: 'products.view' },
       { to: '/inventory/items', label: 'Stock on hand', icon: Boxes, end: false, permission: 'inventory.view' },
@@ -91,6 +99,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Banking',
+    icon: Landmark,
+    tone: 'tone-info',
     items: [
       { to: '/bank', label: 'Bank lines', icon: Landmark, end: true, permission: 'bank.view' },
       { to: '/bank/import', label: 'Import statement', icon: Upload, end: false, permission: 'bank.reconcile' },
@@ -100,6 +110,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Accounting',
+    icon: BookOpen,
+    tone: 'tone-good',
     items: [
       { to: '/accounts', label: 'Chart of accounts', icon: ListTree, end: false, permission: 'accounts.view' },
       { to: '/manual-journals', label: 'Manual journals', icon: BookOpen, end: false, permission: 'journals.view' },
@@ -113,6 +125,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Reports',
+    icon: FileBarChart,
+    tone: 'tone-violet',
     items: [
       { to: '/reports', label: 'Reports', icon: FileBarChart, end: false, permission: 'reports.view' },
       { to: '/trial-balance', label: 'Trial balance', icon: Scale, end: false, permission: 'reports.view' },
@@ -123,6 +137,8 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
   },
   {
     heading: 'Workspace',
+    icon: FolderOpen,
+    tone: 'tone-plain',
     items: [
       { to: '/documents', label: 'Documents', icon: FolderOpen, end: false, permission: 'documents.view' },
       { to: '/settings', label: 'Settings', icon: SettingsIcon, end: false },

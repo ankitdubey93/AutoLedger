@@ -186,7 +186,7 @@ export default function ManualJournalDetailPage() {
 
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{journal.narration}</h2>
+          <h2 className="page-title m-0">{journal.narration}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1 flex items-center gap-2 flex-wrap">
             {statusPill(journal.status)}
             <span>{formatDate(journal.entryDate)}</span>
@@ -208,7 +208,7 @@ export default function ManualJournalDetailPage() {
                   type="button"
                   onClick={() => void handlePost()}
                   disabled={busy}
-                  className="px-3 py-1.5 rounded-md text-sm font-medium cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] border-0 disabled:opacity-40"
+                  className="px-3 py-1.5 rounded-full text-sm font-medium cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] border-0 disabled:opacity-40"
                 >
                   Post
                 </button>

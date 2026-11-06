@@ -216,7 +216,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
 
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-        <h2 className="text-lg font-semibold m-0 mt-1">{ledger.party.name}</h2>
+        <h2 className="page-title m-0 mt-1">{ledger.party.name}</h2>
         <p className="text-sm text-[var(--muted)] m-0">
           {kind === 'CUSTOMER' ? 'Customer account' : 'Vendor account'}
           {ledger.controlAccount !== null &&
@@ -255,7 +255,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
         </div>
       </div>
 
-      <h3 className="text-base font-semibold m-0 mt-2">Open items</h3>
+      <h3 className="section-title m-0 mt-2">Open items</h3>
       <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
         <table className="w-full border-collapse text-sm min-w-[40rem]">
           <thead>
@@ -292,7 +292,7 @@ export default function PartyAccountPage({ kind }: { kind: PartyKind }) {
         </table>
       </div>
 
-      <h3 className="text-base font-semibold m-0 mt-2">Account ledger</h3>
+      <h3 className="section-title m-0 mt-2">Account ledger</h3>
       <div className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">From</span>

@@ -117,7 +117,7 @@ export default function SettingsHubPage() {
                 >
                   <Icon size={16} />
                 </span>
-                <h2 id={`settings-${section.title}`} className="text-base font-semibold m-0">
+                <h2 id={`settings-${section.title}`} className="section-title m-0">
                   {section.title}
                 </h2>
               </header>

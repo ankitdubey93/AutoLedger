@@ -48,7 +48,7 @@ export default function PlaceholderHints({ text, surface, preview, labels }: Pla
         ))}
       {hiddenCount > 0 && <p className="m-0 text-[var(--muted)]">…and {hiddenCount} more</p>}
       {hints.map((hint) => (
-        <p key={hint} className="m-0 text-[var(--warn)]">
+        <p key={hint} className="m-0 text-[var(--warn-ink)]">
           {hint}
         </p>
       ))}

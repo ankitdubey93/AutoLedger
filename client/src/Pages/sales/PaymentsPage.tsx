@@ -94,7 +94,7 @@ export default function PaymentsPage() {
   return (
     <section className="flex flex-col gap-4">
       <header>
-        <h2 className="text-lg font-semibold m-0">Payments</h2>
+        <h2 className="page-title m-0">Payments</h2>
         <p className="text-sm text-[var(--muted)] m-0 mt-1">
           Every receipt and payment recorded against an invoice or an expense.
         </p>

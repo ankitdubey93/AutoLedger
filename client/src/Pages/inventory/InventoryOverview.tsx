@@ -79,7 +79,7 @@ export default function InventoryOverview() {
 
   const heading = (
     <div className="flex items-baseline justify-between gap-4">
-      <h2 className="text-base font-semibold m-0 flex items-center gap-2">
+      <h2 className="section-title m-0 flex items-center gap-2">
         <Boxes size={16} aria-hidden="true" className="text-[var(--muted)]" /> Inventory
       </h2>
       {configured === true && <Link to="/inventory/items">Stock on hand</Link>}
@@ -170,7 +170,7 @@ export default function InventoryOverview() {
       </div>
 
       <section aria-label="Low stock items" className="space-y-2">
-        <h3 className="text-sm font-medium text-[var(--text)] flex items-center gap-1.5">
+        <h3 className="section-title flex items-center gap-1.5">
           <ClipboardList size={14} aria-hidden="true" className="text-[var(--muted)]" /> Low stock
         </h3>
         {lowStockItems.length === 0 ? (
@@ -206,7 +206,7 @@ export default function InventoryOverview() {
       </section>
 
       <section aria-label="Recent movements" className="space-y-2">
-        <h3 className="text-sm font-medium text-[var(--text)] flex items-center gap-1.5">
+        <h3 className="section-title flex items-center gap-1.5">
           <History size={14} aria-hidden="true" className="text-[var(--muted)]" /> Recent movements
         </h3>
         {recentMovements.length === 0 ? (
@@ -258,18 +258,5 @@ function StatTileCount({
   icon: typeof Boxes;
   bad?: boolean;
 }) {
-  return (
-    <div className="card">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs uppercase tracking-wide text-[var(--muted)] m-0">{label}</p>
-        <span
-          aria-hidden="true"
-          className={`flex size-7 items-center justify-center rounded-md ${bad ? 'bg-[var(--bad-soft)] text-[var(--bad)]' : 'bg-[var(--panel-2)] text-[var(--muted)]'}`}
-        >
-          <Icon size={15} />
-        </span>
-      </div>
-      <p className="text-2xl font-semibold m-0 mt-2 tabular-nums">{value}</p>
-    </div>
-  );
+  return <StatTile label={label} icon={Icon} tone={bad === true ? 'bad' : 'neutral'} value={value} />;
 }

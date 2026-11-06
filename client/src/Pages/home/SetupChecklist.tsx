@@ -53,7 +53,7 @@ export default function SetupChecklist() {
 
   return (
     <section className="card flex flex-col gap-3" aria-label="Setup">
-      <h2 className="text-base font-semibold m-0">Finish setting up</h2>
+      <h2 className="section-title m-0">Finish setting up</h2>
       <ul className="flex flex-col gap-2 m-0 p-0 list-none">
         {tasks.map((item) => {
           const task = TASKS[item.module];

@@ -217,7 +217,7 @@ export default function RecurringScheduleDetailPage() {
 
       <header className="flex items-baseline justify-between gap-4 flex-wrap">
         <div>
-          <h2 className="text-lg font-semibold m-0">{schedule.name}</h2>
+          <h2 className="page-title m-0">{schedule.name}</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             {kindLabel(schedule.kind)} · {frequencyLabel(schedule.frequency, schedule.intervalCount)}
           </p>
@@ -329,7 +329,7 @@ export default function RecurringScheduleDetailPage() {
 
       {nextRunPreview !== null && nextRunPreview.context !== null && (
         <div>
-          <h3 className="text-sm font-semibold m-0 mb-3">Next run will read</h3>
+          <h3 className="section-title m-0 mb-3">Next run will read</h3>
           <PlaceholderHints
             text={nextRunPreview.texts}
             labels={nextRunPreview.labels}
@@ -341,7 +341,7 @@ export default function RecurringScheduleDetailPage() {
 
       {schedule.runs.length > 0 && (
         <div>
-          <h3 className="text-sm font-semibold m-0 mb-3">Runs (newest first)</h3>
+          <h3 className="section-title m-0 mb-3">Runs (newest first)</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[36rem]">
               <thead>

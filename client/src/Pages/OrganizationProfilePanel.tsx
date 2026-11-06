@@ -219,7 +219,7 @@ export default function OrganizationProfilePanel() {
         <p className="muted">Only an OWNER or ADMIN can edit the organization profile.</p>
       )}
 
-      <h3 className="m-0 mt-2 mb-2 text-sm font-semibold">Logo</h3>
+      <h3 className="m-0 mt-2 mb-2 section-title">Logo</h3>
       {logoUrl !== null && (
         <img src={logoUrl} alt="Organization logo" style={{ maxHeight: '96px', maxWidth: '240px' }} />
       )}
@@ -245,7 +245,7 @@ export default function OrganizationProfilePanel() {
       )}
       {logoError !== null && <p className="status status--bad">{logoError}</p>}
 
-      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Identity</h3>
+      <h3 className="m-0 mt-5 mb-2 section-title">Identity</h3>
       <div className="grid gap-3 sm:grid-cols-2">
         <label htmlFor="org-legal-name" className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Legal name</span>
@@ -258,7 +258,7 @@ export default function OrganizationProfilePanel() {
             onChange={(e) => set('industry', e.target.value)} />
         </label>
       </div>
-      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Street address</h3>
+      <h3 className="m-0 mt-5 mb-2 section-title">Street address</h3>
       <div className="grid gap-3 sm:grid-cols-2">
         <label htmlFor="org-street-1" className="flex flex-col gap-1 text-sm sm:col-span-2">
           <span className="text-[var(--muted)]">Address line 1</span>
@@ -291,7 +291,7 @@ export default function OrganizationProfilePanel() {
             onChange={(e) => set('countryCode', e.target.value.toUpperCase())} />
         </label>
       </div>
-      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Postal address</h3>
+      <h3 className="m-0 mt-5 mb-2 section-title">Postal address</h3>
       <label htmlFor="org-postal-same" className="flex items-center gap-2 text-sm">
         <input id="org-postal-same" type="checkbox" disabled={ro} checked={form.postalSameAsStreet}
           onChange={(e) => set('postalSameAsStreet', e.target.checked)} />
@@ -332,7 +332,7 @@ export default function OrganizationProfilePanel() {
         </div>
       )}
 
-      <h3 className="m-0 mt-5 mb-2 text-sm font-semibold">Contact</h3>
+      <h3 className="m-0 mt-5 mb-2 section-title">Contact</h3>
       <div className="grid gap-3 sm:grid-cols-2">
         <label htmlFor="org-phone" className="flex flex-col gap-1 text-sm">
           <span className="text-[var(--muted)]">Phone</span>

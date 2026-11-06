@@ -7,7 +7,7 @@ export default function ImportGuidePanel({ kind }: { kind: MigrationImportKind }
 
   return (
     <aside aria-label="How to import" className="rounded-lg border border-[var(--border)] bg-[var(--panel)] p-4 flex flex-col gap-3 text-sm">
-      <h3 className="text-sm font-semibold m-0">How to import</h3>
+      <h3 className="section-title m-0">How to import</h3>
       <p>{guide.intro}</p>
       <ol className="list-decimal list-inside pl-0">
         {guide.steps.map((step, i) => (

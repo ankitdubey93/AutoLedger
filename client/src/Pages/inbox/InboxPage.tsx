@@ -67,7 +67,7 @@ function StatusPill({ status }: { status: CaptureDocumentStatus }) {
     return (
       <span
         className={PILL_CLASS}
-        style={{ background: 'var(--warn-soft)', color: 'var(--warn)', boxShadow: 'inset 0 0 0 1px var(--warn-soft)' }}
+        style={{ background: 'var(--warn-soft)', color: 'var(--warn-ink)', boxShadow: 'inset 0 0 0 1px var(--warn-soft)' }}
       >
         Possible duplicate
       </span>

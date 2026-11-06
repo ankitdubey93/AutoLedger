@@ -57,7 +57,7 @@ export default function PlaceholderPicker({ surface, onInsert, disabled = false,
           type="button"
           disabled={disabled}
           title="Placeholders are filled in when the document is issued. Add an offset to a date: [Month+1], [Year-1]. Write [[Month]] for a literal [Month]."
-          className="inline-flex items-center gap-1 rounded-md border border-[var(--border)] bg-transparent px-2 py-1 text-xs text-[var(--muted)] cursor-pointer hover:text-[var(--text)] hover:bg-[var(--panel-2)] disabled:opacity-40 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1 rounded-full border border-[var(--border-strong)] bg-transparent px-2 py-1 text-xs text-[var(--muted)] cursor-pointer hover:text-[var(--text)] hover:bg-[var(--panel-2)] disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Braces size={13} aria-hidden="true" /> Insert placeholder
         </button>

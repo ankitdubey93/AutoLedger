@@ -248,7 +248,7 @@ export default function RolesSettingsPage() {
 
       {overview !== null && (
         <section className="card">
-          <h3 className="m-0 mb-2 text-sm font-semibold">Custom roles</h3>
+          <h3 className="m-0 mb-2 section-title">Custom roles</h3>
           {overview.custom.length === 0 ? (
             <p className="muted m-0">
               No custom roles yet. Create one to give someone exactly the access they need — for example, an invoice clerk
@@ -316,7 +316,7 @@ export default function RolesSettingsPage() {
 
       {overview !== null && (
         <section className="card">
-          <h3 className="m-0 mb-2 text-sm font-semibold">Built-in roles</h3>
+          <h3 className="m-0 mb-2 section-title">Built-in roles</h3>
           <p className="muted text-sm mt-0">Fixed for every organization. Use them as a starting point for a custom role.</p>
           <ul className="m-0 p-0 list-none flex flex-col gap-1 text-sm">
             {overview.builtin.map((b) => (

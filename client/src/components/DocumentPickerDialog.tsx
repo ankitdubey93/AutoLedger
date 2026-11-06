@@ -98,7 +98,7 @@ export default function DocumentPickerDialog({ open, onClose, onPick, excludeIds
         aria-label="Choose from Documents"
         className="animate-pop-in w-full max-w-xl rounded-lg border border-[var(--border)] bg-[var(--panel)] p-5 flex flex-col gap-3 shadow-[var(--shadow-lg)]"
       >
-        <h3 className="text-base font-semibold m-0">Choose from Documents</h3>
+        <h3 className="section-title m-0">Choose from Documents</h3>
         <input
           ref={searchRef}
           type="search"
@@ -147,7 +147,7 @@ export default function DocumentPickerDialog({ open, onClose, onPick, excludeIds
             type="button"
             onClick={handleAttach}
             disabled={selected.size === 0}
-            className="px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             Attach
           </button>

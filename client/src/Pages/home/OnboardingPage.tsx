@@ -60,7 +60,7 @@ type WizardStep = { step: 1 } | { step: 2 } | { step: 3 };
 const inputClass =
   'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2.5 py-1.5 text-sm text-[var(--text)] w-full';
 const primaryButtonClass =
-  'px-4 py-2 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
+  'px-4 py-2 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed';
 const ghostButtonClass =
   'px-4 py-2 rounded-md text-sm font-medium border border-[var(--border)] bg-transparent text-[var(--text)] cursor-pointer';
 
@@ -208,7 +208,7 @@ export default function OnboardingPage() {
     <section className="shell shell--narrow flex flex-col gap-6">
       <header className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold m-0">Set up AutoLedger</h1>
+          <h1 className="page-title m-0">Set up AutoLedger</h1>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Step {wizardStep.step} of 4
           </p>
@@ -220,7 +220,7 @@ export default function OnboardingPage() {
 
       {wizardStep.step === 1 && (
         <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold m-0">Workspace</h2>
+          <h2 className="page-title m-0">Workspace</h2>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Organization name</span>
             <input
@@ -270,7 +270,7 @@ export default function OnboardingPage() {
 
       {wizardStep.step === 2 && (
         <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold m-0">Financial year</h2>
+          <h2 className="page-title m-0">Financial year</h2>
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Base currency</span>
@@ -360,7 +360,7 @@ export default function OnboardingPage() {
 
       {wizardStep.step === 3 && (
         <div className="flex flex-col gap-4">
-          <h2 className="text-lg font-semibold m-0">Review</h2>
+          <h2 className="page-title m-0">Review</h2>
 
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-sm">
             <dt className="text-[var(--muted)]">Organization</dt>

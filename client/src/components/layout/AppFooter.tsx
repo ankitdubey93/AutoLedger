@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 export default function AppFooter() {
   const year = new Date().getFullYear();
   return (
-    <footer className="no-print mt-auto border-t border-[var(--border)] px-4 md:px-6 py-3 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted)]">
+    <footer className="no-print mt-auto px-4 md:px-7 py-5 flex flex-wrap items-center justify-between gap-2 text-xs text-[var(--muted)]">
       <span>© {year} AutoLedger</span>
       <div className="flex items-center gap-3">
         <span className="hidden sm:inline">

@@ -124,7 +124,7 @@ export default function StatementPage({ kind }: { kind: PartyKind }) {
 
       {sends !== null && sends.length > 0 && (
         <div className="no-print flex flex-col gap-2">
-          <h3 className="text-base font-semibold m-0">Emailed</h3>
+          <h3 className="section-title m-0">Emailed</h3>
           <div className="rounded-lg border border-[var(--border)] bg-[var(--panel)] overflow-x-auto">
             <table className="w-full border-collapse text-sm min-w-[40rem]">
               <thead>

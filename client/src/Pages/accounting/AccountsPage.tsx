@@ -224,7 +224,7 @@ export default function AccountsPage() {
     <section className="flex flex-col gap-4">
       <header className="flex items-baseline justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold m-0">Chart of accounts</h2>
+          <h2 className="page-title m-0">Chart of accounts</h2>
           <p className="text-sm text-[var(--muted)] m-0 mt-1">
             Seeded for this organization at registration. Header accounts roll up for
             reporting and cannot be posted to.
@@ -238,7 +238,7 @@ export default function AccountsPage() {
           <button
             type="button"
             onClick={() => setShowForm((open) => !open)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             <Plus size={15} aria-hidden="true" /> New account
           </button>
@@ -266,7 +266,7 @@ export default function AccountsPage() {
           <button
             type="button"
             onClick={() => setShowForm(true)}
-            className="px-3 py-1.5 rounded-md text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
+            className="px-3 py-1.5 rounded-full text-sm font-medium border-0 cursor-pointer bg-[var(--accent)] text-[var(--accent-fg)] hover:bg-[var(--accent-hover)] transition-colors"
           >
             Create the first account
           </button>

@@ -26,17 +26,17 @@ export default function PageHeader({ icon: Icon, title, subtitle, actions, as = 
         {Icon && (
           <span
             aria-hidden="true"
-            className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border)] bg-[var(--accent-soft)] text-[var(--accent)]"
+            className="mt-0.5 flex size-11 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent)]"
           >
-            <Icon size={18} />
+            <Icon size={20} />
           </span>
         )}
         <div>
-          <Heading className="text-lg font-semibold m-0">{title}</Heading>
+          <Heading className="page-title m-0">{title}</Heading>
           {subtitle !== undefined && <p className="subtitle">{subtitle}</p>}
         </div>
       </div>
-      {actions !== undefined && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
+      {actions !== undefined && <div className="flex min-w-0 flex-wrap items-center gap-2">{actions}</div>}
     </header>
   );
 }

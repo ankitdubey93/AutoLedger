@@ -99,7 +99,7 @@ export default function InboxEmailInCard() {
 
   return (
     <div className="card flex flex-col gap-3">
-      <h3 className="text-sm font-semibold m-0 flex items-center gap-1.5">
+      <h3 className="section-title m-0 flex items-center gap-1.5">
         <Mail size={14} aria-hidden="true" className="text-[var(--muted)]" /> Email bills in
       </h3>
 

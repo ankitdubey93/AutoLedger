@@ -177,7 +177,7 @@ export default function PublicQuotePage() {
       <div className="max-w-6xl mx-auto px-4 py-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section className="flex flex-col gap-4 min-w-0" aria-label="Quote">
           <div className="no-print">
-            <h1 className="text-xl font-semibold m-0">Hi {view.partyName}</h1>
+            <h1 className="page-title m-0">Hi {view.partyName}</h1>
             <p className="text-sm text-[var(--muted)] m-0 mt-1">
               {view.merchant.name} has sent you {purchase ? 'a price confirmation request' : 'a quote'} for{' '}
               {formatCents(view.totalCents)} {view.currencyCode}, valid until {formatDate(view.validUntil)}.
