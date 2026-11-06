@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import AttributeFields from './AttributeFields';
@@ -34,7 +35,7 @@ const inputClass = 'bg-[var(--bg)] border border-[var(--border)] rounded-md px-2
 type Tab = 'RECEIVE' | 'ISSUE' | 'TRANSFER' | 'ADJUST';
 
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 interface LineState {

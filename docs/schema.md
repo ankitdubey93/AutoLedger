@@ -976,6 +976,13 @@ Chart note: rows `1150` and `2130` are additions to the default-chart table belo
 - `online_payments.statement_send_id` becomes nullable; new `invoice_send_id` (composite FK RESTRICT) and **`ck_online_payments_source`** (exactly one of the two).
 - `ledger_invoice_settings` gains `reminders_enabled` (default `false`) and `reminder_offsets_days INTEGER[]` (default `{7,14,30}`); `recurring_schedules` gains `auto_send` (default `false`) with **`ck_recurring_auto_send`** (`NOT auto_send OR (kind = 'INVOICE' AND mode = 'POST')`).
 
+## Phase 49a — region and GST settings (platform) — applied
+
+Migration `106_platform_region_gst_settings.sql`.
+
+- `organizations.region` `TEXT NOT NULL DEFAULT 'GENERIC'`, CHECK in `('GENERIC', 'AU')`. Separate from `organization_profiles.country_code`, which is a postal address.
+- `gst_settings`: `org_id` PK, `registered`, `basis` (`CASH`/`ACCRUAL`), `bas_cycle` (`QUARTERLY`/`MONTHLY`), `bas_method` (`SIMPLER`/`FULL`), `time_zone`, audited. A row exists only for an AU organization. Its own table because an organization that skips the wizard has no `ledger_settings` row, and that row's fiscal columns are `NOT NULL`.
+
 ## Phase 17 — target tables
 
 Sketches only. Specified properly in the migration that creates it.

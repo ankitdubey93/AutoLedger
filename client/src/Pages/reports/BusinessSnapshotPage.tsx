@@ -11,7 +11,7 @@ import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
 import { formatCents } from '../../utils/money';
 import { formatRatio, ratioUnavailableText } from '../../utils/ratio';
-import { formatDate } from '../../utils/date';
+import { formatDate, orgToday } from '../../utils/date';
 import BackLink from '../../components/BackLink';
 import LoadingState from '../../components/ui/LoadingState';
 import ExportMenu from '../../components/ui/ExportMenu';
@@ -51,7 +51,7 @@ export default function BusinessSnapshotPage() {
   const ledgerSettings = useLedgerSettings();
 
   const settings = ledgerSettings.status === 'ready' ? ledgerSettings.settings : null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = orgToday();
   const defaults = fiscalYearBounds(
     settings?.fiscalYearStartMonth ?? 1,
     settings?.fiscalYearStartDay ?? 1,

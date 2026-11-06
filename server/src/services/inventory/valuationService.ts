@@ -1,3 +1,4 @@
+import { regionTodayOnClient } from '../accounting/regionService.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -200,7 +201,7 @@ export async function trueUp(
     const adjustmentAccountId = defaults.adjustmentAccountId;
 
     const id = randomUUID();
-    const today = new Date().toISOString().slice(0, 10);
+    const today = await regionTodayOnClient(client, orgId);
     const lines =
       differenceCents > 0
         ? [

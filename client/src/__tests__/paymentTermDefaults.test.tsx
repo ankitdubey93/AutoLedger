@@ -54,7 +54,9 @@ const vendorA = vendor('vend-a', 'Acme Supplies', next20.id);
 const vendorB = vendor('vend-b', 'Bolt Works', net30.id);
 
 const settings: LedgerSettings = {
-  organizationName: 'Test Org',
+  region: 'GENERIC',
+      gst: null,
+      organizationName: 'Test Org',
   legalName: null,
   baseCurrency: 'USD',
   fiscalYearStartMonth: 1,

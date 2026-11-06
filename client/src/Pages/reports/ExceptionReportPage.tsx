@@ -13,7 +13,7 @@ import {
 } from '../../services/fetchServices';
 import { useAuth, useCan } from '../../context/AuthContext';
 import { formatCents } from '../../utils/money';
-import { formatDate } from '../../utils/date';
+import { formatDate, orgNow } from '../../utils/date';
 import BackLink from '../../components/BackLink';
 import LoadingState from '../../components/ui/LoadingState';
 import EmptyState from '../../components/ui/EmptyState';
@@ -31,7 +31,7 @@ import { inputClass, primaryButtonClass, secondaryButtonClass } from '../../comp
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 /** The last three complete months: the 1st of (this month − 3) to the last day of last month. */
-function defaultWindow(now: Date = new Date()): { from: string; to: string } {
+function defaultWindow(now: Date = orgNow()): { from: string; to: string } {
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
   return { from: iso(new Date(Date.UTC(y, m - 3, 1))), to: iso(new Date(Date.UTC(y, m, 0))) };

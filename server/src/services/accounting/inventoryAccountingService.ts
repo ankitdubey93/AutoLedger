@@ -1,3 +1,4 @@
+import { regionTodayOnClient } from './regionService.js';
 import type { PoolClient } from 'pg';
 import * as journalService from './journalService.js';
 import type { JournalLineInput } from './journalService.js';
@@ -22,10 +23,6 @@ import { MODULE_TAGS } from '../../config/modules.js';
  * every function here assumes the caller already holds whatever `items` /
  * `ledger_settings` locks the change needs.
  */
-
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 /**
  * Posts Dr to / Cr from for each posting, netted per account, source
@@ -86,7 +83,7 @@ export async function reclassToCurrentAccountsOnClient(
   }
   if (targets.length === 0) return 0;
 
-  const entryDate = todayUtc();
+  const entryDate = await regionTodayOnClient(client, orgId);
   const outcome = await documentStockService.reclassItemsOnClient(client, orgId, userId, {
     targets,
     occurredOn: entryDate,

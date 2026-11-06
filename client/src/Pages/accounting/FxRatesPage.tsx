@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { deleteFxRate, listFxRates, upsertFxRate, type FxRate } from '../../services/fetchServices';
@@ -29,7 +30,7 @@ function RateForm({
 }) {
   const fromOptions = CURRENCIES.filter((c) => c !== baseCurrency);
   const [fromCode, setFromCode] = useState(fromOptions[0] ?? '');
-  const [rateDate, setRateDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [rateDate, setRateDate] = useState(() => orgToday());
   const [rate, setRate] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

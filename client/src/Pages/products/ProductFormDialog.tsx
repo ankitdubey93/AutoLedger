@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { createPortal } from 'react-dom';
 import {
@@ -33,7 +34,7 @@ import { createWithCodeRetry, deriveItemCode } from './productCode';
 
 function todayIsoDate(): string {
   // UTC, like the server's "not in the future" check.
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 function centsOrNull(raw: string): number | null | 'invalid' {

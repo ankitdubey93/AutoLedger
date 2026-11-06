@@ -96,6 +96,7 @@ import EmailSettingsPage from '../Pages/settings/EmailSettingsPage';
 import RolesSettingsPage from '../Pages/settings/RolesSettingsPage';
 import SettingsHubPage from '../Pages/settings/SettingsHubPage';
 import GeneralSettingsPage from '../Pages/settings/GeneralSettingsPage';
+import CountryTaxSettingsPage from '../Pages/settings/CountryTaxSettingsPage';
 import FinancialSettingsPage from '../Pages/settings/FinancialSettingsPage';
 import ChartSettingsPage from '../Pages/settings/ChartSettingsPage';
 import ConversionBalancesPage from '../Pages/settings/ConversionBalancesPage';
@@ -263,6 +264,7 @@ export default function ProductRoutes() {
           {/* Settings */}
           <Route path="/settings" element={<SettingsHubPage />} />
           <Route path="/settings/general" element={<GeneralSettingsPage />} />
+          <Route path="/settings/country-tax" element={<CountryTaxSettingsPage />} />
           {/* Phase 38a — moved here from the Account page. */}
           <Route path="/settings/profile" element={<OrganizationProfileSettingsPage />} />
           <Route path="/settings/members" element={<MembersSettingsPage />} />

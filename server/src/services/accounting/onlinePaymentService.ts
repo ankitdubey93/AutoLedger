@@ -1,3 +1,4 @@
+import { regionTodayOnClient } from './regionService.js';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
@@ -10,7 +11,6 @@ import { createPaymentOnClient } from './paymentService.js';
 import { settledCentsOnClient } from './settlementSql.js';
 import { resolveLiveInvoiceSend } from './invoiceLinkService.js';
 import { resolveLiveSend, type LiveSend, type PublicPaymentOptions } from './statementLinkService.js';
-import { todayIso } from './statementService.js';
 import {
   canTransitionOnlinePayment,
   type OnlinePayment,
@@ -419,7 +419,7 @@ export async function settleIntent(intentId: string, deps?: StripeDeps): Promise
       if (sentBy === undefined || settings.deposit_account_id === null) {
         throw new ApiError(422, 'Online payments have no deposit account');
       }
-      const today = todayIso();
+      const today = await regionTodayOnClient(client, row.org_id);
       const paymentId = await createPaymentOnClient(client, row.org_id, sentBy, {
         direction: 'RECEIVE',
         paymentDate: today,

@@ -1,3 +1,4 @@
+import { regionToday } from '../../services/accounting/regionService.js';
 import type { RequestHandler } from 'express';
 import * as statementEmailService from '../../services/accounting/statementEmailService.js';
 import * as statementService from '../../services/accounting/statementService.js';
@@ -58,7 +59,7 @@ function sendHandler(kind: PartyKind): RequestHandler {
     const input = parseBody(sendStatementsSchema, req.body);
     const result = await statementEmailService.sendStatements(user.orgId, user.id, kind, {
       partyIds: input.partyIds,
-      request: statementService.readStatementRequest(input),
+      request: statementService.readStatementRequest(input, await regionToday(user.orgId)),
       templateId: input.templateId,
       toEmail: input.toEmail,
     });
@@ -74,7 +75,7 @@ function previewHandler(kind: PartyKind): RequestHandler {
       user.orgId,
       kind,
       input.partyId,
-      statementService.readStatementRequest(input),
+      statementService.readStatementRequest(input, await regionToday(user.orgId)),
       input.templateId,
     );
     res.json({ success: true, preview });

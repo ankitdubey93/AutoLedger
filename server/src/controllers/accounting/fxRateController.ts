@@ -1,3 +1,4 @@
+import { regionToday } from '../../services/accounting/regionService.js';
 import type { RequestHandler } from 'express';
 import { pool } from '../../db/connect.js';
 import { isSupportedCurrency } from '../../config/currencies.js';
@@ -45,7 +46,7 @@ export const latest: RequestHandler = async (req, res) => {
   }
   const fromCode = fromRaw.toUpperCase();
 
-  const onDate = optionalIsoDate(req, 'on') ?? new Date().toISOString().slice(0, 10);
+  const onDate = optionalIsoDate(req, 'on') ?? (await regionToday(user.orgId));
 
   const organization = await organizationService.getById(user.orgId);
   const rate = await fxRateService.requireRateOnClient(

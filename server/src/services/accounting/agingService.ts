@@ -1,3 +1,4 @@
+import { regionToday } from './regionService.js';
 import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
 import { noteOwnAppliedCentsSubquery, settledCentsSubquery } from './settlementSql.js';
@@ -242,7 +243,7 @@ async function loadControlAccountBalance(
 
 async function aging(orgId: string, asOf: string | null, kind: 'AR' | 'AP'): Promise<AgingReport> {
   const config = AGING_CONFIG[kind];
-  const on = asOf ?? new Date().toISOString().slice(0, 10);
+  const on = asOf ?? (await regionToday(orgId));
 
   const [{ buckets, totalOutstandingCents, totalOverdueCents }, rows, account] = await Promise.all([
     loadBuckets(orgId, on, config),

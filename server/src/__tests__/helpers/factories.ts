@@ -30,7 +30,7 @@ export async function resetTables(): Promise<void> {
     `TRUNCATE organizations, users, organization_members, refresh_tokens, password_reset_tokens, organization_invitations,
               email_outbox, user_email_tokens, organization_email_settings, user_notification_preferences,
               org_roles, org_role_permissions, accounts,
-              ledger_settings, ledger_invoice_settings, ledger_statement_settings,
+              ledger_settings, gst_settings, ledger_invoice_settings, ledger_statement_settings,
               statement_email_templates, quote_email_templates, statement_sends, quotes, quote_lines, quote_links, quote_responses, quote_acceptance_codes,
               orders, order_lines, deposit_applications,
               ledger_online_payment_settings, online_payments, online_payment_invoices, customers, invoices, invoice_lines,

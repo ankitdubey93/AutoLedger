@@ -1,3 +1,4 @@
+import { regionTodayOnClient } from '../accounting/regionService.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
 import { pool } from '../../db/connect.js';
@@ -678,7 +679,7 @@ export async function linkProduct(
       const inventoryAccountId = accounts.get(ledgerItem.id)?.assetAccountId;
       if (inventoryAccountId === undefined) throw new Error('linked product did not resolve inventory accounts');
       if (anchor === undefined) throw new Error('item has on-hand value but no balance row');
-      const today = new Date().toISOString().slice(0, 10);
+      const today = await regionTodayOnClient(client, orgId);
       await postLinkOpeningOnClient(client, orgId, userId, id, inventoryAccountId, onHandValueCents, today, item.code);
       // Phase 35a: the stock ledger already carried this value with no GL
       // account (gl_account_id NULL) — the RECLASS pair below is what makes

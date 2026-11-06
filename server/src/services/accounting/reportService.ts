@@ -1,3 +1,4 @@
+import { regionToday } from './regionService.js';
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
 import type { ReportContext } from '../../types/reportTable.js';
@@ -161,7 +162,7 @@ export async function profitAndLoss(
   from: string | null,
   to: string | null,
 ): Promise<ProfitAndLoss> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await regionToday(orgId);
   const resolvedTo = to ?? today;
   const { month, day } = await fiscalYearStart(orgId);
   const fy = fiscalYearBounds(month, day, resolvedTo);
@@ -266,7 +267,7 @@ interface EarningsSplitRow {
  * in Accounting for exactly this reason.
  */
 export async function balanceSheet(orgId: string, asOf: string | null): Promise<BalanceSheet> {
-  const resolvedAsOf = asOf ?? new Date().toISOString().slice(0, 10);
+  const resolvedAsOf = asOf ?? (await regionToday(orgId));
   const { month, day } = await fiscalYearStart(orgId);
   const fiscalYearStartDate = fiscalYearBounds(month, day, resolvedAsOf).startDate;
 
@@ -548,7 +549,7 @@ export async function profitAndLossComparison(
   mode: ComparisonMode,
   count: number,
 ): Promise<ProfitAndLossComparison> {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await regionToday(orgId);
   const resolvedTo = to ?? today;
   const { month, day } = await fiscalYearStart(orgId);
   const fy = fiscalYearBounds(month, day, resolvedTo);

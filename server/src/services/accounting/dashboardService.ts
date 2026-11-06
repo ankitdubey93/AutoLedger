@@ -1,3 +1,4 @@
+import { regionToday } from './regionService.js';
 import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
 import { fiscalYearBounds, monthBounds, monthsBackStart } from '../../utils/fiscalYear.js';
@@ -189,7 +190,7 @@ async function loadDocumentCounts(orgId: string): Promise<DocumentCountsRow> {
 
 export async function dashboardSummary(orgId: string, asOf: string | null): Promise<DashboardSummary> {
   const settings = await getSettings(orgId);
-  const on = asOf ?? new Date().toISOString().slice(0, 10);
+  const on = asOf ?? (await regionToday(orgId));
   const fy = fiscalYearBounds(settings.fiscalYearStartMonth, settings.fiscalYearStartDay, on);
   const month = monthBounds(on);
   const trendFrom = monthsBackStart(on, 6);

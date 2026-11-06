@@ -1,3 +1,4 @@
+import { useRegion } from '../../context/LedgerSettingsContext';
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Search, UserCog } from 'lucide-react';
@@ -14,6 +15,7 @@ interface Command {
   icon: LucideIcon;
   to: string;
   permission?: string;
+  region?: string;
 }
 
 /**
@@ -48,7 +50,10 @@ export default function CommandPalette() {
   const { paletteOpen, closePalette } = useShell();
   // Phase 38c — the same filtering as the sidebar.
   const can = useCan();
-  const allowed = COMMANDS.filter((c) => c.permission === undefined || can(c.permission));
+  const region = useRegion();
+  const allowed = COMMANDS.filter(
+    (c) => (c.permission === undefined || can(c.permission)) && (c.region === undefined || c.region === region),
+  );
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);

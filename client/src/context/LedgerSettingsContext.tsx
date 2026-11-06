@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getLedgerSettings, type LedgerSettings } from '../services/fetchServices';
+import { configureOrgCalendar } from '../utils/date';
 
 /**
  * Accounting's own settings state, scoped to this app's subtree rather than
@@ -25,6 +26,11 @@ const LedgerSettingsContext = createContext<(LedgerSettingsState & LedgerSetting
 
 export function LedgerSettingsProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<LedgerSettingsState>({ status: 'loading' });
+
+  // Phase 49a: set during render, before any child formats a date. Idempotent,
+  // and reset while loading so one organization's calendar never reaches the next.
+  if (state.status === 'ready') configureOrgCalendar(state.settings.region, state.settings.timezone);
+  else configureOrgCalendar('GENERIC', 'UTC');
 
   function toErrorMessage(err: unknown): string {
     return err instanceof Error ? err.message : 'Failed to load settings';
@@ -77,4 +83,10 @@ export function useLedgerSettings(): LedgerSettingsState & LedgerSettingsActions
     throw new Error('useLedgerSettings must be used inside <LedgerSettingsProvider>');
   }
   return value;
+}
+
+/** Phase 49a: the organization's jurisdiction pack; GENERIC until settings load, or outside the provider. */
+export function useRegion(): string {
+  const context = useContext(LedgerSettingsContext);
+  return context?.status === 'ready' ? context.settings.region : 'GENERIC';
 }

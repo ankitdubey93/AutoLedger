@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useCallback } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
@@ -18,7 +19,7 @@ import { inputClass } from '../../components/ui/formClasses';
 export const PATH_FOR_KIND: Record<PartyKind, StatementPartyPath> = { CUSTOMER: 'customers', VENDOR: 'vendors' };
 
 export function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 function firstOfMonth(iso: string): string {

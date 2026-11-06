@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Lock, Undo2 } from 'lucide-react';
 import {
@@ -25,7 +26,7 @@ import LoadingState from '../../components/ui/LoadingState';
  */
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 function StatusChip({ status }: { status: FiscalPeriod['status'] }) {

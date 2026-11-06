@@ -4,6 +4,8 @@ import { beginTransaction, withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { fiscalYearBounds } from '../../utils/fiscalYear.js';
 import { todayInZone } from '../../utils/orgDate.js';
+import { isRegion, type BasCycle, type BasMethod, type GstBasis } from '../../config/regions.js';
+import { activateAustraliaOnClient, regionTodayOnClient, type GstSettingsInput } from './regionService.js';
 import { parseCents } from '../../utils/money.js';
 import { updateOrganization } from '../organizationService.js';
 import * as onboardingService from '../onboardingService.js';
@@ -56,10 +58,6 @@ function pgErrorMessage(err: unknown): string {
   return 'Database rejected the settings';
 }
 
-function todayUtc(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
 export interface OnboardingInput {
   organizationName: string;
   legalName: string | null;
@@ -70,6 +68,7 @@ export interface OnboardingInput {
   industry: string | null;
   timezone: string;
   cashAccountId: string | null;
+  australia?: { gst: GstSettingsInput } | undefined;
 }
 
 export interface UpdateSettingsInput {
@@ -115,9 +114,15 @@ interface SettingsRow {
   stock_opening_account_id: string | null;
   default_sales_payment_term_id: string | null;
   default_purchase_payment_term_id: string | null;
+  region: string;
+  gst_time_zone: string | null;
+  gst_registered: boolean | null;
+  gst_basis: GstBasis | null;
+  gst_bas_cycle: BasCycle | null;
+  gst_bas_method: BasMethod | null;
 }
 
-function toLedgerSettings(row: SettingsRow): LedgerSettings {
+function toLedgerSettings(row: SettingsRow, today: string): LedgerSettings {
   const fiscalYearStartMonth = row.fiscal_year_start_month ?? 1;
   const fiscalYearStartDay = row.fiscal_year_start_day ?? 1;
 
@@ -129,10 +134,10 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     fiscalYearStartDay,
     booksStartDate: row.books_start_date ?? row.org_created_at.toISOString().slice(0, 10),
     industry: row.industry,
-    timezone: row.timezone ?? 'UTC',
+    timezone: row.gst_time_zone ?? row.timezone ?? 'UTC',
     cashAccountId: row.cash_account_id,
     onboardedAt: row.onboarded_at === null ? null : row.onboarded_at.toISOString(),
-    currentFiscalYear: fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, todayUtc()),
+    currentFiscalYear: fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, today),
     baseCurrencyLocked: row.has_lines,
     unmatchedAlertThresholdCents:
       row.unmatched_alert_threshold_cents === null ? 0 : parseCents(row.unmatched_alert_threshold_cents),
@@ -145,6 +150,16 @@ function toLedgerSettings(row: SettingsRow): LedgerSettings {
     stockOpeningAccountId: row.stock_opening_account_id,
     defaultSalesPaymentTermId: row.default_sales_payment_term_id,
     defaultPurchasePaymentTermId: row.default_purchase_payment_term_id,
+    region: isRegion(row.region) ? row.region : 'GENERIC',
+    gst:
+      row.gst_registered === null || row.gst_basis === null || row.gst_bas_cycle === null || row.gst_bas_method === null
+        ? null
+        : {
+            registered: row.gst_registered,
+            basis: row.gst_basis,
+            basCycle: row.gst_bas_cycle,
+            basMethod: row.gst_bas_method,
+          },
   };
 }
 
@@ -156,10 +171,14 @@ const SETTINGS_SELECT = `
          s.realized_fx_gain_account_id, s.realized_fx_loss_account_id, s.unrealized_fx_account_id,
          s.inventory_account_id, s.cogs_account_id, s.inventory_adjustment_account_id, s.stock_opening_account_id,
          s.default_sales_payment_term_id, s.default_purchase_payment_term_id,
+         o.region, g.time_zone AS gst_time_zone,
+         g.registered AS gst_registered, g.basis AS gst_basis,
+         g.bas_cycle AS gst_bas_cycle, g.bas_method AS gst_bas_method,
          EXISTS (SELECT 1 FROM ledger_lines l WHERE l.org_id = o.id) AS has_lines
     FROM organizations o
     LEFT JOIN ledger_settings s ON s.org_id = o.id
     LEFT JOIN organization_profiles p ON p.org_id = o.id
+    LEFT JOIN gst_settings g ON g.org_id = o.id
    WHERE o.id = $1`;
 
 /** GET /settings. A missing `ledger_settings` row is not a 404 — it means "not yet onboarded". */
@@ -167,7 +186,7 @@ export async function getSettings(orgId: string): Promise<LedgerSettings> {
   const { rows } = await pool.query<SettingsRow>(SETTINGS_SELECT, [orgId]);
   const row = rows[0];
   if (row === undefined) throw new ApiError(404, 'Organization not found');
-  return toLedgerSettings(row);
+  return toLedgerSettings(row, await regionTodayOnClient(pool, orgId));
 }
 
 /**
@@ -241,6 +260,12 @@ export async function completeOnboarding(orgId: string, input: OnboardingInput):
         input.cashAccountId,
       ],
     );
+
+    // Phase 49a — the country step chose Australia. Same client (rule 5), after
+    // the settings upsert so the wizard's timezone is the one that stays.
+    if (input.australia !== undefined) {
+      await activateAustraliaOnClient(client, orgId, input.australia.gst, input.timezone);
+    }
 
     // Marks Accounting's own onboarding row COMPLETED on this same client, so
     // it commits or rolls back together with the settings write (rule 5).
@@ -375,6 +400,11 @@ export async function updateSettings(
         if (termId !== undefined && termId !== null) {
           await paymentTermService.assertActiveTermOnClient(client, orgId, termId);
         }
+      }
+
+      // Phase 49a — an Australian organization's "today" reads gst_settings.
+      if (input.timezone !== undefined) {
+        await client.query('UPDATE gst_settings SET time_zone = $2 WHERE org_id = $1', [orgId, input.timezone]);
       }
 
       // Same `client` for both writes (rule 5): they commit or roll back together.

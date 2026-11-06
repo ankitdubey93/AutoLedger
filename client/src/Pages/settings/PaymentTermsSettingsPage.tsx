@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { FileStack } from 'lucide-react';
 import {
@@ -41,7 +42,7 @@ function PaymentTermForm({ onCreated, onCancel }: { onCreated: () => void; onCan
   const [error, setError] = useState<string | null>(null);
 
   const dayRule = isDayOfMonthRule(rule);
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = orgToday();
   const parsedDays = Number(netDays);
   const exampleValid =
     netDays.trim() !== '' && Number.isInteger(parsedDays) && (dayRule ? parsedDays >= 1 && parsedDays <= 31 : parsedDays >= 0);

@@ -13,6 +13,8 @@ export interface SidebarNavItem {
   end: boolean;
   /** Phase 38c — the permission needed to see this entry; absent means every member. */
   permission?: string;
+  /** Phase 49a: only for organizations in this jurisdiction pack; absent means every region. */
+  region?: string;
 }
 
 export interface SidebarNavGroup {

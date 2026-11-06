@@ -15,7 +15,7 @@ import {
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
 import { formatCents } from '../../utils/money';
-import { formatDate } from '../../utils/date';
+import { formatDate, orgNow } from '../../utils/date';
 import BackLink from '../../components/BackLink';
 import LoadingState from '../../components/ui/LoadingState';
 import EmptyState from '../../components/ui/EmptyState';
@@ -103,7 +103,7 @@ function saveColumns(columns: string[]): void {
 // ---- UTC calendar helpers (never `new Date('YYYY-MM-DD')` in local time) ----
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
-const todayIso = () => iso(new Date());
+const todayIso = () => iso(orgNow());
 
 function monthBounds(year: number, monthIndex: number): { from: string; to: string } {
   return { from: iso(new Date(Date.UTC(year, monthIndex, 1))), to: iso(new Date(Date.UTC(year, monthIndex + 1, 0))) };
@@ -177,7 +177,7 @@ export default function AccountTransactionsPage() {
   const ledgerSettings = useLedgerSettings();
 
   const now = useMemo(() => {
-    const d = new Date();
+    const d = orgNow();
     return monthBounds(d.getUTCFullYear(), d.getUTCMonth());
   }, []);
 
@@ -259,7 +259,7 @@ export default function AccountTransactionsPage() {
   }
 
   function applyPreset(preset: 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'thisFy' | 'lastFy') {
-    const today = new Date();
+    const today = orgNow();
     const y = today.getUTCFullYear();
     const m = today.getUTCMonth();
     let range: { from: string; to: string };

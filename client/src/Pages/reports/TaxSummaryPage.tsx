@@ -1,3 +1,4 @@
+import { orgNow } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { getTaxSummary, type TaxSummary, type TaxSummaryDirection } from '../../services/fetchServices';
 import { formatCents } from '../../utils/money';
@@ -19,7 +20,7 @@ function rateLabel(rateBp: number): string {
 
 /** The first and last day of the current month, UTC, like the P&L shortcuts. */
 function currentMonthRange(): { from: string; to: string } {
-  const today = new Date();
+  const today = orgNow();
   const year = today.getUTCFullYear();
   const month = today.getUTCMonth();
   const iso = (d: Date) => d.toISOString().slice(0, 10);

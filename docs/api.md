@@ -1193,6 +1193,16 @@ Customer and vendor statements are a **read** over the Phase 25 subledger, with 
 - `502` — Stripe refused or was unreachable; the online payment goes to `FAILED`.
 - `503` — Stripe is not configured (webhook).
 
+### Country and GST settings — Phase 49a ✅
+
+| Route | Permission | Does |
+|---|---|---|
+| `POST /settings/region/australia` | `settings.manage` | Body `{gst: {registered, basis, basCycle, basMethod}, timezone}`, with an `Australia/*` zone. Idempotent. `409` for a non-AUD organization that has postings. Returns `{settings}` |
+| `POST /settings/region/generic` | `settings.manage` | Back to `GENERIC`, removing GST settings and keeping accounts. Returns `{settings}` |
+| `PATCH /settings/gst` | `settings.manage` + region `AU` | Any of `registered`, `basis`, `basCycle`, `basMethod`, `timezone`. `403` for a `GENERIC` organization |
+
+`GET /settings` gains `region` and `gst` (`null` unless `AU`). `POST /settings/onboarding` accepts `australia: {gst}`, which requires `baseCurrency: 'AUD'` and an `Australia/*` `timezone`, and activates in the same transaction.
+
 ### History & notes — Phase 46c ✅
 
 Thirteen resource prefixes each expose the same two routes, mounted from one router factory (`routes/historyRoutes.ts`). The entity type comes from the mount, the id from the path, the actor from the verified token.

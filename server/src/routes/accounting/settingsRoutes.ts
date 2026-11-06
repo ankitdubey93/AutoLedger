@@ -7,6 +7,7 @@ import * as quoteEmailTemplateController from '../../controllers/accounting/quot
 import * as onlinePaymentController from '../../controllers/accounting/onlinePaymentController.js';
 import { authenticate } from '../../middleware/auth.js';
 import { allowAnyMember, requirePermission } from '../../middleware/rbac.js';
+import { requireRegion } from '../../middleware/region.js';
 
 /**
  * /api/v1/settings — see docs/api.md.
@@ -29,6 +30,11 @@ router.post(
 );
 
 router.patch('/', authenticate, requirePermission('settings.manage'), settingsController.update);
+
+// Phase 49a — the Australian edition.
+router.post('/region/australia', authenticate, requirePermission('settings.manage'), settingsController.activateAustralia);
+router.post('/region/generic', authenticate, requirePermission('settings.manage'), settingsController.deactivateAustralia);
+router.patch('/gst', authenticate, requirePermission('settings.manage'), requireRegion('AU'), settingsController.updateGst);
 
 router.get('/invoicing', authenticate, allowAnyMember, invoiceSettingsController.get);
 router.patch('/invoicing', authenticate, requirePermission('settings.manage'), invoiceSettingsController.update);

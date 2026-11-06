@@ -161,6 +161,8 @@ describe('a new expense', () => {
       isPostable: true,
     } as unknown as Account;
     const settings = {
+      region: 'GENERIC',
+      gst: null,
       organizationName: 'Test Org',
       legalName: null,
       baseCurrency: 'USD',

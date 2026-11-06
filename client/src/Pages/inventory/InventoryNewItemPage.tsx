@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { INVENTORY_BASE } from '../../routes/paths';
@@ -74,7 +75,7 @@ export default function InventoryNewItemPage() {
   // Opening stock posted with the item (quantity-tracked only). Blank cost = the purchase price.
   const [openingQtyText, setOpeningQtyText] = useState('');
   const [openingCostText, setOpeningCostText] = useState('');
-  const [openingDate, setOpeningDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [openingDate, setOpeningDate] = useState(() => orgToday());
 
   useEffect(() => {
     Promise.all([fetchStockCategories(), fetchStockUoms(), fetchStockCodeSchemes()])

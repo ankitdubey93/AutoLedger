@@ -147,9 +147,11 @@ export const NAV_GROUPS: readonly SidebarNavGroup[] = [
 ];
 
 /** Phase 38c — the nav as this member may use it: entries they lack the permission for are dropped, then empty groups. */
-export function visibleNavGroups(can: (permission: string) => boolean): SidebarNavGroup[] {
+export function visibleNavGroups(can: (permission: string) => boolean, region: string = 'GENERIC'): SidebarNavGroup[] {
   return NAV_GROUPS.map((group) => ({
     ...group,
-    items: group.items.filter((item) => item.permission === undefined || can(item.permission)),
+    items: group.items.filter(
+      (item) => (item.permission === undefined || can(item.permission)) && (item.region === undefined || item.region === region),
+    ),
   })).filter((group) => group.items.length > 0);
 }

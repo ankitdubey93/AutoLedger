@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { CheckCircle2, XCircle } from 'lucide-react';
 import { listAccounts, getBankReconciliation, type Account, type BankReconciliationReport } from '../../services/fetchServices';
@@ -19,7 +20,7 @@ import LoadingState from '../../components/ui/LoadingState';
  */
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 const inputClass =

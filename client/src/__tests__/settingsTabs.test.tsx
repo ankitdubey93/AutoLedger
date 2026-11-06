@@ -63,7 +63,9 @@ function makeAccount(overrides: {
 
 function baseLedgerSettings(overrides: Partial<LedgerSettings> = {}): LedgerSettings {
   return {
-    organizationName: 'Harbor Point Fabrication',
+    region: 'GENERIC',
+      gst: null,
+      organizationName: 'Harbor Point Fabrication',
     legalName: 'Harbor Point Fabrication Pty Ltd',
     baseCurrency: 'USD',
     fiscalYearStartMonth: 4,

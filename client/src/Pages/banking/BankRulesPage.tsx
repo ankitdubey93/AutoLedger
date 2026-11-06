@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Filter } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
@@ -46,7 +47,7 @@ function BankRuleForm({
   const [description, setDescription] = useState('');
   const placeholderTarget = usePlaceholderTarget('description');
   const organisationName = useOrganizationName();
-  const previewContext = { date: new Date().toISOString().slice(0, 10), organisationName };
+  const previewContext = { date: orgToday(), organisationName };
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

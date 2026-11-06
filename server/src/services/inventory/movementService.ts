@@ -1,5 +1,7 @@
+import { regionTodayOnClient } from '../accounting/regionService.js';
 import { randomUUID } from 'node:crypto';
 import type { PoolClient } from 'pg';
+import { pool } from '../../db/connect.js';
 import { withTransaction } from '../../db/transaction.js';
 import { ApiError } from '../../utils/apiError.js';
 import { cents, scaleCents } from '../../utils/money.js';
@@ -38,8 +40,8 @@ import type { StockMovement, StockMovementType, StockSerialStatus, StockTracking
 
 // ------------------------------------------------------------- shared helpers
 
-function assertNotFuture(occurredOn: string): void {
-  const today = new Date().toISOString().slice(0, 10);
+async function assertNotFuture(client: Pick<PoolClient, 'query'>, orgId: string, occurredOn: string): Promise<void> {
+  const today = await regionTodayOnClient(client, orgId);
   if (occurredOn > today) throw new ApiError(422, 'Movement date cannot be in the future');
 }
 
@@ -431,7 +433,7 @@ export async function receiveOnClient(
   input: ReceiveInput,
   opts: MovementOptions,
 ): Promise<StockMovement[]> {
-  if (!opts.allowFuture) assertNotFuture(input.occurredOn);
+  if (!opts.allowFuture) await assertNotFuture(client, orgId, input.occurredOn);
   const location = await assertLocationActive(client, orgId, input.locationId);
   const items = await loadItems(client, orgId, input.lines.map((l) => l.itemId));
 
@@ -596,7 +598,7 @@ export async function issueOnClient(
   input: IssueInput,
   opts: MovementOptions,
 ): Promise<StockMovement[]> {
-  if (!opts.allowFuture) assertNotFuture(input.occurredOn);
+  if (!opts.allowFuture) await assertNotFuture(client, orgId, input.occurredOn);
   // Outbound movements from an inactive location are allowed — no active check.
   const location = await getLocationOnClient(client, orgId, input.locationId);
   const items = await loadItems(client, orgId, input.lines.map((l) => l.itemId));
@@ -754,7 +756,7 @@ export async function transferOnClient(
   input: TransferInput,
   opts: MovementOptions,
 ): Promise<StockMovement[]> {
-  if (!opts.allowFuture) assertNotFuture(input.occurredOn);
+  if (!opts.allowFuture) await assertNotFuture(client, orgId, input.occurredOn);
   if (input.fromLocationId === input.toLocationId) throw new ApiError(422, 'Transfer needs two different locations');
   const fromLocation = await getLocationOnClient(client, orgId, input.fromLocationId);
   const toLocation = await assertLocationActive(client, orgId, input.toLocationId);
@@ -955,7 +957,7 @@ export async function adjustOnClient(
   input: AdjustInput,
   opts: MovementOptions,
 ): Promise<StockMovement[]> {
-  if (!opts.allowFuture) assertNotFuture(input.occurredOn);
+  if (!opts.allowFuture) await assertNotFuture(client, orgId, input.occurredOn);
   const location = await getLocationOnClient(client, orgId, input.locationId);
   const items = await loadItems(client, orgId, input.lines.map((l) => l.itemId));
 
@@ -1361,7 +1363,7 @@ export async function receiveManualOnClient(
   userId: string,
   input: ReceiveInput,
 ): Promise<MovementResult> {
-  assertNotFuture(input.occurredOn);
+  await assertNotFuture(client, orgId, input.occurredOn);
   const movementGroupId = randomUUID();
   const purpose = input.purpose ?? 'OPENING';
   const description = purpose === 'OPENING' ? 'Opening stock' : 'Stock found — count gain';
@@ -1375,7 +1377,7 @@ export async function receiveManualOnClient(
 }
 
 export async function issue(orgId: string, userId: string, input: IssueInput): Promise<MovementResult> {
-  assertNotFuture(input.occurredOn);
+  await assertNotFuture(pool, orgId, input.occurredOn);
   const movementGroupId = randomUUID();
   const expenseAccountId = input.expenseAccountId ?? null;
   const description = expenseAccountId !== null ? 'Stock consumed' : 'Stock issue';
@@ -1395,7 +1397,7 @@ export async function issue(orgId: string, userId: string, input: IssueInput): P
 }
 
 export async function transfer(orgId: string, userId: string, input: TransferInput): Promise<MovementResult> {
-  assertNotFuture(input.occurredOn);
+  await assertNotFuture(pool, orgId, input.occurredOn);
   const movementGroupId = randomUUID();
   // A transfer moves value between locations of the same item, so the item's
   // inventory account is unchanged — no GL effect, no provenance.
@@ -1406,7 +1408,7 @@ export async function transfer(orgId: string, userId: string, input: TransferInp
 }
 
 export async function adjust(orgId: string, userId: string, input: AdjustInput): Promise<MovementResult> {
-  assertNotFuture(input.occurredOn);
+  await assertNotFuture(pool, orgId, input.occurredOn);
   const movementGroupId = randomUUID();
   const movements = await withTransaction(async (client) => {
     const opts = await manualOptions(client, orgId, movementGroupId, input.lines.map((l) => l.itemId));

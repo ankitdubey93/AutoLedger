@@ -8,11 +8,13 @@ import {
   saveOnboardingDraft,
   skipOnboarding,
   type Account,
+  type GstSettings,
   type OnboardingInput,
 } from '../../services/fetchServices';
+import GstFields, { AU_TIME_ZONES, DEFAULT_GST } from '../settings/GstFields';
 import { useLedgerSettings } from '../../context/LedgerSettingsContext';
 import { fiscalYearBounds } from '../accounting/fiscalYear';
-import { formatDate } from '../../utils/date';
+import { formatDate, orgToday } from '../../utils/date';
 
 /**
  * Accounting's first-run wizard. Collected once per organization and never
@@ -55,6 +57,12 @@ const MONTHS = [
 
 const INDUSTRIES = ['Software', 'Services', 'Retail', 'Manufacturing', 'Nonprofit', 'Other'];
 
+/** The browser's zone when it is Australian, which also suggests the country below. */
+function browserAustralianZone(): string | null {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  return AU_TIME_ZONES.some((z) => z.value === zone) ? zone : null;
+}
+
 type WizardStep = { step: 1 } | { step: 2 } | { step: 3 };
 
 const inputClass =
@@ -65,7 +73,7 @@ const ghostButtonClass =
   'px-4 py-2 rounded-md text-sm font-medium border border-[var(--border)] bg-transparent text-[var(--text)] cursor-pointer';
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 export default function OnboardingPage() {
@@ -77,12 +85,17 @@ export default function OnboardingPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [country, setCountry] = useState<'AU' | 'OTHER'>(browserAustralianZone() === null ? 'OTHER' : 'AU');
+  const [gst, setGst] = useState<GstSettings>(DEFAULT_GST);
+  const [timeZone, setTimeZone] = useState(browserAustralianZone() ?? 'Australia/Sydney');
+  const isAustralia = country === 'AU';
+
   const [organizationName, setOrganizationName] = useState(organization?.name ?? '');
   const [legalName, setLegalName] = useState('');
   const [industry, setIndustry] = useState('');
 
-  const [baseCurrency, setBaseCurrency] = useState<string>('USD');
-  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(1);
+  const [baseCurrency, setBaseCurrency] = useState<string>(isAustralia ? 'AUD' : 'USD');
+  const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(isAustralia ? 7 : 1);
   const [fiscalYearStartDay, setFiscalYearStartDay] = useState(1);
   const [booksStartDate, setBooksStartDate] = useState(todayIso());
   const [cashAccountId, setCashAccountId] = useState('');
@@ -129,6 +142,8 @@ export default function OnboardingPage() {
         if (typeof draft.fiscalYearStartDay === 'number') setFiscalYearStartDay(draft.fiscalYearStartDay);
         if (typeof draft.booksStartDate === 'string') setBooksStartDate(draft.booksStartDate);
         if (typeof draft.cashAccountId === 'string') setCashAccountId(draft.cashAccountId);
+        if (draft.country === 'AU' || draft.country === 'OTHER') setCountry(draft.country);
+        if (typeof draft.timeZone === 'string') setTimeZone(draft.timeZone);
         setDraftLoaded(true);
       })
       .catch(() => {
@@ -153,6 +168,8 @@ export default function OnboardingPage() {
         fiscalYearStartDay,
         booksStartDate,
         cashAccountId,
+        country,
+        timeZone,
       },
     }).catch(() => {
       // Silent — see the comment above.
@@ -174,6 +191,15 @@ export default function OnboardingPage() {
     navigate('/', { replace: true });
   }
 
+  // The Australian financial year is 1 July to 30 June; a business with a
+  // substituted accounting period can still change the month afterwards.
+  function chooseCountry(next: 'AU' | 'OTHER') {
+    setCountry(next);
+    setBaseCurrency(next === 'AU' ? 'AUD' : 'USD');
+    setFiscalYearStartMonth(next === 'AU' ? 7 : 1);
+    setFiscalYearStartDay(1);
+  }
+
   const derivedFiscalYear = fiscalYearBounds(fiscalYearStartMonth, fiscalYearStartDay, todayIso());
 
   async function handleFinish() {
@@ -189,8 +215,9 @@ export default function OnboardingPage() {
       fiscalYearStartDay,
       booksStartDate,
       industry: industry === '' ? null : industry,
-      timezone: 'UTC',
+      timezone: isAustralia ? timeZone : 'UTC',
       cashAccountId: cashAccountId === '' ? null : cashAccountId,
+      ...(isAustralia ? { australia: { gst } } : {}),
     };
 
     try {
@@ -244,6 +271,17 @@ export default function OnboardingPage() {
             />
           </label>
           <label className="flex flex-col gap-1 text-sm">
+            <span className="text-[var(--muted)]">Country</span>
+            <select
+              value={country}
+              onChange={(e) => chooseCountry(e.target.value === 'AU' ? 'AU' : 'OTHER')}
+              className={inputClass}
+            >
+              <option value="AU">Australia</option>
+              <option value="OTHER">Another country</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
             <span className="text-[var(--muted)]">Industry</span>
             <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={inputClass}>
               <option value="">Select an industry…</option>
@@ -277,6 +315,7 @@ export default function OnboardingPage() {
             <select
               value={baseCurrency}
               onChange={(e) => setBaseCurrency(e.target.value)}
+              disabled={isAustralia}
               className={inputClass}
             >
               {CURRENCIES.map((code) => (
@@ -347,6 +386,10 @@ export default function OnboardingPage() {
             </select>
           </label>
 
+          {isAustralia && (
+            <GstFields value={gst} onChange={setGst} timeZone={timeZone} onTimeZoneChange={setTimeZone} />
+          )}
+
           <div className="flex justify-between">
             <button type="button" className={ghostButtonClass} onClick={() => goToStep(1)}>
               Back
@@ -369,6 +412,8 @@ export default function OnboardingPage() {
             <dd className="m-0">{legalName === '' ? '—' : legalName}</dd>
             <dt className="text-[var(--muted)]">Industry</dt>
             <dd className="m-0">{industry === '' ? '—' : industry}</dd>
+            <dt className="text-[var(--muted)]">Country</dt>
+            <dd className="m-0">{isAustralia ? 'Australia' : 'Another country'}</dd>
             <dt className="text-[var(--muted)]">Base currency</dt>
             <dd className="m-0">{baseCurrency}</dd>
             <dt className="text-[var(--muted)]">Fiscal year</dt>

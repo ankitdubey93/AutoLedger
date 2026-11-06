@@ -1,3 +1,4 @@
+import { regionToday } from '../../services/accounting/regionService.js';
 import type { Request, RequestHandler } from 'express';
 import * as reportService from '../../services/accounting/reportService.js';
 import * as dashboardService from '../../services/accounting/dashboardService.js';
@@ -278,7 +279,7 @@ export const bankReconciliation: RequestHandler = async (req, res) => {
   const user = requireUser(req);
   const accountId = optionalUuid(req, 'accountId');
   if (accountId === null) throw new ApiError(400, 'accountId is required');
-  const asOf = optionalIsoDate(req, 'asOf') ?? new Date().toISOString().slice(0, 10);
+  const asOf = optionalIsoDate(req, 'asOf') ?? (await regionToday(user.orgId));
 
   const report = await reportService.bankReconciliation(user.orgId, accountId, asOf);
   res.json({ success: true, ...report });
@@ -287,7 +288,7 @@ export const bankReconciliation: RequestHandler = async (req, res) => {
 /** GET /reports/fx-exposure?asOf=YYYY-MM-DD */
 export const fxExposure: RequestHandler = async (req, res) => {
   const user = requireUser(req);
-  const asOf = optionalIsoDate(req, 'asOf') ?? new Date().toISOString().slice(0, 10);
+  const asOf = optionalIsoDate(req, 'asOf') ?? (await regionToday(user.orgId));
 
   const report = await fxRevaluationService.computeExposure(user.orgId, asOf);
   res.json({ success: true, exposure: report });

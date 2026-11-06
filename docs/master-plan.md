@@ -76,6 +76,8 @@ Each clause in that sentence is backed by something that already exists or is in
 
 A new entrant can't be a "SAP killer" on day one. It gets there by winning one segment well enough that the segment funds the next. **My recommendation, which is Decision D2:**
 
+> **Superseded 2026-11-06:** the product's focus moved to Australian businesses, as a direct decision by the owner (Phase 49, [australia.md](australia.md)). The India reasoning below is kept as the record of the earlier thinking. The "jurisdiction pack" design later in this document is what Phase 49 follows, with Australia as the first pack.
+
 **Beachhead: Indian SMEs and startups with ₹2–100 crore in revenue, reached through Chartered Accountant (CA) firms.**
 
 - **Why India.** TaxGuard's statute parser is already tuned for Indian drafting. The audit-trail mandate turns Phase 5 into a selling point. GST and e-invoicing complexity is exactly where rules plus AI beat manual work. Tally dominates, but it is desktop-first and has little AI, so there is a clear switching story. Local cost structure also makes a human-in-the-loop service profitable.

@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { getFxExposure, runFxRevaluation, type FxExposureReport } from '../../services/fetchServices';
@@ -13,7 +14,7 @@ import LoadingState from '../../components/ui/LoadingState';
  */
 
 function today(): string {
-  return new Date().toISOString().slice(0, 10);
+  return orgToday();
 }
 
 const inputClass =

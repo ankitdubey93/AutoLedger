@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -116,7 +117,7 @@ export default function CashFlowPage() {
   const ledgerSettings = useLedgerSettings();
 
   const settings = ledgerSettings.status === 'ready' ? ledgerSettings.settings : null;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = orgToday();
   const defaults = fiscalYearBounds(
     settings?.fiscalYearStartMonth ?? 1,
     settings?.fiscalYearStartDay ?? 1,

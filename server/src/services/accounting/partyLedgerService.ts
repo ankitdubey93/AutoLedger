@@ -1,3 +1,4 @@
+import { regionToday } from './regionService.js';
 import { pool } from '../../db/connect.js';
 import { parseCents } from '../../utils/money.js';
 import * as customerService from './customerService.js';
@@ -440,7 +441,7 @@ async function openItems(
 ): Promise<PartyOpenItems> {
   const config = PARTY_CONFIG[kind];
   const party = await loadParty(orgId, partyId, kind);
-  const on = asOf ?? new Date().toISOString().slice(0, 10);
+  const on = asOf ?? (await regionToday(orgId));
 
   const { rows } = await pool.query<OpenItemRow>(
     `WITH open_docs AS (

@@ -44,18 +44,21 @@ function daysBetween(from: string, to: string): number {
 }
 
 /** Validates the type/date combination a caller asked for — 400 on nonsense. */
-export function readStatementRequest(input: {
-  type: StatementType | null;
-  asOf: string | null;
-  from: string | null;
-  to: string | null;
-}): StatementRequest {
+export function readStatementRequest(
+  input: {
+    type: StatementType | null;
+    asOf: string | null;
+    from: string | null;
+    to: string | null;
+  },
+  today: string,
+): StatementRequest {
   const type = input.type ?? 'OUTSTANDING';
   if (type === 'OUTSTANDING') {
-    return { type, asOf: input.asOf ?? todayIso() };
+    return { type, asOf: input.asOf ?? today };
   }
   if (input.from === null) throw new ApiError(400, 'An activity statement needs a from date');
-  const to = input.to ?? todayIso();
+  const to = input.to ?? today;
   const days = daysBetween(input.from, to);
   if (days < 0) throw new ApiError(400, 'from must be on or before to');
   if (days > STATEMENT_MAX_RANGE_DAYS) {

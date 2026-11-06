@@ -1,3 +1,4 @@
+import { regionTodayOnClient } from './regionService.js';
 import type { PoolClient } from 'pg';
 import { ApiError } from '../../utils/apiError.js';
 import { ITEM_CODE_REGEX } from '../../utils/stockCodePattern.js';
@@ -91,7 +92,7 @@ export async function validateRows(
   const first = rows[0];
   const dateFormat = first === undefined ? 'ISO' : await importDateFormatForRowOnClient(client, orgId, first.id);
   const { refs, existingProducts, accounts, booksStartDate } = await loadLookups(client, orgId, rows);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = await regionTodayOnClient(client, orgId);
 
   const rowNumbersByCode = new Map<string, number[]>();
   for (const row of rows) {

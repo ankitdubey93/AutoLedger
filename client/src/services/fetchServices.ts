@@ -1032,7 +1032,21 @@ export interface FiscalYearWindow {
 }
 
 /** Mirrors server/src/types/accounting.ts's LedgerSettings. */
+export type GstBasis = 'CASH' | 'ACCRUAL';
+export type BasCycle = 'QUARTERLY' | 'MONTHLY';
+export type BasMethod = 'SIMPLER' | 'FULL';
+
+/** Phase 49a: present only for an Australian organization. */
+export interface GstSettings {
+  registered: boolean;
+  basis: GstBasis;
+  basCycle: BasCycle;
+  basMethod: BasMethod;
+}
+
 export interface LedgerSettings {
+  region: string;
+  gst: GstSettings | null;
   organizationName: string;
   legalName: string | null;
   baseCurrency: string;
@@ -1072,6 +1086,8 @@ export interface OnboardingInput {
   industry: string | null;
   timezone: string;
   cashAccountId: string | null;
+  /** Phase 49a: present only when the wizard's country step chose Australia. */
+  australia?: { gst: GstSettings };
 }
 
 /**
@@ -1109,6 +1125,29 @@ export async function completeLedgerOnboarding(input: OnboardingInput): Promise<
 }
 
 /** PATCH /settings — refused with 409 until onboarding has completed once. */
+export async function activateAustralia(input: { gst: GstSettings; timezone: string }): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings/region/australia', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  });
+  return body.settings;
+}
+
+export async function deactivateAustralia(): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings/region/generic', {
+    method: 'POST',
+  });
+  return body.settings;
+}
+
+export async function updateGstSettings(input: Partial<GstSettings> & { timezone?: string }): Promise<LedgerSettings> {
+  const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings/gst', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  });
+  return body.settings;
+}
+
 export async function updateLedgerSettings(input: LedgerSettingsPatch): Promise<LedgerSettings> {
   const body = await apiFetch<{ success: boolean; settings: LedgerSettings }>('/settings', {
     method: 'PATCH',

@@ -1,3 +1,4 @@
+import { regionToday } from './regionService.js';
 import type { Readable } from 'node:stream';
 import { pool } from '../../db/connect.js';
 import { ApiError } from '../../utils/apiError.js';
@@ -68,7 +69,7 @@ export interface PublicStatementView {
 /** GET /public/statements/:token */
 export async function getPublicStatement(token: string): Promise<PublicStatementView> {
   const send = await resolveLiveSend(token);
-  const today = statementService.todayIso();
+  const today = await regionToday(send.orgId);
 
   const [organization, profile, settings, invoiceSettings, statement, current, payment] = await Promise.all([
     organizationService.getById(send.orgId),

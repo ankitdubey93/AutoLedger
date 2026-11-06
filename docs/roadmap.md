@@ -48,6 +48,7 @@ Phases are sequential. Where a **Gate** is listed, do not start the gated work f
 | **38a ✅ done** | Platform — user settings vs organization settings: `/account` becomes user-only (profile, change password, sessions with sign-out-others, your organizations), organization profile and members move under `/settings`; session id across rotation and revocation tombstones; migrations `080`, `081` — see [Phase 38a, as delivered](#phase-38a-as-delivered) below. 38b (email via Brevo) and 38c (custom roles and permissions) follow | Needs 37 |
 | **38b ✅ done** | Platform — real email through Brevo (free, `fetch`, no SDK) via a transactional outbox drained by the worker: invitations, password reset, email verification, change of sign-in email, organization sender name and reply-to, and per-user notification preferences (bill awaiting approval, invitation accepted); Mailpit for local inboxes; migration `082` — see [Phase 38b, as delivered](#phase-38b-as-delivered) below | Needs 7, 37, 38a |
 | **38c ✅ done** | Platform, all modules — custom roles: a ~60-key `area.action` permission catalogue with tiers from which the four built-in roles are derived; every authenticated route gated by `requirePermission`/`allowAnyMember` (proven route-for-route equivalent for built-ins), resolved from the database per request; org-defined roles with a checkbox editor; no-escalation rules; permission-aware navigation; migration `083` — see [Phase 38c, as delivered](#phase-38c-as-delivered) below | Needs 37, 38a |
+| **49 in progress** | The Australian edition: region, GST codes, BAS, tax invoices, ABN, ABA, TPAR — [australia.md](australia.md). Slices 49a–49i, one commit each; see [Phase 49, as delivered](#phase-49-as-delivered) | Needs 45, 46a, 48 |
 | **47 ✅ done** | Accounting — business snapshot: `GET /reports/business-snapshot` (performance, position, seven integer-bp ratios against the prior period, AR/AP aging, 12-month trend; CSV/XLSX/PDF export), a Recharts report page and four dashboard health tiles, and an optional `accounts.balance_sheet_class` override (migration `104`). Phases 39–46 have their own "as delivered" sections below. |
 
 **Phase 18 is numbered after 17 but applied before it** — 17 stays deferred; migration numbers and phase numbers both simply follow build order from here, not a fixed sequence decided in advance. This is the first phase of the suite's second stage — showcase, integrate, guide, automate — laid out in full in the strategic plan that opened it. Phase 19 delivered the AP-Flow slice of that plan's "multi-provider AI layer" theme; Phase 19.1 (AI usage metering), 19.2 (Google Drive intake), 19.3 (that intake promoted to the platform) and 19.4 (duplicate-content capture, a bug found through 19.3's own real-world use) delivered the rest of the "automations" theme's AP-Flow slice, as half-steps rather than a renumbering. Phases 20–23 (a verification sweep, app enablement and cross-app connections, an in-app help center, and the remainder of the automations theme beyond AP-Flow) **keep their reserved names and stay unstarted** — Phase 24 is a direct feature request (payment terms, an item catalogue, a party importer, UI corrections), outside that strategic sequence, and takes the next free number rather than colliding with 20–23, the same reasoning that let Phase 18 jump ahead of 17.
@@ -1825,3 +1826,22 @@ The prior roadmap (Phases 6–14, before this restructure) planned Inventory & W
 - **EAM** — nightly cron job computing depreciation and auto-posting balancing journal entries; must be idempotent.
 
 **MagicJournal**, the prior build's rule-based keyword-scoring engine that drafted journal entries from plain English, is also dropped rather than revived — TaxGuard AI's RAG approach supersedes the idea it was reaching for, done properly this time (a database-backed, `org_id`-scoped corpus instead of a tracked CSV mutated at runtime).
+
+## Phase 49, as delivered
+
+A direct decision by the owner on 2026-11-06: focus on Australian businesses, with a detailed edition for them including BAS. Spec and build status: [australia.md](australia.md). Scope agreed before building: BAS is prepared here and lodged manually, PAYG figures are typed on the BAS with no payroll module, the country is chosen in setup, and existing organizations do not change.
+
+### 49a: region foundation
+
+`organizations.region` (`GENERIC`/`AU`) and `gst_settings` (migration `106`), `config/regions.ts`, the pack in `config/taxPacks/au.ts`, `regionService`, a `requireRegion` guard, and `region` on nav items. A country step in the setup wizard, and Settings → Country & GST for an organization that already exists. `POST /settings/region/australia`, `POST /settings/region/generic`, `PATCH /settings/gst`.
+
+"Today" follows the organization's zone for an AU organization through `regionToday` (server) and `orgToday`/`orgNow` (client), and dates show DD/MM/YYYY. A `GENERIC` organization keeps UTC and browser-locale dates.
+
+**Found while building:** a `ledger_settings` row means "onboarded" and its fiscal columns are `NOT NULL`, so the zone also lives on `gst_settings`. Inventory's "not in the future" check would have refused today's date on an Australian morning.
+
+**Corrected from the plan:** chart additions landed here rather than in 49d, because activation is here.
+
+**Deliberately left on UTC:** see [australia.md](australia.md#today-for-an-australian-organization).
+
+2595 server (2 skipped) + 741 client tests at the time.
+

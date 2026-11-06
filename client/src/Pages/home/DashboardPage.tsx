@@ -1,3 +1,4 @@
+import { useRegion } from '../../context/LedgerSettingsContext';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
@@ -56,7 +57,8 @@ function entryTotalCents(lines: { debitCents: number }[]): number {
  */
 function RoleHome() {
   const { organization, roleName, can } = useOrg();
-  const sections = visibleNavGroups(can).flatMap((group) => group.items).filter((item) => item.to !== '/');
+  const region = useRegion();
+  const sections = visibleNavGroups(can, region).flatMap((group) => group.items).filter((item) => item.to !== '/');
   return (
     <section className="flex flex-col gap-5">
       <PageHeader

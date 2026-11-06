@@ -1,3 +1,4 @@
+import { orgToday } from '../../utils/date';
 import { useEffect, useState } from 'react';
 import { Landmark } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -263,7 +264,7 @@ export default function FinancialSettingsPage() {
   }
 
   const { applySettings } = ledgerSettings;
-  const derivedFiscalYear = fiscalYearBounds(startMonth, startDay, new Date().toISOString().slice(0, 10));
+  const derivedFiscalYear = fiscalYearBounds(startMonth, startDay, orgToday());
 
   async function handleSave() {
     setSaving(true);

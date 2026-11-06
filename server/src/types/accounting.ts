@@ -1,3 +1,4 @@
+import type { BasCycle, BasMethod, GstBasis, Region } from '../config/regions.js';
 /**
  * Accounting's domain types — the general ledger.
  *
@@ -237,6 +238,14 @@ export interface FiscalYearWindow {
  * display, but they are only ever written through
  * `organizationService.updateOrganization` — never through this table.
  */
+/** Phase 49a — present only for an AU organization. */
+export interface GstSettings {
+  registered: boolean;
+  basis: GstBasis;
+  basCycle: BasCycle;
+  basMethod: BasMethod;
+}
+
 export interface LedgerSettings {
   organizationName: string;
   legalName: string | null;
@@ -269,6 +278,8 @@ export interface LedgerSettings {
   cogsAccountId: string | null;
   inventoryAdjustmentAccountId: string | null;
   stockOpeningAccountId: string | null;
+  region: Region;
+  gst: GstSettings | null;
 }
 
 /* ---------------------------------------------------------- Phase 3.5 — dashboard */

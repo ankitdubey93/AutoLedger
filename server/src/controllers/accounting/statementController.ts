@@ -1,3 +1,4 @@
+import { regionToday } from '../../services/accounting/regionService.js';
 import type { Request, RequestHandler } from 'express';
 import * as statementService from '../../services/accounting/statementService.js';
 import * as statementSettingsService from '../../services/accounting/statementSettingsService.js';
@@ -27,7 +28,7 @@ function optionalStatementType(req: Request): StatementType | null {
 function listHandler(kind: PartyKind): RequestHandler {
   return async (req, res) => {
     const user = requireUser(req);
-    const asOf = optionalIsoDate(req, 'asOf') ?? statementService.todayIso();
+    const asOf = optionalIsoDate(req, 'asOf') ?? (await regionToday(user.orgId));
     const parties = await statementService.listStatementParties(user.orgId, kind, {
       asOf,
       q: optionalText(req, 'q', 200),
@@ -45,7 +46,7 @@ function getHandler(kind: PartyKind): RequestHandler {
       asOf: optionalIsoDate(req, 'asOf'),
       from: optionalIsoDate(req, 'from'),
       to: optionalIsoDate(req, 'to'),
-    });
+    }, await regionToday(user.orgId));
     const statement = await statementService.getStatement(user.orgId, kind, requireParam(req, 'id'), request);
     res.json({ success: true, statement });
   };

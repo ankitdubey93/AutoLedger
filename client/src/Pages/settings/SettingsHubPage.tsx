@@ -40,6 +40,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
     icon: Landmark,
     links: [
       { to: '/settings/financial', label: 'Financial' },
+      { to: '/settings/country-tax', label: 'Country & GST' },
       { to: '/settings/chart', label: 'Chart of accounts' },
       { to: '/settings/conversion-balances', label: 'Conversion balances' },
       { to: '/fiscal-periods', label: 'Fiscal periods' },
